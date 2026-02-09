@@ -277,6 +277,15 @@
       gap: 0.375rem;
     }
 
+    .log-toggle {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .log-toggle:hover { color: var(--text); }
+
     .execution-log {
       padding: 1rem;
       max-height: 400px;
@@ -300,16 +309,6 @@
     .log-entry.error { color: var(--danger); }
 
     /* Result */
-    .result-section {
-      padding: 1rem;
-      border-top: 1px solid var(--border);
-    }
-
-    .result-section h4 {
-      font-size: 0.875rem;
-      margin-bottom: 0.5rem;
-    }
-
     .result-summary {
       font-size: 0.875rem;
       color: var(--text-muted);

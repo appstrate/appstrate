@@ -3,6 +3,7 @@
 const API_BASE = "/api";
 let currentFlowId = null;
 let flowsData = {};
+let pendingResults = {}; // Cache SSE result data for history auto-expand
 
 // --- API Helpers ---
 
@@ -128,9 +129,9 @@ function renderFlows(flows) {
       <div class="execution-output" id="output-${flow.id}">
         <div class="execution-header">
           <span class="execution-status" id="exec-status-${flow.id}"></span>
+          <span class="log-toggle" onclick="toggleLogs('${flow.id}')" id="log-toggle-${flow.id}">Afficher les logs</span>
         </div>
-        <div class="execution-log" id="exec-log-${flow.id}"></div>
-        <div class="result-section" id="exec-result-${flow.id}" style="display:none"></div>
+        <div class="execution-log" id="exec-log-${flow.id}" style="display:none"></div>
       </div>
       <div class="history-section" id="history-${flow.id}">
         <div class="history-header" onclick="toggleHistory('${flow.id}')">
@@ -392,12 +393,11 @@ async function runFlow(flowId, inputData) {
   const outputEl = document.getElementById(`output-${flowId}`);
   const logEl = document.getElementById(`exec-log-${flowId}`);
   const statusEl = document.getElementById(`exec-status-${flowId}`);
-  const resultEl = document.getElementById(`exec-result-${flowId}`);
 
   // Show output area
   outputEl.classList.add("active");
   logEl.innerHTML = "";
-  resultEl.style.display = "none";
+  delete pendingResults[flowId];
   statusEl.innerHTML = `<span class="spinner"></span> Démarrage...`;
 
   // Disable run button
@@ -482,7 +482,7 @@ function handleSSEEvent(flowId, event, data) {
       break;
 
     case "result":
-      renderResult(flowId, data);
+      pendingResults[flowId] = data;
       break;
 
     case "execution_completed":
@@ -495,8 +495,8 @@ function handleSSEEvent(flowId, event, data) {
         statusEl.innerHTML = `<span class="status-dot disconnected"></span> Échec`;
         if (data.error) appendLog(logEl, data.error, "error");
       }
-      // Refresh history after execution completes
-      loadExecutionHistory(flowId);
+      // Refresh history and auto-expand latest execution
+      loadExecutionHistory(flowId, true);
       break;
   }
 }
@@ -507,6 +507,14 @@ function appendLog(logEl, message, type = "progress") {
   entry.textContent = message;
   logEl.appendChild(entry);
   logEl.scrollTop = logEl.scrollHeight;
+}
+
+function toggleLogs(flowId) {
+  const logEl = document.getElementById(`exec-log-${flowId}`);
+  const toggleEl = document.getElementById(`log-toggle-${flowId}`);
+  const isHidden = logEl.style.display === "none";
+  logEl.style.display = isHidden ? "block" : "none";
+  toggleEl.textContent = isHidden ? "Masquer les logs" : "Afficher les logs";
 }
 
 // --- Result Rendering ---
@@ -543,9 +551,8 @@ function renderResultItems(items) {
   }).join("")}</div>`;
 }
 
-function renderResult(flowId, data, targetEl) {
-  const resultEl = targetEl || document.getElementById(`exec-result-${flowId}`);
-  resultEl.style.display = "block";
+function renderResult(data, targetEl) {
+  targetEl.style.display = "block";
 
   let html = `<h4>Résultat</h4>`;
 
@@ -589,7 +596,7 @@ function renderResult(flowId, data, targetEl) {
     html += `<pre style="font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; color: var(--text-muted)">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
   }
 
-  resultEl.innerHTML = html;
+  targetEl.innerHTML = html;
 }
 
 // --- Execution History ---
@@ -602,7 +609,7 @@ function toggleHistory(flowId) {
   toggle.innerHTML = isOpen ? "&#9654;" : "&#9660;";
 }
 
-async function loadExecutionHistory(flowId) {
+async function loadExecutionHistory(flowId, autoExpandFirst = false) {
   const listEl = document.getElementById(`history-list-${flowId}`);
   if (!listEl) return;
 
@@ -638,6 +645,38 @@ async function loadExecutionHistory(flowId) {
         `;
       })
       .join("");
+
+    // Auto-expand the latest execution after a run completes
+    if (autoExpandFirst) {
+      // Open history section if collapsed
+      const content = document.getElementById(`history-content-${flowId}`);
+      const toggle = document.getElementById(`history-toggle-${flowId}`);
+      if (content && content.style.display === "none") {
+        content.style.display = "block";
+        toggle.innerHTML = "&#9660;";
+      }
+
+      // Expand first item with cached result (avoids extra API call)
+      const firstItem = listEl.querySelector(".history-item");
+      if (firstItem) {
+        const detail = firstItem.querySelector(".history-item-detail");
+        detail.style.display = "block";
+
+        const cachedResult = pendingResults[flowId];
+        if (cachedResult) {
+          firstItem.dataset.rendered = "true";
+          const resultDiv = document.createElement("div");
+          resultDiv.className = "history-item-result";
+          detail.appendChild(resultDiv);
+          renderResult(cachedResult, resultDiv);
+          delete pendingResults[flowId];
+        } else {
+          // Fallback: trigger lazy load via toggleHistoryItem
+          const headerEl = firstItem.querySelector(".history-item-header");
+          toggleHistoryItem(headerEl);
+        }
+      }
+    }
   } catch {
     listEl.innerHTML = `<div class="history-empty">Impossible de charger l'historique</div>`;
   }
@@ -673,7 +712,7 @@ async function toggleHistoryItem(headerEl) {
         resultDiv.className = "history-item-result";
         resultDiv.style.display = "block";
         detail.appendChild(resultDiv);
-        renderResult(null, exec.result, resultDiv);
+        renderResult(exec.result, resultDiv);
       } else if (exec.error) {
         detail.innerHTML = `<div class="history-item-result"><p class="log-entry error">${escapeHtml(exec.error)}</p></div>`;
       } else {
