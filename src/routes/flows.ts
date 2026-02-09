@@ -80,6 +80,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
         services: serviceStatuses,
         tools: toolStatuses,
       },
+      ...(m.input ? { input: { schema: m.input.schema } } : {}),
       config: {
         schema: m.config?.schema ?? {},
         current: configWithDefaults,

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "version": "1.0.0",
+
+  "metadata": {
+    "name": "newsletter-search",
+    "displayName": "Recherche newsletters",
+    "description": "Recherche et résume les newsletters sur un sujet donné",
+    "author": "openflows",
+    "license": "MIT",
+    "tags": ["email", "search", "newsletters"]
+  },
+
+  "requires": {
+    "services": [
+      {
+        "id": "gmail",
+        "provider": "google-mail",
+        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+        "description": "Accès en lecture aux emails"
+      }
+    ]
+  },
+
+  "input": {
+    "schema": {
+      "topic": {
+        "type": "string",
+        "description": "Sujet à rechercher dans les newsletters",
+        "required": true,
+        "placeholder": "ex: intelligence artificielle, crypto, design..."
+      }
+    }
+  },
+
+  "config": {
+    "schema": {
+      "max_emails": {
+        "type": "number",
+        "description": "Nombre max de mails à analyser",
+        "default": 50
+      },
+      "language": {
+        "type": "string",
+        "description": "Langue du résumé",
+        "default": "fr",
+        "enum": ["fr", "en"]
+      }
+    }
+  },
+
+  "execution": {
+    "timeout": 300,
+    "maxTokens": 16000
+  }
+}

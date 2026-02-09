@@ -5,6 +5,7 @@ export interface FlowManifest {
   version: string;
   metadata: FlowMetadata;
   requires: FlowRequirements;
+  input?: FlowInputSpec;
   state?: FlowStateSpec;
   config?: FlowConfigSpec;
   execution?: FlowExecutionSpec;
@@ -35,6 +36,18 @@ export interface FlowToolRequirement {
   id: string;
   type: "static" | "custom";
   description: string;
+}
+
+export interface FlowInputSpec {
+  schema: Record<string, FlowInputField>;
+}
+
+export interface FlowInputField {
+  type: string;
+  description: string;
+  required?: boolean;
+  default?: unknown;
+  placeholder?: string;
 }
 
 export interface FlowStateSpec {
@@ -130,6 +143,9 @@ export interface FlowDetail {
   requires: {
     services: ServiceStatus[];
     tools: { id: string; type: string; status: string }[];
+  };
+  input?: {
+    schema: Record<string, FlowInputField>;
   };
   config: {
     schema: Record<string, FlowConfigField>;

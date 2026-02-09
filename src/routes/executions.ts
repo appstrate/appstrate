@@ -7,6 +7,7 @@ import {
   createExecution,
   updateExecution,
   getExecution,
+  getExecutionsByFlow,
 } from "../services/state.ts";
 import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
 import { getAdapter, getAdapterName, TimeoutError, ClaudeCodeTimeoutError } from "../services/adapters/index.ts";
@@ -69,7 +70,25 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       }
     }
 
-    const body = await c.req.json<{ input?: Record<string, unknown>; stream?: boolean }>().catch(() => ({}));
+    const body = await c.req.json<{ input?: Record<string, unknown>; stream?: boolean }>().catch(() => ({} as { input?: Record<string, unknown>; stream?: boolean }));
+
+    // Validate required input fields
+    const inputSchema = flow.manifest.input?.schema;
+    if (inputSchema) {
+      for (const [key, field] of Object.entries(inputSchema)) {
+        if (field.required && (!body.input || body.input[key] === undefined || body.input[key] === null || body.input[key] === "")) {
+          return c.json(
+            {
+              error: "INPUT_REQUIRED",
+              message: `Le champ d'entrée '${key}' est requis`,
+              field: key,
+            },
+            400
+          );
+        }
+      }
+    }
+
     const executionId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Get state and tokens
@@ -81,7 +100,8 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     }
 
     // Interpolate prompt
-    const prompt = interpolatePrompt(flow.prompt, config, state);
+    const input = body.input ?? {};
+    const prompt = interpolatePrompt(flow.prompt, config, state, input);
 
     // Create execution record
     await createExecution(executionId, flowId, body.input ?? null);
@@ -127,6 +147,13 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
 
         // Inject state
         envVars["FLOW_STATE"] = JSON.stringify(state);
+
+        // Inject input
+        if (body.input) {
+          for (const [key, value] of Object.entries(body.input)) {
+            envVars[`INPUT_${key.toUpperCase()}`] = String(value);
+          }
+        }
 
         // Execute via adapter (Docker or Claude Code CLI)
         const adapter = getAdapter();
@@ -210,6 +237,16 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     });
   });
 
+  // GET /api/flows/:id/executions — list past executions
+  router.get("/flows/:id/executions", async (c) => {
+    const flowId = c.req.param("id");
+    const limit = Math.min(Number(c.req.query("limit")) || 10, 50);
+    const flow = flows.get(flowId);
+    if (!flow) return c.json({ error: "FLOW_NOT_FOUND" }, 404);
+    const executions = await getExecutionsByFlow(flowId, limit);
+    return c.json({ flowId, executions });
+  });
+
   // GET /api/executions/:id — get execution status
   router.get("/executions/:id", async (c) => {
     const executionId = c.req.param("id");
@@ -228,9 +265,15 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
 function interpolatePrompt(
   prompt: string,
   config: Record<string, unknown>,
-  state: Record<string, unknown>
+  state: Record<string, unknown>,
+  input: Record<string, unknown> = {}
 ): string {
   let result = prompt;
+
+  // Replace {{input.*}}
+  result = result.replace(/\{\{input\.(\w+)\}\}/g, (_, key) => {
+    return String(input[key] ?? "");
+  });
 
   // Replace {{config.*}}
   result = result.replace(/\{\{config\.(\w+)\}\}/g, (_, key) => {

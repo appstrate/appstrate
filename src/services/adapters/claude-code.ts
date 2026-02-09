@@ -36,7 +36,7 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
       `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
     ];
     for (const [k, v] of Object.entries(envVars)) {
-      if (k.startsWith("TOKEN_") || k.startsWith("CONFIG_") || k === "FLOW_STATE") {
+      if (k.startsWith("TOKEN_") || k.startsWith("CONFIG_") || k.startsWith("INPUT_") || k === "FLOW_STATE") {
         flowVarArgs.push(`${k}=${v}`);
       }
     }
@@ -136,6 +136,7 @@ function buildEnrichedPrompt(envVars: Record<string, string>): string {
 
   const tokenEntries = Object.entries(envVars).filter(([k]) => k.startsWith("TOKEN_"));
   const configEntries = Object.entries(envVars).filter(([k]) => k.startsWith("CONFIG_"));
+  const inputEntries = Object.entries(envVars).filter(([k]) => k.startsWith("INPUT_"));
 
   const sections: string[] = [];
 
@@ -155,6 +156,16 @@ function buildEnrichedPrompt(envVars: Record<string, string>): string {
         sections.push(`  Example: \`curl -s -H "Authorization: Bearer $${key}" "https://api.clickup.com/api/v2/team"\``);
         sections.push(`  Create task: \`curl -s -X POST -H "Authorization: Bearer $${key}" -H "Content-Type: application/json" -d '{"name":"...","description":"..."}' "https://api.clickup.com/api/v2/list/{list_id}/task"\``);
       }
+    }
+    sections.push("");
+  }
+
+  // User input for this execution
+  if (inputEntries.length > 0) {
+    sections.push("## User Input\n");
+    for (const [key, value] of inputEntries) {
+      const name = key.replace("INPUT_", "").toLowerCase();
+      sections.push(`- **${name}**: ${value}`);
     }
     sections.push("");
   }

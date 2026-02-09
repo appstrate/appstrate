@@ -90,3 +90,12 @@ export async function getLastExecution(flowId: string) {
   `;
   return rows[0] ?? null;
 }
+
+export async function getExecutionsByFlow(flowId: string, limit: number = 10) {
+  const rows = await sql`
+    SELECT id, flow_id, status, input, result, error, tokens_used, started_at, completed_at, duration
+    FROM executions WHERE flow_id = ${flowId}
+    ORDER BY started_at DESC LIMIT ${limit}
+  `;
+  return rows;
+}
