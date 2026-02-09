@@ -111,6 +111,16 @@ export interface Execution {
   duration: number | null;
 }
 
+export interface ExecutionLog {
+  id: number;
+  execution_id: string;
+  type: "progress" | "system" | "error" | "result";
+  event: string | null;
+  message: string | null;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // --- API Types ---
 
 export interface FlowListItem {

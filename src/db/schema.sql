@@ -26,3 +26,15 @@ CREATE TABLE IF NOT EXISTS executions (
 
 CREATE INDEX IF NOT EXISTS idx_executions_flow_id ON executions(flow_id);
 CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
+
+CREATE TABLE IF NOT EXISTS execution_logs (
+  id SERIAL PRIMARY KEY,
+  execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'progress',
+  event TEXT,
+  message TEXT,
+  data JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_execution_logs_execution_id ON execution_logs(execution_id);
+CREATE INDEX IF NOT EXISTS idx_execution_logs_lookup ON execution_logs(execution_id, id);

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import type { LoadedFlow, FlowConfigField } from "../types/index.ts";
-import { getFlowConfig, setFlowConfig, getFlowState, getLastExecution } from "../services/state.ts";
+import type { LoadedFlow } from "../types/index.ts";
+import { getFlowConfig, setFlowConfig, getFlowState, getLastExecution, getRunningExecutionsCounts, getRunningExecutionsForFlow } from "../services/state.ts";
 import { getConnectionStatus } from "../services/nango.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
@@ -8,6 +8,8 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
 
   // GET /api/flows — list all loaded flows
   router.get("/", async (c) => {
+    const runningCounts = await getRunningExecutionsCounts();
+
     const flowList = Array.from(flows.values()).map((f) => ({
       id: f.id,
       displayName: f.manifest.metadata.displayName,
@@ -19,6 +21,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
         services: f.manifest.requires.services.map((s) => s.id),
         tools: (f.manifest.requires.tools ?? []).map((t) => t.id),
       },
+      runningExecutions: runningCounts[f.id] ?? 0,
     }));
 
     return c.json({ flows: flowList });
@@ -55,11 +58,12 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       status: "available",
     }));
 
-    // Get config, state, last execution in parallel
-    const [currentConfig, currentState, lastExec] = await Promise.all([
+    // Get config, state, last execution, running count in parallel
+    const [currentConfig, currentState, lastExec, runningCount] = await Promise.all([
       getFlowConfig(flowId),
       getFlowState(flowId),
       getLastExecution(flowId),
+      getRunningExecutionsForFlow(flowId),
     ]);
 
     // Merge defaults with current config
@@ -86,6 +90,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
         current: configWithDefaults,
       },
       state: currentState,
+      runningExecutions: runningCount,
       lastExecution: lastExec
         ? {
             id: lastExec.id,

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { loadFlows } from "./services/flow-loader.ts";
+import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import authRouter from "./routes/auth.ts";
@@ -40,6 +41,16 @@ app.use("/auth/*", async (c, next) => {
 console.log("Loading flows...");
 const flows = await loadFlows();
 console.log(`${flows.size} flow(s) loaded.`);
+
+// Clean up orphaned executions from previous server runs
+try {
+  const orphanCount = await markOrphanExecutionsFailed();
+  if (orphanCount > 0) {
+    console.log(`Marked ${orphanCount} orphaned execution(s) as failed.`);
+  }
+} catch (err) {
+  console.warn("Could not clean orphaned executions:", err);
+}
 
 // Routes
 const flowsRouter = createFlowsRouter(flows);

@@ -1,4 +1,5 @@
 import sql from "../db/client.ts";
+import type { ExecutionLog } from "../types/index.ts";
 
 export async function getFlowConfig(flowId: string): Promise<Record<string, unknown>> {
   const rows = await sql`SELECT config FROM flow_configs WHERE flow_id = ${flowId}`;
@@ -82,4 +83,65 @@ export async function getExecutionsByFlow(flowId: string, limit: number = 10) {
     ORDER BY started_at DESC LIMIT ${limit}
   `;
   return rows;
+}
+
+export async function appendExecutionLog(
+  executionId: string,
+  type: string,
+  event: string | null,
+  message: string | null,
+  data: Record<string, unknown> | null
+): Promise<number> {
+  const rows = await sql`
+    INSERT INTO execution_logs (execution_id, type, event, message, data)
+    VALUES (${executionId}, ${type}, ${event}, ${message}, ${data ? sql.json(data) : null})
+    RETURNING id
+  `;
+  return (rows[0]?.id ?? 0) as number;
+}
+
+export async function getExecutionLogs(
+  executionId: string,
+  afterId?: number,
+  limit: number = 1000
+): Promise<ExecutionLog[]> {
+  const rows = await sql`
+    SELECT id, execution_id, type, event, message, data, created_at
+    FROM execution_logs
+    WHERE execution_id = ${executionId}
+      ${afterId !== undefined ? sql`AND id > ${afterId}` : sql``}
+    ORDER BY id ASC LIMIT ${limit}
+  `;
+  return rows as unknown as ExecutionLog[];
+}
+
+export async function getRunningExecutionsForFlow(flowId: string): Promise<number> {
+  const rows = await sql`
+    SELECT COUNT(*)::int AS count FROM executions
+    WHERE flow_id = ${flowId} AND status IN ('running', 'pending')
+  `;
+  return (rows[0]?.count ?? 0) as number;
+}
+
+export async function getRunningExecutionsCounts(): Promise<Record<string, number>> {
+  const rows = await sql`
+    SELECT flow_id, COUNT(*)::int AS count FROM executions
+    WHERE status IN ('running', 'pending')
+    GROUP BY flow_id
+  `;
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    counts[row.flow_id as string] = row.count as number;
+  }
+  return counts;
+}
+
+export async function markOrphanExecutionsFailed(): Promise<number> {
+  const rows = await sql`
+    UPDATE executions
+    SET status = 'failed', error = 'Server restarted', completed_at = NOW()
+    WHERE status IN ('running', 'pending')
+    RETURNING id
+  `;
+  return rows.length;
 }

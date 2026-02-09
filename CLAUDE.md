@@ -22,16 +22,16 @@ bun run dev                   # Hono server on http://localhost:3000
 
 ## Stack & Conventions
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Runtime | **Bun** | Use `bun` everywhere, not node. Bun auto-loads `.env` |
-| API | **Hono** | NOT `Bun.serve()` — we need Hono for SSE (`streamSSE`), routing, middleware |
-| DB | **postgres.js** (`postgres` package) | NOT `Bun.sql` — despite the auto-generated Bun CLAUDE.md suggestion |
-| OAuth | **Nango** self-hosted (`@nangohq/node`) | Manages Gmail + ClickUp OAuth tokens |
-| Docker | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun) |
-| Container runtime | **Claude Code CLI** in Node 20 Alpine | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) |
-| Frontend | **Vanilla JS + CSS** | No framework. `public/index.html` + `public/app.js` |
-| Auth | Bearer token from `AUTH_TOKEN` env var | No auth on static files. All `/api/*` and `/auth/*` routes require bearer |
+| Layer             | Technology                                        | Notes                                                                       |
+| ----------------- | ------------------------------------------------- | --------------------------------------------------------------------------- |
+| Runtime           | **Bun**                                           | Use `bun` everywhere, not node. Bun auto-loads `.env`                       |
+| API               | **Hono**                                          | NOT `Bun.serve()` — we need Hono for SSE (`streamSSE`), routing, middleware |
+| DB                | **postgres.js** (`postgres` package)              | NOT `Bun.sql` — despite the auto-generated Bun CLAUDE.md suggestion         |
+| OAuth             | **Nango** self-hosted (`@nangohq/node`)           | Manages Gmail + ClickUp OAuth tokens                                        |
+| Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
+| Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
+| Frontend          | **Vanilla JS + CSS**                              | No framework. `public/index.html` + `public/app.js`                         |
+| Auth              | Bearer token from `AUTH_TOKEN` env var            | No auth on static files. All `/api/*` and `/auth/*` routes require bearer   |
 
 ### Key Patterns
 
@@ -44,20 +44,28 @@ bun run dev                   # Hono server on http://localhost:3000
 ## Architecture
 
 ```
-User Browser                    Platform (Bun + Hono :3000)
+User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |                                |
-     |-- GET /api/flows ------------->|-- flow-loader.ts (reads flows/ dir)
+     |-- #/ (Flow List) ------------->|-- GET /api/flows (with runningExecutions count)
+     |-- #/flows/:id (Flow Detail) -->|-- GET /api/flows/:id (with runningExecutions count)
      |-- PUT /api/flows/:id/config -->|-- state.ts (PostgreSQL)
      |-- POST /auth/connect/:provider>|-- nango.ts --> createConnectSession() --> Nango (:3003)
      |                                |   returns connectLink for popup --> OAuth
      |-- POST /api/flows/:id/run ---->|
      |                                |-- 1. Validate deps & config
-     |                                |-- 2. Get OAuth tokens from Nango
-     |                                |-- 3. Interpolate prompt template
-     |<-- SSE stream -----------------|-- 4. Create Docker container
-     |<-- progress events ------------|-- 5. Stream container stdout
-     |<-- result event ---------------|-- 6. Parse result, update state
-     |<-- execution_completed --------|-- 7. Destroy container
+     |                                |-- 2. Create execution record (pending)
+     |                                |-- 3. Fire-and-forget: executeFlowInBackground()
+     |<-- SSE (replay + live) --------|-- 4. Subscribe to logs via pub/sub
+     |                                |
+     |   Background Execution:        |-- Runs independently of SSE client
+     |                                |-- Persists logs to execution_logs table
+     |                                |-- Broadcasts to in-memory subscribers
+     |                                |-- Supports concurrent executions per flow
+     |                                |
+     |-- #/flows/:id/executions/:eid->|
+     |   (Execution Detail)           |
+     |-- GET /api/executions/:id/stream (SSE: replay DB + live via pub/sub)
+     |-- GET /api/executions/:id/logs  (REST: paginated historical logs)
      |                                |
      |            Ephemeral Container (Claude Code CLI)
      |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, CLAUDE_CODE_OAUTH_TOKEN
@@ -100,8 +108,8 @@ runtime-claude-code/
 └── entrypoint.sh             # Runs Claude Code with FLOW_PROMPT
 
 public/
-├── index.html                # Dark theme SPA shell
-└── app.js                    # Vanilla JS: fetch API + SSE stream reader + dynamic UI
+├── index.html                # Dark theme SPA shell (hash-based routing)
+└── app.js                    # Vanilla JS SPA: hash router, 3 views (flow list, flow detail, execution detail)
 
 scripts/
 └── setup-db.ts               # Runs schema.sql against PostgreSQL
@@ -109,16 +117,19 @@ scripts/
 
 ## API Endpoints
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/flows` | Bearer | List all loaded flows |
-| `GET` | `/api/flows/:id` | Bearer | Flow detail with service connection status, config, state, last execution |
-| `PUT` | `/api/flows/:id/config` | Bearer | Save flow configuration (validated against manifest schema) |
-| `POST` | `/api/flows/:id/run` | Bearer | Execute flow — returns SSE stream |
-| `GET` | `/api/executions/:id` | Bearer | Get execution status/result |
-| `GET` | `/auth/connections` | Bearer | List OAuth connections from Nango |
-| `POST` | `/auth/connect/:provider` | Bearer | Create Nango Connect Session (returns `connectLink` for popup) |
-| `GET` | `/*` | None | Static files from `public/` |
+| Method | Path                          | Auth   | Description                                                                     |
+| ------ | ----------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `GET`  | `/api/flows`                  | Bearer | List all loaded flows (with `runningExecutions` count per flow)                 |
+| `GET`  | `/api/flows/:id`              | Bearer | Flow detail with service status, config, state, last execution, running count   |
+| `PUT`  | `/api/flows/:id/config`       | Bearer | Save flow configuration (validated against manifest schema)                     |
+| `POST` | `/api/flows/:id/run`          | Bearer | Execute flow (fire-and-forget) — returns SSE stream (replay + live)             |
+| `GET`  | `/api/flows/:id/executions`   | Bearer | List executions for a flow (default limit 50)                                   |
+| `GET`  | `/api/executions/:id`         | Bearer | Get execution status/result                                                     |
+| `GET`  | `/api/executions/:id/logs`    | Bearer | Get persisted logs for an execution (pagination via `?after=lastId`)            |
+| `GET`  | `/api/executions/:id/stream`  | Bearer | SSE stream: replays all logs from DB, then streams live updates via pub/sub     |
+| `GET`  | `/auth/connections`       | Bearer | List OAuth connections from Nango                                         |
+| `POST` | `/auth/connect/:provider` | Bearer | Create Nango Connect Session (returns `connectLink` for popup)            |
+| `GET`  | `/*`                      | None   | Static files from `public/`                                               |
 
 ### SSE Events (POST /api/flows/:id/run)
 
@@ -172,15 +183,13 @@ AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 
 ## Known Issues & Technical Debt
 
-1. **Duration not computed**: `execution.duration` is never set — need to compute elapsed time between started_at and completed_at in the execution flow.
+1. **Nango Connect Session flow**: OAuth uses Connect Session Tokens (created server-side via `nango.createConnectSession()`). The frontend opens `connectLink` in a popup. The `NANGO_SECRET_KEY_DEV` env var seeds Nango's dev environment key — if this doesn't work, check the Nango DB for the auto-generated secret key.
 
-2. **Nango Connect Session flow**: OAuth uses Connect Session Tokens (created server-side via `nango.createConnectSession()`). The frontend opens `connectLink` in a popup. The `NANGO_SECRET_KEY_DEV` env var seeds Nango's dev environment key — if this doesn't work, check the Nango DB for the auto-generated secret key.
+2. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous `stream: false` mode that returns the full result as JSON — not yet implemented. The request body accepts `stream?: boolean` but it's ignored.
 
-3. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous `stream: false` mode that returns the full result as JSON — not yet implemented. The request body accepts `stream?: boolean` but it's ignored.
+3. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
 
-4. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
-
-5. **UI auth token**: The UI reads `localStorage.getItem("openflows_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
+4. **UI auth token**: The UI reads `localStorage.getItem("openflows_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
 
 ## What's Validated
 
@@ -201,6 +210,7 @@ AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 ## Detailed Specs
 
 The full product specifications are in the Obsidian vault at:
+
 ```
 /Users/pierrecabriere/Library/Mobile Documents/iCloud~md~obsidian/Documents/main/projects/claude-flows/
 ├── claude-flows-mvp.md              # MVP scope, architecture, milestones
