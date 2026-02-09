@@ -1,0 +1,22 @@
+{
+  "name": "openflows",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "setup-db": "bun scripts/setup-db.ts",
+    "build-runtime": "docker build -t openflows-runtime ./runtime"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@nangohq/node": "^0.69.30",
+    "hono": "^4.11.9",
+    "postgres": "^3.4.8"
+  }
+}

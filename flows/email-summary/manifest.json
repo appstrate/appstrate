@@ -1,0 +1,53 @@
+{
+  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "version": "1.0.0",
+
+  "metadata": {
+    "name": "email-summary",
+    "displayName": "Résumé des mails",
+    "description": "Lit les mails récents et produit un résumé structuré depuis la dernière exécution",
+    "author": "openflows",
+    "license": "MIT",
+    "tags": ["email", "résumé", "productivité"]
+  },
+
+  "requires": {
+    "services": [
+      {
+        "id": "gmail",
+        "provider": "google-mail",
+        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+        "description": "Lecture des mails"
+      }
+    ]
+  },
+
+  "state": {
+    "enabled": true,
+    "schema": {
+      "last_run": { "type": "string", "format": "date-time" },
+      "last_email_id": { "type": "string" }
+    }
+  },
+
+  "config": {
+    "schema": {
+      "max_emails": {
+        "type": "number",
+        "default": 30,
+        "description": "Nombre maximum de mails à traiter par exécution"
+      },
+      "language": {
+        "type": "string",
+        "default": "fr",
+        "enum": ["fr", "en"],
+        "description": "Langue du résumé"
+      }
+    }
+  },
+
+  "execution": {
+    "timeout": 180,
+    "maxTokens": 50000
+  }
+}
