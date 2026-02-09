@@ -1,16 +1,53 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
+import { createBunWebSocket } from "hono/bun";
 import { loadFlows } from "./services/flow-loader.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import authRouter from "./routes/auth.ts";
+import * as ws from "./ws.ts";
 
 const app = new Hono();
+const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 // Middleware
 app.use("*", cors());
+
+// WebSocket route (before auth middleware — auth via query param)
+app.get(
+  "/ws",
+  upgradeWebSocket((c) => {
+    let connectionId: string | null = null;
+    return {
+      onOpen(_evt, wsCtx) {
+        const token = new URL(c.req.url).searchParams.get("token") || "";
+        const authToken = process.env.AUTH_TOKEN;
+        if (authToken && token !== authToken) {
+          wsCtx.close(1008, "Unauthorized");
+          return;
+        }
+        connectionId = ws.addConnection(wsCtx);
+      },
+      onMessage(evt) {
+        if (!connectionId) return;
+        try {
+          const msg = JSON.parse(String(evt.data));
+          if (msg.type === "subscribe") ws.subscribe(connectionId, msg.channel);
+          else if (msg.type === "unsubscribe")
+            ws.unsubscribe(connectionId, msg.channel);
+          else if (msg.type === "ping") ws.send(connectionId, { type: "pong" });
+        } catch {
+          // Invalid JSON — ignore
+        }
+      },
+      onClose() {
+        if (connectionId) ws.removeConnection(connectionId);
+      },
+    };
+  })
+);
 
 // Auth middleware (MVP: static bearer token)
 app.use("/api/*", async (c, next) => {
@@ -69,7 +106,8 @@ const port = parseInt(process.env.PORT || "3000", 10);
 export default {
   port,
   fetch: app.fetch,
-  idleTimeout: 255, // seconds — prevent Bun from killing long SSE connections
+  websocket,
+  idleTimeout: 255, // seconds — prevent Bun from killing long SSE/WS connections
 };
 
 console.log(`OpenFlows running on http://localhost:${port}`);

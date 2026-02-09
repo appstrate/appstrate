@@ -14,6 +14,7 @@ import {
 } from "../services/state.ts";
 import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
 import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
+import { broadcast } from "../ws.ts";
 
 // --- In-memory pub/sub for live log streaming ---
 
@@ -49,10 +50,25 @@ async function emitLog(
   type: string,
   event: string,
   message: string | null,
-  data: Record<string, unknown> | null
+  data: Record<string, unknown> | null,
+  flowId?: string
 ) {
   const id = await appendExecutionLog(executionId, type, event, message, data);
   notifySubscribers(executionId, { id, event, data: data ?? (message ? { message } : {}) });
+
+  // Broadcast via WebSocket
+  broadcast(`execution:${executionId}`, {
+    type: "log",
+    executionId,
+    event,
+    data: data ?? (message ? { message } : {}),
+  });
+
+  if (flowId && (event === "execution_started" || event === "execution_completed")) {
+    const stateMsg = { type: event, flowId, executionId, ...(data || {}) };
+    broadcast(`flow:${flowId}`, stateMsg);
+    broadcast("flows", stateMsg);
+  }
 }
 
 // --- Shared SSE streaming logic ---
@@ -114,14 +130,14 @@ async function executeFlowInBackground(
     await emitLog(executionId, "system", "execution_started", null, {
       executionId,
       startedAt: new Date().toISOString(),
-    });
+    }, flowId);
 
     // Check dependencies
     const depCheck: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       depCheck[svc.id] = tokens[svc.id] ? "ok" : "missing";
     }
-    await emitLog(executionId, "system", "dependency_check", null, { services: depCheck });
+    await emitLog(executionId, "system", "dependency_check", null, { services: depCheck }, flowId);
 
     // Update status to running
     await updateExecution(executionId, { status: "running" });
@@ -129,7 +145,7 @@ async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
     const adapterName = getAdapterName();
-    await emitLog(executionId, "system", "adapter_started", null, { adapter: adapterName });
+    await emitLog(executionId, "system", "adapter_started", null, { adapter: adapterName }, flowId);
 
     const timeout = flow.manifest.execution?.timeout ?? 300;
     let result: Record<string, unknown> | null = null;
@@ -137,7 +153,7 @@ async function executeFlowInBackground(
     try {
       for await (const msg of adapter.execute(executionId, envVars, flow.path, timeout)) {
         if (msg.type === "progress") {
-          await emitLog(executionId, "progress", "progress", msg.message ?? null, null);
+          await emitLog(executionId, "progress", "progress", msg.message ?? null, null, flowId);
         } else if (msg.type === "result") {
           result = msg.data ?? null;
         }
@@ -154,7 +170,7 @@ async function executeFlowInBackground(
         await emitLog(executionId, "error", "execution_completed", null, {
           executionId,
           status: "timeout",
-        });
+        }, flowId);
         return;
       }
       throw err;
@@ -175,11 +191,11 @@ async function executeFlowInBackground(
         await setFlowState(flowId, result.state as Record<string, unknown>);
       }
 
-      await emitLog(executionId, "result", "result", null, result);
+      await emitLog(executionId, "result", "result", null, result, flowId);
       await emitLog(executionId, "system", "execution_completed", null, {
         executionId,
         status: "success",
-      });
+      }, flowId);
     } else {
       const duration = Date.now() - startTime;
       await updateExecution(executionId, {
@@ -192,7 +208,7 @@ async function executeFlowInBackground(
         executionId,
         status: "failed",
         error: "No result returned from adapter",
-      });
+      }, flowId);
     }
   } catch (err) {
     const duration = Date.now() - startTime;
@@ -207,7 +223,7 @@ async function executeFlowInBackground(
       executionId,
       status: "failed",
       error: errorMessage,
-    });
+    }, flowId);
   }
 }
 
@@ -328,7 +344,12 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     // Fire-and-forget background execution
     executeFlowInBackground(executionId, flowId, flow, envVars, tokens);
 
-    // Return SSE stream that subscribes to logs (replay + live)
+    // stream: false → return JSON with executionId
+    if (body.stream === false) {
+      return c.json({ executionId });
+    }
+
+    // Default: return SSE stream that subscribes to logs (replay + live)
     return streamSSE(c, async (stream) => {
       try {
         await streamLogsToSSE(stream, executionId, 50);

@@ -3,8 +3,6 @@
 const API_BASE = "/api";
 let currentFlowId = null;
 let flowDetailCache = {};
-let activeAbortController = null;
-let execListInterval = null;
 
 // --- API Helpers ---
 
@@ -27,6 +25,70 @@ async function api(path, options = {}) {
     throw new Error(err.message || `API Error: ${res.status}`);
   }
   return res.json();
+}
+
+// --- WebSocket Manager ---
+
+let wsConn = null;
+const wsSubscriptions = new Map(); // channel → handler
+
+function wsConnect() {
+  const token = localStorage.getItem("openflows_token") || "";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  wsConn = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+
+  wsConn.onopen = () => {
+    // Re-subscribe on reconnect
+    for (const [channel] of wsSubscriptions) {
+      wsConn.send(JSON.stringify({ type: "subscribe", channel }));
+    }
+  };
+
+  wsConn.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "pong") return;
+    for (const [channel, handler] of wsSubscriptions) {
+      if (matchChannel(channel, msg)) handler(msg);
+    }
+  };
+
+  wsConn.onclose = () => {
+    setTimeout(wsConnect, 2000);
+  };
+}
+
+function matchChannel(channel, msg) {
+  if (channel === "flows") {
+    return msg.type === "execution_started" || msg.type === "execution_completed";
+  }
+  if (channel.startsWith("flow:")) {
+    return (msg.type === "execution_started" || msg.type === "execution_completed") &&
+           msg.flowId === channel.split(":")[1];
+  }
+  if (channel.startsWith("execution:")) {
+    return msg.type === "log" && msg.executionId === channel.split(":")[1];
+  }
+  return false;
+}
+
+function wsSubscribe(channel, handler) {
+  wsSubscriptions.set(channel, handler);
+  if (wsConn?.readyState === WebSocket.OPEN) {
+    wsConn.send(JSON.stringify({ type: "subscribe", channel }));
+  }
+}
+
+function wsUnsubscribe(channel) {
+  wsSubscriptions.delete(channel);
+  if (wsConn?.readyState === WebSocket.OPEN) {
+    wsConn.send(JSON.stringify({ type: "unsubscribe", channel }));
+  }
+}
+
+function wsUnsubscribeAll() {
+  for (const channel of [...wsSubscriptions.keys()]) {
+    wsUnsubscribe(channel);
+  }
 }
 
 // --- Markdown Converter ---
@@ -75,10 +137,7 @@ function navigate(hash) {
 }
 
 function handleRoute() {
-  // Cleanup previous view
-  cleanupActiveStream();
-  clearInterval(execListInterval);
-  execListInterval = null;
+  wsUnsubscribeAll();
 
   const hash = window.location.hash || "#/";
   const app = document.getElementById("app");
@@ -113,15 +172,6 @@ function handleRoute() {
 
 window.addEventListener("hashchange", handleRoute);
 
-// --- Cleanup ---
-
-function cleanupActiveStream() {
-  if (activeAbortController) {
-    activeAbortController.abort();
-    activeAbortController = null;
-  }
-}
-
 // --- View 1: Flow List ---
 
 async function renderFlowList(container) {
@@ -151,6 +201,11 @@ async function renderFlowList(container) {
         </div>
       </div>
     `).join("")}</div>`;
+
+    // Subscribe to live updates for flow list
+    wsSubscribe("flows", () => {
+      renderFlowList(document.getElementById("app"));
+    });
   } catch (err) {
     container.innerHTML = `
       <div class="empty-state">
@@ -220,8 +275,10 @@ async function renderFlowDetail(container, flowId) {
 
     loadExecutionList(flowId);
 
-    // Poll execution list if there are running executions
-    startExecListPolling(flowId);
+    // Subscribe to live execution updates for this flow
+    wsSubscribe(`flow:${flowId}`, () => {
+      loadExecutionList(flowId);
+    });
   } catch (err) {
     container.innerHTML = `
       <div class="empty-state">
@@ -272,81 +329,16 @@ async function loadExecutionList(flowId) {
   }
 }
 
-function startExecListPolling(flowId) {
-  clearInterval(execListInterval);
-  execListInterval = setInterval(async () => {
-    // Only poll if we're still on this flow's detail view
-    const hash = window.location.hash || "#/";
-    if (hash !== `#/flows/${flowId}`) {
-      clearInterval(execListInterval);
-      execListInterval = null;
-      return;
-    }
-    await loadExecutionList(flowId);
-  }, 5000);
-}
-
 // --- Run flow from detail view ---
 
 async function runFlowFromDetail(flowId, inputData) {
   try {
-    const abortController = new AbortController();
-    const res = await fetch(`${API_BASE}/flows/${flowId}/run`, {
+    const { executionId } = await api(`/flows/${flowId}/run`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify({ stream: true, ...(inputData ? { input: inputData } : {}) }),
-      signal: abortController.signal,
+      body: JSON.stringify({ stream: false, ...(inputData ? { input: inputData } : {}) }),
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(err.message || `Error: ${res.status}`);
-    }
-
-    // Read the first SSE event to get executionId
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let executionId = null;
-
-    while (!executionId) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      let eventType = null;
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.executionId) {
-              executionId = data.executionId;
-            }
-          } catch {}
-          eventType = null;
-        }
-      }
-    }
-
-    // Cancel the SSE reader — execution continues in background
-    abortController.abort();
-
-    if (executionId) {
-      navigate(`#/flows/${flowId}/executions/${executionId}`);
-    } else {
-      // Fallback: reload execution list
-      navigate(`#/flows/${flowId}`);
-    }
+    navigate(`#/flows/${flowId}/executions/${executionId}`);
   } catch (err) {
-    if (err.name === "AbortError") return;
     alert(`Erreur : ${err.message}`);
   }
 }
@@ -409,7 +401,10 @@ async function renderExecutionDetail(container, flowId, execId) {
     `;
 
     if (isRunning) {
-      streamExecutionLogs(execId);
+      // Load existing logs first (partial replay)
+      await loadHistoricalLogs(execId);
+      // Then subscribe for live updates via WebSocket
+      wsSubscribe(`execution:${execId}`, (msg) => handleExecutionMessage(msg));
     } else {
       loadExecutionLogs(execId, execution);
     }
@@ -420,6 +415,76 @@ async function renderExecutionDetail(container, flowId, execId) {
         <p style="font-size: 0.8rem; margin-top: 0.5rem">${escapeHtml(err.message)}</p>
       </div>
     `;
+  }
+}
+
+// Load historical logs (for replay before WS subscription)
+async function loadHistoricalLogs(execId) {
+  const logContent = document.getElementById("log-content");
+  const logCount = document.getElementById("log-count");
+  const resultContainer = document.getElementById("result-container");
+  if (!logContent) return;
+
+  try {
+    const { logs } = await api(`/executions/${execId}/logs`);
+    if (logCount) logCount.textContent = `${logs.length} events`;
+
+    for (const log of logs) {
+      if (log.event === "result" && log.data) {
+        if (resultContainer) {
+          resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
+          renderResult(log.data, document.getElementById("result-display"));
+        }
+      } else if (log.event === "execution_completed") {
+        // skip — shown as badge
+      } else {
+        const message = log.data?.message || log.message || formatEvent(log.event, log.data);
+        if (message) appendLogEntry(logContent, message, log.type || "progress");
+      }
+    }
+  } catch (err) {
+    logContent.innerHTML = `<div class="log-entry error">Erreur de chargement des logs: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Handle a live WS message for an execution
+function handleExecutionMessage(msg) {
+  const logContent = document.getElementById("log-content");
+  const logCount = document.getElementById("log-count");
+  const resultContainer = document.getElementById("result-container");
+  if (!logContent) return;
+
+  const event = msg.event;
+  const data = msg.data || {};
+
+  // Update event count
+  const currentCount = parseInt(logCount?.textContent) || 0;
+  if (logCount) logCount.textContent = `${currentCount + 1} events`;
+
+  if (event === "result" && data) {
+    if (resultContainer) {
+      resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
+      renderResult(data, document.getElementById("result-display"));
+      switchTab("result");
+    }
+  } else if (event === "execution_completed") {
+    // Update badge
+    const badge = document.getElementById("exec-badge");
+    const status = data.status || "failed";
+    if (badge) {
+      const badgeClass = status === "success" ? "badge-success" :
+                         status === "timeout" ? "badge-timeout" : "badge-failed";
+      badge.className = `badge ${badgeClass}`;
+      badge.innerHTML = status;
+    }
+    // Remove live indicator
+    const liveEl = document.querySelector(".live-indicator");
+    if (liveEl) liveEl.remove();
+  } else if (event === "progress") {
+    appendLogEntry(logContent, data.message || "", "progress");
+  } else {
+    const message = data.message || formatEvent(event, data);
+    if (message) appendLogEntry(logContent, message, "system");
   }
 }
 
@@ -459,84 +524,6 @@ async function loadExecutionLogs(execId, execution) {
     }
   } catch (err) {
     logContent.innerHTML = `<div class="log-entry error">Erreur de chargement des logs: ${escapeHtml(err.message)}</div>`;
-  }
-}
-
-// Stream live logs for a running execution
-async function streamExecutionLogs(execId) {
-  const logContent = document.getElementById("log-content");
-  const logCount = document.getElementById("log-count");
-  const resultContainer = document.getElementById("result-container");
-  if (!logContent) return;
-
-  const abortController = new AbortController();
-  activeAbortController = abortController;
-  let eventCount = 0;
-
-  try {
-    const res = await fetch(`${API_BASE}/executions/${execId}/stream`, {
-      headers: { ...getAuthHeaders() },
-      signal: abortController.signal,
-    });
-
-    if (!res.ok) throw new Error(`Stream error: ${res.status}`);
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      let eventType = null;
-
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            eventCount++;
-            if (logCount) logCount.textContent = `${eventCount} events`;
-
-            if (eventType === "result" && data) {
-              if (resultContainer) {
-                resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
-                renderResult(data, document.getElementById("result-display"));
-                switchTab("result");
-              }
-            } else if (eventType === "execution_completed") {
-              // Update badge
-              const badge = document.getElementById("exec-badge");
-              const status = data.status || "failed";
-              if (badge) {
-                const badgeClass = status === "success" ? "badge-success" :
-                                   status === "timeout" ? "badge-timeout" : "badge-failed";
-                badge.className = `badge ${badgeClass}`;
-                badge.innerHTML = status;
-              }
-              // Remove live indicator
-              const liveEl = document.querySelector(".live-indicator");
-              if (liveEl) liveEl.remove();
-            } else if (eventType === "progress") {
-              appendLogEntry(logContent, data.message || "", "progress");
-            } else {
-              const message = data.message || formatEvent(eventType, data);
-              if (message) appendLogEntry(logContent, message, "system");
-            }
-          } catch {}
-          eventType = null;
-        }
-      }
-    }
-  } catch (err) {
-    if (err.name === "AbortError") return;
-    appendLogEntry(logContent, `Stream interrompu: ${err.message}`, "error");
   }
 }
 
@@ -844,6 +831,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 // --- Init ---
+
+wsConnect();
 
 if (!window.location.hash || window.location.hash === "#") {
   window.location.hash = "#/";
