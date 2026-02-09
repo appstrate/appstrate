@@ -351,6 +351,15 @@ async function runFlowFromDetail(flowId, inputData) {
   }
 }
 
+// --- Tab Switching ---
+
+function switchTab(tabId) {
+  document.querySelectorAll(".exec-tabs .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelector(`.tab[onclick*="${tabId}"]`)?.classList.add("active");
+  document.getElementById(`panel-${tabId}`)?.classList.add("active");
+}
+
 // --- View 3: Execution Detail ---
 
 async function renderExecutionDetail(container, flowId, execId) {
@@ -379,15 +388,24 @@ async function renderExecutionDetail(container, flowId, execId) {
         ${isRunning ? '<span class="live-indicator"><span class="spinner"></span> En direct</span>' : ""}
       </div>
 
-      <div class="log-viewer">
-        <div class="log-viewer-header">
-          <span>Logs</span>
-          <span id="log-count"></span>
-        </div>
-        <div class="log-content" id="log-content"></div>
+      <div class="exec-tabs">
+        <button class="tab active" onclick="switchTab('logs')">Logs <span id="log-count"></span></button>
+        <button class="tab" onclick="switchTab('result')">Resultat</button>
       </div>
 
-      <div id="result-container"></div>
+      <div class="tab-panel active" id="panel-logs">
+        <div class="log-viewer">
+          <div class="log-content" id="log-content"></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-result">
+        <div id="result-container">
+          <div class="empty-state" style="padding: 1.5rem">
+            <p style="font-size: 0.8rem">Aucun resultat</p>
+          </div>
+        </div>
+      </div>
     `;
 
     if (isRunning) {
@@ -433,9 +451,11 @@ async function loadExecutionLogs(execId, execution) {
     if (resultData && resultContainer) {
       resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
       renderResult(resultData, document.getElementById("result-display"));
+      switchTab("result");
     } else if (execution.result && resultContainer) {
       resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
       renderResult(execution.result, document.getElementById("result-display"));
+      switchTab("result");
     }
   } catch (err) {
     logContent.innerHTML = `<div class="log-entry error">Erreur de chargement des logs: ${escapeHtml(err.message)}</div>`;
@@ -488,6 +508,7 @@ async function streamExecutionLogs(execId) {
               if (resultContainer) {
                 resultContainer.innerHTML = `<div class="result-section" id="result-display"></div>`;
                 renderResult(data, document.getElementById("result-display"));
+                switchTab("result");
               }
             } else if (eventType === "execution_completed") {
               // Update badge
