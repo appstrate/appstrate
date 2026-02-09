@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "setup-db": "bun scripts/setup-db.ts",
-    "build-runtime": "docker build -t openflows-runtime ./runtime"
+    "build-runtime": "docker build -t openflows-claude-code ./runtime-claude-code"
   },
   "devDependencies": {
     "@types/bun": "latest"

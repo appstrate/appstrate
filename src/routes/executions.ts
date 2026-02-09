@@ -10,7 +10,7 @@ import {
   getExecutionsByFlow,
 } from "../services/state.ts";
 import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
-import { getAdapter, getAdapterName, TimeoutError, ClaudeCodeTimeoutError } from "../services/adapters/index.ts";
+import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
 
 export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
@@ -131,7 +131,6 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
           FLOW_PROMPT: prompt,
           FLOW_ID: flowId,
           EXECUTION_ID: executionId,
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
           LLM_MODEL: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
         };
 
@@ -155,7 +154,7 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
           }
         }
 
-        // Execute via adapter (Docker or Claude Code CLI)
+        // Execute via adapter
         const adapter = getAdapter();
         const adapterName = getAdapterName();
         await stream.writeSSE({ event: "adapter_started", data: JSON.stringify({ adapter: adapterName }) });
@@ -172,7 +171,7 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
             }
           }
         } catch (err) {
-          if (err instanceof TimeoutError || err instanceof ClaudeCodeTimeoutError) {
+          if (err instanceof TimeoutError) {
             await updateExecution(executionId, {
               status: "timeout",
               error: `Execution timed out after ${timeout}s`,

@@ -1,6 +1,12 @@
 import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
-
-const DEFAULT_CLI_PATH = process.env.CLAUDE_CLI_PATH || "claude";
+import {
+  createClaudeCodeContainer,
+  startContainer,
+  streamLogs,
+  waitForExit,
+  stopContainer,
+  removeContainer,
+} from "../docker.ts";
 
 export class ClaudeCodeAdapter implements ExecutionAdapter {
   async *execute(
@@ -12,121 +18,64 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     const prompt = buildEnrichedPrompt(envVars);
     const model = envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
 
-    // Pass prompt via stdin (not as CLI arg) to avoid length/encoding issues
-    const cliArgs = [
-      "-p",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--no-session-persistence",
-      "--permission-mode", "bypassPermissions",
-      "--allowedTools", "Bash(read_only=false) WebFetch WebSearch",
-      "--model", model,
-      "--max-turns", "50",
-      "--system-prompt", "You are an AI assistant executing a flow. Follow the user instructions precisely. Use Bash with curl for API calls. Output your final result as JSON in a ```json code block.",
-      "--disable-slash-commands",
-    ];
-
     // Auth via CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, uses Claude subscription)
     const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     if (!oauthToken) {
       throw new Error("CLAUDE_CODE_OAUTH_TOKEN is required for the claude-code adapter. Run `claude setup-token` to generate one.");
     }
 
-    const flowVarArgs: string[] = [
-      `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
-    ];
+    // Build container environment variables
+    const containerEnv: Record<string, string> = {
+      FLOW_PROMPT: prompt,
+      LLM_MODEL: model,
+      CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+    };
+
     for (const [k, v] of Object.entries(envVars)) {
       if (k.startsWith("TOKEN_") || k.startsWith("CONFIG_") || k.startsWith("INPUT_") || k === "FLOW_STATE") {
-        flowVarArgs.push(`${k}=${v}`);
+        containerEnv[k] = v;
       }
     }
 
-    // Use `env` to: set CLAUDE_CODE_OAUTH_TOKEN + flow vars, unset ANTHROPIC_API_KEY (avoid conflict)
-    const spawnCmd = [
-      "env",
-      "-u", "ANTHROPIC_API_KEY",
-      ...flowVarArgs,
-      DEFAULT_CLI_PATH,
-      ...cliArgs,
-    ];
+    // Create and start the container
+    const containerId = await createClaudeCodeContainer(executionId, containerEnv);
 
-    yield { type: "progress", message: "Claude Code CLI started", data: { adapter: "claude-code", executionId } };
+    yield { type: "progress", message: "Claude Code container started", data: { adapter: "claude-code", executionId, containerId } };
 
-    // Don't pass env — let Bun.spawn inherit the real OS environment
-    // Pipe prompt via stdin to avoid arg length/encoding issues
-    // cwd=/tmp avoids loading CLAUDE.md from the project directory
-    const proc = Bun.spawn(spawnCmd, {
-      cwd: "/tmp",
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    await startContainer(containerId);
 
-    // Write prompt to stdin and close
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-
+    // Timeout: stop the container if it exceeds the limit
     const timeoutMs = timeout * 1000;
     let timedOut = false;
-    const timeoutHandle = setTimeout(() => {
+    const timeoutHandle = setTimeout(async () => {
       timedOut = true;
-      proc.kill("SIGTERM");
+      await stopContainer(containerId).catch(() => {});
     }, timeoutMs);
 
-    // Collect stderr in background to avoid pipe deadlock
-    const stderrPromise = new Response(proc.stderr).text();
     let hasResult = false;
 
     try {
-      const reader = proc.stdout.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-
-          const msg = parseStreamJsonLine(trimmed);
-          if (msg) {
-            if (msg.type === "result") hasResult = true;
-            yield msg;
-          }
-        }
-      }
-
-      // Flush remaining buffer
-      if (buffer.trim()) {
-        const msg = parseStreamJsonLine(buffer.trim());
+      for await (const line of streamLogs(containerId)) {
+        const msg = parseStreamJsonLine(line);
         if (msg) {
           if (msg.type === "result") hasResult = true;
           yield msg;
         }
       }
-
-      reader.releaseLock();
     } finally {
       clearTimeout(timeoutHandle);
     }
 
-    await proc.exited;
-    const stderrText = await stderrPromise;
+    const exitCode = await waitForExit(containerId);
+    await removeContainer(containerId);
 
     if (timedOut) {
-      throw new ClaudeCodeTimeoutError(`Execution timed out after ${timeout}s`);
+      throw new TimeoutError(`Execution timed out after ${timeout}s`);
     }
 
     // Only throw on non-zero exit if we didn't get a result
-    if (proc.exitCode !== 0 && !hasResult) {
-      throw new Error(`Claude Code CLI exited with code ${proc.exitCode}: ${stderrText.slice(0, 500)}`);
+    if (exitCode !== 0 && !hasResult) {
+      throw new Error(`Claude Code container exited with code ${exitCode}`);
     }
   }
 }
@@ -260,9 +209,9 @@ function extractJsonResult(text: string): Record<string, unknown> | null {
   return null;
 }
 
-export class ClaudeCodeTimeoutError extends Error {
+export class TimeoutError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "ClaudeCodeTimeoutError";
+    this.name = "TimeoutError";
   }
 }

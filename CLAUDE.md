@@ -12,9 +12,9 @@ docker compose up -d          # PostgreSQL 16 + Nango (OAuth)
 bun run setup-db              # Creates tables in PostgreSQL
 
 # 3. Build runtime image
-bun run build-runtime         # docker build -t openflows-runtime ./runtime
+bun run build-runtime         # docker build -t openflows-claude-code ./runtime-claude-code
 
-# 4. Configure .env (copy .env.example, set ANTHROPIC_API_KEY)
+# 4. Configure .env (copy .env.example, set CLAUDE_CODE_OAUTH_TOKEN)
 
 # 5. Start platform
 bun run dev                   # Hono server on http://localhost:3000
@@ -29,7 +29,7 @@ bun run dev                   # Hono server on http://localhost:3000
 | DB | **postgres.js** (`postgres` package) | NOT `Bun.sql` — despite the auto-generated Bun CLAUDE.md suggestion |
 | OAuth | **Nango** self-hosted (`@nangohq/node`) | Manages Gmail + ClickUp OAuth tokens |
 | Docker | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun) |
-| Container runtime | **Node 20 Alpine** + `@anthropic-ai/sdk` | Plain Anthropic SDK, not Agent SDK — simpler for custom tools |
+| Container runtime | **Claude Code CLI** in Node 20 Alpine | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) |
 | Frontend | **Vanilla JS + CSS** | No framework. `public/index.html` + `public/app.js` |
 | Auth | Bearer token from `AUTH_TOKEN` env var | No auth on static files. All `/api/*` and `/auth/*` routes require bearer |
 
@@ -59,10 +59,10 @@ User Browser                    Platform (Bun + Hono :3000)
      |<-- result event ---------------|-- 6. Parse result, update state
      |<-- execution_completed --------|-- 7. Destroy container
      |                                |
-     |            Ephemeral Container (Node 20 + Anthropic SDK)
-     |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, ANTHROPIC_API_KEY
-     |            - Runs agent loop with gmail/clickup tools
-     |            - Outputs JSON lines on stdout: {type:"progress"|"result", ...}
+     |            Ephemeral Container (Claude Code CLI)
+     |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, CLAUDE_CODE_OAUTH_TOKEN
+     |            - Claude Code executes the prompt with access to bash/tools
+     |            - Outputs JSON lines on stdout (parsed by ClaudeCodeAdapter)
 ```
 
 ## Project Structure
@@ -75,7 +75,11 @@ src/
 │   ├── executions.ts         # POST /api/flows/:id/run (SSE), GET /api/executions/:id
 │   └── auth.ts               # POST /auth/connect/:provider (connect session), GET /auth/connections
 ├── services/
-│   ├── docker.ts             # dockerFetch(), createContainer, startContainer, streamLogs, waitForExit, removeContainer, stopContainer
+│   ├── docker.ts             # dockerFetch(), createClaudeCodeContainer, startContainer, streamLogs, waitForExit, removeContainer, stopContainer
+│   ├── adapters/
+│   │   ├── types.ts          # ExecutionAdapter interface, ExecutionMessage type
+│   │   ├── index.ts          # getAdapter() factory, getAdapterName(), re-exports
+│   │   └── claude-code.ts    # ClaudeCodeAdapter (prompt enrichment, stream parsing, timeout)
 │   ├── nango.ts              # getConnectionStatus, listConnections, getAccessToken, createConnectSession
 │   ├── state.ts              # CRUD for flow_configs, flow_state, executions tables
 │   └── flow-loader.ts        # Scans flows/ dir at startup, parses manifest.json + prompt.md
@@ -90,10 +94,10 @@ flows/
     ├── manifest.json         # Flow spec: metadata, requires (services/tools), config schema, state schema
     └── prompt.md             # Agent instructions with {{config.*}} / {{state.*}} template vars
 
-runtime/
-├── Dockerfile                # Node 20 Alpine + @anthropic-ai/sdk
-├── package.json              # Only dependency: @anthropic-ai/sdk
-└── entrypoint.mjs            # Agent loop: tools (gmail_list_messages, gmail_get_message, clickup_create_task), stdout JSON output
+runtime-claude-code/
+├── Dockerfile                # Node 20 Alpine + Claude Code CLI
+├── package.json              # Runtime dependencies
+└── entrypoint.sh             # Runs Claude Code with FLOW_PROMPT
 
 public/
 ├── index.html                # Dark theme SPA shell
@@ -121,7 +125,7 @@ scripts/
 ```
 execution_started   → {executionId, startedAt}
 dependency_check    → {services: {gmail: "ok", clickup: "ok"}}
-container_started   → {containerId, image}
+adapter_started     → {adapter: "claude-code"}
 progress            → {message: "..."}           (repeated)
 result              → {summary, tickets_created, ...}
 execution_completed → {executionId, status: "success"|"failed"|"timeout"}
@@ -144,53 +148,39 @@ Each flow is a directory in `flows/` with `manifest.json` + `prompt.md`. See `fl
 
 ## Container Protocol
 
-The runtime container communicates via stdout JSON lines:
+The Claude Code runtime container streams JSON events on stdout. The `ClaudeCodeAdapter` (`src/services/adapters/claude-code.ts`) parses these events:
 
-```json
-{"type": "progress", "message": "Searching emails..."}
-{"type": "progress", "message": "Found 12 unread emails"}
-{"type": "result", "data": {"summary": "...", "tickets_created": [...], "state": {...}}}
-```
+- **`assistant` messages** with text content → forwarded as `progress` SSE events
+- **`result` messages** → parsed for JSON code blocks containing the final result
+- The last ` ```json ``` ` block in assistant text is extracted as the result
 
-The platform reads these lines from Docker log stream, parses them, and forwards as SSE events. If `data.state` is present in the result, the platform persists it to `flow_state`.
+The platform reads these lines from Docker log stream (multiplexed format), parses them, and forwards as SSE events. If `result.state` is present, the platform persists it to `flow_state`.
 
 ## Environment Variables
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...       # Required for container runtime
 LLM_MODEL=claude-sonnet-4-5-20250929
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  # Run `claude setup-token` to generate
 DATABASE_URL=postgres://openflows:openflows@localhost:5432/openflows
 NANGO_URL=http://localhost:3003
 NANGO_SECRET_KEY=<uuid-v4>            # Must be UUID v4 format
 NANGO_ENCRYPTION_KEY=<base64-256bit>  # openssl rand -base64 32 (required for Connect UI)
 PORT=3000
 DOCKER_SOCKET=/var/run/docker.sock
-FLOW_TIMEOUT=300000                # Global timeout (ms)
-MAX_CONCURRENT_CONTAINERS=3
 AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 ```
 
 ## Known Issues & Technical Debt
 
-1. **Dead code in `updateExecution()`** (`src/services/state.ts:51-64`): `sets` and `values` arrays are populated but unused — the actual query uses COALESCE. Should be cleaned up.
+1. **Duration not computed**: `execution.duration` is never set — need to compute elapsed time between started_at and completed_at in the execution flow.
 
-2. **Duration not computed**: `execution.duration` is never set — need to compute elapsed time between started_at and completed_at in the execution flow.
+2. **Nango Connect Session flow**: OAuth uses Connect Session Tokens (created server-side via `nango.createConnectSession()`). The frontend opens `connectLink` in a popup. The `NANGO_SECRET_KEY_DEV` env var seeds Nango's dev environment key — if this doesn't work, check the Nango DB for the auto-generated secret key.
 
-3. **`MAX_CONCURRENT_CONTAINERS` not enforced**: The env var exists but there's no check in the execution route to limit concurrent containers.
+3. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous `stream: false` mode that returns the full result as JSON — not yet implemented. The request body accepts `stream?: boolean` but it's ignored.
 
-4. **No Nango DB auto-creation**: Nango needs its own database (`nango`). The docker-compose uses the same PostgreSQL but the `nango` database isn't auto-created — Nango may handle this itself, but it needs verification.
+4. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
 
-5. **Nango Connect Session flow**: OAuth uses Connect Session Tokens (created server-side via `nango.createConnectSession()`). The frontend opens `connectLink` in a popup. The `NANGO_SECRET_KEY_DEV` env var seeds Nango's dev environment key — if this doesn't work, check the Nango DB for the auto-generated secret key.
-
-6. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous `stream: false` mode that returns the full result as JSON — not yet implemented.
-
-7. **Runtime image not published**: The `openflows-runtime` image must be built locally before running flows (`bun run build-runtime`). The runtime's `package.json` needs `npm install` inside the Docker build.
-
-8. **No execution history endpoint**: There's `GET /api/executions/:id` but no `GET /api/flows/:id/executions` to list past executions.
-
-9. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables, and there's no `{{state.last_run | default: "..."}}` filter support (the prompt.md uses this syntax but it won't work).
-
-10. **UI auth token**: The UI reads `localStorage.getItem("openflows_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
+5. **UI auth token**: The UI reads `localStorage.getItem("openflows_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
 
 ## What's Validated
 

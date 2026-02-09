@@ -1,5 +1,5 @@
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
-const RUNTIME_IMAGE = "openflows-runtime:latest";
+const CLAUDE_CODE_RUNTIME_IMAGE = "openflows-claude-code:latest";
 
 // Bun supports fetch() with unix: option for Unix sockets
 async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
@@ -10,31 +10,27 @@ async function dockerFetch(path: string, options: RequestInit = {}): Promise<Res
   });
 }
 
-export async function createContainer(
+export async function createClaudeCodeContainer(
   executionId: string,
-  envVars: Record<string, string>,
-  flowPath: string
+  envVars: Record<string, string>
 ): Promise<string> {
-  const containerName = `openflows-${executionId}`;
+  const containerName = `openflows-cc-${executionId}`;
 
   const env = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
 
   const body = {
-    Image: RUNTIME_IMAGE,
+    Image: CLAUDE_CODE_RUNTIME_IMAGE,
     Env: env,
+    Tty: false,
     HostConfig: {
-      // Memory limit: 512MB
-      Memory: 512 * 1024 * 1024,
-      // CPU limit: 1 core
-      NanoCpus: 1_000_000_000,
-      // Auto-remove on stop (but we'll remove manually for safety)
+      Memory: 1024 * 1024 * 1024,
+      NanoCpus: 2_000_000_000,
       AutoRemove: false,
-      // Network access (needed for Gmail/ClickUp API calls)
       NetworkMode: "bridge",
     },
-    // Labels for easy identification
     Labels: {
       "openflows.execution": executionId,
+      "openflows.adapter": "claude-code",
       "openflows.managed": "true",
     },
   };
@@ -47,7 +43,7 @@ export async function createContainer(
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Failed to create container: ${res.status} ${error}`);
+    throw new Error(`Failed to create claude-code container: ${res.status} ${error}`);
   }
 
   const data = (await res.json()) as { Id: string };

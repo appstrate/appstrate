@@ -48,22 +48,6 @@ export async function updateExecution(
     duration?: number;
   }
 ): Promise<void> {
-  const sets: string[] = [];
-  const values: unknown[] = [];
-
-  if (updates.status !== undefined) {
-    sets.push("status");
-    values.push(updates.status);
-  }
-  if (updates.result !== undefined) {
-    sets.push("result");
-  }
-  if (updates.error !== undefined) {
-    sets.push("error");
-    values.push(updates.error);
-  }
-
-  // Use a simpler approach: update all fields at once
   await sql`
     UPDATE executions SET
       status = COALESCE(${updates.status ?? null}, status),
