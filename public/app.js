@@ -11,8 +11,8 @@ function getAuthHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function apiFetch(path, options = {}) {
+  const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -25,6 +25,10 @@ async function api(path, options = {}) {
     throw new Error(err.message || `API Error: ${res.status}`);
   }
   return res.json();
+}
+
+async function api(path, options = {}) {
+  return apiFetch(`${API_BASE}${path}`, options);
 }
 
 // --- WebSocket Manager ---
@@ -148,6 +152,7 @@ function handleRoute() {
 
   if ((match = hash.match(/^#\/flows\/([^/]+)\/executions\/([^/]+)$/))) {
     const [, flowId, execId] = match;
+    updateNavActive("flows");
     breadcrumb.innerHTML = `
       <a onclick="navigate('#/')">Flows</a>
       <span class="separator">/</span>
@@ -158,13 +163,19 @@ function handleRoute() {
     renderExecutionDetail(app, flowId, execId);
   } else if ((match = hash.match(/^#\/flows\/([^/]+)$/))) {
     const [, flowId] = match;
+    updateNavActive("flows");
     breadcrumb.innerHTML = `
       <a onclick="navigate('#/')">Flows</a>
       <span class="separator">/</span>
       <span class="current">${flowDetailCache[flowId]?.displayName || flowId}</span>
     `;
     renderFlowDetail(app, flowId);
+  } else if (hash === "#/services") {
+    updateNavActive("services");
+    breadcrumb.innerHTML = "";
+    renderServicesList(app);
   } else {
+    updateNavActive("flows");
     breadcrumb.innerHTML = "";
     renderFlowList(app);
   }
@@ -720,25 +731,12 @@ async function saveConfig() {
 
 async function connectService(provider) {
   try {
-    const res = await fetch(`/auth/connect/${provider}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeaders(),
-      },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(err.message || `Error: ${res.status}`);
-    }
-    const session = await res.json();
-
+    const session = await apiFetch(`/auth/connect/${provider}`, { method: "POST" });
     const popup = window.open(session.connectLink, "oauth", "width=600,height=700");
 
     const interval = setInterval(() => {
       if (popup && popup.closed) {
         clearInterval(interval);
-        // Reload current view
         handleRoute();
       }
     }, 500);
@@ -812,6 +810,91 @@ function submitInput() {
   const flowId = currentFlowId;
   closeInputModal();
   runFlowFromDetail(flowId, input);
+}
+
+// --- Navigation ---
+
+function updateNavActive(tab) {
+  const nav = document.getElementById("mainNav");
+  if (!nav) return;
+  nav.querySelectorAll(".nav-tab").forEach((t) => t.classList.remove("active"));
+  const tabs = nav.querySelectorAll(".nav-tab");
+  if (tab === "services" && tabs[1]) tabs[1].classList.add("active");
+  else if (tabs[0]) tabs[0].classList.add("active");
+}
+
+// --- View: Services List ---
+
+async function renderServicesList(container) {
+  container.innerHTML = `<div class="empty-state"><span class="spinner"></span></div>`;
+
+  try {
+    const { integrations } = await apiFetch("/auth/integrations");
+
+    if (!integrations || integrations.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <p>Aucun service configure.</p>
+          <p style="font-size: 0.8rem; margin-top: 0.5rem">Configurez des integrations dans Nango pour les voir ici.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="section-title">Services</div>
+      <div class="services-grid">${integrations.map((svc) => {
+        const isConnected = svc.status === "connected";
+        const connDate = svc.connectedAt
+          ? new Date(svc.connectedAt).toLocaleString("fr-FR", {
+              day: "2-digit", month: "2-digit", year: "numeric",
+              hour: "2-digit", minute: "2-digit",
+            })
+          : "";
+
+        return `
+          <div class="service-card">
+            <div class="service-card-header">
+              ${svc.logo ? `<img class="service-logo" src="${escapeHtml(svc.logo)}" alt="${escapeHtml(svc.displayName)}">` : ""}
+              <div class="service-info">
+                <h3>${escapeHtml(svc.displayName)}</h3>
+                <span class="service-provider">${escapeHtml(svc.provider)}</span>
+              </div>
+            </div>
+            <div class="service-card-status">
+              <span class="status-dot ${isConnected ? "connected" : "disconnected"}"></span>
+              <span class="badge ${isConnected ? "badge-success" : "badge-failed"}">${isConnected ? "Connecte" : "Non connecte"}</span>
+              ${connDate ? `<span class="service-date">${connDate}</span>` : ""}
+            </div>
+            <div class="service-card-actions">
+              ${isConnected
+                ? `<button onclick="disconnectService('${escapeHtml(svc.uniqueKey)}')">Deconnecter</button>
+                   <button onclick="connectService('${escapeHtml(svc.uniqueKey)}')">Reconnecter</button>`
+                : `<button class="primary" onclick="connectService('${escapeHtml(svc.uniqueKey)}')">Connecter</button>`
+              }
+            </div>
+          </div>
+        `;
+      }).join("")}</div>
+    `;
+  } catch (err) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>Impossible de charger les services.</p>
+        <p style="font-size: 0.8rem; margin-top: 0.5rem">${escapeHtml(err.message)}</p>
+      </div>
+    `;
+  }
+}
+
+async function disconnectService(provider) {
+  if (!confirm(`Deconnecter le service "${provider}" ?`)) return;
+  try {
+    await apiFetch(`/auth/connections/${provider}`, { method: "DELETE" });
+    handleRoute();
+  } catch (err) {
+    alert(`Erreur : ${err.message}`);
+  }
 }
 
 // --- Modal event listeners ---

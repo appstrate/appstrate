@@ -86,4 +86,49 @@ export async function createConnectSession(provider: string): Promise<ConnectSes
   };
 }
 
+export async function listIntegrations() {
+  const { configs } = await nango.listIntegrations();
+  return configs;
+}
+
+export async function deleteConnection(provider: string): Promise<void> {
+  let connId = connectionIdCache.get(provider);
+  if (!connId) {
+    await listConnections();
+    connId = connectionIdCache.get(provider);
+  }
+  if (!connId) throw new Error(`No connection found for ${provider}`);
+  await nango.deleteConnection(provider, connId);
+  connectionIdCache.delete(provider);
+}
+
+export interface IntegrationWithStatus {
+  uniqueKey: string;
+  provider: string;
+  displayName: string;
+  logo: string;
+  status: "connected" | "not_connected";
+  connectionId?: string;
+  connectedAt?: string;
+}
+
+export async function getIntegrationsWithStatus(): Promise<IntegrationWithStatus[]> {
+  const [integrations, connections] = await Promise.all([
+    listIntegrations(),
+    listConnections(),
+  ]);
+  return integrations.map((integ) => {
+    const conn = connections.find((c) => c.provider === integ.unique_key);
+    return {
+      uniqueKey: integ.unique_key,
+      provider: integ.provider,
+      displayName: integ.display_name || integ.unique_key,
+      logo: integ.logo,
+      status: conn ? "connected" : "not_connected",
+      connectionId: conn?.connectionId,
+      connectedAt: conn?.connectedAt,
+    };
+  });
+}
+
 export { END_USER_ID };

@@ -579,12 +579,46 @@
       padding: 3rem 1rem;
       color: var(--text-muted);
     }
+
+    /* Main Navigation */
+    .main-nav { display: flex; gap: 0.25rem; }
+    .nav-tab {
+      font-size: 0.8rem; font-weight: 500;
+      padding: 0.375rem 0.75rem; border-radius: 6px;
+      color: var(--text-muted); cursor: pointer;
+      transition: all 0.15s; text-decoration: none;
+    }
+    .nav-tab:hover { color: var(--text); background: var(--surface); }
+    .nav-tab.active { color: var(--text); background: var(--surface); }
+
+    /* Service Cards */
+    .services-grid { display: flex; flex-direction: column; gap: 0.75rem; }
+    .service-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .service-card-header {
+      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+    }
+    .service-logo { width: 32px; height: 32px; border-radius: 6px; object-fit: contain; }
+    .service-info { flex: 1; }
+    .service-info h3 { font-size: 0.95rem; font-weight: 600; }
+    .service-provider { font-size: 0.75rem; color: var(--text-muted); }
+    .service-card-status {
+      display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;
+    }
+    .service-date { font-size: 0.75rem; color: var(--text-muted); }
+    .service-card-actions { display: flex; gap: 0.5rem; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
       <h1 onclick="navigate('#/')"><span>Open</span>Flows</h1>
+      <nav class="main-nav" id="mainNav">
+        <a class="nav-tab active" onclick="navigate('#/')">Flows</a>
+        <a class="nav-tab" onclick="navigate('#/services')">Services</a>
+      </nav>
     </header>
 
     <nav class="breadcrumb" id="breadcrumb"></nav>
