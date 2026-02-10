@@ -1,0 +1,62 @@
+{
+  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "version": "1.0.0",
+
+  "metadata": {
+    "name": "clickup-summary",
+    "displayName": "ClickUp → Résumé",
+    "description": "Lit les tickets à faire dans ClickUp et produit un résumé priorisé",
+    "author": "openflows",
+    "license": "MIT",
+    "tags": ["clickup", "productivité", "résumé", "tickets"]
+  },
+
+  "requires": {
+    "services": [
+      {
+        "id": "clickup",
+        "provider": "clickup",
+        "scopes": ["task:read"],
+        "description": "Lecture des tickets ClickUp"
+      }
+    ],
+    "tools": []
+  },
+
+  "state": {
+    "enabled": true,
+    "schema": {
+      "last_run": { "type": "string", "format": "date-time" }
+    }
+  },
+
+  "config": {
+    "schema": {
+      "clickup_team_id": {
+        "type": "string",
+        "required": true,
+        "description": "ID du workspace (team) ClickUp — visible dans l'URL : app.clickup.com/{team_id}/..."
+      },
+      "clickup_list_id": {
+        "type": "string",
+        "description": "ID d'une liste spécifique (optionnel — si vide, récupère les tickets de toutes les listes)"
+      },
+      "include_subtasks": {
+        "type": "boolean",
+        "default": true,
+        "description": "Inclure les sous-tâches dans l'analyse"
+      },
+      "language": {
+        "type": "string",
+        "default": "fr",
+        "enum": ["fr", "en"],
+        "description": "Langue du résumé"
+      }
+    }
+  },
+
+  "execution": {
+    "timeout": 180,
+    "maxTokens": 50000
+  }
+}

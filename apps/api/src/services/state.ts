@@ -42,10 +42,11 @@ export async function createExecution(
   id: string,
   flowId: string,
   input: Record<string, unknown> | null,
+  scheduleId?: string,
 ): Promise<void> {
   await sql`
-    INSERT INTO executions (id, flow_id, status, input, started_at)
-    VALUES (${id}, ${flowId}, 'pending', ${input ? sql.json(input) : null}, NOW())
+    INSERT INTO executions (id, flow_id, status, input, started_at, schedule_id)
+    VALUES (${id}, ${flowId}, 'pending', ${input ? sql.json(input) : null}, NOW(), ${scheduleId ?? null})
   `;
 }
 
@@ -89,7 +90,7 @@ export async function getLastExecution(flowId: string) {
 
 export async function getExecutionsByFlow(flowId: string, limit: number = 10) {
   const rows = await sql`
-    SELECT id, flow_id, status, input, result, error, tokens_used, started_at, completed_at, duration
+    SELECT id, flow_id, status, input, result, error, tokens_used, started_at, completed_at, duration, schedule_id
     FROM executions WHERE flow_id = ${flowId}
     ORDER BY started_at DESC LIMIT ${limit}
   `;

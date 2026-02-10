@@ -38,3 +38,20 @@ CREATE TABLE IF NOT EXISTS execution_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_execution_logs_execution_id ON execution_logs(execution_id);
 CREATE INDEX IF NOT EXISTS idx_execution_logs_lookup ON execution_logs(execution_id, id);
+
+CREATE TABLE IF NOT EXISTS flow_schedules (
+  id TEXT PRIMARY KEY,
+  flow_id TEXT NOT NULL,
+  name TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  cron_expression TEXT NOT NULL,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  input JSONB,
+  last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_flow_id ON flow_schedules(flow_id);
+
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS schedule_id TEXT;

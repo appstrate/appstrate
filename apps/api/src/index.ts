@@ -4,8 +4,10 @@ import { serveStatic } from "hono/bun";
 import { createBunWebSocket } from "hono/bun";
 import { loadFlows } from "./services/flow-loader.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
+import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
+import { createSchedulesRouter } from "./routes/schedules.ts";
 import authRouter from "./routes/auth.ts";
 import * as ws from "./ws.ts";
 
@@ -88,12 +90,29 @@ try {
   console.warn("Could not clean orphaned executions:", err);
 }
 
+// Initialize scheduler
+try {
+  await initScheduler(flows);
+} catch (err) {
+  console.warn("Could not initialize scheduler:", err);
+}
+
+// Graceful shutdown
+const shutdown = () => {
+  shutdownScheduler();
+  process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
 // Routes
 const flowsRouter = createFlowsRouter(flows);
 const executionsRouter = createExecutionsRouter(flows);
+const schedulesRouter = createSchedulesRouter(flows);
 
 app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
+app.route("/api", schedulesRouter);
 app.route("/auth", authRouter);
 
 // Static files for UI

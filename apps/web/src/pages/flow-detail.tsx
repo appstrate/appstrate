@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutions } from "../hooks/use-executions";
+import { useSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useRunFlow, useConnect } from "../hooks/use-mutations";
 import { useWsChannel } from "../hooks/use-websocket";
 import { Spinner } from "../components/spinner";
@@ -10,7 +11,10 @@ import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
 import { StateModal } from "../components/state-modal";
 import { InputModal } from "../components/input-modal";
+import { ScheduleModal } from "../components/schedule-modal";
+import { ScheduleRow } from "../components/schedule-row";
 import { truncate } from "../lib/markdown";
+import type { Schedule } from "@openflows/shared-types";
 
 function checkRequiredConfig(detail: {
   config: { schema: Record<string, { required?: boolean }>; current: Record<string, unknown> };
@@ -28,18 +32,27 @@ function checkRequiredConfig(detail: {
   return true;
 }
 
+type Tab = "executions" | "schedules";
+
 export function FlowDetailPage() {
   const { flowId } = useParams<{ flowId: string }>();
   const qc = useQueryClient();
 
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
   const { data: executions } = useExecutions(flowId);
+  const { data: schedules } = useSchedules(flowId);
   const runFlow = useRunFlow(flowId!);
   const connectMutation = useConnect();
+  const createSchedule = useCreateSchedule(flowId!);
+  const updateSchedule = useUpdateSchedule(flowId!);
+  const deleteSchedule = useDeleteSchedule(flowId!);
 
+  const [tab, setTab] = useState<Tab>("executions");
   const [configOpen, setConfigOpen] = useState(false);
   const [stateOpen, setStateOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
   useWsChannel(flowId ? `flow:${flowId}` : null, () => {
     qc.invalidateQueries({ queryKey: ["executions", flowId] });
@@ -133,38 +146,83 @@ export function FlowDetailPage() {
         </button>
       </div>
 
-      <div className="section-title">Executions</div>
-      {!executions || executions.length === 0 ? (
-        <div className="empty-state empty-state-compact">
-          <p className="empty-hint">Aucune execution</p>
-        </div>
-      ) : (
-        <div className="exec-list">
-          {executions.map((exec) => {
-            const date = new Date(exec.started_at).toLocaleString("fr-FR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
-            const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
+      <div className="exec-tabs">
+        <button
+          className={`tab ${tab === "executions" ? "active" : ""}`}
+          onClick={() => setTab("executions")}
+        >
+          Executions
+        </button>
+        <button
+          className={`tab ${tab === "schedules" ? "active" : ""}`}
+          onClick={() => setTab("schedules")}
+        >
+          Planifications{schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
+        </button>
+      </div>
 
-            return (
-              <Link
-                key={exec.id}
-                className="exec-row"
-                to={`/flows/${flowId}/executions/${exec.id}`}
-              >
-                <Badge status={exec.status} />
-                <span className="exec-date">{date}</span>
-                {duration && <span className="exec-duration">{duration}</span>}
-                {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
-              </Link>
-            );
-          })}
-        </div>
+      {tab === "executions" && (
+        <>
+          {!executions || executions.length === 0 ? (
+            <div className="empty-state empty-state-compact">
+              <p className="empty-hint">Aucune execution</p>
+            </div>
+          ) : (
+            <div className="exec-list">
+              {executions.map((exec) => {
+                const date = new Date(exec.started_at).toLocaleString("fr-FR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
+                const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
+
+                return (
+                  <Link
+                    key={exec.id}
+                    className="exec-row"
+                    to={`/flows/${flowId}/executions/${exec.id}`}
+                  >
+                    <Badge status={exec.status} />
+                    <span className="exec-date">{date}</span>
+                    {duration && <span className="exec-duration">{duration}</span>}
+                    {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
+                    {exec.schedule_id && <span className="tag">cron</span>}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "schedules" && (
+        <>
+          <div className="section-header">
+            <div />
+            <button onClick={() => { setEditingSchedule(null); setScheduleOpen(true); }}>
+              Ajouter
+            </button>
+          </div>
+          {!schedules || schedules.length === 0 ? (
+            <div className="empty-state empty-state-compact">
+              <p className="empty-hint">Aucune planification</p>
+            </div>
+          ) : (
+            <div className="schedule-list">
+              {schedules.map((sched) => (
+                <ScheduleRow
+                  key={sched.id}
+                  schedule={sched}
+                  onClick={() => { setEditingSchedule(sched); setScheduleOpen(true); }}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} flow={detail} />
@@ -174,6 +232,25 @@ export function FlowDetailPage() {
         onClose={() => setInputOpen(false)}
         flow={detail}
         onSubmit={(input) => runFlow.mutate(input)}
+      />
+      <ScheduleModal
+        open={scheduleOpen}
+        onClose={() => { setScheduleOpen(false); setEditingSchedule(null); }}
+        schedule={editingSchedule}
+        inputSchema={detail.input?.schema}
+        onSave={(data) => {
+          if (editingSchedule) {
+            updateSchedule.mutate({ id: editingSchedule.id, ...data });
+          } else {
+            createSchedule.mutate(data);
+          }
+        }}
+        onDelete={editingSchedule ? () => {
+          deleteSchedule.mutate(editingSchedule.id);
+          setScheduleOpen(false);
+          setEditingSchedule(null);
+        } : undefined}
+        isPending={createSchedule.isPending || updateSchedule.isPending}
       />
     </>
   );

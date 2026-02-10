@@ -13,6 +13,7 @@ export interface Execution {
   started_at: string;
   completed_at: string | null;
   duration: number | null;
+  schedule_id: string | null;
 }
 
 export interface ExecutionLog {
@@ -80,6 +81,22 @@ export interface FlowDetail {
   };
   state: Record<string, unknown>;
   lastExecution: Partial<Execution> | null;
+}
+
+// --- Schedule Types ---
+
+export interface Schedule {
+  id: string;
+  flow_id: string;
+  name: string | null;
+  enabled: boolean;
+  cron_expression: string;
+  timezone: string;
+  input: Record<string, unknown> | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Integration Types ---

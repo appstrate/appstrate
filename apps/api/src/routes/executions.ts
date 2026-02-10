@@ -119,7 +119,7 @@ async function streamLogsToSSE(
 
 // --- Background execution (decoupled from SSE) ---
 
-async function executeFlowInBackground(
+export async function executeFlowInBackground(
   executionId: string,
   flowId: string,
   flow: LoadedFlow,
@@ -465,7 +465,7 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
   return router;
 }
 
-function interpolatePrompt(
+export function interpolatePrompt(
   prompt: string,
   config: Record<string, unknown>,
   state: Record<string, unknown>,

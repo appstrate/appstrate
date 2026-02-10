@@ -9,6 +9,7 @@ export type {
   FlowListItem,
   FlowDetail,
   Integration,
+  Schedule,
 } from "@openflows/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---

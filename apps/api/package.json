@@ -15,6 +15,7 @@
   "dependencies": {
     "@nangohq/node": "^0.69.30",
     "@openflows/shared-types": "workspace:*",
+    "croner": "^10.0.1",
     "hono": "^4.11.9",
     "postgres": "^3.4.8"
   },
