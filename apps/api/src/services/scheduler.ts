@@ -222,12 +222,18 @@ export async function initScheduler(flows: Map<string, LoadedFlow>) {
   `;
   const schedules = rows as unknown as Schedule[];
 
+  let started = 0;
   for (const schedule of schedules) {
+    if (!flows.has(schedule.flow_id)) {
+      console.warn(`[scheduler] Schedule ${schedule.id} references missing flow '${schedule.flow_id}', skipping`);
+      continue;
+    }
     startCronJob(schedule);
+    started++;
   }
 
-  if (schedules.length > 0) {
-    console.log(`[scheduler] Started ${schedules.length} cron job(s)`);
+  if (started > 0) {
+    console.log(`[scheduler] Started ${started} cron job(s)`);
   }
 }
 

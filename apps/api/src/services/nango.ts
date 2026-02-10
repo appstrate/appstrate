@@ -45,19 +45,20 @@ export async function getConnectionStatus(provider: string): Promise<ConnectionS
 }
 
 export async function getAccessToken(provider: string): Promise<string | null> {
-  try {
-    // Find the connection_id for this provider
-    let connId = connectionIdCache.get(provider);
-    if (!connId) {
-      await listConnections();
-      connId = connectionIdCache.get(provider);
-    }
-    if (!connId) return null;
+  // Find the connection_id for this provider
+  let connId = connectionIdCache.get(provider);
+  if (!connId) {
+    await listConnections();
+    connId = connectionIdCache.get(provider);
+  }
+  if (!connId) return null; // No connection exists — expected
 
+  try {
     const connection = await nango.getConnection(provider, connId);
     const credentials = connection.credentials as { access_token?: string };
     return credentials.access_token ?? null;
-  } catch {
+  } catch (err) {
+    console.error(`[nango] Failed to fetch access token for '${provider}':`, err);
     return null;
   }
 }

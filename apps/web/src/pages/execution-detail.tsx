@@ -78,7 +78,8 @@ export function ExecutionDetailPage() {
 
     if (event === "result" && data) {
       setLiveResult(data);
-      setUserTab("result");
+      // Only auto-switch to result tab if user hasn't manually chosen a tab
+      setUserTab((prev) => (prev === null ? "result" : prev));
     } else if (event === "execution_completed") {
       setLiveStatus((data.status as ExecutionStatus) || "failed");
     } else if (event === "progress") {

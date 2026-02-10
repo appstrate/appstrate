@@ -71,6 +71,11 @@ async function emitLog(
     broadcast(`flow:${flowId}`, stateMsg);
     broadcast("flows", stateMsg);
   }
+
+  // Clean up in-memory subscribers when execution finishes
+  if (event === "execution_completed") {
+    liveSubscribers.delete(executionId);
+  }
 }
 
 // --- Shared SSE streaming logic ---
@@ -110,7 +115,11 @@ async function streamLogsToSSE(
     }
   });
 
-  while (!closed) {
+  // Safety timeout: close SSE after 10 minutes to prevent zombie connections
+  const maxDuration = 10 * 60 * 1000;
+  const deadline = Date.now() + maxDuration;
+
+  while (!closed && Date.now() < deadline) {
     await stream.sleep(2000);
     const current = await getExecution(executionId);
     if (current && ["success", "failed", "timeout"].includes(current.status as string)) break;

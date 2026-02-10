@@ -5,6 +5,7 @@ import { createBunWebSocket } from "hono/bun";
 import { loadFlows } from "./services/flow-loader.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
+import sql from "./db/client.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
@@ -98,12 +99,14 @@ try {
 }
 
 // Graceful shutdown
-const shutdown = () => {
+const shutdown = async () => {
+  console.log("Shutting down...");
   shutdownScheduler();
+  await sql.end({ timeout: 5 }).catch(() => {});
   process.exit(0);
 };
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());
 
 // Routes
 const flowsRouter = createFlowsRouter(flows);
