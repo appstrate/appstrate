@@ -16,37 +16,35 @@ bun run build-runtime         # docker build -t openflows-claude-code ./runtime-
 
 # 4. Configure .env (copy .env.example, set CLAUDE_CODE_OAUTH_TOKEN)
 
-# 5. Build frontend
-bun run build:frontend        # Vite build → dist/
+# 5. Build everything (shared-types + frontend)
+bun run build                 # turbo build → apps/web/dist/
 
-# 6. Start platform
-bun run dev                   # Hono server on http://localhost:3000
-
-# Dev mode (with HMR):
-# Terminal 1: bun run dev          (API on :3000)
-# Terminal 2: bun run dev:frontend (Vite on :5173, proxies to :3000)
+# 6. Start platform (API + Vite build --watch in parallel)
+bun run dev                   # turbo dev → Hono on :3000
 ```
 
 ## Stack & Conventions
 
 | Layer             | Technology                                        | Notes                                                                       |
 | ----------------- | ------------------------------------------------- | --------------------------------------------------------------------------- |
+| Monorepo          | **Turborepo** + Bun workspaces                    | Single `bun install`, task caching, parallel execution                      |
 | Runtime           | **Bun**                                           | Use `bun` everywhere, not node. Bun auto-loads `.env`                       |
 | API               | **Hono**                                          | NOT `Bun.serve()` — we need Hono for SSE (`streamSSE`), routing, middleware |
 | DB                | **postgres.js** (`postgres` package)              | NOT `Bun.sql` — despite the auto-generated Bun CLAUDE.md suggestion         |
 | OAuth             | **Nango** self-hosted (`@nangohq/node`)           | Manages Gmail + ClickUp OAuth tokens                                        |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
 | Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
-| Frontend          | **React 19 + Vite + React Query v5**              | `frontend/` dir, React Router v7 HashRouter, `bun run build:frontend` → `dist/`  |
+| Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 HashRouter, builds to `apps/web/dist/`         |
 | Auth              | Bearer token from `AUTH_TOKEN` env var            | No auth on static files. All `/api/*` and `/auth/*` routes require bearer   |
 
 ### Key Patterns
 
-- **Docker Engine API**: All Docker operations use `fetch()` with Bun's `unix:` socket option (`src/services/docker.ts`). The `@ts-expect-error` on the unix option is intentional.
+- **Docker Engine API**: All Docker operations use `fetch()` with Bun's `unix:` socket option (`apps/api/src/services/docker.ts`). The `@ts-expect-error` on the unix option is intentional.
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
-- **Template interpolation**: `{{config.*}}`, `{{state.*}}`, `{{#if state.*}}...{{/if}}` in prompt.md files. Implemented in `interpolatePrompt()` in `src/routes/executions.ts`.
+- **Template interpolation**: `{{config.*}}`, `{{state.*}}`, `{{#if state.*}}...{{/if}}` in prompt.md files. Implemented in `interpolatePrompt()` in `apps/api/src/routes/executions.ts`.
 - **Credential injection**: OAuth tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_CLICKUP`) to the container. MVP simplicity — no proxy pattern.
+- **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Backend re-exports them from `apps/api/src/types/index.ts`.
 
 ## Architecture
 
@@ -83,73 +81,93 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
 ## Project Structure
 
 ```
-src/
-├── index.ts                  # Hono app entry. CORS, auth middleware, route mounting, static serving
-├── routes/
-│   ├── flows.ts              # GET /api/flows, GET /api/flows/:id, PUT /api/flows/:id/config
-│   ├── executions.ts         # POST /api/flows/:id/run (SSE), GET /api/executions/:id
-│   └── auth.ts               # POST /auth/connect/:provider (connect session), GET /auth/connections
-├── services/
-│   ├── docker.ts             # dockerFetch(), createClaudeCodeContainer, startContainer, streamLogs, waitForExit, removeContainer, stopContainer
-│   ├── adapters/
-│   │   ├── types.ts          # ExecutionAdapter interface, ExecutionMessage type
-│   │   ├── index.ts          # getAdapter() factory, getAdapterName(), re-exports
-│   │   └── claude-code.ts    # ClaudeCodeAdapter (prompt enrichment, stream parsing, timeout)
-│   ├── nango.ts              # getConnectionStatus, listConnections, getAccessToken, createConnectSession
-│   ├── state.ts              # CRUD for flow_configs, flow_state, executions tables
-│   └── flow-loader.ts        # Scans flows/ dir at startup, parses manifest.json + prompt.md
-├── db/
-│   ├── client.ts             # postgres.js connection (reads DATABASE_URL)
-│   └── schema.sql            # DDL: flow_configs, flow_state, executions + indexes
-└── types/
-    └── index.ts              # FlowManifest, LoadedFlow, Execution, FlowDetail, etc.
-
-flows/
-└── email-to-tickets/
-    ├── manifest.json         # Flow spec: metadata, requires (services/tools), config schema, state schema
-    └── prompt.md             # Agent instructions with {{config.*}} / {{state.*}} template vars
-
-runtime-claude-code/
-├── Dockerfile                # Node 20 Alpine + Claude Code CLI
-├── package.json              # Runtime dependencies
-└── entrypoint.sh             # Runs Claude Code with FLOW_PROMPT
-
-frontend/
-├── index.html                    # Vite entry (<div id="root">)
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-└── src/
-    ├── main.tsx                  # Root: QueryClientProvider + HashRouter + App
-    ├── app.tsx                   # Layout: header, nav, <Routes/>
-    ├── styles.css                # All CSS (dark theme)
-    ├── api.ts                    # apiFetch(), api(), getAuthHeaders()
-    ├── types.ts                  # Frontend-specific TypeScript types
-    ├── hooks/
-    │   ├── use-flows.ts          # useFlows(), useFlowDetail(flowId)
-    │   ├── use-executions.ts     # useExecutions(flowId), useExecution(execId), useExecutionLogs(execId)
-    │   ├── use-services.ts       # useServices()
-    │   ├── use-mutations.ts      # useSaveConfig, useResetState, useRunFlow, useConnect, useDisconnect
-    │   └── use-websocket.ts      # Module-level WS singleton + useWsChannel() hook
-    ├── pages/
-    │   ├── flow-list.tsx         # #/ — flow cards grid
-    │   ├── flow-detail.tsx       # #/flows/:flowId — config/state/input modals + execution list
-    │   ├── execution-detail.tsx  # #/flows/:flowId/executions/:execId — tabs logs/result + WS streaming
-    │   └── services-list.tsx     # #/services — connect/disconnect integrations
-    ├── components/
-    │   ├── modal.tsx             # Generic overlay + escape + click-outside
-    │   ├── config-modal.tsx      # Config form, useSaveConfig mutation
-    │   ├── state-modal.tsx       # JSON viewer + useResetState mutation
-    │   ├── input-modal.tsx       # Input form before run
-    │   ├── log-viewer.tsx        # Log entries with type-based styling + auto-scroll
-    │   ├── result-renderer.tsx   # Full result render pipeline (generic cards, nested objects)
-    │   ├── badge.tsx             # Status badge with conditional spinner
-    │   └── spinner.tsx           # <span className="spinner" />
-    └── lib/
-        └── markdown.ts           # escapeHtml, convertMarkdown, truncate, formatDateField
-
-scripts/
-└── setup-db.ts               # Runs schema.sql against PostgreSQL
+openflows/
+├── turbo.json                        # Turborepo task pipeline config
+├── package.json                      # Root: workspaces, turbo scripts
+├── .prettierrc                       # Shared Prettier config
+├── docker-compose.yml
+├── CLAUDE.md
+│
+├── apps/
+│   ├── api/                          # @openflows/api — Backend (Hono + Bun)
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   ├── eslint.config.js
+│   │   └── src/
+│   │       ├── index.ts              # Hono app entry. CORS, auth middleware, route mounting, static serving
+│   │       ├── ws.ts                 # WebSocket pub/sub manager
+│   │       ├── routes/
+│   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, PUT /api/flows/:id/config
+│   │       │   ├── executions.ts     # POST /api/flows/:id/run (SSE), GET /api/executions/:id
+│   │       │   └── auth.ts           # POST /auth/connect/:provider, GET /auth/connections
+│   │       ├── services/
+│   │       │   ├── docker.ts         # dockerFetch(), createClaudeCodeContainer, streamLogs, etc.
+│   │       │   ├── adapters/
+│   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type
+│   │       │   │   ├── index.ts      # getAdapter() factory, re-exports
+│   │       │   │   └── claude-code.ts # ClaudeCodeAdapter (prompt enrichment, stream parsing)
+│   │       │   ├── nango.ts          # getConnectionStatus, listConnections, getAccessToken
+│   │       │   ├── state.ts          # CRUD for flow_configs, flow_state, executions tables
+│   │       │   └── flow-loader.ts    # Scans flows/ dir at startup, parses manifest.json + prompt.md
+│   │       ├── db/
+│   │       │   ├── client.ts         # postgres.js connection (reads DATABASE_URL)
+│   │       │   └── schema.sql        # DDL: flow_configs, flow_state, executions + indexes
+│   │       └── types/
+│   │           └── index.ts          # Backend-only types + re-exports from @openflows/shared-types
+│   │
+│   └── web/                          # @openflows/web — Frontend (React + Vite)
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── eslint.config.js
+│       ├── vite.config.ts
+│       ├── index.html
+│       └── src/
+│           ├── main.tsx              # Root: QueryClientProvider + HashRouter + App
+│           ├── app.tsx               # Layout: header, nav, <Routes/>
+│           ├── styles.css            # All CSS (dark theme)
+│           ├── api.ts                # apiFetch(), api(), getAuthHeaders()
+│           ├── hooks/
+│           │   ├── use-flows.ts      # useFlows(), useFlowDetail(flowId)
+│           │   ├── use-executions.ts # useExecutions, useExecution, useExecutionLogs
+│           │   ├── use-services.ts   # useServices()
+│           │   ├── use-mutations.ts  # useSaveConfig, useResetState, useRunFlow, useConnect
+│           │   └── use-websocket.ts  # Module-level WS singleton + useWsChannel() hook
+│           ├── pages/
+│           │   ├── flow-list.tsx     # #/ — flow cards grid
+│           │   ├── flow-detail.tsx   # #/flows/:flowId — config/state/input modals + execution list
+│           │   ├── execution-detail.tsx # #/flows/:flowId/executions/:execId — logs/result
+│           │   └── services-list.tsx # #/services — connect/disconnect integrations
+│           ├── components/
+│           │   ├── modal.tsx         # Generic overlay + escape + click-outside
+│           │   ├── config-modal.tsx  # Config form, useSaveConfig mutation
+│           │   ├── state-modal.tsx   # JSON viewer + useResetState mutation
+│           │   ├── input-modal.tsx   # Input form before run
+│           │   ├── log-viewer.tsx    # Log entries with type-based styling + auto-scroll
+│           │   ├── result-renderer.tsx # Full result render pipeline
+│           │   ├── badge.tsx         # Status badge with conditional spinner
+│           │   └── spinner.tsx       # <span className="spinner" />
+│           └── lib/
+│               └── markdown.ts       # escapeHtml, convertMarkdown, truncate, formatDateField
+│
+├── packages/
+│   └── shared-types/                 # @openflows/shared-types — Types used by both apps
+│       ├── package.json
+│       ├── tsconfig.json
+│       └── src/
+│           └── index.ts              # ExecutionStatus, Execution, FlowDetail, Integration, etc.
+│
+├── flows/                            # Flow definitions (loaded at runtime)
+│   └── email-to-tickets/
+│       ├── manifest.json
+│       └── prompt.md
+│
+├── runtime-claude-code/              # Docker image for Claude Code CLI
+│   ├── Dockerfile
+│   ├── package.json
+│   └── entrypoint.sh
+│
+└── scripts/
+    └── setup-db.ts                   # Runs schema.sql against PostgreSQL
 ```
 
 ## API Endpoints
@@ -166,7 +184,7 @@ scripts/
 | `GET`  | `/api/executions/:id/stream`  | Bearer | SSE stream: replays all logs from DB, then streams live updates via pub/sub     |
 | `GET`  | `/auth/connections`       | Bearer | List OAuth connections from Nango                                         |
 | `POST` | `/auth/connect/:provider` | Bearer | Create Nango Connect Session (returns `connectLink` for popup)            |
-| `GET`  | `/*`                      | None   | Static files from `public/`                                               |
+| `GET`  | `/*`                      | None   | Static files from `apps/web/dist/`                                        |
 
 ### SSE Events (POST /api/flows/:id/run)
 
@@ -196,7 +214,7 @@ Each flow is a directory in `flows/` with `manifest.json` + `prompt.md`. See `fl
 
 ## Container Protocol
 
-The Claude Code runtime container streams JSON events on stdout. The `ClaudeCodeAdapter` (`src/services/adapters/claude-code.ts`) parses these events:
+The Claude Code runtime container streams JSON events on stdout. The `ClaudeCodeAdapter` (`apps/api/src/services/adapters/claude-code.ts`) parses these events:
 
 - **`assistant` messages** with text content → forwarded as `progress` SSE events
 - **`result` messages** → parsed for JSON code blocks containing the final result
@@ -230,10 +248,12 @@ AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 
 ## What's Validated
 
-- `bun run dev` starts successfully and loads flows from `flows/` directory
+- `turbo build` builds shared-types + frontend successfully
+- `turbo lint` passes for both apps with cache support
+- `turbo dev` runs API + Vite build --watch in parallel
 - `GET /api/flows` returns the email-to-tickets flow with correct structure
 - Auth middleware blocks unauthenticated requests to `/api/*`
-- Static file serving works for `dist/` (built by `bun run build:frontend`)
+- Static file serving works for `apps/web/dist/`
 
 ## What's NOT Yet Tested End-to-End
 
