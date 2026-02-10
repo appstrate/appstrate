@@ -21,6 +21,10 @@ export async function getFlowState(flowId: string): Promise<Record<string, unkno
   return (rows[0]?.state as Record<string, unknown>) ?? {};
 }
 
+export async function deleteFlowState(flowId: string): Promise<void> {
+  await sql`DELETE FROM flow_state WHERE flow_id = ${flowId}`;
+}
+
 export async function setFlowState(flowId: string, state: Record<string, unknown>): Promise<void> {
   await sql`
     INSERT INTO flow_state (flow_id, state, updated_at)

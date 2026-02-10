@@ -272,6 +272,12 @@ async function renderFlowDetail(container, flowId) {
 
       <div class="actions">
         <button onclick="openConfigModal('${flowId}')">Configurer</button>
+        ${(() => {
+          const hasState = detail.state && Object.keys(detail.state).length > 0;
+          return hasState
+            ? `<button onclick="openStateModal('${flowId}')">Etat</button>`
+            : `<button disabled title="Aucun etat persiste">Etat (vide)</button>`;
+        })()}
         <button class="primary"
                 onclick="${runAction}"
                 ${!allConnected || !hasRequiredConfig ? "disabled" : ""}
@@ -838,6 +844,41 @@ async function saveConfig() {
   }
 }
 
+// --- State Modal ---
+
+function openStateModal(flowId) {
+  currentFlowId = flowId;
+  const detail = flowDetailCache[flowId];
+  if (!detail) return;
+
+  document.getElementById("stateModalTitle").textContent = `Etat — ${detail.displayName}`;
+  document.getElementById("stateContent").innerHTML =
+    `<pre class="state-json">${escapeHtml(JSON.stringify(detail.state, null, 2))}</pre>`;
+  document.getElementById("stateModal").classList.add("active");
+}
+
+function closeStateModal() {
+  document.getElementById("stateModal").classList.remove("active");
+  currentFlowId = null;
+}
+
+async function resetState() {
+  if (!currentFlowId) return;
+  if (!confirm("Reinitialiser l'etat du flow ? Cette action est irreversible.")) return;
+
+  const flowId = currentFlowId;
+  try {
+    await fetch(`${API_BASE}/flows/${flowId}/state`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    closeStateModal();
+    navigate(`#/flows/${flowId}`);
+  } catch (err) {
+    alert(`Erreur : ${err.message}`);
+  }
+}
+
 // --- Connect Service ---
 
 async function connectService(provider) {
@@ -1016,11 +1057,15 @@ document.getElementById("configModal").addEventListener("click", (e) => {
 document.getElementById("inputModal").addEventListener("click", (e) => {
   if (e.target === e.currentTarget) closeInputModal();
 });
+document.getElementById("stateModal").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) closeStateModal();
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeConfigModal();
     closeInputModal();
+    closeStateModal();
   }
 });
 

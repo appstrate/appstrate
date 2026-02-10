@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { LoadedFlow } from "../types/index.ts";
-import { getFlowConfig, setFlowConfig, getFlowState, getLastExecution, getRunningExecutionsCounts, getRunningExecutionsForFlow } from "../services/state.ts";
+import { getFlowConfig, setFlowConfig, getFlowState, deleteFlowState, getLastExecution, getRunningExecutionsCounts, getRunningExecutionsForFlow } from "../services/state.ts";
 import { getConnectionStatus } from "../services/nango.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
@@ -144,6 +144,19 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       config,
       validation: { valid: true },
     });
+  });
+
+  // DELETE /api/flows/:id/state — reset flow state
+  router.delete("/:id/state", async (c) => {
+    const flowId = c.req.param("id");
+    const flow = flows.get(flowId);
+
+    if (!flow) {
+      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
+    }
+
+    await deleteFlowState(flowId);
+    return c.body(null, 204);
   });
 
   return router;

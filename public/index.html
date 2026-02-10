@@ -609,6 +609,24 @@
     }
     .service-date { font-size: 0.75rem; color: var(--text-muted); }
     .service-card-actions { display: flex; gap: 0.5rem; }
+
+    /* Danger button */
+    .btn-danger { background: var(--danger); color: white; border-color: var(--danger); }
+    .btn-danger:hover { opacity: 0.9; }
+
+    /* State JSON display */
+    .state-json {
+      font-size: 0.75rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      color: var(--text-muted);
+      max-height: 400px;
+      overflow-y: auto;
+      background: var(--bg);
+      padding: 0.75rem;
+      border-radius: 6px;
+    }
   </style>
 </head>
 <body>
@@ -633,6 +651,18 @@
         <div class="modal-actions">
           <button onclick="closeConfigModal()">Annuler</button>
           <button class="primary" onclick="saveConfig()">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- State Modal -->
+    <div class="modal-overlay" id="stateModal">
+      <div class="modal">
+        <h3 id="stateModalTitle">Etat du flow</h3>
+        <div id="stateContent"></div>
+        <div class="modal-actions">
+          <button onclick="closeStateModal()">Fermer</button>
+          <button class="btn-danger" id="stateResetBtn" onclick="resetState()">Reinitialiser</button>
         </div>
       </div>
     </div>
