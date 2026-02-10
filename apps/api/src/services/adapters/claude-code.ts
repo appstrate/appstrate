@@ -73,20 +73,22 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
           yield msg;
         }
       }
+
+      const exitCode = await waitForExit(containerId);
+
+      if (timedOut) {
+        throw new TimeoutError(`Execution timed out after ${timeout}s`);
+      }
+
+      // Only throw on non-zero exit if we didn't get a result
+      if (exitCode !== 0 && !hasResult) {
+        throw new Error(`Claude Code container exited with code ${exitCode}`);
+      }
     } finally {
       clearTimeout(timeoutHandle);
-    }
-
-    const exitCode = await waitForExit(containerId);
-    await removeContainer(containerId);
-
-    if (timedOut) {
-      throw new TimeoutError(`Execution timed out after ${timeout}s`);
-    }
-
-    // Only throw on non-zero exit if we didn't get a result
-    if (exitCode !== 0 && !hasResult) {
-      throw new Error(`Claude Code container exited with code ${exitCode}`);
+      await removeContainer(containerId).catch((err) => {
+        console.error(`[adapter] Failed to remove container ${containerId}:`, err);
+      });
     }
   }
 }

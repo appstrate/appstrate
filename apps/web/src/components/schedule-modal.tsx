@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Modal } from "./modal";
+import { FormField } from "./form-field";
 import type { FlowInputField, Schedule } from "@openflows/shared-types";
 
 const CRON_PRESETS = [
@@ -208,20 +209,17 @@ function ScheduleForm({
         <>
           <div className="schedule-input-title">Parametres d'entree</div>
           {Object.entries(schema).map(([key, field]) => (
-            <div className="form-group" key={key}>
-              <label htmlFor={`sched-input-${key}`}>
-                {key}
-                {field.required ? " *" : ""}
-              </label>
-              <input
-                id={`sched-input-${key}`}
-                type={field.type === "number" ? "number" : "text"}
-                value={inputValues[key] || ""}
-                onChange={(e) => setInputValues((v) => ({ ...v, [key]: e.target.value }))}
-                placeholder={field.placeholder || field.description}
-              />
-              <div className="hint">{field.description}</div>
-            </div>
+            <FormField
+              key={key}
+              id={`sched-input-${key}`}
+              label={key}
+              required={field.required}
+              type={field.type === "number" ? "number" : "text"}
+              value={inputValues[key] || ""}
+              onChange={(v) => setInputValues((prev) => ({ ...prev, [key]: v }))}
+              placeholder={field.placeholder || field.description}
+              description={field.description}
+            />
           ))}
         </>
       )}

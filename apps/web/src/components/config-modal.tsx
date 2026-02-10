@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./modal";
+import { FormField } from "./form-field";
 import { useSaveConfig } from "../hooks/use-mutations";
 import type { FlowDetail } from "@openflows/shared-types";
 
@@ -48,34 +49,18 @@ function ConfigModalForm({ flow, onClose }: { flow: FlowDetail; onClose: () => v
   return (
     <>
       {Object.entries(schema).map(([key, field]) => (
-        <div className="form-group" key={key}>
-          <label htmlFor={`config-${key}`}>
-            {key}
-            {field.required ? " *" : ""}
-          </label>
-          {field.enum ? (
-            <select
-              id={`config-${key}`}
-              value={values[key] || ""}
-              onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-            >
-              {(field.enum as string[]).map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              id={`config-${key}`}
-              type={field.type === "number" ? "number" : "text"}
-              value={values[key] || ""}
-              onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-              placeholder={field.description}
-            />
-          )}
-          <div className="hint">{field.description}</div>
-        </div>
+        <FormField
+          key={key}
+          id={`config-${key}`}
+          label={key}
+          required={field.required}
+          type={field.type === "number" ? "number" : "text"}
+          value={values[key] || ""}
+          onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
+          placeholder={field.description}
+          description={field.description}
+          enumValues={field.enum as string[] | undefined}
+        />
       ))}
       <div className="modal-actions">
         <button onClick={onClose}>Annuler</button>

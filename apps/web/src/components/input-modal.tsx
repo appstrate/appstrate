@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./modal";
+import { FormField } from "./form-field";
 import type { FlowDetail } from "@openflows/shared-types";
 
 interface InputModalProps {
@@ -58,20 +59,17 @@ function InputModalForm({
   return (
     <>
       {Object.entries(schema).map(([key, field]) => (
-        <div className="form-group" key={key}>
-          <label htmlFor={`input-${key}`}>
-            {key}
-            {field.required ? " *" : ""}
-          </label>
-          <input
-            id={`input-${key}`}
-            type={field.type === "number" ? "number" : "text"}
-            value={values[key] || ""}
-            onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-            placeholder={field.placeholder || field.description}
-          />
-          <div className="hint">{field.description}</div>
-        </div>
+        <FormField
+          key={key}
+          id={`input-${key}`}
+          label={key}
+          required={field.required}
+          type={field.type === "number" ? "number" : "text"}
+          value={values[key] || ""}
+          onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
+          placeholder={field.placeholder || field.description}
+          description={field.description}
+        />
       ))}
       <div className="modal-actions">
         <button onClick={onClose}>Annuler</button>

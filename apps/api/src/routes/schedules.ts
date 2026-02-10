@@ -9,6 +9,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
+import { validateRequiredInput } from "../services/validation.ts";
 
 export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
@@ -65,19 +66,12 @@ export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
     // Validate input against flow's input schema if provided
     const inputSchema = flow.manifest.input?.schema;
     if (body.input && inputSchema) {
-      for (const [key, field] of Object.entries(inputSchema)) {
-        if (
-          field.required &&
-          (body.input[key] === undefined || body.input[key] === null || body.input[key] === "")
-        ) {
-          return c.json(
-            {
-              error: "VALIDATION_ERROR",
-              message: `Input field '${key}' is required`,
-            },
-            400,
-          );
-        }
+      const inputError = validateRequiredInput(body.input, inputSchema);
+      if (inputError) {
+        return c.json(
+          { error: "VALIDATION_ERROR", message: inputError.message },
+          400,
+        );
       }
     }
 

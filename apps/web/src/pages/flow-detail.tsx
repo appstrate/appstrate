@@ -13,7 +13,7 @@ import { StateModal } from "../components/state-modal";
 import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
-import { truncate } from "../lib/markdown";
+import { truncate, formatDateField } from "../lib/markdown";
 import type { Schedule } from "@openflows/shared-types";
 
 function checkRequiredConfig(detail: {
@@ -146,14 +146,18 @@ export function FlowDetailPage() {
         </button>
       </div>
 
-      <div className="exec-tabs">
+      <div className="exec-tabs" role="tablist">
         <button
+          role="tab"
+          aria-selected={tab === "executions"}
           className={`tab ${tab === "executions" ? "active" : ""}`}
           onClick={() => setTab("executions")}
         >
           Executions
         </button>
         <button
+          role="tab"
+          aria-selected={tab === "schedules"}
           className={`tab ${tab === "schedules" ? "active" : ""}`}
           onClick={() => setTab("schedules")}
         >
@@ -170,13 +174,7 @@ export function FlowDetailPage() {
           ) : (
             <div className="exec-list">
               {executions.map((exec) => {
-                const date = new Date(exec.started_at).toLocaleString("fr-FR", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
+                const date = formatDateField(exec.started_at);
                 const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
                 const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
 

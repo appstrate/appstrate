@@ -60,6 +60,13 @@ export function useRunFlow(flowId: string) {
   });
 }
 
+function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["services"] });
+  // Invalidate all flow detail queries (service status may have changed)
+  qc.invalidateQueries({ queryKey: ["flow"] });
+  qc.invalidateQueries({ queryKey: ["flows"] });
+}
+
 export function useConnect() {
   const qc = useQueryClient();
   return useMutation({
@@ -85,10 +92,7 @@ export function useConnect() {
         }, 500);
       });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["services"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
-    },
+    onSuccess: () => invalidateServiceRelated(qc),
     onError: onMutationError,
   });
 }
@@ -99,10 +103,7 @@ export function useDisconnect() {
     mutationFn: async (provider: string) => {
       return apiFetch(`/auth/connections/${provider}`, { method: "DELETE" });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["services"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
-    },
+    onSuccess: () => invalidateServiceRelated(qc),
     onError: onMutationError,
   });
 }

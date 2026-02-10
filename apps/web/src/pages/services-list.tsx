@@ -1,6 +1,7 @@
 import { useServices } from "../hooks/use-services";
 import { useConnect, useDisconnect } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
+import { formatDateField } from "../lib/markdown";
 
 export function ServicesListPage() {
   const { data: integrations, isLoading, error } = useServices();
@@ -39,15 +40,7 @@ export function ServicesListPage() {
       <div className="services-grid">
         {integrations.map((svc) => {
           const isConnected = svc.status === "connected";
-          const connDate = svc.connectedAt
-            ? new Date(svc.connectedAt).toLocaleString("fr-FR", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "";
+          const connDate = svc.connectedAt ? formatDateField(svc.connectedAt) : "";
 
           return (
             <div key={svc.uniqueKey} className="service-card">

@@ -8,6 +8,7 @@ import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import type { ExecutionStatus } from "@openflows/shared-types";
+import { formatDateField } from "../lib/markdown";
 
 function formatEvent(event: string, data: Record<string, unknown>): string {
   if (event === "execution_started") return `Execution demarree (${data?.executionId || ""})`;
@@ -111,14 +112,7 @@ export function ExecutionDetailPage() {
   }
 
   const displayStatus = status || execution.status;
-  const date = new Date(execution.started_at).toLocaleString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const date = formatDateField(execution.started_at);
   const duration = execution.duration ? `${(execution.duration / 1000).toFixed(1)}s` : "";
 
   return (
@@ -142,14 +136,18 @@ export function ExecutionDetailPage() {
         )}
       </div>
 
-      <div className="exec-tabs">
+      <div className="exec-tabs" role="tablist">
         <button
+          role="tab"
+          aria-selected={activeTab === "logs"}
           className={`tab ${activeTab === "logs" ? "active" : ""}`}
           onClick={() => setUserTab("logs")}
         >
           Logs <span>{allLogs.length} events</span>
         </button>
         <button
+          role="tab"
+          aria-selected={activeTab === "result"}
           className={`tab ${activeTab === "result" ? "active" : ""}`}
           onClick={() => setUserTab("result")}
         >

@@ -9,6 +9,7 @@ import {
 } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
+import { buildContainerEnv } from "./env-builder.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -47,7 +48,7 @@ export async function createSchedule(
     input?: Record<string, unknown>;
   },
 ): Promise<Schedule> {
-  const id = `sched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = `sched_${crypto.randomUUID()}`;
   const tz = data.timezone || "UTC";
 
   // Compute next run
@@ -152,75 +153,63 @@ async function triggerScheduledExecution(
   flowId: string,
   input?: Record<string, unknown>,
 ) {
-  const flow = loadedFlows.get(flowId);
-  if (!flow) {
-    console.warn(`[scheduler] Flow '${flowId}' not found, skipping schedule ${scheduleId}`);
-    return;
-  }
-
-  // Validate service dependencies — skip if not connected
-  const tokens: Record<string, string> = {};
-  for (const svc of flow.manifest.requires.services) {
-    const conn = await getConnectionStatus(svc.provider);
-    if (conn.status !== "connected") {
-      console.warn(
-        `[scheduler] Service '${svc.id}' not connected, skipping schedule ${scheduleId} for flow '${flowId}'`,
-      );
+  try {
+    const flow = loadedFlows.get(flowId);
+    if (!flow) {
+      console.warn(`[scheduler] Flow '${flowId}' not found, skipping schedule ${scheduleId}`);
       return;
     }
-    const token = await getAccessToken(svc.provider);
-    if (token) tokens[svc.id] = token;
-  }
 
-  // Get config and state
-  const config = await getFlowConfig(flowId);
-  const state = await getFlowState(flowId);
-  const inputValues = input ?? {};
-
-  // Interpolate prompt
-  const prompt = interpolatePrompt(flow.prompt, config, state, inputValues);
-
-  // Prepare env vars
-  const executionId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const envVars: Record<string, string> = {
-    FLOW_PROMPT: prompt,
-    FLOW_ID: flowId,
-    EXECUTION_ID: executionId,
-    LLM_MODEL: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
-  };
-
-  for (const [svcId, token] of Object.entries(tokens)) {
-    envVars[`TOKEN_${svcId.toUpperCase().replace(/-/g, "_")}`] = token;
-  }
-  for (const [key, value] of Object.entries(config)) {
-    envVars[`CONFIG_${key.toUpperCase()}`] = String(value);
-  }
-  envVars["FLOW_STATE"] = JSON.stringify(state);
-  if (input) {
-    for (const [key, value] of Object.entries(input)) {
-      envVars[`INPUT_${key.toUpperCase()}`] = String(value);
+    // Validate service dependencies — skip if not connected
+    const tokens: Record<string, string> = {};
+    for (const svc of flow.manifest.requires.services) {
+      const conn = await getConnectionStatus(svc.provider);
+      if (conn.status !== "connected") {
+        console.warn(
+          `[scheduler] Service '${svc.id}' not connected, skipping schedule ${scheduleId} for flow '${flowId}'`,
+        );
+        return;
+      }
+      const token = await getAccessToken(svc.provider);
+      if (token) tokens[svc.id] = token;
     }
+
+    // Get config and state
+    const config = await getFlowConfig(flowId);
+    const state = await getFlowState(flowId);
+    const inputValues = input ?? {};
+
+    // Interpolate prompt
+    const prompt = interpolatePrompt(flow.prompt, config, state, inputValues);
+
+    // Prepare env vars
+    const executionId = `exec_${crypto.randomUUID()}`;
+    const envVars = buildContainerEnv({ flowId, executionId, prompt, tokens, config, state, input });
+
+    // Create execution record with schedule_id
+    await createExecution(executionId, flowId, input ?? null, scheduleId);
+
+    console.log(`[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId})`);
+
+    // Fire-and-forget (catch to prevent unhandled rejection)
+    executeFlowInBackground(executionId, flowId, flow, envVars, tokens).catch((err) => {
+      console.error(`[scheduler] Unhandled error in execution ${executionId}:`, err);
+    });
+
+    // Update schedule timestamps
+    const job = activeJobs.get(scheduleId);
+    const nextRun = job?.nextRun() ?? null;
+
+    await sql`
+      UPDATE flow_schedules SET
+        last_run_at = NOW(),
+        next_run_at = ${nextRun ? nextRun.toISOString() : null},
+        updated_at = NOW()
+      WHERE id = ${scheduleId}
+    `;
+  } catch (err) {
+    console.error(`[scheduler] Failed to trigger schedule ${scheduleId} for flow '${flowId}':`, err);
   }
-
-  // Create execution record with schedule_id
-  await createExecution(executionId, flowId, input ?? null, scheduleId);
-
-  console.log(`[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId})`);
-
-  // Fire-and-forget
-  executeFlowInBackground(executionId, flowId, flow, envVars, tokens);
-
-  // Update schedule timestamps
-  const job = activeJobs.get(scheduleId);
-  const nextRun = job?.nextRun() ?? null;
-
-  await sql`
-    UPDATE flow_schedules SET
-      last_run_at = NOW(),
-      next_run_at = ${nextRun ? nextRun.toISOString() : null},
-      updated_at = NOW()
-    WHERE id = ${scheduleId}
-  `;
 }
 
 // --- Lifecycle ---

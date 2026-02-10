@@ -1,4 +1,5 @@
 import type { Schedule } from "@openflows/shared-types";
+import { formatDateField } from "../lib/markdown";
 
 interface ScheduleRowProps {
   schedule: Schedule;
@@ -15,14 +16,7 @@ export function ScheduleRow({ schedule, onClick, showFlowId }: ScheduleRowProps)
       {showFlowId && <span className="schedule-flow-id">{schedule.flow_id}</span>}
       <span className="schedule-tz">{schedule.timezone}</span>
       {schedule.next_run_at && (
-        <span className="schedule-next">
-          {new Date(schedule.next_run_at).toLocaleString("fr-FR", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+        <span className="schedule-next">{formatDateField(schedule.next_run_at)}</span>
       )}
     </button>
   );

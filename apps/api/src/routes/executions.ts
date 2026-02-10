@@ -15,6 +15,8 @@ import {
 import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
 import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
 import { broadcast } from "../ws.ts";
+import { buildContainerEnv } from "../services/env-builder.ts";
+import { validateRequiredInput } from "../services/validation.ts";
 
 // --- In-memory pub/sub for live log streaming ---
 
@@ -310,34 +312,26 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       }
     }
 
-    const body = await c.req
-      .json<{ input?: Record<string, unknown>; stream?: boolean }>()
-      .catch(() => ({}) as { input?: Record<string, unknown>; stream?: boolean });
+    let body: { input?: Record<string, unknown>; stream?: boolean };
+    try {
+      body = await c.req.json<{ input?: Record<string, unknown>; stream?: boolean }>();
+    } catch {
+      body = {};
+    }
 
     // Validate required input fields
     const inputSchema = flow.manifest.input?.schema;
     if (inputSchema) {
-      for (const [key, field] of Object.entries(inputSchema)) {
-        if (
-          field.required &&
-          (!body.input ||
-            body.input[key] === undefined ||
-            body.input[key] === null ||
-            body.input[key] === "")
-        ) {
-          return c.json(
-            {
-              error: "INPUT_REQUIRED",
-              message: `Le champ d'entrée '${key}' est requis`,
-              field: key,
-            },
-            400,
-          );
-        }
+      const inputError = validateRequiredInput(body.input, inputSchema);
+      if (inputError) {
+        return c.json(
+          { error: "INPUT_REQUIRED", message: inputError.message, field: inputError.field },
+          400,
+        );
       }
     }
 
-    const executionId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const executionId = `exec_${crypto.randomUUID()}`;
 
     // Get state and tokens
     const state = await getFlowState(flowId);
@@ -352,38 +346,23 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     const prompt = interpolatePrompt(flow.prompt, config, state, input);
 
     // Prepare env vars for container
-    const envVars: Record<string, string> = {
-      FLOW_PROMPT: prompt,
-      FLOW_ID: flowId,
-      EXECUTION_ID: executionId,
-      LLM_MODEL: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
-    };
-
-    // Inject OAuth tokens (replace hyphens with underscores for valid env var names)
-    for (const [svcId, token] of Object.entries(tokens)) {
-      envVars[`TOKEN_${svcId.toUpperCase().replace(/-/g, "_")}`] = token;
-    }
-
-    // Inject config
-    for (const [key, value] of Object.entries(config)) {
-      envVars[`CONFIG_${key.toUpperCase()}`] = String(value);
-    }
-
-    // Inject state
-    envVars["FLOW_STATE"] = JSON.stringify(state);
-
-    // Inject input
-    if (body.input) {
-      for (const [key, value] of Object.entries(body.input)) {
-        envVars[`INPUT_${key.toUpperCase()}`] = String(value);
-      }
-    }
+    const envVars = buildContainerEnv({
+      flowId,
+      executionId,
+      prompt,
+      tokens,
+      config,
+      state,
+      input: body.input,
+    });
 
     // Create execution record
     await createExecution(executionId, flowId, body.input ?? null);
 
-    // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, flow, envVars, tokens);
+    // Fire-and-forget background execution (catch to prevent unhandled rejection)
+    executeFlowInBackground(executionId, flowId, flow, envVars, tokens).catch((err) => {
+      console.error(`[execution] Unhandled error in background execution ${executionId}:`, err);
+    });
 
     // stream: false → return JSON with executionId
     if (body.stream === false) {
