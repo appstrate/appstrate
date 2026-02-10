@@ -16,8 +16,15 @@ bun run build-runtime         # docker build -t openflows-claude-code ./runtime-
 
 # 4. Configure .env (copy .env.example, set CLAUDE_CODE_OAUTH_TOKEN)
 
-# 5. Start platform
+# 5. Build frontend
+bun run build:frontend        # Vite build → dist/
+
+# 6. Start platform
 bun run dev                   # Hono server on http://localhost:3000
+
+# Dev mode (with HMR):
+# Terminal 1: bun run dev          (API on :3000)
+# Terminal 2: bun run dev:frontend (Vite on :5173, proxies to :3000)
 ```
 
 ## Stack & Conventions
@@ -30,7 +37,7 @@ bun run dev                   # Hono server on http://localhost:3000
 | OAuth             | **Nango** self-hosted (`@nangohq/node`)           | Manages Gmail + ClickUp OAuth tokens                                        |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
 | Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
-| Frontend          | **Vanilla JS + CSS**                              | No framework. `public/index.html` + `public/app.js`                         |
+| Frontend          | **React 19 + Vite + React Query v5**              | `frontend/` dir, React Router v7 HashRouter, `bun run build:frontend` → `dist/`  |
 | Auth              | Bearer token from `AUTH_TOKEN` env var            | No auth on static files. All `/api/*` and `/auth/*` routes require bearer   |
 
 ### Key Patterns
@@ -107,9 +114,39 @@ runtime-claude-code/
 ├── package.json              # Runtime dependencies
 └── entrypoint.sh             # Runs Claude Code with FLOW_PROMPT
 
-public/
-├── index.html                # Dark theme SPA shell (hash-based routing)
-└── app.js                    # Vanilla JS SPA: hash router, 3 views (flow list, flow detail, execution detail)
+frontend/
+├── index.html                    # Vite entry (<div id="root">)
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+└── src/
+    ├── main.tsx                  # Root: QueryClientProvider + HashRouter + App
+    ├── app.tsx                   # Layout: header, nav, <Routes/>
+    ├── styles.css                # All CSS (dark theme)
+    ├── api.ts                    # apiFetch(), api(), getAuthHeaders()
+    ├── types.ts                  # Frontend-specific TypeScript types
+    ├── hooks/
+    │   ├── use-flows.ts          # useFlows(), useFlowDetail(flowId)
+    │   ├── use-executions.ts     # useExecutions(flowId), useExecution(execId), useExecutionLogs(execId)
+    │   ├── use-services.ts       # useServices()
+    │   ├── use-mutations.ts      # useSaveConfig, useResetState, useRunFlow, useConnect, useDisconnect
+    │   └── use-websocket.ts      # Module-level WS singleton + useWsChannel() hook
+    ├── pages/
+    │   ├── flow-list.tsx         # #/ — flow cards grid
+    │   ├── flow-detail.tsx       # #/flows/:flowId — config/state/input modals + execution list
+    │   ├── execution-detail.tsx  # #/flows/:flowId/executions/:execId — tabs logs/result + WS streaming
+    │   └── services-list.tsx     # #/services — connect/disconnect integrations
+    ├── components/
+    │   ├── modal.tsx             # Generic overlay + escape + click-outside
+    │   ├── config-modal.tsx      # Config form, useSaveConfig mutation
+    │   ├── state-modal.tsx       # JSON viewer + useResetState mutation
+    │   ├── input-modal.tsx       # Input form before run
+    │   ├── log-viewer.tsx        # Log entries with type-based styling + auto-scroll
+    │   ├── result-renderer.tsx   # Full result render pipeline (generic cards, nested objects)
+    │   ├── badge.tsx             # Status badge with conditional spinner
+    │   └── spinner.tsx           # <span className="spinner" />
+    └── lib/
+        └── markdown.ts           # escapeHtml, convertMarkdown, truncate, formatDateField
 
 scripts/
 └── setup-db.ts               # Runs schema.sql against PostgreSQL
@@ -196,7 +233,7 @@ AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 - `bun run dev` starts successfully and loads flows from `flows/` directory
 - `GET /api/flows` returns the email-to-tickets flow with correct structure
 - Auth middleware blocks unauthenticated requests to `/api/*`
-- Static file serving works for `public/index.html` and `public/app.js`
+- Static file serving works for `dist/` (built by `bun run build:frontend`)
 
 ## What's NOT Yet Tested End-to-End
 

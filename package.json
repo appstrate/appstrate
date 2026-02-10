@@ -4,12 +4,14 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun --hot src/index.ts",
+    "dev": "concurrently -n api,build -c blue,green \"bun --hot src/index.ts\" \"cd frontend && bunx vite build --watch\"",
     "setup-db": "bun scripts/setup-db.ts",
-    "build-runtime": "docker build -t openflows-claude-code ./runtime-claude-code"
+    "build-runtime": "docker build -t openflows-claude-code ./runtime-claude-code",
+    "build:frontend": "cd frontend && bun run build"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "concurrently": "^9.2.1"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -98,7 +98,10 @@ app.route("/api", executionsRouter);
 app.route("/auth", authRouter);
 
 // Static files for UI
-app.use("/*", serveStatic({ root: "./public" }));
+app.use("/*", serveStatic({ root: "./dist" }));
+
+// SPA fallback — serve index.html for client-side routes
+app.get("/*", serveStatic({ root: "./dist", path: "index.html" }));
 
 // Start server
 const port = parseInt(process.env.PORT || "3000", 10);
