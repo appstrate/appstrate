@@ -318,9 +318,9 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       LLM_MODEL: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
     };
 
-    // Inject OAuth tokens
+    // Inject OAuth tokens (replace hyphens with underscores for valid env var names)
     for (const [svcId, token] of Object.entries(tokens)) {
-      envVars[`TOKEN_${svcId.toUpperCase()}`] = token;
+      envVars[`TOKEN_${svcId.toUpperCase().replace(/-/g, "_")}`] = token;
     }
 
     // Inject config

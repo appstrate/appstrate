@@ -1,0 +1,81 @@
+{
+  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "version": "1.0.0",
+
+  "metadata": {
+    "name": "meeting-prep",
+    "displayName": "Meeting Prep",
+    "description": "Prépare des briefings pour les réunions à venir : participants, historique email, recherche web",
+    "author": "openflows",
+    "license": "MIT",
+    "tags": ["calendar", "meetings", "productivité", "email"]
+  },
+
+  "requires": {
+    "services": [
+      {
+        "id": "google-calendar",
+        "provider": "google-calendar",
+        "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
+        "description": "Lecture des événements du calendrier"
+      },
+      {
+        "id": "gmail",
+        "provider": "google-mail",
+        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+        "description": "Recherche d'historique email avec les participants"
+      }
+    ],
+    "tools": [
+      {
+        "id": "web-search",
+        "type": "static",
+        "description": "Recherche web pour contexte sur les participants externes"
+      }
+    ]
+  },
+
+  "state": {
+    "enabled": true,
+    "schema": {
+      "last_run": { "type": "string", "format": "date-time" },
+      "prepared_event_ids": { "type": "string" }
+    }
+  },
+
+  "config": {
+    "schema": {
+      "hours_ahead": {
+        "type": "number",
+        "default": 24,
+        "description": "Nombre d'heures à l'avance pour chercher les réunions"
+      },
+      "internal_domain": {
+        "type": "string",
+        "required": true,
+        "description": "Domaine email de l'entreprise (ex: mycompany.com) pour distinguer participants internes/externes"
+      },
+      "language": {
+        "type": "string",
+        "default": "fr",
+        "enum": ["fr", "en"],
+        "description": "Langue de sortie des briefings"
+      },
+      "skip_all_day": {
+        "type": "boolean",
+        "default": true,
+        "description": "Ignorer les événements sur la journée entière"
+      },
+      "min_external_participants": {
+        "type": "number",
+        "default": 0,
+        "description": "Nombre minimum de participants externes pour déclencher un briefing (0 = toutes les réunions)"
+      }
+    }
+  },
+
+  "execution": {
+    "timeout": 600,
+    "maxTokens": 100000
+  }
+}

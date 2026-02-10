@@ -564,6 +564,9 @@ function renderMetadata(data) {
   if (data.emails_processed !== undefined) parts.push(`${data.emails_processed} mails traites`);
   if (data.emails_scanned !== undefined) parts.push(`${data.emails_scanned} mails scannes`);
   if (data.newsletters_found !== undefined) parts.push(`${data.newsletters_found} newsletters trouvees`);
+  if (data.meetings_found !== undefined) parts.push(`${data.meetings_found} reunions trouvees`);
+  if (data.meetings_prepped !== undefined) parts.push(`${data.meetings_prepped} reunions preparees`);
+  if (data.meetings_skipped !== undefined) parts.push(`${data.meetings_skipped} ignorees`);
   if (data.ignored_count) parts.push(`${data.ignored_count} ignores`);
   if (data.tokensUsed) parts.push(`${data.tokensUsed} tokens`);
   if (parts.length === 0) return "";
@@ -596,10 +599,15 @@ function renderResult(data, targetEl) {
 
   let html = `<h4>Resultat</h4>`;
 
+  // Summary (common to all flows)
   if (data.summary) {
     html += `<div class="result-summary">${convertMarkdown(data.summary)}</div>`;
   }
 
+  // Flow-specific metadata
+  html += renderMetadata(data);
+
+  // Render known array fields with specialized renderers
   if (data.tickets_created && data.tickets_created.length > 0) {
     html += `<h4>Tickets crees</h4><ul class="ticket-list">`;
     for (const ticket of data.tickets_created) {
@@ -623,15 +631,118 @@ function renderResult(data, targetEl) {
     html += renderResultItems(data.results);
   }
 
-  html += renderMetadata(data);
-
-  const knownKeys = ["summary", "tickets_created", "informational", "results", "emails_processed", "emails_scanned", "newsletters_found", "ignored_count", "tokensUsed", "state"];
-  const hasKnownField = Object.keys(data).some((k) => knownKeys.includes(k));
-  if (!hasKnownField) {
-    html += `<pre style="font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; color: var(--text-muted)">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+  // Generic renderer: any remaining array of objects gets rendered as cards
+  const handledKeys = new Set(["summary", "tickets_created", "informational", "results", "emails_processed", "emails_scanned", "newsletters_found", "ignored_count", "tokensUsed", "state", "meetings_found", "meetings_prepped", "meetings_skipped"]);
+  for (const [key, value] of Object.entries(data)) {
+    if (handledKeys.has(key)) continue;
+    if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
+      html += renderGenericCards(key, value);
+      handledKeys.add(key);
+    }
   }
 
   targetEl.innerHTML = html;
+}
+
+// --- Generic card renderer for unknown result arrays ---
+
+function renderGenericCards(sectionKey, items) {
+  const title = sectionKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  let html = `<h4 style="margin-top: 0.75rem">${escapeHtml(title)}</h4>`;
+  html += `<div class="result-items">`;
+
+  for (const item of items) {
+    html += `<div class="result-item">`;
+
+    // Try to find a good title: title, name, subject, or first string field
+    const itemTitle = item.title || item.name || item.subject || "";
+    const subtitle = item.start ? formatDateField(item.start) : "";
+    if (itemTitle) {
+      html += `<div class="result-item-header"><strong>${escapeHtml(itemTitle)}</strong></div>`;
+    }
+    if (subtitle) {
+      html += `<div class="result-item-meta"><span>${escapeHtml(subtitle)}</span>${item.end ? ` — ${escapeHtml(formatDateField(item.end))}` : ""}${item.location ? ` · ${escapeHtml(truncate(item.location, 50))}` : ""}</div>`;
+    }
+
+    // Render remaining fields
+    const skipFields = new Set(["title", "name", "subject", "start", "end", "location", "event_id"]);
+    for (const [k, v] of Object.entries(item)) {
+      if (skipFields.has(k)) continue;
+      if (v === null || v === undefined || v === "") continue;
+
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+      if (typeof v === "object" && !Array.isArray(v)) {
+        // Nested object (e.g. participants)
+        html += renderNestedObject(label, v);
+      } else if (Array.isArray(v)) {
+        html += renderNestedArray(label, v);
+      } else {
+        // String or number value — render as markdown if it's long text
+        const strVal = String(v);
+        if (strVal.length > 80) {
+          html += `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><br>${convertMarkdown(strVal)}</div>`;
+        } else {
+          html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(strVal)}</div>`;
+        }
+      }
+    }
+
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function renderNestedObject(label, obj) {
+  let html = `<div class="result-item-content"><strong>${escapeHtml(label)}</strong>`;
+  html += `<ul class="ticket-list">`;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v)) {
+      html += renderNestedArray(k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()), v);
+    } else if (typeof v === "object") {
+      html += `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(JSON.stringify(v))}</li>`;
+    } else {
+      html += `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`;
+    }
+  }
+  html += `</ul></div>`;
+  return html;
+}
+
+function renderNestedArray(label, arr) {
+  if (arr.length === 0) return "";
+  let html = `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><ul class="ticket-list">`;
+  for (const item of arr) {
+    if (typeof item === "string") {
+      html += `<li>${escapeHtml(item)}</li>`;
+    } else if (typeof item === "object" && item !== null) {
+      // Compact object display: name/email or first few fields
+      const display = item.name || item.email || item.title || "";
+      const extra = Object.entries(item)
+        .filter(([k]) => k !== "name" && k !== "email" && k !== "title")
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      html += `<li>${display ? `<strong>${escapeHtml(display)}</strong>` : ""}${extra ? ` (${escapeHtml(truncate(extra, 100))})` : ""}</li>`;
+    } else {
+      html += `<li>${escapeHtml(String(item))}</li>`;
+    }
+  }
+  html += `</ul></div>`;
+  return html;
+}
+
+function formatDateField(dateStr) {
+  try {
+    return new Date(dateStr).toLocaleString("fr-FR", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
 }
 
 // --- Config Modal ---
