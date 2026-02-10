@@ -157,13 +157,15 @@ openflows/
 │           └── index.ts              # ExecutionStatus, Execution, FlowDetail, Integration, etc.
 │
 ├── flows/                            # Flow definitions (loaded at runtime)
-│   └── email-to-tickets/
-│       ├── manifest.json
-│       └── prompt.md
+│   ├── email-summary/
+│   ├── email-to-tickets/
+│   ├── meeting-prep/
+│   └── newsletter-search/
+│       ├── manifest.json             # Flow spec: metadata, requires, config/state schema
+│       └── prompt.md                 # Agent instructions with {{config.*}} / {{state.*}} vars
 │
 ├── runtime-claude-code/              # Docker image for Claude Code CLI
 │   ├── Dockerfile
-│   ├── package.json
 │   └── entrypoint.sh
 │
 └── scripts/
