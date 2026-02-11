@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api";
-import type { Integration } from "@openflows/shared-types";
+import type { Integration } from "@appstrate/shared-types";
 
 export function useServices() {
   return useQuery({

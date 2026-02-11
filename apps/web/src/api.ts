@@ -1,7 +1,7 @@
 const API_BASE = "/api";
 
 export function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem("openflows_token") || "";
+  const token = localStorage.getItem("appstrate_token") || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

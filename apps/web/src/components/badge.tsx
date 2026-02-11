@@ -1,4 +1,4 @@
-import type { ExecutionStatus } from "@openflows/shared-types";
+import type { ExecutionStatus } from "@appstrate/shared-types";
 import { Spinner } from "./spinner";
 
 const badgeClassMap: Record<string, string> = {

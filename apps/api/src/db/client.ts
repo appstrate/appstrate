@@ -1,7 +1,7 @@
 import postgres from "postgres";
 
 const databaseUrl =
-  process.env.DATABASE_URL || "postgres://openflows:openflows@localhost:5432/openflows";
+  process.env.DATABASE_URL || "postgres://appstrate:appstrate@localhost:5432/appstrate";
 
 const sql = postgres(databaseUrl, {
   max: 10,

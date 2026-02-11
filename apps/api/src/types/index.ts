@@ -10,7 +10,7 @@ export type {
   FlowDetail,
   Integration,
   Schedule,
-} from "@openflows/shared-types";
+} from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
 
@@ -53,7 +53,7 @@ export interface FlowToolRequirement {
 }
 
 export interface FlowInputSpec {
-  schema: Record<string, import("@openflows/shared-types").FlowInputField>;
+  schema: Record<string, import("@appstrate/shared-types").FlowInputField>;
 }
 
 export interface FlowStateSpec {
@@ -62,7 +62,7 @@ export interface FlowStateSpec {
 }
 
 export interface FlowConfigSpec {
-  schema: Record<string, import("@openflows/shared-types").FlowConfigField>;
+  schema: Record<string, import("@appstrate/shared-types").FlowConfigField>;
 }
 
 export interface FlowExecutionSpec {

@@ -1,12 +1,12 @@
 {
-  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
   "version": "1.0.0",
 
   "metadata": {
     "name": "meeting-prep",
     "displayName": "Meeting Prep",
     "description": "Prépare des briefings pour les réunions à venir : participants, historique email, recherche web",
-    "author": "openflows",
+    "author": "appstrate",
     "license": "MIT",
     "tags": ["calendar", "meetings", "productivité", "email"]
   },

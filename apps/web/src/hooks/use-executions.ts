@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Execution, ExecutionLog } from "@openflows/shared-types";
+import type { Execution, ExecutionLog } from "@appstrate/shared-types";
 
 export function useExecutions(flowId: string | undefined) {
   return useQuery({

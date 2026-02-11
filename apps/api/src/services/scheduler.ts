@@ -1,7 +1,7 @@
 import { Cron } from "croner";
 import sql from "../db/client.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import type { Schedule } from "@openflows/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 import {
   getFlowConfig,
   getFlowState,

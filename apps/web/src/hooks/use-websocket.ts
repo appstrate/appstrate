@@ -12,7 +12,7 @@ let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
 function getWsUrl(): string {
-  const token = localStorage.getItem("openflows_token") || "";
+  const token = localStorage.getItem("appstrate_token") || "";
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`;
 }

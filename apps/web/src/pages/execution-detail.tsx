@@ -7,7 +7,7 @@ import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
-import type { ExecutionStatus } from "@openflows/shared-types";
+import type { ExecutionStatus } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 function formatEvent(event: string, data: Record<string, unknown>): string {

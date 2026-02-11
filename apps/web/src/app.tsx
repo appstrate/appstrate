@@ -19,7 +19,7 @@ export function App() {
       <header>
         <h1>
           <Link to="/" className="logo-link">
-            <span>Open</span>Flows
+            <span>App</span>strate
           </Link>
         </h1>
         <nav className="main-nav">

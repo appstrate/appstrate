@@ -1,5 +1,5 @@
 {
-  "name": "@openflows/web",
+  "name": "@appstrate/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "check": "tsc --noEmit && eslint src/ && prettier --check src/"
   },
   "dependencies": {
-    "@openflows/shared-types": "workspace:*",
+    "@appstrate/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

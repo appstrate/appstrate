@@ -1,12 +1,12 @@
 {
-  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
   "version": "1.0.0",
 
   "metadata": {
     "name": "email-to-tickets",
     "displayName": "Email → Tickets",
     "description": "Lit les mails récents et crée des tickets pour les actions à traiter",
-    "author": "openflows",
+    "author": "appstrate",
     "license": "MIT",
     "tags": ["email", "productivité", "tickets"]
   },

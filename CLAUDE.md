@@ -1,6 +1,6 @@
-# OpenFlows — Developer Guide
+# Appstrate — Developer Guide
 
-OpenFlows is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. A user deploys via Docker Compose, connects OAuth services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container.
+Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. A user deploys via Docker Compose, connects OAuth services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container.
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ docker compose up -d          # PostgreSQL 16 + Nango (OAuth)
 bun run setup-db              # Creates tables in PostgreSQL
 
 # 3. Build runtime image
-bun run build-runtime         # docker build -t openflows-claude-code ./runtime-claude-code
+bun run build-runtime         # docker build -t appstrate-claude-code ./runtime-claude-code
 
 # 4. Configure .env (copy .env.example, set CLAUDE_CODE_OAUTH_TOKEN)
 
@@ -81,7 +81,7 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
 ## Project Structure
 
 ```
-openflows/
+appstrate/
 ├── turbo.json                        # Turborepo task pipeline config
 ├── package.json                      # Root: workspaces, turbo scripts
 ├── .prettierrc                       # Shared Prettier config
@@ -89,7 +89,7 @@ openflows/
 ├── CLAUDE.md
 │
 ├── apps/
-│   ├── api/                          # @openflows/api — Backend (Hono + Bun)
+│   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── eslint.config.js
@@ -113,9 +113,9 @@ openflows/
 │   │       │   ├── client.ts         # postgres.js connection (reads DATABASE_URL)
 │   │       │   └── schema.sql        # DDL: flow_configs, flow_state, executions + indexes
 │   │       └── types/
-│   │           └── index.ts          # Backend-only types + re-exports from @openflows/shared-types
+│   │           └── index.ts          # Backend-only types + re-exports from @appstrate/shared-types
 │   │
-│   └── web/                          # @openflows/web — Frontend (React + Vite)
+│   └── web/                          # @appstrate/web — Frontend (React + Vite)
 │       ├── package.json
 │       ├── tsconfig.json
 │       ├── eslint.config.js
@@ -150,7 +150,7 @@ openflows/
 │               └── markdown.ts       # escapeHtml, convertMarkdown, truncate, formatDateField
 │
 ├── packages/
-│   └── shared-types/                 # @openflows/shared-types — Types used by both apps
+│   └── shared-types/                 # @appstrate/shared-types — Types used by both apps
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── src/
@@ -229,13 +229,13 @@ The platform reads these lines from Docker log stream (multiplexed format), pars
 ```env
 LLM_MODEL=claude-sonnet-4-5-20250929
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  # Run `claude setup-token` to generate
-DATABASE_URL=postgres://openflows:openflows@localhost:5432/openflows
+DATABASE_URL=postgres://appstrate:appstrate@localhost:5432/appstrate
 NANGO_URL=http://localhost:3003
 NANGO_SECRET_KEY=<uuid-v4>            # Must be UUID v4 format
 NANGO_ENCRYPTION_KEY=<base64-256bit>  # openssl rand -base64 32 (required for Connect UI)
 PORT=3000
 DOCKER_SOCKET=/var/run/docker.sock
-AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
+AUTH_TOKEN=dev-token-appstrate     # Omit to disable auth (dev mode)
 ```
 
 ## Known Issues & Technical Debt
@@ -246,7 +246,7 @@ AUTH_TOKEN=dev-token-openflows     # Omit to disable auth (dev mode)
 
 3. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
 
-4. **UI auth token**: The UI reads `localStorage.getItem("openflows_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
+4. **UI auth token**: The UI reads `localStorage.getItem("appstrate_token")` but there's no UI to set it. If `AUTH_TOKEN` is configured, the UI will fail silently. Needs a token input prompt.
 
 ## What's Validated
 

@@ -1,5 +1,5 @@
 {
-  "name": "openflows",
+  "name": "appstrate",
   "private": true,
   "packageManager": "bun@1.3.9",
   "workspaces": ["apps/*", "packages/*"],
@@ -12,7 +12,7 @@
     "format:check": "turbo format:check",
     "check": "turbo check",
     "setup-db": "bun scripts/setup-db.ts",
-    "build-runtime": "docker build -t openflows-claude-code ./runtime-claude-code"
+    "build-runtime": "docker build -t appstrate-claude-code ./runtime-claude-code"
   },
   "devDependencies": {
     "@types/bun": "latest",

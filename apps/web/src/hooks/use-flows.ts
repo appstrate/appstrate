@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { FlowListItem, FlowDetail } from "@openflows/shared-types";
+import type { FlowListItem, FlowDetail } from "@appstrate/shared-types";
 
 export function useFlows() {
   return useQuery({

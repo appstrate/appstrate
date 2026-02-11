@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./modal";
 import { FormField } from "./form-field";
-import type { FlowDetail } from "@openflows/shared-types";
+import type { FlowDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
   open: boolean;

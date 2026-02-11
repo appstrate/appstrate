@@ -1,12 +1,12 @@
 {
-  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
   "version": "1.0.0",
 
   "metadata": {
     "name": "newsletter-search",
     "displayName": "Recherche newsletters",
     "description": "Recherche et résume les newsletters sur un sujet donné",
-    "author": "openflows",
+    "author": "appstrate",
     "license": "MIT",
     "tags": ["email", "search", "newsletters"]
   },

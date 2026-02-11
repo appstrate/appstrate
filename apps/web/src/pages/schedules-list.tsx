@@ -5,7 +5,7 @@ import { useAllSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedul
 import { Spinner } from "../components/spinner";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
-import type { Schedule } from "@openflows/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
   const { data: schedules, isLoading, error } = useAllSchedules();

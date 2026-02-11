@@ -2,17 +2,17 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: openflows
-      POSTGRES_PASSWORD: openflows
-      POSTGRES_DB: openflows
+      POSTGRES_USER: appstrate
+      POSTGRES_PASSWORD: appstrate
+      POSTGRES_DB: appstrate
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Init script to create the nango database alongside openflows
+      # Init script to create the nango database alongside appstrate
       - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-nango-db.sh
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openflows"]
+      test: ["CMD-SHELL", "pg_isready -U appstrate"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -36,8 +36,8 @@ services:
     environment:
       - NANGO_DB_HOST=postgres
       - NANGO_DB_PORT=5432
-      - NANGO_DB_USER=openflows
-      - NANGO_DB_PASSWORD=openflows
+      - NANGO_DB_USER=appstrate
+      - NANGO_DB_PASSWORD=appstrate
       - NANGO_DB_NAME=nango
       - NANGO_DB_SSL=false
       - NANGO_REDIS_URL=redis://redis:6379

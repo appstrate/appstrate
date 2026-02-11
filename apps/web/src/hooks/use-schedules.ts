@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Schedule } from "@openflows/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 
 export function useAllSchedules() {
   return useQuery({

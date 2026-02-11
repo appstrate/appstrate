@@ -1,12 +1,12 @@
 {
-  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
   "version": "1.0.0",
 
   "metadata": {
     "name": "clickup-summary",
     "displayName": "ClickUp → Résumé",
     "description": "Lit les tickets à faire dans ClickUp et produit un résumé priorisé",
-    "author": "openflows",
+    "author": "appstrate",
     "license": "MIT",
     "tags": ["clickup", "productivité", "résumé", "tickets"]
   },

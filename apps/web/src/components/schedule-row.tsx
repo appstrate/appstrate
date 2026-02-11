@@ -1,4 +1,4 @@
-import type { Schedule } from "@openflows/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 interface ScheduleRowProps {

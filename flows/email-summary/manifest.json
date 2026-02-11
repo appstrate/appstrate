@@ -1,12 +1,12 @@
 {
-  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
   "version": "1.0.0",
 
   "metadata": {
     "name": "email-summary",
     "displayName": "Résumé des mails",
     "description": "Lit les mails récents et produit un résumé structuré depuis la dernière exécution",
-    "author": "openflows",
+    "author": "appstrate",
     "license": "MIT",
     "tags": ["email", "résumé", "productivité"]
   },

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Modal } from "./modal";
 import { FormField } from "./form-field";
-import type { FlowInputField, Schedule } from "@openflows/shared-types";
+import type { FlowInputField, Schedule } from "@appstrate/shared-types";
 
 const CRON_PRESETS = [
   { label: "Toutes les 30 min", cron: "*/30 * * * *" },

@@ -1,5 +1,5 @@
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
-const CLAUDE_CODE_RUNTIME_IMAGE = "openflows-claude-code:latest";
+const CLAUDE_CODE_RUNTIME_IMAGE = "appstrate-claude-code:latest";
 
 // Bun supports fetch() with unix: option for Unix sockets
 async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
@@ -15,7 +15,7 @@ export async function createClaudeCodeContainer(
   envVars: Record<string, string>,
   flowPath?: string,
 ): Promise<string> {
-  const containerName = `openflows-cc-${executionId}`;
+  const containerName = `appstrate-cc-${executionId}`;
 
   const env = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
 
@@ -31,9 +31,9 @@ export async function createClaudeCodeContainer(
       ...(flowPath ? { Binds: [`${flowPath}:/workspace/flow:ro`] } : {}),
     },
     Labels: {
-      "openflows.execution": executionId,
-      "openflows.adapter": "claude-code",
-      "openflows.managed": "true",
+      "appstrate.execution": executionId,
+      "appstrate.adapter": "claude-code",
+      "appstrate.managed": "true",
     },
   };
 

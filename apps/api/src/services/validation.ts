@@ -1,4 +1,4 @@
-import type { FlowInputField } from "@openflows/shared-types";
+import type { FlowInputField } from "@appstrate/shared-types";
 
 /**
  * Validates required input fields against a flow's input schema.

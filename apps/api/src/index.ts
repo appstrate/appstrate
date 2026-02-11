@@ -134,4 +134,4 @@ export default {
   idleTimeout: 255, // seconds — prevent Bun from killing long SSE/WS connections
 };
 
-console.log(`OpenFlows running on http://localhost:${port}`);
+console.log(`Appstrate running on http://localhost:${port}`);

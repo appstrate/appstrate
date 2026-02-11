@@ -14,7 +14,7 @@ import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
 import { truncate, formatDateField } from "../lib/markdown";
-import type { Schedule } from "@openflows/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
   config: { schema: Record<string, { required?: boolean }>; current: Record<string, unknown> };

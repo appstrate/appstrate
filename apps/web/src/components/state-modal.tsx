@@ -1,6 +1,6 @@
 import { Modal } from "./modal";
 import { useResetState } from "../hooks/use-mutations";
-import type { FlowDetail } from "@openflows/shared-types";
+import type { FlowDetail } from "@appstrate/shared-types";
 
 interface StateModalProps {
   open: boolean;

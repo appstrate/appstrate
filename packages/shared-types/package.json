@@ -1,5 +1,5 @@
 {
-  "name": "@openflows/shared-types",
+  "name": "@appstrate/shared-types",
   "version": "0.0.0",
   "private": true,
   "type": "module",
