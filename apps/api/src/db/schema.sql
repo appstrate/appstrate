@@ -55,3 +55,12 @@ CREATE TABLE IF NOT EXISTS flow_schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_flow_id ON flow_schedules(flow_id);
 
 ALTER TABLE executions ADD COLUMN IF NOT EXISTS schedule_id TEXT;
+
+CREATE TABLE IF NOT EXISTS user_flows (
+  id TEXT PRIMARY KEY,
+  manifest JSONB NOT NULL,
+  prompt TEXT NOT NULL,
+  skills JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

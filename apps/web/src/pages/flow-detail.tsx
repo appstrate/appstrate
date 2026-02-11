@@ -9,7 +9,7 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
-import { useRunFlow, useConnect, useConnectApiKey } from "../hooks/use-mutations";
+import { useRunFlow, useConnect, useDeleteFlow, useConnectApiKey } from "../hooks/use-mutations";
 import { useWsChannel } from "../hooks/use-websocket";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
@@ -48,6 +48,7 @@ export function FlowDetailPage() {
   const { data: executions } = useExecutions(flowId);
   const { data: schedules } = useSchedules(flowId);
   const runFlow = useRunFlow(flowId!);
+  const deleteFlow = useDeleteFlow();
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
   const createSchedule = useCreateSchedule(flowId!);
@@ -162,6 +163,24 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
+        {detail.source === "user" && (
+          <button
+            className="btn-danger"
+            disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
+            title={
+              detail.runningExecutions > 0
+                ? "Impossible de supprimer pendant une execution"
+                : "Supprimer ce flow"
+            }
+            onClick={() => {
+              if (confirm(`Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`)) {
+                deleteFlow.mutate(detail.id);
+              }
+            }}
+          >
+            Supprimer
+          </button>
+        )}
       </div>
 
       <div className="exec-tabs" role="tablist">

@@ -2,6 +2,8 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { FlowManifest, LoadedFlow, SkillMeta } from "../types/index.ts";
 import { validateManifest } from "./schema.ts";
+import { listUserFlows } from "./user-flows.ts";
+import { materializeAllFlows } from "./flow-materializer.ts";
 
 const FLOWS_DIR = join(process.cwd(), "flows");
 
@@ -84,6 +86,7 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
         prompt,
         path: flowPath,
         skills,
+        source: "built-in",
       });
 
       const skillCount = skills.length;
@@ -97,6 +100,43 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
     } catch (e) {
       console.warn(`Skipping ${entry}: ${e instanceof Error ? e.message : "parse error"}`);
     }
+  }
+
+  // Load user flows from DB and materialize to filesystem
+  try {
+    const userFlowRows = await listUserFlows();
+    if (userFlowRows.length > 0) {
+      const materializedPaths = await materializeAllFlows(userFlowRows);
+
+      for (const row of userFlowRows) {
+        const path = materializedPaths.get(row.id);
+        if (!path) continue;
+
+        const skills: SkillMeta[] = (row.skills || []).map((s) => ({
+          id: s.id,
+          description: s.description,
+        }));
+
+        flows.set(row.id, {
+          id: row.id,
+          manifest: row.manifest as FlowManifest,
+          prompt: row.prompt,
+          path,
+          skills,
+          source: "user",
+        });
+
+        const skillCount = skills.length;
+        const skillInfo =
+          skillCount > 0 ? ` (${skillCount} skill${skillCount > 1 ? "s" : ""})` : "";
+        const manifest = row.manifest as { metadata?: { displayName?: string } };
+        console.log(
+          `Loaded user flow: ${row.id} (${manifest.metadata?.displayName ?? row.id})${skillInfo}`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("Could not load user flows from DB:", err);
   }
 
   return flows;
