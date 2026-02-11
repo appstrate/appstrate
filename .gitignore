@@ -41,3 +41,5 @@ scripts/setup-nango.ts
 
 # Runtime data (materialized user flows)
 data/
+
+zip-flows/
