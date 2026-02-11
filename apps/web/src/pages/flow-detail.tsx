@@ -9,7 +9,7 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
-import { useRunFlow, useConnect, useDeleteFlow } from "../hooks/use-mutations";
+import { useRunFlow, useConnect, useDeleteFlow, useConnectApiKey } from "../hooks/use-mutations";
 import { useWsChannel } from "../hooks/use-websocket";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
@@ -18,6 +18,7 @@ import { StateModal } from "../components/state-modal";
 import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
+import { ApiKeyModal } from "../components/api-key-modal";
 import { truncate, formatDateField } from "../lib/markdown";
 import type { Schedule } from "@appstrate/shared-types";
 
@@ -49,6 +50,7 @@ export function FlowDetailPage() {
   const runFlow = useRunFlow(flowId!);
   const deleteFlow = useDeleteFlow();
   const connectMutation = useConnect();
+  const apiKeyMutation = useConnectApiKey();
   const createSchedule = useCreateSchedule(flowId!);
   const updateSchedule = useUpdateSchedule(flowId!);
   const deleteSchedule = useDeleteSchedule(flowId!);
@@ -59,6 +61,10 @@ export function FlowDetailPage() {
   const [inputOpen, setInputOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [apiKeyService, setApiKeyService] = useState<{
+    provider: string;
+    id: string;
+  } | null>(null);
 
   useWsChannel(flowId ? `flow:${flowId}` : null, () => {
     qc.invalidateQueries({ queryKey: ["executions", flowId] });
@@ -110,12 +116,19 @@ export function FlowDetailPage() {
       <div className="services">
         {detail.requires.services.map((svc) => {
           const isConnected = svc.status === "connected";
+          const handleServiceConnect = () => {
+            if (svc.authMode === "API_KEY") {
+              setApiKeyService({ provider: svc.provider, id: svc.id });
+            } else {
+              connectMutation.mutate(svc.provider);
+            }
+          };
           return (
             <button
               key={svc.id}
               type="button"
               className={`service ${isConnected ? "" : "not-connected"}`}
-              onClick={!isConnected ? () => connectMutation.mutate(svc.provider) : undefined}
+              onClick={!isConnected ? handleServiceConnect : undefined}
               disabled={isConnected}
               title={svc.description}
             >
@@ -288,6 +301,20 @@ export function FlowDetailPage() {
             : undefined
         }
         isPending={createSchedule.isPending || updateSchedule.isPending}
+      />
+      <ApiKeyModal
+        open={!!apiKeyService}
+        onClose={() => setApiKeyService(null)}
+        providerName={apiKeyService?.id ?? ""}
+        isPending={apiKeyMutation.isPending}
+        onSubmit={(apiKey) => {
+          if (apiKeyService) {
+            apiKeyMutation.mutate(
+              { provider: apiKeyService.provider, apiKey },
+              { onSuccess: () => setApiKeyService(null) },
+            );
+          }
+        }}
       />
     </>
   );

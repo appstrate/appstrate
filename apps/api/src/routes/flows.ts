@@ -9,7 +9,7 @@ import {
   getRunningExecutionsCounts,
   getRunningExecutionsForFlow,
 } from "../services/state.ts";
-import { getConnectionStatus } from "../services/nango.ts";
+import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
@@ -52,13 +52,16 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     // Check service connections in parallel
     const serviceStatuses = await Promise.all(
       m.requires.services.map(async (svc) => {
-        const conn = await getConnectionStatus(svc.provider);
+        const [conn, authMode] = await Promise.all([
+          getConnectionStatus(svc.provider),
+          getProviderAuthMode(svc.provider),
+        ]);
         return {
           id: svc.id,
           provider: svc.provider,
           description: svc.description,
           status: conn.status,
-          // Connect URL is now obtained via POST /auth/connect/:provider (Connect Session Token flow)
+          authMode,
         };
       }),
     );

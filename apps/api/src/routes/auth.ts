@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   listConnections,
   createConnectSession,
+  createApiKeyConnection,
   getIntegrationsWithStatus,
   deleteConnection,
 } from "../services/nango.ts";
@@ -23,6 +24,22 @@ router.post("/connect/:provider", async (c) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create connect session";
     return c.json({ error: "CONNECT_SESSION_FAILED", message }, 500);
+  }
+});
+
+// POST /auth/connect/:provider/api-key — create an API key connection
+router.post("/connect/:provider/api-key", async (c) => {
+  const provider = c.req.param("provider");
+  try {
+    const body = await c.req.json<{ apiKey?: string }>();
+    if (!body.apiKey || !body.apiKey.trim()) {
+      return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
+    }
+    await createApiKeyConnection(provider, body.apiKey.trim());
+    return c.json({ success: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to create API key connection";
+    return c.json({ error: "API_KEY_CONNECTION_FAILED", message }, 500);
   }
 });
 
