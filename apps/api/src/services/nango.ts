@@ -18,6 +18,46 @@ export interface ConnectionStatus {
 // Cache provider → connectionId mapping (refreshed on listConnections)
 const connectionIdCache = new Map<string, string>();
 
+// Cache provider → auth_mode (static, fetched once per provider)
+const authModeCache = new Map<string, string>();
+
+export async function getProviderAuthMode(providerName: string): Promise<string | undefined> {
+  if (authModeCache.has(providerName)) return authModeCache.get(providerName);
+
+  try {
+    const result = await nango.getProvider({ provider: providerName });
+    const authMode = (result as { data: { auth_mode?: string } }).data.auth_mode;
+    if (authMode) authModeCache.set(providerName, authMode);
+    return authMode;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function createApiKeyConnection(
+  provider: string,
+  apiKey: string,
+): Promise<void> {
+  // Create a connect session token, then use it with Nango's API key auth endpoint
+  const session = await nango.createConnectSession({
+    end_user: { id: END_USER_ID },
+    allowed_integrations: [provider],
+  });
+  const nangoHost = process.env.NANGO_URL || "http://localhost:3003";
+  const res = await fetch(
+    `${nangoHost}/api-auth/api-key/${provider}?connect_session_token=${session.data.token}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to create API key connection: ${res.status} ${body}`);
+  }
+}
+
 export async function listConnections(): Promise<ConnectionStatus[]> {
   try {
     const { connections } = await nango.listConnections();
@@ -55,7 +95,14 @@ export async function getAccessToken(provider: string): Promise<string | null> {
 
   try {
     const connection = await nango.getConnection(provider, connId);
-    const credentials = connection.credentials as { access_token?: string };
+    const credentials = connection.credentials as {
+      type?: string;
+      access_token?: string;
+      apiKey?: string;
+    };
+    if (credentials.type === "API_KEY" || credentials.apiKey) {
+      return credentials.apiKey ?? null;
+    }
     return credentials.access_token ?? null;
   } catch (err) {
     console.error(`[nango] Failed to fetch access token for '${provider}':`, err);
@@ -77,8 +124,8 @@ export async function createConnectSession(provider: string): Promise<ConnectSes
 
   // Connect UI (port 3009) is not available in self-hosted mode.
   // Use the direct OAuth endpoint with the session token instead.
-  const nangoUrl = process.env.NANGO_URL || "http://localhost:3003";
-  const oauthUrl = `${nangoUrl}/oauth/connect/${provider}?connect_session_token=${result.data.token}`;
+  const nangoHost = process.env.NANGO_URL || "http://localhost:3003";
+  const oauthUrl = `${nangoHost}/oauth/connect/${provider}?connect_session_token=${result.data.token}`;
 
   return {
     token: result.data.token,
@@ -109,24 +156,30 @@ export interface IntegrationWithStatus {
   displayName: string;
   logo: string;
   status: "connected" | "not_connected";
+  authMode?: string;
   connectionId?: string;
   connectedAt?: string;
 }
 
 export async function getIntegrationsWithStatus(): Promise<IntegrationWithStatus[]> {
   const [integrations, connections] = await Promise.all([listIntegrations(), listConnections()]);
-  return integrations.map((integ) => {
-    const conn = connections.find((c) => c.provider === integ.unique_key);
-    return {
-      uniqueKey: integ.unique_key,
-      provider: integ.provider,
-      displayName: integ.display_name || integ.unique_key,
-      logo: integ.logo,
-      status: conn ? "connected" : "not_connected",
-      connectionId: conn?.connectionId,
-      connectedAt: conn?.connectedAt,
-    };
-  });
+  const results = await Promise.all(
+    integrations.map(async (integ) => {
+      const conn = connections.find((c) => c.provider === integ.unique_key);
+      const authMode = await getProviderAuthMode(integ.unique_key);
+      return {
+        uniqueKey: integ.unique_key,
+        provider: integ.provider,
+        displayName: integ.display_name || integ.unique_key,
+        logo: integ.logo,
+        status: conn ? ("connected" as const) : ("not_connected" as const),
+        authMode,
+        connectionId: conn?.connectionId,
+        connectedAt: conn?.connectedAt,
+      };
+    }),
+  );
+  return results;
 }
 
 export { END_USER_ID };
