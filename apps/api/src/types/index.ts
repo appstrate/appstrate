@@ -92,6 +92,7 @@ export interface LoadedFlow {
   prompt: string;
   path: string;
   skills: SkillMeta[];
+  source: "built-in" | "user";
 }
 
 // --- Database Models (backend-only) ---
