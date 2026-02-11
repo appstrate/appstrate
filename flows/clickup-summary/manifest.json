@@ -55,6 +55,25 @@
     }
   },
 
+  "output": {
+    "schema": {
+      "summary": {
+        "type": "string",
+        "description": "Résumé priorisé des tickets ClickUp",
+        "required": true
+      },
+      "tasks": {
+        "type": "array",
+        "description": "Liste des tickets avec statut et priorité",
+        "required": true
+      },
+      "total_tasks": {
+        "type": "number",
+        "description": "Nombre total de tickets analysés"
+      }
+    }
+  },
+
   "execution": {
     "timeout": 180,
     "maxTokens": 50000

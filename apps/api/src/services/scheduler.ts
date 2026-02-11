@@ -2,11 +2,7 @@ import { Cron } from "croner";
 import sql from "../db/client.ts";
 import type { LoadedFlow } from "../types/index.ts";
 import type { Schedule } from "@appstrate/shared-types";
-import {
-  getFlowConfig,
-  getFlowState,
-  createExecution,
-} from "./state.ts";
+import { getFlowConfig, getFlowState, createExecution } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
 import { buildContainerEnv } from "./env-builder.ts";
@@ -130,12 +126,16 @@ export async function deleteSchedule(id: string): Promise<boolean> {
 function startCronJob(schedule: Schedule) {
   if (activeJobs.has(schedule.id)) return;
 
-  const job = new Cron(schedule.cron_expression, {
-    timezone: schedule.timezone,
-    protect: true, // Prevent overlapping runs
-  }, () => {
-    triggerScheduledExecution(schedule.id, schedule.flow_id, schedule.input ?? undefined);
-  });
+  const job = new Cron(
+    schedule.cron_expression,
+    {
+      timezone: schedule.timezone,
+      protect: true, // Prevent overlapping runs
+    },
+    () => {
+      triggerScheduledExecution(schedule.id, schedule.flow_id, schedule.input ?? undefined);
+    },
+  );
 
   activeJobs.set(schedule.id, job);
 }
@@ -184,12 +184,22 @@ async function triggerScheduledExecution(
 
     // Prepare env vars
     const executionId = `exec_${crypto.randomUUID()}`;
-    const envVars = buildContainerEnv({ flowId, executionId, prompt, tokens, config, state, input });
+    const envVars = buildContainerEnv({
+      flowId,
+      executionId,
+      prompt,
+      tokens,
+      config,
+      state,
+      input,
+    });
 
     // Create execution record with schedule_id
     await createExecution(executionId, flowId, input ?? null, scheduleId);
 
-    console.log(`[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId})`);
+    console.log(
+      `[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId})`,
+    );
 
     // Fire-and-forget (catch to prevent unhandled rejection)
     executeFlowInBackground(executionId, flowId, flow, envVars, tokens).catch((err) => {
@@ -208,7 +218,10 @@ async function triggerScheduledExecution(
       WHERE id = ${scheduleId}
     `;
   } catch (err) {
-    console.error(`[scheduler] Failed to trigger schedule ${scheduleId} for flow '${flowId}':`, err);
+    console.error(
+      `[scheduler] Failed to trigger schedule ${scheduleId} for flow '${flowId}':`,
+      err,
+    );
   }
 }
 
@@ -225,7 +238,9 @@ export async function initScheduler(flows: Map<string, LoadedFlow>) {
   let started = 0;
   for (const schedule of schedules) {
     if (!flows.has(schedule.flow_id)) {
-      console.warn(`[scheduler] Schedule ${schedule.id} references missing flow '${schedule.flow_id}', skipping`);
+      console.warn(
+        `[scheduler] Schedule ${schedule.id} references missing flow '${schedule.flow_id}', skipping`,
+      );
       continue;
     }
     startCronJob(schedule);

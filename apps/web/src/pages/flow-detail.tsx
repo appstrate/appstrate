@@ -3,7 +3,12 @@ import { useParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutions } from "../hooks/use-executions";
-import { useSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import {
+  useSchedules,
+  useCreateSchedule,
+  useUpdateSchedule,
+  useDeleteSchedule,
+} from "../hooks/use-schedules";
 import { useRunFlow, useConnect } from "../hooks/use-mutations";
 import { useWsChannel } from "../hooks/use-websocket";
 import { Spinner } from "../components/spinner";
@@ -201,7 +206,12 @@ export function FlowDetailPage() {
         <>
           <div className="section-header">
             <div />
-            <button onClick={() => { setEditingSchedule(null); setScheduleOpen(true); }}>
+            <button
+              onClick={() => {
+                setEditingSchedule(null);
+                setScheduleOpen(true);
+              }}
+            >
               Ajouter
             </button>
           </div>
@@ -215,7 +225,10 @@ export function FlowDetailPage() {
                 <ScheduleRow
                   key={sched.id}
                   schedule={sched}
-                  onClick={() => { setEditingSchedule(sched); setScheduleOpen(true); }}
+                  onClick={() => {
+                    setEditingSchedule(sched);
+                    setScheduleOpen(true);
+                  }}
                 />
               ))}
             </div>
@@ -233,7 +246,10 @@ export function FlowDetailPage() {
       />
       <ScheduleModal
         open={scheduleOpen}
-        onClose={() => { setScheduleOpen(false); setEditingSchedule(null); }}
+        onClose={() => {
+          setScheduleOpen(false);
+          setEditingSchedule(null);
+        }}
         schedule={editingSchedule}
         inputSchema={detail.input?.schema}
         onSave={(data) => {
@@ -243,11 +259,15 @@ export function FlowDetailPage() {
             createSchedule.mutate(data);
           }
         }}
-        onDelete={editingSchedule ? () => {
-          deleteSchedule.mutate(editingSchedule.id);
-          setScheduleOpen(false);
-          setEditingSchedule(null);
-        } : undefined}
+        onDelete={
+          editingSchedule
+            ? () => {
+                deleteSchedule.mutate(editingSchedule.id);
+                setScheduleOpen(false);
+                setEditingSchedule(null);
+              }
+            : undefined
+        }
         isPending={createSchedule.isPending || updateSchedule.isPending}
       />
     </>

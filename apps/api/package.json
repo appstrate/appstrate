@@ -7,17 +7,19 @@
   "scripts": {
     "dev": "cd ../.. && bun --hot apps/api/src/index.ts",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint:fix": "eslint src/ --fix && prettier --write src/",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
-    "check": "eslint src/ && prettier --check src/"
+    "check": "eslint src/ && prettier --check src/",
+    "test": "bun test"
   },
   "dependencies": {
-    "@nangohq/node": "^0.69.30",
     "@appstrate/shared-types": "workspace:*",
+    "@nangohq/node": "^0.69.30",
     "croner": "^10.0.1",
     "hono": "^4.11.9",
-    "postgres": "^3.4.8"
+    "postgres": "^3.4.8",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

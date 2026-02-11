@@ -64,6 +64,29 @@
     }
   },
 
+  "output": {
+    "schema": {
+      "summary": {
+        "type": "string",
+        "description": "Résumé de l'exécution",
+        "required": true
+      },
+      "tickets_created": {
+        "type": "array",
+        "description": "Liste des tickets créés (titre, URL, priorité)",
+        "required": true
+      },
+      "informational": {
+        "type": "array",
+        "description": "Mails informatifs non convertis en tickets"
+      },
+      "emails_processed": {
+        "type": "number",
+        "description": "Nombre total de mails traités"
+      }
+    }
+  },
+
   "execution": {
     "timeout": 300,
     "maxTokens": 100000

@@ -160,7 +160,7 @@ export function ExecutionDetailPage() {
 
       {activeTab === "result" &&
         (resultData ? (
-          <ResultRenderer data={resultData} />
+          <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
           <div className="empty-state empty-state-compact">
             <p className="empty-hint">Aucun resultat</p>

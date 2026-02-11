@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { FlowManifest, LoadedFlow, SkillMeta } from "../types/index.ts";
+import { validateManifest } from "./schema.ts";
 
 const FLOWS_DIR = join(process.cwd(), "flows");
 
@@ -63,16 +64,17 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
     }
 
     try {
-      const manifest: FlowManifest = await manifestFile.json();
+      const raw = await manifestFile.json();
       const prompt = await promptFile.text();
 
-      // Basic validation
-      if (!manifest.metadata?.name || !manifest.metadata?.description) {
-        console.warn(
-          `Skipping ${entry}: manifest missing required fields (metadata.name, metadata.description)`,
-        );
+      // Validate manifest with Zod
+      const validation = validateManifest(raw);
+      if (!validation.valid) {
+        console.warn(`Skipping ${entry}: invalid manifest`);
+        for (const err of validation.errors) console.warn(`  - ${err}`);
         continue;
       }
+      const manifest = validation.manifest as FlowManifest;
 
       const skills = await loadFlowSkills(flowPath);
 
@@ -86,8 +88,11 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
 
       const skillCount = skills.length;
       const skillInfo = skillCount > 0 ? ` (${skillCount} skill${skillCount > 1 ? "s" : ""})` : "";
+      const outputInfo = manifest.output?.schema
+        ? ` [${Object.keys(manifest.output.schema).length} output fields]`
+        : "";
       console.log(
-        `Loaded flow: ${manifest.metadata.name} (${manifest.metadata.displayName})${skillInfo}`,
+        `Loaded flow: ${manifest.metadata.name} (${manifest.metadata.displayName})${skillInfo}${outputInfo}`,
       );
     } catch (e) {
       console.warn(`Skipping ${entry}: ${e instanceof Error ? e.message : "parse error"}`);

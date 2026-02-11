@@ -1,0 +1,227 @@
+import { describe, test, expect, mock, beforeEach } from "bun:test";
+import type { ExecutionAdapter, ExecutionMessage } from "../../services/adapters/types.ts";
+import type { FlowOutputField } from "@appstrate/shared-types";
+import type { LoadedFlow } from "../../types/index.ts";
+
+// --- Mocks ---
+
+const logs: { event: string; data: Record<string, unknown> | null }[] = [];
+const updates: { id: string; updates: Record<string, unknown> }[] = [];
+
+mock.module("../../services/state.ts", () => ({
+  appendExecutionLog: mock(
+    async (
+      _executionId: string,
+      _type: string,
+      event: string,
+      _message: string | null,
+      data: Record<string, unknown> | null,
+    ) => {
+      logs.push({ event, data });
+      return logs.length;
+    },
+  ),
+  updateExecution: mock(async (id: string, upd: Record<string, unknown>) => {
+    updates.push({ id, updates: upd });
+  }),
+  getExecution: mock(async () => null),
+  setFlowState: mock(async () => {}),
+  getFlowConfig: mock(async () => ({})),
+  getFlowState: mock(async () => ({})),
+  createExecution: mock(async () => {}),
+  getExecutionsByFlow: mock(async () => []),
+  getExecutionLogs: mock(async () => []),
+}));
+
+mock.module("../../ws.ts", () => ({
+  broadcast: mock(() => {}),
+  addConnection: mock(() => ""),
+  removeConnection: mock(() => {}),
+  subscribe: mock(() => {}),
+  unsubscribe: mock(() => {}),
+  send: mock(() => {}),
+}));
+
+mock.module("../../services/nango.ts", () => ({
+  getConnectionStatus: mock(async () => ({ status: "connected" })),
+  getAccessToken: mock(async () => "mock-token"),
+  listConnections: mock(async () => []),
+}));
+
+mock.module("../../services/env-builder.ts", () => ({
+  buildContainerEnv: mock(() => ({})),
+}));
+
+// Track how many times the adapter's execute() is called
+let adapterCallCount = 0;
+let mockAdapter: ExecutionAdapter;
+
+class MockTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
+
+mock.module("../../services/adapters/index.ts", () => ({
+  getAdapter: () => mockAdapter,
+  getAdapterName: () => "mock-adapter",
+  TimeoutError: MockTimeoutError,
+}));
+
+// Import after mocks are set up
+const { executeFlowInBackground } = await import("../executions.ts");
+
+// --- Helpers ---
+
+function createMockAdapter(results: (Record<string, unknown> | "timeout")[]): ExecutionAdapter {
+  adapterCallCount = 0;
+  return {
+    async *execute(): AsyncGenerator<ExecutionMessage> {
+      const idx = adapterCallCount++;
+      const value = results[idx] ?? results[results.length - 1];
+      if (value === "timeout") {
+        throw new MockTimeoutError("Execution timed out");
+      }
+      yield { type: "progress", message: "Working..." };
+      yield { type: "result", data: value as Record<string, unknown> };
+    },
+  };
+}
+
+function makeFlow(overrides: {
+  outputSchema?: Record<string, FlowOutputField>;
+  outputRetries?: number;
+  timeout?: number;
+}): LoadedFlow {
+  return {
+    id: "test-flow",
+    prompt: "test prompt",
+    path: "/tmp/test-flow",
+    skills: [],
+    manifest: {
+      version: "1.0.0",
+      metadata: {
+        name: "test-flow",
+        displayName: "Test Flow",
+        description: "A test flow",
+        author: "test",
+      },
+      requires: { services: [] },
+      output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
+      execution: {
+        timeout: overrides.timeout ?? 300,
+        outputRetries: overrides.outputRetries,
+      },
+    },
+  };
+}
+
+const OUTPUT_SCHEMA: Record<string, FlowOutputField> = {
+  summary: { type: "string", description: "Summary text", required: true },
+  count: { type: "number", description: "Item count", required: true },
+};
+
+function findLogs(event: string) {
+  return logs.filter((l) => l.event === event);
+}
+
+function lastUpdate() {
+  return updates[updates.length - 1];
+}
+
+// --- Tests ---
+
+beforeEach(() => {
+  logs.length = 0;
+  updates.length = 0;
+  adapterCallCount = 0;
+});
+
+describe("executeFlowInBackground — retry loop", () => {
+  test("no output schema → no retry, status success", async () => {
+    const result = { summary: "done" };
+    mockAdapter = createMockAdapter([result]);
+
+    const flow = makeFlow({});
+    await executeFlowInBackground("exec-1", "test-flow", flow, {}, {});
+
+    expect(adapterCallCount).toBe(1);
+    expect(findLogs("output_validation_retry")).toHaveLength(0);
+    expect(lastUpdate()!.updates.status).toBe("success");
+  });
+
+  test("valid output on first attempt → no retry, status success", async () => {
+    const result = { summary: "done", count: 5 };
+    mockAdapter = createMockAdapter([result]);
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
+    await executeFlowInBackground("exec-2", "test-flow", flow, {}, {});
+
+    expect(adapterCallCount).toBe(1);
+    expect(findLogs("output_validation_retry")).toHaveLength(0);
+    expect(lastUpdate()!.updates.status).toBe("success");
+    expect((lastUpdate()!.updates.result as Record<string, unknown>).count).toBe(5);
+  });
+
+  test("invalid then valid → 1 retry, status success", async () => {
+    const badResult = { summary: "done" }; // missing count
+    const goodResult = { summary: "done", count: 3 };
+    mockAdapter = createMockAdapter([badResult, goodResult]);
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
+    await executeFlowInBackground("exec-3", "test-flow", flow, {}, {});
+
+    expect(adapterCallCount).toBe(2);
+    expect(findLogs("output_validation_retry")).toHaveLength(1);
+    expect(findLogs("output_validation")).toHaveLength(0); // no final validation error
+    expect(lastUpdate()!.updates.status).toBe("success");
+    expect((lastUpdate()!.updates.result as Record<string, unknown>).count).toBe(3);
+  });
+
+  test("all retries fail → status success with last result, validation error logged", async () => {
+    const badResult = { summary: "done" }; // always missing count
+    mockAdapter = createMockAdapter([badResult, badResult, badResult]);
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 2 });
+    await executeFlowInBackground("exec-4", "test-flow", flow, {}, {});
+
+    // 1 initial + 2 retries = 3 calls
+    expect(adapterCallCount).toBe(3);
+    expect(findLogs("output_validation_retry")).toHaveLength(2);
+    // Final validation failure logged
+    const finalValidation = findLogs("output_validation");
+    expect(finalValidation).toHaveLength(1);
+    expect(finalValidation[0]!.data!.valid).toBe(false);
+    // Still succeeds (uses last result)
+    expect(lastUpdate()!.updates.status).toBe("success");
+  });
+
+  test("outputRetries: 0 → no retry even if invalid", async () => {
+    const badResult = { summary: "done" }; // missing count
+    mockAdapter = createMockAdapter([badResult]);
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 0 });
+    await executeFlowInBackground("exec-5", "test-flow", flow, {}, {});
+
+    expect(adapterCallCount).toBe(1);
+    expect(findLogs("output_validation_retry")).toHaveLength(0);
+    // Validation failure logged
+    expect(findLogs("output_validation")).toHaveLength(1);
+    expect(lastUpdate()!.updates.status).toBe("success");
+  });
+
+  test("timeout during retry → breaks out, uses last result", async () => {
+    const badResult = { summary: "done" }; // missing count
+    mockAdapter = createMockAdapter([badResult, "timeout"]);
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 3 });
+    await executeFlowInBackground("exec-6", "test-flow", flow, {}, {});
+
+    // 1 initial + 1 retry that timed out = 2 calls
+    expect(adapterCallCount).toBe(2);
+    expect(findLogs("output_validation_retry")).toHaveLength(1);
+    // Still succeeds with last result
+    expect(lastUpdate()!.updates.status).toBe("success");
+  });
+});

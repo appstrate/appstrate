@@ -74,6 +74,33 @@
     }
   },
 
+  "output": {
+    "schema": {
+      "summary": {
+        "type": "string",
+        "description": "Résumé des réunions préparées",
+        "required": true
+      },
+      "meetings": {
+        "type": "array",
+        "description": "Briefings détaillés pour chaque réunion",
+        "required": true
+      },
+      "meetings_found": {
+        "type": "number",
+        "description": "Nombre de réunions trouvées"
+      },
+      "meetings_prepped": {
+        "type": "number",
+        "description": "Nombre de réunions préparées"
+      },
+      "meetings_skipped": {
+        "type": "number",
+        "description": "Nombre de réunions ignorées"
+      }
+    }
+  },
+
   "execution": {
     "timeout": 600,
     "maxTokens": 100000

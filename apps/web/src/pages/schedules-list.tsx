@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFlows } from "../hooks/use-flows";
-import { useAllSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import {
+  useAllSchedules,
+  useCreateSchedule,
+  useUpdateSchedule,
+  useDeleteSchedule,
+} from "../hooks/use-schedules";
 import { Spinner } from "../components/spinner";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
@@ -66,7 +71,8 @@ export function SchedulesListPage() {
       ) : (
         <div className="schedule-list">
           {schedules.map((sched) => {
-            const flowName = flows?.find((f) => f.id === sched.flow_id)?.displayName ?? sched.flow_id;
+            const flowName =
+              flows?.find((f) => f.id === sched.flow_id)?.displayName ?? sched.flow_id;
             return (
               <div key={sched.id} className="schedule-list-item">
                 <Link className="schedule-flow-link" to={`/flows/${sched.flow_id}`}>
@@ -80,40 +86,45 @@ export function SchedulesListPage() {
       )}
 
       {/* Step 1: pick a flow before opening the schedule modal */}
-      {createOpen && !createFlowId ? null : createOpen && (
-        <>
-          {/* Flow picker as a mini-modal, then the schedule modal */}
-          <ScheduleModal
-            open
-            onClose={() => setCreateOpen(false)}
-            onSave={(data) => createMutation.mutate(data)}
-            isPending={createMutation.isPending}
-            flowPicker={
-              flows && flows.length > 1 ? (
-                <div className="form-group">
-                  <label htmlFor="sched-flow">Flow</label>
-                  <select
-                    id="sched-flow"
-                    value={createFlowId}
-                    onChange={(e) => setCreateFlowId(e.target.value)}
-                  >
-                    {flows.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : undefined
-            }
-          />
-        </>
-      )}
+      {createOpen && !createFlowId
+        ? null
+        : createOpen && (
+            <>
+              {/* Flow picker as a mini-modal, then the schedule modal */}
+              <ScheduleModal
+                open
+                onClose={() => setCreateOpen(false)}
+                onSave={(data) => createMutation.mutate(data)}
+                isPending={createMutation.isPending}
+                flowPicker={
+                  flows && flows.length > 1 ? (
+                    <div className="form-group">
+                      <label htmlFor="sched-flow">Flow</label>
+                      <select
+                        id="sched-flow"
+                        value={createFlowId}
+                        onChange={(e) => setCreateFlowId(e.target.value)}
+                      >
+                        {flows.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : undefined
+                }
+              />
+            </>
+          )}
 
       {editOpen && editingSchedule && (
         <ScheduleModal
           open
-          onClose={() => { setEditOpen(false); setEditingSchedule(null); }}
+          onClose={() => {
+            setEditOpen(false);
+            setEditingSchedule(null);
+          }}
           schedule={editingSchedule}
           onSave={(data) => updateSchedule.mutate({ id: editingSchedule.id, ...data })}
           onDelete={() => {

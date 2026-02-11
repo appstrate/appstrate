@@ -179,11 +179,7 @@ function ScheduleForm({
 
       <div className="form-group">
         <label htmlFor="sched-tz">Fuseau horaire</label>
-        <select
-          id="sched-tz"
-          value={timezone}
-          onChange={(e) => setTimezone(e.target.value)}
-        >
+        <select id="sched-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
           {TIMEZONES.map((tz) => (
             <option key={tz} value={tz}>
               {tz}

@@ -9,7 +9,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
-import { validateRequiredInput } from "../services/validation.ts";
+import { validateInput } from "../services/schema.ts";
 
 export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
@@ -47,31 +47,23 @@ export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
     }>();
 
     if (!body.cronExpression) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "cronExpression is required" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "cronExpression is required" }, 400);
     }
 
     // Validate cron expression
     try {
       new Cron(body.cronExpression, { paused: true });
     } catch {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Invalid cron expression" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
     }
 
     // Validate input against flow's input schema if provided
     const inputSchema = flow.manifest.input?.schema;
     if (body.input && inputSchema) {
-      const inputError = validateRequiredInput(body.input, inputSchema);
-      if (inputError) {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: inputError.message },
-          400,
-        );
+      const inputValidation = validateInput(body.input, inputSchema);
+      if (!inputValidation.valid) {
+        const first = inputValidation.errors[0]!;
+        return c.json({ error: "VALIDATION_ERROR", message: first.message }, 400);
       }
     }
 
@@ -110,10 +102,7 @@ export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
       try {
         new Cron(body.cronExpression, { paused: true });
       } catch {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: "Invalid cron expression" },
-          400,
-        );
+        return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
       }
     }
 

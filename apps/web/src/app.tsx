@@ -35,10 +35,7 @@ export function App() {
           >
             Planifications
           </Link>
-          <Link
-            className={`nav-tab ${currentPath === "/services" ? "active" : ""}`}
-            to="/services"
-          >
+          <Link className={`nav-tab ${currentPath === "/services" ? "active" : ""}`} to="/services">
             Services
           </Link>
         </nav>

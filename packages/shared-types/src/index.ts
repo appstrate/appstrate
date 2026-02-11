@@ -26,23 +26,28 @@ export interface ExecutionLog {
   created_at: string;
 }
 
-// --- Flow API Types ---
+// --- Flow Field Types ---
 
-export interface FlowConfigField {
+export type FlowFieldType = "string" | "number" | "boolean" | "array" | "object";
+
+export interface FlowFieldBase {
   type: string;
-  default?: unknown;
-  required?: boolean;
-  enum?: unknown[];
   description: string;
+  required?: boolean;
 }
 
-export interface FlowInputField {
-  type: string;
-  description: string;
-  required?: boolean;
+export interface FlowConfigField extends FlowFieldBase {
+  default?: unknown;
+  enum?: unknown[];
+}
+
+export interface FlowInputField extends FlowFieldBase {
   default?: unknown;
   placeholder?: string;
 }
+
+// Compatible with FlowInputField for flow chaining (output flow A → input flow B)
+export interface FlowOutputField extends FlowFieldBase {}
 
 export interface ServiceStatus {
   id: string;
@@ -75,6 +80,9 @@ export interface FlowDetail {
   };
   input?: {
     schema: Record<string, FlowInputField>;
+  };
+  output?: {
+    schema: Record<string, FlowOutputField>;
   };
   config: {
     schema: Record<string, FlowConfigField>;

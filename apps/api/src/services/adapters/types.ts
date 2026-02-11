@@ -10,5 +10,6 @@ export interface ExecutionAdapter {
     envVars: Record<string, string>,
     flowPath: string,
     timeout: number,
+    outputSchema?: Record<string, import("@appstrate/shared-types").FlowOutputField>,
   ): AsyncGenerator<ExecutionMessage>;
 }

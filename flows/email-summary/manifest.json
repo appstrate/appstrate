@@ -46,6 +46,24 @@
     }
   },
 
+  "output": {
+    "schema": {
+      "summary": {
+        "type": "string",
+        "description": "Résumé structuré des mails récents",
+        "required": true
+      },
+      "emails_processed": {
+        "type": "number",
+        "description": "Nombre de mails traités"
+      },
+      "categories": {
+        "type": "array",
+        "description": "Mails regroupés par catégorie (urgent, action, info)"
+      }
+    }
+  },
+
   "execution": {
     "timeout": 180,
     "maxTokens": 50000

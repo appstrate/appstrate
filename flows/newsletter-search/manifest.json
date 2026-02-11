@@ -49,6 +49,29 @@
     }
   },
 
+  "output": {
+    "schema": {
+      "summary": {
+        "type": "string",
+        "description": "Résumé des résultats de la recherche",
+        "required": true
+      },
+      "results": {
+        "type": "array",
+        "description": "Articles/newsletters pertinents trouvés",
+        "required": true
+      },
+      "newsletters_found": {
+        "type": "number",
+        "description": "Nombre de newsletters analysées"
+      },
+      "emails_scanned": {
+        "type": "number",
+        "description": "Nombre total de mails scannés"
+      }
+    }
+  },
+
   "execution": {
     "timeout": 300,
     "maxTokens": 16000

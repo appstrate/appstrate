@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import type { FlowOutputField } from "@appstrate/shared-types";
 import { escapeHtml, convertMarkdown, truncate, formatDateField } from "../lib/markdown";
 
 interface ResultRendererProps {
   data: Record<string, unknown>;
+  outputSchema?: Record<string, FlowOutputField>;
 }
 
 function renderMetadata(data: Record<string, unknown>): string {
@@ -98,7 +100,7 @@ function renderNestedArray(label: string, arr: unknown[]): string {
 
 function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]): string {
   const title = sectionKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  let html = `<h4 style="margin-top: 0.75rem">${escapeHtml(title)}</h4>`;
+  let html = `<h4>${escapeHtml(title)}</h4>`;
   html += `<div class="result-items">`;
 
   for (const item of items) {
@@ -146,6 +148,97 @@ function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]
   }
 
   html += `</div>`;
+  return html;
+}
+
+function renderSchemaField(key: string, field: FlowOutputField, value: unknown): string {
+  if (value === undefined || value === null) {
+    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <em>—</em></div>`;
+  }
+
+  if (field.type === "string") {
+    const strVal = String(value);
+    if (strVal.length > 80) {
+      return `<div class="result-item-content"><strong>${escapeHtml(field.description)}</strong><br>${convertMarkdown(strVal)}</div>`;
+    }
+    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(strVal)}</div>`;
+  }
+
+  if (field.type === "number") {
+    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(String(value))}</div>`;
+  }
+
+  if (field.type === "boolean") {
+    const label = value ? "Oui" : "Non";
+    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <span class="relevance-badge ${value ? "high" : "low"}">${label}</span></div>`;
+  }
+
+  if (field.type === "array" && Array.isArray(value)) {
+    if (value.length === 0) {
+      return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <em>Aucun</em></div>`;
+    }
+    if (typeof value[0] === "object" && value[0] !== null) {
+      return renderGenericCards(key, value as Record<string, unknown>[]);
+    }
+    return renderNestedArray(field.description, value);
+  }
+
+  if (field.type === "object" && typeof value === "object" && !Array.isArray(value)) {
+    return renderNestedObject(field.description, value as Record<string, unknown>);
+  }
+
+  return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(String(value))}</div>`;
+}
+
+function buildSchemaResultHtml(
+  data: Record<string, unknown>,
+  schema: Record<string, FlowOutputField>,
+): string {
+  let html = `<h4>Resultat</h4>`;
+
+  // Render summary first if present in schema
+  if (schema.summary && data.summary) {
+    html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
+  }
+
+  html += renderMetadata(data);
+
+  // Render schema fields in declared order (skip summary already rendered above)
+  for (const [key, field] of Object.entries(schema)) {
+    if (key === "summary") continue;
+    html += renderSchemaField(key, field, data[key]);
+  }
+
+  // Render extra fields not in schema (except internal fields)
+  const schemaKeys = new Set(Object.keys(schema));
+  const internalKeys = new Set(["state", "tokensUsed"]);
+  const metadataKeys = new Set([
+    "emails_processed",
+    "emails_scanned",
+    "newsletters_found",
+    "meetings_found",
+    "meetings_prepped",
+    "meetings_skipped",
+    "ignored_count",
+  ]);
+  const extraEntries = Object.entries(data).filter(
+    ([k]) => !schemaKeys.has(k) && !internalKeys.has(k) && !metadataKeys.has(k),
+  );
+
+  if (extraEntries.length > 0) {
+    for (const [key, value] of extraEntries) {
+      if (value === null || value === undefined) continue;
+      const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
+        html += renderGenericCards(key, value as Record<string, unknown>[]);
+      } else if (typeof value === "object" && !Array.isArray(value)) {
+        html += renderNestedObject(label, value as Record<string, unknown>);
+      } else {
+        html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</div>`;
+      }
+    }
+  }
+
   return html;
 }
 
@@ -207,7 +300,40 @@ function buildResultHtml(data: Record<string, unknown>): string {
   return html;
 }
 
-export function ResultRenderer({ data }: ResultRendererProps) {
-  const html = useMemo(() => buildResultHtml(data), [data]);
-  return <div className="result-section" dangerouslySetInnerHTML={{ __html: html }} />;
+export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
+  const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
+
+  const html = useMemo(
+    () =>
+      outputSchema && Object.keys(outputSchema).length > 0
+        ? buildSchemaResultHtml(data, outputSchema)
+        : buildResultHtml(data),
+    [data, outputSchema],
+  );
+
+  const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
+
+  return (
+    <div className="result-section">
+      <div className="result-view-toggle">
+        <button
+          className={`result-toggle-btn ${viewMode === "formatted" ? "active" : ""}`}
+          onClick={() => setViewMode("formatted")}
+        >
+          Formaté
+        </button>
+        <button
+          className={`result-toggle-btn ${viewMode === "json" ? "active" : ""}`}
+          onClick={() => setViewMode("json")}
+        >
+          JSON
+        </button>
+      </div>
+      {viewMode === "formatted" ? (
+        <div dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <pre className="result-json-viewer">{jsonString}</pre>
+      )}
+    </div>
+  );
 }

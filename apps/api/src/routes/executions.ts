@@ -14,9 +14,10 @@ import {
 } from "../services/state.ts";
 import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
 import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
+import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
 import { broadcast } from "../ws.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
-import { validateRequiredInput } from "../services/validation.ts";
+import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
 
 // --- In-memory pub/sub for live log streaming ---
 
@@ -128,6 +129,8 @@ async function streamLogsToSSE(
   unsubscribe();
 }
 
+const MIN_RETRY_TIME_MS = 5_000;
+
 // --- Background execution (decoupled from SSE) ---
 
 export async function executeFlowInBackground(
@@ -172,7 +175,13 @@ export async function executeFlowInBackground(
     let result: Record<string, unknown> | null = null;
 
     try {
-      for await (const msg of adapter.execute(executionId, envVars, flow.path, timeout)) {
+      for await (const msg of adapter.execute(
+        executionId,
+        envVars,
+        flow.path,
+        timeout,
+        flow.manifest.output?.schema,
+      )) {
         if (msg.type === "progress") {
           await emitLog(executionId, "progress", "progress", msg.message ?? null, null, flowId);
         } else if (msg.type === "result") {
@@ -205,6 +214,85 @@ export async function executeFlowInBackground(
     }
 
     if (result) {
+      // Validate against output schema and retry if invalid
+      const outputSchema = flow.manifest.output?.schema;
+      if (outputSchema) {
+        const maxRetries = flow.manifest.execution?.outputRetries ?? 2;
+        const timeoutMs = timeout * 1000;
+        let retriesLeft = maxRetries;
+        let outputValidation = validateOutput(result, outputSchema);
+
+        while (!outputValidation.valid && retriesLeft > 0) {
+          const remaining = timeoutMs - (Date.now() - startTime);
+          if (remaining < MIN_RETRY_TIME_MS) break;
+
+          const attempt = maxRetries - retriesLeft + 1;
+          await emitLog(
+            executionId,
+            "system",
+            "output_validation_retry",
+            null,
+            {
+              attempt,
+              maxRetries,
+              errors: outputValidation.errors,
+            },
+            flowId,
+          );
+
+          const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
+          const retryEnvVars: Record<string, string> = { FLOW_PROMPT: retryPrompt };
+          if (envVars.LLM_MODEL) retryEnvVars.LLM_MODEL = envVars.LLM_MODEL;
+
+          try {
+            for await (const msg of adapter.execute(
+              executionId,
+              retryEnvVars,
+              flow.path,
+              Math.min(60, Math.floor(remaining / 1000)),
+              outputSchema,
+            )) {
+              if (msg.type === "progress") {
+                await emitLog(
+                  executionId,
+                  "progress",
+                  "progress",
+                  msg.message ?? null,
+                  null,
+                  flowId,
+                );
+              } else if (msg.type === "result" && msg.data) {
+                result = msg.data;
+              }
+            }
+          } catch (err) {
+            if (err instanceof TimeoutError) break;
+            throw err;
+          }
+
+          retriesLeft--;
+          outputValidation = validateOutput(result, outputSchema);
+        }
+
+        if (!outputValidation.valid) {
+          await emitLog(
+            executionId,
+            "system",
+            "output_validation",
+            null,
+            {
+              valid: false,
+              errors: outputValidation.errors,
+            },
+            flowId,
+          );
+          console.warn(
+            `[execution] Output validation failed for ${executionId}:`,
+            outputValidation.errors,
+          );
+        }
+      }
+
       const duration = Date.now() - startTime;
       await updateExecution(executionId, {
         status: "success",
@@ -307,18 +395,18 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
 
     // Validate config
     const config = await getFlowConfig(flowId);
-    const schema = flow.manifest.config?.schema ?? {};
-    for (const [key, field] of Object.entries(schema)) {
-      if (field.required && (config[key] === undefined || config[key] === null)) {
-        return c.json(
-          {
-            error: "CONFIG_INCOMPLETE",
-            message: `Le paramètre '${key}' est requis`,
-            configUrl: `/api/flows/${flowId}/config`,
-          },
-          400,
-        );
-      }
+    const configSchema = flow.manifest.config?.schema ?? {};
+    const configValidation = validateConfig(config, configSchema);
+    if (!configValidation.valid) {
+      const first = configValidation.errors[0]!;
+      return c.json(
+        {
+          error: "CONFIG_INCOMPLETE",
+          message: `Le paramètre '${first.field}' est requis`,
+          configUrl: `/api/flows/${flowId}/config`,
+        },
+        400,
+      );
     }
 
     let body: { input?: Record<string, unknown>; stream?: boolean };
@@ -331,12 +419,10 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     // Validate required input fields
     const inputSchema = flow.manifest.input?.schema;
     if (inputSchema) {
-      const inputError = validateRequiredInput(body.input, inputSchema);
-      if (inputError) {
-        return c.json(
-          { error: "INPUT_REQUIRED", message: inputError.message, field: inputError.field },
-          400,
-        );
+      const inputValidation = validateInput(body.input, inputSchema);
+      if (!inputValidation.valid) {
+        const first = inputValidation.errors[0]!;
+        return c.json({ error: "INPUT_REQUIRED", message: first.message, field: first.field }, 400);
       }
     }
 

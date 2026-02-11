@@ -3,8 +3,11 @@ export type {
   ExecutionStatus,
   Execution,
   ExecutionLog,
+  FlowFieldType,
+  FlowFieldBase,
   FlowConfigField,
   FlowInputField,
+  FlowOutputField,
   ServiceStatus,
   FlowListItem,
   FlowDetail,
@@ -20,6 +23,7 @@ export interface FlowManifest {
   metadata: FlowMetadata;
   requires: FlowRequirements;
   input?: FlowInputSpec;
+  output?: FlowOutputSpec;
   state?: FlowStateSpec;
   config?: FlowConfigSpec;
   execution?: FlowExecutionSpec;
@@ -56,6 +60,10 @@ export interface FlowInputSpec {
   schema: Record<string, import("@appstrate/shared-types").FlowInputField>;
 }
 
+export interface FlowOutputSpec {
+  schema: Record<string, import("@appstrate/shared-types").FlowOutputField>;
+}
+
 export interface FlowStateSpec {
   enabled: boolean;
   schema: Record<string, { type: string; format?: string }>;
@@ -68,6 +76,7 @@ export interface FlowConfigSpec {
 export interface FlowExecutionSpec {
   timeout?: number;
   maxTokens?: number;
+  outputRetries?: number;
 }
 
 // --- Loaded Flow (manifest + prompt + path) ---

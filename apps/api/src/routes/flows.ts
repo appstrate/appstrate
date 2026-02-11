@@ -10,6 +10,7 @@ import {
   getRunningExecutionsForFlow,
 } from "../services/state.ts";
 import { getConnectionStatus } from "../services/nango.ts";
+import { validateConfig } from "../services/schema.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
@@ -95,6 +96,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
         skills: flow.skills,
       },
       ...(m.input ? { input: { schema: m.input.schema } } : {}),
+      ...(m.output ? { output: { schema: m.output.schema } } : {}),
       config: {
         schema: m.config?.schema ?? {},
         current: configWithDefaults,
@@ -124,23 +126,15 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     const body = await c.req.json<Record<string, unknown>>();
     const schema = flow.manifest.config?.schema ?? {};
 
-    // Validate required fields
-    const errors: { field: string; error: string }[] = [];
-    for (const [key, field] of Object.entries(schema)) {
-      if (field.required && (body[key] === undefined || body[key] === null)) {
-        errors.push({ field: key, error: "Champ obligatoire manquant" });
-      }
-      if (body[key] !== undefined && field.enum && !field.enum.includes(body[key])) {
-        errors.push({
-          field: key,
-          error: `Valeur invalide. Valeurs acceptées : ${field.enum.join(", ")}`,
-        });
-      }
-    }
-
-    if (errors.length > 0) {
+    // Validate config with Zod
+    const validation = validateConfig(body, schema);
+    if (!validation.valid) {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "Configuration invalide", details: errors },
+        {
+          error: "VALIDATION_ERROR",
+          message: "Configuration invalide",
+          details: validation.errors.map((e) => ({ field: e.field, error: e.message })),
+        },
         400,
       );
     }

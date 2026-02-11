@@ -1,3 +1,4 @@
+import type { FlowOutputField } from "@appstrate/shared-types";
 import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
 import {
   createClaudeCodeContainer,
@@ -14,8 +15,9 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     envVars: Record<string, string>,
     flowPath: string,
     timeout: number,
+    outputSchema?: Record<string, FlowOutputField>,
   ): AsyncGenerator<ExecutionMessage> {
-    const prompt = buildEnrichedPrompt(envVars);
+    const prompt = buildEnrichedPrompt(envVars, outputSchema);
     const model = envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
 
     // Auth via CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, uses Claude subscription)
@@ -93,7 +95,10 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
   }
 }
 
-function buildEnrichedPrompt(envVars: Record<string, string>): string {
+function buildEnrichedPrompt(
+  envVars: Record<string, string>,
+  outputSchema?: Record<string, FlowOutputField>,
+): string {
   const flowPrompt = envVars.FLOW_PROMPT || "";
 
   const tokenEntries = Object.entries(envVars).filter(([k]) => k.startsWith("TOKEN_"));
@@ -165,24 +170,45 @@ function buildEnrichedPrompt(envVars: Record<string, string>): string {
   sections.push(
     "When you have completed the task, output your final result as a JSON object inside a ```json code block.",
   );
-  sections.push("The JSON must contain at minimum a `summary` field (string).");
+
+  if (outputSchema && Object.keys(outputSchema).length > 0) {
+    sections.push("\nThe JSON must include the following fields:");
+    const example: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(outputSchema)) {
+      const req = field.required ? "required" : "optional";
+      sections.push(`- **${key}** (${field.type}, ${req}): ${field.description}`);
+      // Build example value based on type
+      if (field.type === "string") example[key] = "...";
+      else if (field.type === "number") example[key] = 0;
+      else if (field.type === "boolean") example[key] = false;
+      else if (field.type === "array") example[key] = [];
+      else if (field.type === "object") example[key] = {};
+    }
+    sections.push("\nExample:");
+    sections.push("```json");
+    sections.push(JSON.stringify(example, null, 2));
+    sections.push("```");
+  } else {
+    sections.push("The JSON must contain at minimum a `summary` field (string).");
+    sections.push("Example:");
+    sections.push("```json");
+    sections.push(
+      JSON.stringify(
+        {
+          summary: "Processed 5 emails, created 3 tickets",
+          tickets_created: [],
+          state: { last_run: "2025-01-01T00:00:00Z" },
+        },
+        null,
+        2,
+      ),
+    );
+    sections.push("```");
+  }
+
   sections.push(
-    "If you need to update persistent state for the next run, include a `state` object.",
+    "\nIf you need to update persistent state for the next run, include a `state` object.\n",
   );
-  sections.push("Example:");
-  sections.push("```json");
-  sections.push(
-    JSON.stringify(
-      {
-        summary: "Processed 5 emails, created 3 tickets",
-        tickets_created: [],
-        state: { last_run: "2025-01-01T00:00:00Z" },
-      },
-      null,
-      2,
-    ),
-  );
-  sections.push("```\n");
 
   const preamble = sections.length > 0 ? sections.join("\n") + "\n---\n\n" : "";
   return preamble + flowPrompt;
@@ -244,6 +270,44 @@ function extractJsonResult(text: string): Record<string, unknown> | null {
     }
   }
   return null;
+}
+
+export function buildRetryPrompt(
+  badResult: Record<string, unknown>,
+  validationErrors: string[],
+  outputSchema: Record<string, FlowOutputField>,
+): string {
+  const lines: string[] = [];
+
+  lines.push("# Output Correction Required\n");
+  lines.push(
+    "Your previous output did not match the required schema. Fix the JSON and return ONLY a corrected ```json block.\n",
+  );
+
+  lines.push("## Your Previous Output\n");
+  lines.push("```json");
+  lines.push(JSON.stringify(badResult, null, 2));
+  lines.push("```\n");
+
+  lines.push("## Validation Errors\n");
+  for (const err of validationErrors) {
+    lines.push(`- ${err}`);
+  }
+  lines.push("");
+
+  lines.push("## Expected Schema\n");
+  for (const [key, field] of Object.entries(outputSchema)) {
+    const req = field.required ? "required" : "optional";
+    lines.push(`- **${key}** (${field.type}, ${req}): ${field.description}`);
+  }
+  lines.push("");
+
+  lines.push("## Instructions\n");
+  lines.push(
+    "Return ONLY a single ```json code block with the corrected JSON. Do not include any explanation or commentary.",
+  );
+
+  return lines.join("\n");
 }
 
 export class TimeoutError extends Error {
