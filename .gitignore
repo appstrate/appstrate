@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Local setup scripts (contain OAuth credentials)
 scripts/setup-nango.ts
+
+# Runtime data (materialized user flows)
+data/

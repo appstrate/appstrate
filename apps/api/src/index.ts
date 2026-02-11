@@ -9,6 +9,7 @@ import sql from "./db/client.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
+import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import authRouter from "./routes/auth.ts";
 import * as ws from "./ws.ts";
 
@@ -109,10 +110,12 @@ process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
 // Routes
+const userFlowsRouter = createUserFlowsRouter({ flows });
 const flowsRouter = createFlowsRouter(flows);
 const executionsRouter = createExecutionsRouter(flows);
 const schedulesRouter = createSchedulesRouter(flows);
 
+app.route("/api/flows", userFlowsRouter);  // Must be before flowsRouter (import/delete routes)
 app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);

@@ -2,7 +2,10 @@
   "name": "appstrate",
   "private": true,
   "packageManager": "bun@1.3.9",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
@@ -12,6 +15,7 @@
     "format:check": "turbo format:check",
     "check": "turbo check",
     "setup-db": "bun scripts/setup-db.ts",
+    "setup-nango": "bun scripts/setup-nango.ts",
     "build-runtime": "docker build -t appstrate-claude-code ./runtime-claude-code"
   },
   "devDependencies": {

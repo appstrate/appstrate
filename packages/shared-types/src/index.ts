@@ -65,6 +65,7 @@ export interface FlowListItem {
   author: string;
   tags: string[];
   runningExecutions: number;
+  source: "built-in" | "user";
 }
 
 export interface FlowDetail {
@@ -73,6 +74,7 @@ export interface FlowDetail {
   description: string;
   version: string;
   author: string;
+  source: "built-in" | "user";
   requires: {
     services: ServiceStatus[];
     tools: { id: string; type: string; status: string }[];
@@ -89,6 +91,7 @@ export interface FlowDetail {
     current: Record<string, unknown>;
   };
   state: Record<string, unknown>;
+  runningExecutions: number;
   lastExecution: Partial<Execution> | null;
 }
 

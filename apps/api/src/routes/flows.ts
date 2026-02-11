@@ -32,6 +32,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
         skills: f.skills.map((s) => s.id),
       },
       runningExecutions: runningCounts[f.id] ?? 0,
+      source: f.source,
     }));
 
     return c.json({ flows: flowList });
@@ -90,6 +91,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       description: m.metadata.description,
       version: m.version,
       author: m.metadata.author,
+      source: flow.source,
       requires: {
         services: serviceStatuses,
         tools: toolStatuses,

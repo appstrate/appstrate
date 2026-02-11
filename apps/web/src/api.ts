@@ -24,3 +24,16 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   return apiFetch<T>(`${API_BASE}${path}`, options);
 }
+
+export async function uploadFormData<T = unknown>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || `API Error: ${res.status}`);
+  }
+  return res.json();
+}
