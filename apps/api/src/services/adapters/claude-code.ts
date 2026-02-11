@@ -12,7 +12,7 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
   async *execute(
     executionId: string,
     envVars: Record<string, string>,
-    _flowPath: string,
+    flowPath: string,
     timeout: number,
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(envVars);
@@ -45,7 +45,7 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     }
 
     // Create and start the container
-    const containerId = await createClaudeCodeContainer(executionId, containerEnv);
+    const containerId = await createClaudeCodeContainer(executionId, containerEnv, flowPath);
 
     yield {
       type: "progress",

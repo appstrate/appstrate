@@ -28,6 +28,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       requires: {
         services: f.manifest.requires.services.map((s) => s.id),
         tools: (f.manifest.requires.tools ?? []).map((t) => t.id),
+        skills: f.skills.map((s) => s.id),
       },
       runningExecutions: runningCounts[f.id] ?? 0,
     }));
@@ -91,6 +92,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       requires: {
         services: serviceStatuses,
         tools: toolStatuses,
+        skills: flow.skills,
       },
       ...(m.input ? { input: { schema: m.input.schema } } : {}),
       config: {

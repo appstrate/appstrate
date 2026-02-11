@@ -72,11 +72,17 @@ export interface FlowExecutionSpec {
 
 // --- Loaded Flow (manifest + prompt + path) ---
 
+export interface SkillMeta {
+  id: string;
+  description: string;
+}
+
 export interface LoadedFlow {
   id: string;
   manifest: FlowManifest;
   prompt: string;
   path: string;
+  skills: SkillMeta[];
 }
 
 // --- Database Models (backend-only) ---

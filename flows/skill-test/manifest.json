@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openflows.dev/schemas/manifest-v1.json",
+  "version": "1.0.0",
+
+  "metadata": {
+    "name": "skill-test",
+    "displayName": "Skill Discovery Test",
+    "description": "Flow de test qui demande à l'agent de lister ses skills disponibles",
+    "author": "openflows",
+    "tags": ["test", "skills"]
+  },
+
+  "requires": {
+    "services": [],
+    "tools": []
+  },
+
+  "config": {
+    "schema": {}
+  },
+
+  "execution": {
+    "timeout": 120,
+    "maxTokens": 10000
+  }
+}

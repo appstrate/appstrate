@@ -71,6 +71,7 @@ export interface FlowDetail {
   requires: {
     services: ServiceStatus[];
     tools: { id: string; type: string; status: string }[];
+    skills: { id: string; description: string }[];
   };
   input?: {
     schema: Record<string, FlowInputField>;

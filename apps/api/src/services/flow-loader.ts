@@ -1,8 +1,37 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { FlowManifest, LoadedFlow } from "../types/index.ts";
+import type { FlowManifest, LoadedFlow, SkillMeta } from "../types/index.ts";
 
 const FLOWS_DIR = join(process.cwd(), "flows");
+
+async function loadFlowSkills(flowPath: string): Promise<SkillMeta[]> {
+  const skillsDir = join(flowPath, "skills");
+  const skills: SkillMeta[] = [];
+
+  let entries: string[];
+  try {
+    entries = await readdir(skillsDir);
+  } catch {
+    return skills;
+  }
+
+  for (const entry of entries) {
+    const skillFile = Bun.file(join(skillsDir, entry, "SKILL.md"));
+    if (!(await skillFile.exists())) continue;
+
+    const content = await skillFile.text();
+    let description = "";
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const descMatch = fmMatch[1]!.match(/description:\s*(.+)/);
+      if (descMatch) description = descMatch[1]!.trim();
+    }
+
+    skills.push({ id: entry, description });
+  }
+
+  return skills;
+}
 
 export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
   const flows = new Map<string, LoadedFlow>();
@@ -45,14 +74,21 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
         continue;
       }
 
+      const skills = await loadFlowSkills(flowPath);
+
       flows.set(manifest.metadata.name, {
         id: manifest.metadata.name,
         manifest,
         prompt,
         path: flowPath,
+        skills,
       });
 
-      console.log(`Loaded flow: ${manifest.metadata.name} (${manifest.metadata.displayName})`);
+      const skillCount = skills.length;
+      const skillInfo = skillCount > 0 ? ` (${skillCount} skill${skillCount > 1 ? "s" : ""})` : "";
+      console.log(
+        `Loaded flow: ${manifest.metadata.name} (${manifest.metadata.displayName})${skillInfo}`,
+      );
     } catch (e) {
       console.warn(`Skipping ${entry}: ${e instanceof Error ? e.message : "parse error"}`);
     }
