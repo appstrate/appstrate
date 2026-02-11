@@ -97,6 +97,20 @@ export function useConnect() {
   });
 }
 
+export function useConnectApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ provider, apiKey }: { provider: string; apiKey: string }) => {
+      return apiFetch(`/auth/connect/${provider}/api-key`, {
+        method: "POST",
+        body: JSON.stringify({ apiKey }),
+      });
+    },
+    onSuccess: () => invalidateServiceRelated(qc),
+    onError: onMutationError,
+  });
+}
+
 export function useDisconnect() {
   const qc = useQueryClient();
   return useMutation({

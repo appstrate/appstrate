@@ -54,6 +54,7 @@ export interface ServiceStatus {
   provider: string;
   description: string;
   status: "connected" | "not_connected";
+  authMode?: string;
   connectUrl?: string;
 }
 
@@ -116,5 +117,6 @@ export interface Integration {
   displayName: string;
   logo?: string;
   status: "connected" | "not_connected";
+  authMode?: string;
   connectedAt?: string;
 }
