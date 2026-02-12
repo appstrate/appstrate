@@ -323,7 +323,7 @@ user_flows (id PK, manifest JSONB, prompt TEXT, skills JSONB, created_at, update
 Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `flows/email-to-tickets/manifest.json` for the reference implementation. Key sections:
 
 - **metadata**: name (kebab-case ID), displayName, description, author, tags
-- **requires.services[]**: Services needed — `{id, provider, scopes, description}` (OAuth or API key)
+- **requires.services[]**: Services needed — `{id, provider, description, scopes?}` (scopes optional, omit for API key integrations)
 - **requires.tools[]**: Platform tools — `{id, type: "static"|"custom", description}`
 - **input.schema**: Per-execution user input — `{type, description, required, default, placeholder}`
 - **output.schema**: Expected result fields — `{type, description, required}`. Enables Zod validation + retry loop.

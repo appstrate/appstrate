@@ -26,7 +26,7 @@ const outputFieldSchema = fieldBaseSchema;
 const serviceRequirementSchema = z.object({
   id: z.string(),
   provider: z.string(),
-  scopes: z.array(z.string()),
+  scopes: z.array(z.string()).optional().default([]),
   description: z.string(),
 });
 
