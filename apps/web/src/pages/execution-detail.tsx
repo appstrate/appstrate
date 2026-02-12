@@ -2,11 +2,13 @@ import { useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
+import { useRunFlow } from "../hooks/use-mutations";
 import { useWsChannel } from "../hooks/use-websocket";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
+import { InputModal } from "../components/input-modal";
 import type { ExecutionStatus } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
@@ -28,6 +30,8 @@ export function ExecutionDetailPage() {
   const { data: execution, isLoading, error } = useExecution(execId);
   const { data: logs } = useExecutionLogs(execId);
 
+  const runFlow = useRunFlow(flowId!);
+  const [inputOpen, setInputOpen] = useState(false);
   const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
   const [liveResult, setLiveResult] = useState<Record<string, unknown> | null>(null);
@@ -135,7 +139,33 @@ export function ExecutionDetailPage() {
             <Spinner /> En direct
           </span>
         )}
+        {!isRunning && flow && (
+          <button
+            className="primary"
+            onClick={() => {
+              const hasInput = flow.input?.schema && Object.keys(flow.input.schema).length > 0;
+              if (hasInput) {
+                setInputOpen(true);
+              } else {
+                runFlow.mutate(undefined);
+              }
+            }}
+            disabled={runFlow.isPending}
+          >
+            Relancer
+          </button>
+        )}
       </div>
+
+      {flow && (
+        <InputModal
+          open={inputOpen}
+          onClose={() => setInputOpen(false)}
+          flow={flow}
+          onSubmit={(input) => runFlow.mutate(input)}
+          initialValues={(execution.input as Record<string, unknown>) ?? undefined}
+        />
+      )}
 
       <div className="exec-tabs" role="tablist">
         <button
