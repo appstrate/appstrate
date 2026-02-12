@@ -8,12 +8,13 @@ interface InputModalProps {
   onClose: () => void;
   flow: FlowDetail;
   onSubmit: (input: Record<string, unknown>) => void;
+  initialValues?: Record<string, unknown>;
 }
 
-export function InputModal({ open, onClose, flow, onSubmit }: InputModalProps) {
+export function InputModal({ open, onClose, flow, onSubmit, initialValues }: InputModalProps) {
   return (
     <Modal open={open} onClose={onClose} title={`${flow.displayName} — Parametres`} actions={null}>
-      {open && <InputModalForm flow={flow} onClose={onClose} onSubmit={onSubmit} />}
+      {open && <InputModalForm flow={flow} onClose={onClose} onSubmit={onSubmit} initialValues={initialValues} />}
     </Modal>
   );
 }
@@ -22,17 +23,19 @@ function InputModalForm({
   flow,
   onClose,
   onSubmit,
+  initialValues,
 }: {
   flow: FlowDetail;
   onClose: () => void;
   onSubmit: (input: Record<string, unknown>) => void;
+  initialValues?: Record<string, unknown>;
 }) {
   const schema = flow.input?.schema || {};
 
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const [key, field] of Object.entries(schema)) {
-      initial[key] = String(field.default ?? "");
+      initial[key] = String(initialValues?.[key] ?? field.default ?? "");
     }
     return initial;
   });
