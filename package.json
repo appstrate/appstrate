@@ -14,7 +14,6 @@
     "format": "turbo format",
     "format:check": "turbo format:check",
     "check": "turbo check",
-    "setup-db": "bun scripts/setup-db.ts",
     "setup-nango": "bun scripts/setup-nango.ts",
     "build-runtime": "docker build -t appstrate-claude-code ./runtime-claude-code",
     "gen:types": "bunx supabase gen types typescript --local > packages/shared-types/src/database.ts"
