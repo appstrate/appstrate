@@ -77,7 +77,7 @@ The manifest defines everything about the flow. Follow this structure exactly:
 ```
 - `id`: Short name used in env vars. The token is injected as `TOKEN_{ID_UPPERCASED}` (hyphens become underscores: `brevo-api-key` → `TOKEN_BREVO_API_KEY`)
 - `provider`: Must match a Nango integration unique_key. Known providers: `google-mail`, `google-calendar`, `clickup`, `brevo-api-key`
-- `scopes`: OAuth scopes needed (informational for API key integrations)
+- `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
 - `description`: Shown in the UI to explain why this service is needed
 
 **requires.tools[]**: Platform tools the agent can use:
