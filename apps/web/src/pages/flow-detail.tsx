@@ -144,18 +144,6 @@ export function FlowDetailPage() {
       </div>
 
       <div className="actions">
-        {isAdmin && (
-          <>
-            <button onClick={() => setConfigOpen(true)}>Configurer</button>
-            {hasState ? (
-              <button onClick={() => setStateOpen(true)}>Etat</button>
-            ) : (
-              <button disabled title="Aucun etat persiste">
-                Etat (vide)
-              </button>
-            )}
-          </>
-        )}
         <button
           className="primary"
           onClick={handleRun}
@@ -170,27 +158,39 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
-        {isAdmin && detail.source === "user" && (
-          <button
-            className="btn-danger"
-            disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
-            title={
-              detail.runningExecutions > 0
-                ? "Impossible de supprimer pendant une execution"
-                : "Supprimer ce flow"
-            }
-            onClick={() => {
-              if (
-                confirm(
-                  `Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`,
-                )
-              ) {
-                deleteFlow.mutate(detail.id);
-              }
-            }}
-          >
-            Supprimer
-          </button>
+        {isAdmin && (
+          <div className="actions-admin">
+            <button onClick={() => setConfigOpen(true)}>Configurer</button>
+            {hasState ? (
+              <button onClick={() => setStateOpen(true)}>Etat</button>
+            ) : (
+              <button disabled title="Aucun etat persiste">
+                Etat (vide)
+              </button>
+            )}
+            {detail.source === "user" && (
+              <button
+                className="btn-danger"
+                disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
+                title={
+                  detail.runningExecutions > 0
+                    ? "Impossible de supprimer pendant une execution"
+                    : "Supprimer ce flow"
+                }
+                onClick={() => {
+                  if (
+                    confirm(
+                      `Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`,
+                    )
+                  ) {
+                    deleteFlow.mutate(detail.id);
+                  }
+                }}
+              >
+                Supprimer
+              </button>
+            )}
+          </div>
         )}
       </div>
 
