@@ -9,17 +9,19 @@ import {
 
 const router = new Hono();
 
-// GET /auth/connections — list OAuth connections
+// GET /auth/connections — list OAuth connections for current user
 router.get("/connections", async (c) => {
-  const connections = await listConnections();
+  const user = c.get("user") as { id: string };
+  const connections = await listConnections(user.id);
   return c.json({ connections });
 });
 
 // POST /auth/connect/:provider — create a connect session (returns connect_link for popup)
 router.post("/connect/:provider", async (c) => {
   const provider = c.req.param("provider");
+  const user = c.get("user") as { id: string };
   try {
-    const session = await createConnectSession(provider);
+    const session = await createConnectSession(provider, user.id);
     return c.json(session);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create connect session";
@@ -30,12 +32,13 @@ router.post("/connect/:provider", async (c) => {
 // POST /auth/connect/:provider/api-key — create an API key connection
 router.post("/connect/:provider/api-key", async (c) => {
   const provider = c.req.param("provider");
+  const user = c.get("user") as { id: string };
   try {
     const body = await c.req.json<{ apiKey?: string }>();
     if (!body.apiKey || !body.apiKey.trim()) {
       return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
     }
-    await createApiKeyConnection(provider, body.apiKey.trim());
+    await createApiKeyConnection(provider, body.apiKey.trim(), user.id);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create API key connection";
@@ -43,17 +46,19 @@ router.post("/connect/:provider/api-key", async (c) => {
   }
 });
 
-// GET /auth/integrations — list all integrations with connection status
+// GET /auth/integrations — list all integrations with connection status for current user
 router.get("/integrations", async (c) => {
-  const integrations = await getIntegrationsWithStatus();
+  const user = c.get("user") as { id: string };
+  const integrations = await getIntegrationsWithStatus(user.id);
   return c.json({ integrations });
 });
 
-// DELETE /auth/connections/:provider — disconnect a service
+// DELETE /auth/connections/:provider — disconnect a service for current user
 router.delete("/connections/:provider", async (c) => {
   const provider = c.req.param("provider");
+  const user = c.get("user") as { id: string };
   try {
-    await deleteConnection(provider);
+    await deleteConnection(provider, user.id);
     return c.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete connection";

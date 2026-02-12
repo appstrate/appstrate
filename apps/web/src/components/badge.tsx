@@ -1,4 +1,3 @@
-import type { ExecutionStatus } from "@appstrate/shared-types";
 import { Spinner } from "./spinner";
 
 const badgeClassMap: Record<string, string> = {
@@ -9,7 +8,7 @@ const badgeClassMap: Record<string, string> = {
   timeout: "badge-timeout",
 };
 
-export function Badge({ status }: { status: ExecutionStatus }) {
+export function Badge({ status }: { status: string }) {
   const cls = badgeClassMap[status] || "badge-pending";
   const isRunning = status === "running" || status === "pending";
   return (

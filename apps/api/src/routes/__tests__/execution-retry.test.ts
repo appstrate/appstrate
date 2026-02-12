@@ -24,22 +24,10 @@ mock.module("../../services/state.ts", () => ({
   updateExecution: mock(async (id: string, upd: Record<string, unknown>) => {
     updates.push({ id, updates: upd });
   }),
-  getExecution: mock(async () => null),
   setFlowState: mock(async () => {}),
   getFlowConfig: mock(async () => ({})),
   getFlowState: mock(async () => ({})),
   createExecution: mock(async () => {}),
-  getExecutionsByFlow: mock(async () => []),
-  getExecutionLogs: mock(async () => []),
-}));
-
-mock.module("../../ws.ts", () => ({
-  broadcast: mock(() => {}),
-  addConnection: mock(() => ""),
-  removeConnection: mock(() => {}),
-  subscribe: mock(() => {}),
-  unsubscribe: mock(() => {}),
-  send: mock(() => {}),
 }));
 
 mock.module("../../services/nango.ts", () => ({
@@ -144,7 +132,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([result]);
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-1", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-1", "test-flow", "user-1", flow, {}, {});
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -156,7 +144,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([result]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground("exec-2", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-2", "test-flow", "user-1", flow, {}, {});
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -170,7 +158,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, goodResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground("exec-3", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-3", "test-flow", "user-1", flow, {}, {});
 
     expect(adapterCallCount).toBe(2);
     expect(findLogs("output_validation_retry")).toHaveLength(1);
@@ -184,7 +172,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, badResult, badResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 2 });
-    await executeFlowInBackground("exec-4", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-4", "test-flow", "user-1", flow, {}, {});
 
     // 1 initial + 2 retries = 3 calls
     expect(adapterCallCount).toBe(3);
@@ -202,7 +190,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 0 });
-    await executeFlowInBackground("exec-5", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-5", "test-flow", "user-1", flow, {}, {});
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -216,7 +204,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, "timeout"]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 3 });
-    await executeFlowInBackground("exec-6", "test-flow", flow, {}, {});
+    await executeFlowInBackground("exec-6", "test-flow", "user-1", flow, {}, {});
 
     // 1 initial + 1 retry that timed out = 2 calls
     expect(adapterCallCount).toBe(2);

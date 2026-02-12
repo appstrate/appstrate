@@ -14,7 +14,14 @@ interface InputModalProps {
 export function InputModal({ open, onClose, flow, onSubmit, initialValues }: InputModalProps) {
   return (
     <Modal open={open} onClose={onClose} title={`${flow.displayName} — Parametres`} actions={null}>
-      {open && <InputModalForm flow={flow} onClose={onClose} onSubmit={onSubmit} initialValues={initialValues} />}
+      {open && (
+        <InputModalForm
+          flow={flow}
+          onClose={onClose}
+          onSubmit={onSubmit}
+          initialValues={initialValues}
+        />
+      )}
     </Modal>
   );
 }

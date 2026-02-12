@@ -132,6 +132,16 @@ function buildEnrichedPrompt(
         sections.push(
           `  Create task: \`curl -s -X POST -H "Authorization: Bearer $${key}" -H "Content-Type: application/json" -d '{"name":"...","description":"..."}' "https://api.clickup.com/api/v2/list/{list_id}/task"\``,
         );
+      } else if (svcName === "facebook") {
+        sections.push(
+          `  List Pages: \`curl -s -H "Authorization: Bearer $${key}" "https://graph.facebook.com/v21.0/me/accounts"\``,
+        );
+        sections.push(
+          `  Post to Page: \`curl -s -X POST "https://graph.facebook.com/v21.0/{page_id}/feed" -H "Content-Type: application/json" -d '{"message":"...","access_token":"PAGE_ACCESS_TOKEN"}'\``,
+        );
+        sections.push(
+          `  Note: Use the Page Access Token from /me/accounts (not $${key}) when posting to a Page.`,
+        );
       }
     }
     sections.push("");

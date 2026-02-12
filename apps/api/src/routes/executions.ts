@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
 import type { LoadedFlow } from "../types/index.ts";
 import {
   getFlowConfig,
@@ -7,135 +6,22 @@ import {
   setFlowState,
   createExecution,
   updateExecution,
-  getExecution,
-  getExecutionsByFlow,
   appendExecutionLog,
-  getExecutionLogs,
 } from "../services/state.ts";
-import { getConnectionStatus, getAccessToken } from "../services/nango.ts";
+import { listConnections, getAccessToken } from "../services/nango.ts";
 import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
 import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
-import { broadcast } from "../ws.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
 import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
 
-// --- In-memory pub/sub for live log streaming ---
-
-type LogEntry = { id: number; event: string; data: unknown };
-type LogCallback = (log: LogEntry) => void;
-const liveSubscribers = new Map<string, Set<LogCallback>>();
-
-function subscribe(executionId: string, cb: LogCallback): () => void {
-  if (!liveSubscribers.has(executionId)) {
-    liveSubscribers.set(executionId, new Set());
-  }
-  liveSubscribers.get(executionId)!.add(cb);
-  return () => {
-    const subs = liveSubscribers.get(executionId);
-    if (subs) {
-      subs.delete(cb);
-      if (subs.size === 0) liveSubscribers.delete(executionId);
-    }
-  };
-}
-
-function notifySubscribers(executionId: string, log: LogEntry) {
-  const subs = liveSubscribers.get(executionId);
-  if (subs) {
-    for (const cb of subs) cb(log);
-  }
-}
-
-// --- Persist a log entry and broadcast to subscribers ---
-
-async function emitLog(
-  executionId: string,
-  type: string,
-  event: string,
-  message: string | null,
-  data: Record<string, unknown> | null,
-  flowId?: string,
-) {
-  const id = await appendExecutionLog(executionId, type, event, message, data);
-  notifySubscribers(executionId, { id, event, data: data ?? (message ? { message } : {}) });
-
-  // Broadcast via WebSocket
-  broadcast(`execution:${executionId}`, {
-    type: "log",
-    executionId,
-    event,
-    data: data ?? (message ? { message } : {}),
-  });
-
-  if (flowId && (event === "execution_started" || event === "execution_completed")) {
-    const stateMsg = { type: event, flowId, executionId, ...(data || {}) };
-    broadcast(`flow:${flowId}`, stateMsg);
-    broadcast("flows", stateMsg);
-  }
-
-  // Clean up in-memory subscribers when execution finishes
-  if (event === "execution_completed") {
-    liveSubscribers.delete(executionId);
-  }
-}
-
-// --- Shared SSE streaming logic ---
-
-async function streamLogsToSSE(
-  stream: {
-    writeSSE: (data: { event: string; data: string }) => Promise<void>;
-    sleep: (ms: number) => Promise<void>;
-  },
-  executionId: string,
-  initialDelayMs: number = 0,
-) {
-  if (initialDelayMs > 0) await stream.sleep(initialDelayMs);
-
-  // Replay existing logs from DB
-  const existingLogs = await getExecutionLogs(executionId);
-  for (const log of existingLogs) {
-    await stream.writeSSE({
-      event: log.event ?? "progress",
-      data: JSON.stringify(log.data ?? { message: log.message }),
-    });
-  }
-
-  // Check if already finished
-  const exec = await getExecution(executionId);
-  if (exec && ["success", "failed", "timeout"].includes(exec.status as string)) return;
-
-  // Subscribe to live updates
-  let closed = false;
-  const unsubscribe = subscribe(executionId, async (log) => {
-    if (closed) return;
-    try {
-      await stream.writeSSE({ event: log.event, data: JSON.stringify(log.data) });
-      if (log.event === "execution_completed") closed = true;
-    } catch {
-      closed = true;
-    }
-  });
-
-  // Safety timeout: close SSE after 10 minutes to prevent zombie connections
-  const maxDuration = 10 * 60 * 1000;
-  const deadline = Date.now() + maxDuration;
-
-  while (!closed && Date.now() < deadline) {
-    await stream.sleep(2000);
-    const current = await getExecution(executionId);
-    if (current && ["success", "failed", "timeout"].includes(current.status as string)) break;
-  }
-
-  unsubscribe();
-}
-
 const MIN_RETRY_TIME_MS = 5_000;
 
-// --- Background execution (decoupled from SSE) ---
+// --- Background execution (decoupled from client) ---
 
 export async function executeFlowInBackground(
   executionId: string,
   flowId: string,
+  userId: string,
   flow: LoadedFlow,
   envVars: Record<string, string>,
   tokens: Record<string, string>,
@@ -144,24 +30,19 @@ export async function executeFlowInBackground(
 
   try {
     // Emit execution_started
-    await emitLog(
+    await appendExecutionLog(executionId, "system", "execution_started", null, {
       executionId,
-      "system",
-      "execution_started",
-      null,
-      {
-        executionId,
-        startedAt: new Date().toISOString(),
-      },
-      flowId,
-    );
+      startedAt: new Date().toISOString(),
+    });
 
     // Check dependencies
     const depCheck: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       depCheck[svc.id] = tokens[svc.id] ? "ok" : "missing";
     }
-    await emitLog(executionId, "system", "dependency_check", null, { services: depCheck }, flowId);
+    await appendExecutionLog(executionId, "system", "dependency_check", null, {
+      services: depCheck,
+    });
 
     // Update status to running
     await updateExecution(executionId, { status: "running" });
@@ -169,7 +50,9 @@ export async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
     const adapterName = getAdapterName();
-    await emitLog(executionId, "system", "adapter_started", null, { adapter: adapterName }, flowId);
+    await appendExecutionLog(executionId, "system", "adapter_started", null, {
+      adapter: adapterName,
+    });
 
     const timeout = flow.manifest.execution?.timeout ?? 300;
     let result: Record<string, unknown> | null = null;
@@ -183,7 +66,7 @@ export async function executeFlowInBackground(
         flow.manifest.output?.schema,
       )) {
         if (msg.type === "progress") {
-          await emitLog(executionId, "progress", "progress", msg.message ?? null, null, flowId);
+          await appendExecutionLog(executionId, "progress", "progress", msg.message ?? null, null);
         } else if (msg.type === "result") {
           result = msg.data ?? null;
         }
@@ -197,17 +80,10 @@ export async function executeFlowInBackground(
           completed_at: new Date().toISOString(),
           duration,
         });
-        await emitLog(
+        await appendExecutionLog(executionId, "error", "execution_completed", null, {
           executionId,
-          "error",
-          "execution_completed",
-          null,
-          {
-            executionId,
-            status: "timeout",
-          },
-          flowId,
-        );
+          status: "timeout",
+        });
         return;
       }
       throw err;
@@ -227,18 +103,11 @@ export async function executeFlowInBackground(
           if (remaining < MIN_RETRY_TIME_MS) break;
 
           const attempt = maxRetries - retriesLeft + 1;
-          await emitLog(
-            executionId,
-            "system",
-            "output_validation_retry",
-            null,
-            {
-              attempt,
-              maxRetries,
-              errors: outputValidation.errors,
-            },
-            flowId,
-          );
+          await appendExecutionLog(executionId, "system", "output_validation_retry", null, {
+            attempt,
+            maxRetries,
+            errors: outputValidation.errors,
+          });
 
           const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
           const retryEnvVars: Record<string, string> = { FLOW_PROMPT: retryPrompt };
@@ -253,13 +122,12 @@ export async function executeFlowInBackground(
               outputSchema,
             )) {
               if (msg.type === "progress") {
-                await emitLog(
+                await appendExecutionLog(
                   executionId,
                   "progress",
                   "progress",
                   msg.message ?? null,
                   null,
-                  flowId,
                 );
               } else if (msg.type === "result" && msg.data) {
                 result = msg.data;
@@ -275,17 +143,10 @@ export async function executeFlowInBackground(
         }
 
         if (!outputValidation.valid) {
-          await emitLog(
-            executionId,
-            "system",
-            "output_validation",
-            null,
-            {
-              valid: false,
-              errors: outputValidation.errors,
-            },
-            flowId,
-          );
+          await appendExecutionLog(executionId, "system", "output_validation", null, {
+            valid: false,
+            errors: outputValidation.errors,
+          });
           console.warn(
             `[execution] Output validation failed for ${executionId}:`,
             outputValidation.errors,
@@ -299,26 +160,19 @@ export async function executeFlowInBackground(
         result,
         completed_at: new Date().toISOString(),
         duration,
-        tokens_used: (result as Record<string, unknown>).tokensUsed as number | undefined,
+        tokens_used: typeof result.tokensUsed === "number" ? result.tokensUsed : undefined,
       });
 
       // Update flow state if result includes state
       if (result.state && typeof result.state === "object") {
-        await setFlowState(flowId, result.state as Record<string, unknown>);
+        await setFlowState(userId, flowId, result.state as Record<string, unknown>);
       }
 
-      await emitLog(executionId, "result", "result", null, result, flowId);
-      await emitLog(
+      await appendExecutionLog(executionId, "result", "result", null, result);
+      await appendExecutionLog(executionId, "system", "execution_completed", null, {
         executionId,
-        "system",
-        "execution_completed",
-        null,
-        {
-          executionId,
-          status: "success",
-        },
-        flowId,
-      );
+        status: "success",
+      });
     } else {
       const duration = Date.now() - startTime;
       await updateExecution(executionId, {
@@ -327,18 +181,11 @@ export async function executeFlowInBackground(
         completed_at: new Date().toISOString(),
         duration,
       });
-      await emitLog(
+      await appendExecutionLog(executionId, "error", "execution_completed", null, {
         executionId,
-        "error",
-        "execution_completed",
-        null,
-        {
-          executionId,
-          status: "failed",
-          error: "No result returned from adapter",
-        },
-        flowId,
-      );
+        status: "failed",
+        error: "No result returned from adapter",
+      });
     }
   } catch (err) {
     const duration = Date.now() - startTime;
@@ -349,18 +196,11 @@ export async function executeFlowInBackground(
       completed_at: new Date().toISOString(),
       duration,
     });
-    await emitLog(
+    await appendExecutionLog(executionId, "error", "execution_completed", null, {
       executionId,
-      "error",
-      "execution_completed",
-      null,
-      {
-        executionId,
-        status: "failed",
-        error: errorMessage,
-      },
-      flowId,
-    );
+      status: "failed",
+      error: errorMessage,
+    });
   }
 }
 
@@ -369,23 +209,25 @@ export async function executeFlowInBackground(
 export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
 
-  // POST /api/flows/:id/run — execute a flow (concurrent, fire-and-forget)
+  // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
   router.post("/flows/:id/run", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
+    const user = c.get("user") as { id: string };
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
     }
 
-    // Validate service dependencies
+    // Validate service dependencies (single Nango call for all services)
+    const connections = await listConnections(user.id);
+    const connectedProviders = new Set(connections.map((c) => c.provider));
     for (const svc of flow.manifest.requires.services) {
-      const conn = await getConnectionStatus(svc.provider);
-      if (conn.status !== "connected") {
+      if (!connectedProviders.has(svc.provider)) {
         return c.json(
           {
             error: "DEPENDENCY_NOT_SATISFIED",
-            message: `Le service '${svc.id}' n'est pas connecté`,
+            message: `Le service '${svc.id}' n'est pas connecte`,
             connectUrl: `/auth/connect/${svc.provider}`,
           },
           400,
@@ -402,16 +244,16 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       return c.json(
         {
           error: "CONFIG_INCOMPLETE",
-          message: `Le paramètre '${first.field}' est requis`,
+          message: `Le parametre '${first.field}' est requis`,
           configUrl: `/api/flows/${flowId}/config`,
         },
         400,
       );
     }
 
-    let body: { input?: Record<string, unknown>; stream?: boolean };
+    let body: { input?: Record<string, unknown> };
     try {
-      body = await c.req.json<{ input?: Record<string, unknown>; stream?: boolean }>();
+      body = await c.req.json<{ input?: Record<string, unknown> }>();
     } catch {
       body = {};
     }
@@ -429,10 +271,10 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     const executionId = `exec_${crypto.randomUUID()}`;
 
     // Get state and tokens
-    const state = await getFlowState(flowId);
+    const state = await getFlowState(user.id, flowId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
-      const token = await getAccessToken(svc.provider);
+      const token = await getAccessToken(svc.provider, user.id);
       if (token) tokens[svc.id] = token;
     }
 
@@ -452,88 +294,14 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
     });
 
     // Create execution record
-    await createExecution(executionId, flowId, body.input ?? null);
+    await createExecution(executionId, flowId, user.id, body.input ?? null);
 
-    // Fire-and-forget background execution (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, flow, envVars, tokens).catch((err) => {
+    // Fire-and-forget background execution
+    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens).catch((err) => {
       console.error(`[execution] Unhandled error in background execution ${executionId}:`, err);
     });
 
-    // stream: false → return JSON with executionId
-    if (body.stream === false) {
-      return c.json({ executionId });
-    }
-
-    // Default: return SSE stream that subscribes to logs (replay + live)
-    return streamSSE(c, async (stream) => {
-      try {
-        await streamLogsToSSE(stream, executionId, 50);
-      } catch {
-        // Client disconnected — execution continues in background
-      }
-    });
-  });
-
-  // GET /api/flows/:id/executions — list past executions
-  router.get("/flows/:id/executions", async (c) => {
-    const flowId = c.req.param("id");
-    const limit = Math.min(Number(c.req.query("limit")) || 50, 100);
-    const flow = flows.get(flowId);
-    if (!flow) return c.json({ error: "FLOW_NOT_FOUND" }, 404);
-    const executions = await getExecutionsByFlow(flowId, limit);
-    return c.json({ flowId, executions });
-  });
-
-  // GET /api/executions/:id/logs — get persisted logs for an execution
-  router.get("/executions/:id/logs", async (c) => {
-    const executionId = c.req.param("id");
-    const after = c.req.query("after") ? Number(c.req.query("after")) : undefined;
-    const limit = Math.min(Number(c.req.query("limit")) || 1000, 5000);
-
-    const execution = await getExecution(executionId);
-    if (!execution) {
-      return c.json({ error: "NOT_FOUND", message: `Execution '${executionId}' not found` }, 404);
-    }
-
-    const logs = await getExecutionLogs(executionId, after, limit);
-    const hasMore = logs.length === limit;
-
-    return c.json({
-      executionId,
-      status: execution.status,
-      logs,
-      hasMore,
-    });
-  });
-
-  // GET /api/executions/:id/stream — SSE stream (replay + live)
-  router.get("/executions/:id/stream", async (c) => {
-    const executionId = c.req.param("id");
-
-    const execution = await getExecution(executionId);
-    if (!execution) {
-      return c.json({ error: "NOT_FOUND", message: `Execution '${executionId}' not found` }, 404);
-    }
-
-    return streamSSE(c, async (stream) => {
-      try {
-        await streamLogsToSSE(stream, executionId);
-      } catch {
-        // Client disconnected
-      }
-    });
-  });
-
-  // GET /api/executions/:id — get execution status
-  router.get("/executions/:id", async (c) => {
-    const executionId = c.req.param("id");
-    const execution = await getExecution(executionId);
-
-    if (!execution) {
-      return c.json({ error: "NOT_FOUND", message: `Execution '${executionId}' not found` }, 404);
-    }
-
-    return c.json(execution);
+    return c.json({ executionId });
   });
 
   return router;

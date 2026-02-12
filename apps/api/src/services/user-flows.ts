@@ -1,27 +1,24 @@
-import sql from "../db/client.ts";
+import { supabase } from "../lib/supabase.ts";
+import type { Tables, Json } from "@appstrate/shared-types";
 
-export interface UserFlowRow {
-  id: string;
-  manifest: Record<string, unknown>;
-  prompt: string;
-  skills: { id: string; description: string; content: string }[];
-  created_at: string;
-  updated_at: string;
-}
+export type UserFlowRow = Tables<"user_flows">;
 
 export async function listUserFlows(): Promise<UserFlowRow[]> {
-  const rows = await sql`SELECT * FROM user_flows ORDER BY created_at DESC`;
-  return rows as unknown as UserFlowRow[];
+  const { data } = await supabase
+    .from("user_flows")
+    .select("*")
+    .order("created_at", { ascending: false });
+  return data ?? [];
 }
 
 export async function getUserFlow(id: string): Promise<UserFlowRow | null> {
-  const rows = await sql`SELECT * FROM user_flows WHERE id = ${id}`;
-  return (rows[0] as unknown as UserFlowRow) ?? null;
+  const { data } = await supabase.from("user_flows").select("*").eq("id", id).single();
+  return data ?? null;
 }
 
 export async function userFlowExists(id: string): Promise<boolean> {
-  const rows = await sql`SELECT 1 FROM user_flows WHERE id = ${id} LIMIT 1`;
-  return rows.length > 0;
+  const { data } = await supabase.from("user_flows").select("id").eq("id", id).limit(1).single();
+  return !!data;
 }
 
 export async function insertUserFlow(
@@ -30,18 +27,16 @@ export async function insertUserFlow(
   prompt: string,
   skills: { id: string; description: string; content: string }[],
 ): Promise<void> {
-  await sql`
-    INSERT INTO user_flows (id, manifest, prompt, skills)
-    VALUES (${id}, ${sql.json(manifest)}, ${prompt}, ${sql.json(skills)})
-  `;
+  await supabase
+    .from("user_flows")
+    .insert({ id, manifest: manifest as Json, prompt, skills: skills as unknown as Json });
 }
 
 export async function deleteUserFlow(id: string): Promise<void> {
-  // Clean up related tables first
-  await sql`DELETE FROM execution_logs WHERE execution_id IN (SELECT id FROM executions WHERE flow_id = ${id})`;
-  await sql`DELETE FROM executions WHERE flow_id = ${id}`;
-  await sql`DELETE FROM flow_schedules WHERE flow_id = ${id}`;
-  await sql`DELETE FROM flow_configs WHERE flow_id = ${id}`;
-  await sql`DELETE FROM flow_state WHERE flow_id = ${id}`;
-  await sql`DELETE FROM user_flows WHERE id = ${id}`;
+  // execution_logs cascade-deleted via executions FK
+  await supabase.from("executions").delete().eq("flow_id", id);
+  await supabase.from("flow_schedules").delete().eq("flow_id", id);
+  await supabase.from("flow_configs").delete().eq("flow_id", id);
+  await supabase.from("flow_state").delete().eq("flow_id", id);
+  await supabase.from("user_flows").delete().eq("id", id);
 }

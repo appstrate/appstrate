@@ -14,7 +14,7 @@ export function ScheduleRow({ schedule, onClick, showFlowId }: ScheduleRowProps)
       <span className="schedule-cron">{schedule.cron_expression}</span>
       {schedule.name && <span className="schedule-name">{schedule.name}</span>}
       {showFlowId && <span className="schedule-flow-id">{schedule.flow_id}</span>}
-      <span className="schedule-tz">{schedule.timezone}</span>
+      <span className="schedule-tz">{schedule.timezone ?? "UTC"}</span>
       {schedule.next_run_at && (
         <span className="schedule-next">{formatDateField(schedule.next_run_at)}</span>
       )}

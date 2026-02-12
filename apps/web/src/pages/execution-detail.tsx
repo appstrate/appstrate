@@ -1,9 +1,10 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow } from "../hooks/use-mutations";
-import { useWsChannel } from "../hooks/use-websocket";
+import { useExecutionRealtime } from "../hooks/use-realtime";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
@@ -28,17 +29,16 @@ export function ExecutionDetailPage() {
   const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
-  const { data: logs } = useExecutionLogs(execId);
-
-  const runFlow = useRunFlow(flowId!);
-  const [inputOpen, setInputOpen] = useState(false);
-  const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
-  const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
-  const [liveResult, setLiveResult] = useState<Record<string, unknown> | null>(null);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
 
   const status = liveStatus || execution?.status;
   const isRunning = status === "running" || status === "pending";
+
+  const { data: logs } = useExecutionLogs(execId, isRunning);
+
+  const runFlow = useRunFlow(flowId!);
+  const [inputOpen, setInputOpen] = useState(false);
+  const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
 
   // Build log entries from historical data
   const { historicalLogs, historicalResult } = useMemo(() => {
@@ -48,14 +48,13 @@ export function ExecutionDetailPage() {
     if (logs) {
       for (const log of logs) {
         if (log.event === "result" && log.data) {
-          result = log.data;
+          result = log.data as Record<string, unknown>;
         } else if (log.event === "execution_completed") {
           // skip
         } else {
+          const logData = (log.data ?? {}) as Record<string, unknown>;
           const message =
-            (log.data as Record<string, string>)?.message ||
-            log.message ||
-            formatEvent(log.event || "", log.data || {});
+            (logData.message as string) || log.message || formatEvent(log.event || "", logData);
           if (message) entries.push({ message, type: log.type || "progress" });
         }
       }
@@ -64,40 +63,30 @@ export function ExecutionDetailPage() {
     return { historicalLogs: entries, historicalResult: result };
   }, [logs]);
 
-  // If execution is finished, use result from logs or execution object
-  const resultData =
-    liveResult || historicalResult || (execution?.result as Record<string, unknown> | null);
-  const allLogs = useMemo(
-    () => (isRunning ? [...historicalLogs, ...liveLogs] : historicalLogs),
-    [isRunning, historicalLogs, liveLogs],
-  );
+  // Use result from logs or execution object
+  const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
+  const allLogs = historicalLogs;
 
   // Derive active tab: user override > auto-switch to result when done
   const activeTab = userTab ?? (resultData && !isRunning ? "result" : "logs");
 
-  // Live WS handler
-  const handleWsMessage = useCallback((msg: Record<string, unknown>) => {
-    const event = msg.event as string;
-    const data = (msg.data || {}) as Record<string, unknown>;
+  const qc = useQueryClient();
 
-    if (event === "result" && data) {
-      setLiveResult(data);
-      // Only auto-switch to result tab if user hasn't manually chosen a tab
-      setUserTab((prev) => (prev === null ? "result" : prev));
-    } else if (event === "execution_completed") {
-      setLiveStatus((data.status as ExecutionStatus) || "failed");
-    } else if (event === "progress") {
-      setLiveLogs((prev) => [
-        ...prev,
-        { message: (data.message as string) || "", type: "progress" },
-      ]);
-    } else {
-      const message = (data.message as string) || formatEvent(event, data);
-      if (message) setLiveLogs((prev) => [...prev, { message, type: "system" }]);
-    }
-  }, []);
-
-  useWsChannel(isRunning ? `execution:${execId}` : null, handleWsMessage);
+  // Subscribe to Supabase Realtime for instant status updates
+  // Logs are fetched via polling (Realtime doesn't deliver execution_logs INSERTs reliably)
+  useExecutionRealtime(
+    isRunning ? execId : null,
+    useCallback(
+      (payload: Record<string, unknown>) => {
+        const newStatus = payload.status as ExecutionStatus;
+        setLiveStatus(newStatus);
+        // Refresh execution and logs queries when status changes
+        qc.invalidateQueries({ queryKey: ["execution", execId] });
+        qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
+      },
+      [qc, execId],
+    ),
+  );
 
   if (isLoading) {
     return (
@@ -117,7 +106,7 @@ export function ExecutionDetailPage() {
   }
 
   const displayStatus = status || execution.status;
-  const date = formatDateField(execution.started_at);
+  const date = execution.started_at ? formatDateField(execution.started_at) : "";
   const duration = execution.duration ? `${(execution.duration / 1000).toFixed(1)}s` : "";
 
   return (
