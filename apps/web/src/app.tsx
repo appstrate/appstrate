@@ -7,6 +7,7 @@ import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./hooks/use-auth";
 import { Spinner } from "./components/spinner";
 
@@ -48,7 +49,13 @@ function UserMenu({ displayName, isAdmin, onLogout }: { displayName: string; isA
 
 export function App() {
   const location = useLocation();
+  const queryClient = useQueryClient();
   const { user, profile, loading, logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    queryClient.clear();
+  };
 
   if (loading) {
     return (
@@ -94,7 +101,7 @@ export function App() {
         <UserMenu
           displayName={profile?.display_name || user.email || ""}
           isAdmin={profile?.role === "admin"}
-          onLogout={() => void logout()}
+          onLogout={() => void handleLogout()}
         />
       </header>
 
