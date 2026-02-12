@@ -29,17 +29,16 @@ export function ExecutionDetailPage() {
   const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
-  const { data: logs } = useExecutionLogs(execId);
-
-  const runFlow = useRunFlow(flowId!);
-  const [inputOpen, setInputOpen] = useState(false);
-  const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
-  const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
-  const [liveResult, setLiveResult] = useState<Record<string, unknown> | null>(null);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
 
   const status = liveStatus || execution?.status;
   const isRunning = status === "running" || status === "pending";
+
+  const { data: logs } = useExecutionLogs(execId, isRunning);
+
+  const runFlow = useRunFlow(flowId!);
+  const [inputOpen, setInputOpen] = useState(false);
+  const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
 
   // Build log entries from historical data
   const { historicalLogs, historicalResult } = useMemo(() => {
@@ -64,52 +63,30 @@ export function ExecutionDetailPage() {
     return { historicalLogs: entries, historicalResult: result };
   }, [logs]);
 
-  // If execution is finished, use result from logs or execution object
-  const resultData =
-    liveResult || historicalResult || (execution?.result as Record<string, unknown> | null);
-  const allLogs = useMemo(
-    () => (isRunning ? [...historicalLogs, ...liveLogs] : historicalLogs),
-    [isRunning, historicalLogs, liveLogs],
-  );
+  // Use result from logs or execution object
+  const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
+  const allLogs = historicalLogs;
 
   // Derive active tab: user override > auto-switch to result when done
   const activeTab = userTab ?? (resultData && !isRunning ? "result" : "logs");
 
   const qc = useQueryClient();
 
-  // Subscribe to Supabase Realtime for live logs and status changes
-  useExecutionRealtime(isRunning ? execId : null, {
-    onLog: useCallback((payload: Record<string, unknown>) => {
-      const event = payload.event as string;
-      const data = payload.data as Record<string, unknown> | null;
-      const message = payload.message as string | null;
-
-      if (event === "result" && data) {
-        setLiveResult(data);
-        setUserTab((prev) => (prev === null ? "result" : prev));
-      } else if (event === "execution_completed") {
-        // Status change is handled via onStatusChange
-      } else if (event === "progress") {
-        setLiveLogs((prev) => [...prev, { message: message || "", type: "progress" }]);
-      } else {
-        const text = message || formatEvent(event, data || {});
-        if (text) setLiveLogs((prev) => [...prev, { message: text, type: "system" }]);
-      }
-    }, []),
-    onStatusChange: useCallback(
+  // Subscribe to Supabase Realtime for instant status updates
+  // Logs are fetched via polling (Realtime doesn't deliver execution_logs INSERTs reliably)
+  useExecutionRealtime(
+    isRunning ? execId : null,
+    useCallback(
       (payload: Record<string, unknown>) => {
         const newStatus = payload.status as ExecutionStatus;
         setLiveStatus(newStatus);
-        if (payload.result) {
-          setLiveResult(payload.result as Record<string, unknown>);
-        }
         // Refresh execution and logs queries when status changes
         qc.invalidateQueries({ queryKey: ["execution", execId] });
         qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
       },
       [qc, execId],
     ),
-  });
+  );
 
   if (isLoading) {
     return (

@@ -34,7 +34,7 @@ export function useExecution(execId: string | undefined) {
   });
 }
 
-export function useExecutionLogs(execId: string | undefined) {
+export function useExecutionLogs(execId: string | undefined, running?: boolean) {
   return useQuery({
     queryKey: ["execution-logs", execId],
     queryFn: async () => {
@@ -47,5 +47,6 @@ export function useExecutionLogs(execId: string | undefined) {
       return data;
     },
     enabled: !!execId,
+    refetchInterval: running ? 1000 : false,
   });
 }
