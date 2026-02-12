@@ -62,9 +62,9 @@ export async function createApiKeyConnection(
 export async function listConnections(userId: string): Promise<ConnectionStatus[]> {
   try {
     const { connections } = await nango.listConnections();
-    // Filter connections by end_user_id for the current user
+    // Filter connections by end_user.id for the current user
     const userConnections = connections.filter(
-      (c) => (c as unknown as { end_user_id?: string }).end_user_id === userId,
+      (c) => (c as unknown as { end_user?: { id?: string } }).end_user?.id === userId,
     );
     // Rebuild cache for this user
     for (const key of connectionIdCache.keys()) {
