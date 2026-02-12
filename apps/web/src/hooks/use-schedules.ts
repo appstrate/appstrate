@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "../lib/supabase";
 import { api } from "../api";
 import type { Schedule } from "@appstrate/shared-types";
 
@@ -6,8 +7,12 @@ export function useAllSchedules() {
   return useQuery({
     queryKey: ["schedules"],
     queryFn: async () => {
-      const data = await api<{ schedules: Schedule[] }>("/schedules");
-      return data.schedules;
+      const { data, error } = await supabase
+        .from("flow_schedules")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      return data;
     },
   });
 }
@@ -16,8 +21,13 @@ export function useSchedules(flowId: string | undefined) {
   return useQuery({
     queryKey: ["schedules", flowId],
     queryFn: async () => {
-      const data = await api<{ schedules: Schedule[] }>(`/flows/${flowId}/schedules`);
-      return data.schedules;
+      const { data, error } = await supabase
+        .from("flow_schedules")
+        .select("*")
+        .eq("flow_id", flowId!)
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      return data;
     },
     enabled: !!flowId,
   });
@@ -27,6 +37,8 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>, flowId?: str
   qc.invalidateQueries({ queryKey: ["schedules"] });
   if (flowId) qc.invalidateQueries({ queryKey: ["schedules", flowId] });
 }
+
+// Mutations still go through the API (croner sync needed on the backend)
 
 export function useCreateSchedule(flowId: string) {
   const qc = useQueryClient();

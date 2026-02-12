@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlows } from "../hooks/use-flows";
-import { useWsChannel } from "../hooks/use-websocket";
+import { useAllExecutionsRealtime } from "../hooks/use-realtime";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
 
@@ -11,7 +11,7 @@ export function FlowList() {
   const { data: flows, isLoading, error } = useFlows();
   const [importOpen, setImportOpen] = useState(false);
 
-  useWsChannel("flows", () => {
+  useAllExecutionsRealtime(() => {
     qc.invalidateQueries({ queryKey: ["flows"] });
   });
 

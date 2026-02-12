@@ -16,10 +16,10 @@
   "dependencies": {
     "@appstrate/shared-types": "workspace:*",
     "@nangohq/node": "^0.69.30",
+    "@supabase/supabase-js": "^2.95.3",
     "croner": "^10.0.1",
     "fflate": "^0.8.2",
     "hono": "^4.11.9",
-    "postgres": "^3.4.8",
     "zod": "^4.3.6"
   },
   "devDependencies": {

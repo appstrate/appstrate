@@ -1,5 +1,10 @@
 // Re-export shared types used by both API and frontend
 export type {
+  Database,
+  Tables,
+  TablesInsert,
+  TablesUpdate,
+  Json,
   ExecutionStatus,
   Execution,
   ExecutionLog,
@@ -13,6 +18,7 @@ export type {
   FlowDetail,
   Integration,
   Schedule,
+  Profile,
 } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
@@ -93,21 +99,6 @@ export interface LoadedFlow {
   path: string;
   skills: SkillMeta[];
   source: "built-in" | "user";
-}
-
-// --- Database Models (backend-only) ---
-
-export interface FlowConfig {
-  flow_id: string;
-  config: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface FlowState {
-  flow_id: string;
-  state: Record<string, unknown>;
-  updated_at: string;
 }
 
 export interface SSEEvent {

@@ -1,79 +1,49 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
-import { createBunWebSocket } from "hono/bun";
+import { supabase } from "./lib/supabase.ts";
 import { loadFlows } from "./services/flow-loader.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
-import sql from "./db/client.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import authRouter from "./routes/auth.ts";
-import * as ws from "./ws.ts";
 
-const app = new Hono();
-const { upgradeWebSocket, websocket } = createBunWebSocket();
+type AppEnv = {
+  Variables: {
+    user: { id: string };
+  };
+};
+
+const app = new Hono<AppEnv>();
 
 // Middleware
 app.use("*", cors());
 
-// WebSocket route (before auth middleware — auth via query param)
-app.get(
-  "/ws",
-  upgradeWebSocket((c) => {
-    let connectionId: string | null = null;
-    return {
-      onOpen(_evt, wsCtx) {
-        const token = new URL(c.req.url).searchParams.get("token") || "";
-        const authToken = process.env.AUTH_TOKEN;
-        if (authToken && token !== authToken) {
-          wsCtx.close(1008, "Unauthorized");
-          return;
-        }
-        connectionId = ws.addConnection(wsCtx);
-      },
-      onMessage(evt) {
-        if (!connectionId) return;
-        try {
-          const msg = JSON.parse(String(evt.data));
-          if (msg.type === "subscribe") ws.subscribe(connectionId, msg.channel);
-          else if (msg.type === "unsubscribe") ws.unsubscribe(connectionId, msg.channel);
-          else if (msg.type === "ping") ws.send(connectionId, { type: "pong" });
-        } catch {
-          // Invalid JSON — ignore
-        }
-      },
-      onClose() {
-        if (connectionId) ws.removeConnection(connectionId);
-      },
-    };
-  }),
-);
+// Auth middleware: verify Supabase JWT and inject user into context
+async function verifyUser(authHeader: string | undefined) {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7);
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  return user;
+}
 
-// Auth middleware (MVP: static bearer token)
-app.use("/api/*", async (c, next) => {
-  const authToken = process.env.AUTH_TOKEN;
-  if (!authToken) {
-    // No token configured = no auth required (dev mode)
-    return next();
-  }
-  const header = c.req.header("Authorization");
-  if (!header || header !== `Bearer ${authToken}`) {
+// Single auth middleware for /api/* and /auth/* routes
+app.use("*", async (c, next) => {
+  const path = c.req.path;
+  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+
+  const user = await verifyUser(c.req.header("Authorization"));
+  if (!user) {
     return c.json({ error: "UNAUTHORIZED", message: "Token invalide ou manquant" }, 401);
   }
-  return next();
-});
-
-// Auth middleware for /auth/* routes (all are API calls now)
-app.use("/auth/*", async (c, next) => {
-  const authToken = process.env.AUTH_TOKEN;
-  if (!authToken) return next();
-  const header = c.req.header("Authorization");
-  if (!header || header !== `Bearer ${authToken}`) {
-    return c.json({ error: "UNAUTHORIZED", message: "Token invalide ou manquant" }, 401);
-  }
+  c.set("user", user);
   return next();
 });
 
@@ -103,7 +73,6 @@ try {
 const shutdown = async () => {
   console.log("Shutting down...");
   shutdownScheduler();
-  await sql.end({ timeout: 5 }).catch(() => {});
   process.exit(0);
 };
 process.on("SIGINT", () => void shutdown());
@@ -115,7 +84,7 @@ const flowsRouter = createFlowsRouter(flows);
 const executionsRouter = createExecutionsRouter(flows);
 const schedulesRouter = createSchedulesRouter(flows);
 
-app.route("/api/flows", userFlowsRouter);  // Must be before flowsRouter (import/delete routes)
+app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
 app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
@@ -133,8 +102,7 @@ const port = parseInt(process.env.PORT || "3000", 10);
 export default {
   port,
   fetch: app.fetch,
-  websocket,
-  idleTimeout: 255, // seconds — prevent Bun from killing long SSE/WS connections
+  idleTimeout: 255,
 };
 
 console.log(`Appstrate running on http://localhost:${port}`);
