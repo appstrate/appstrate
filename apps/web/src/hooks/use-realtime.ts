@@ -3,20 +3,17 @@ import { supabase } from "../lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 /**
- * Subscribe to new execution_logs rows and execution status changes for an execution.
+ * Subscribe to execution status changes via Supabase Realtime.
+ * Logs are fetched via polling (Realtime doesn't deliver execution_logs INSERTs
+ * reliably due to the subquery-based RLS policy on that table).
  */
 export function useExecutionRealtime(
   executionId: string | null | undefined,
-  callbacks: {
-    onLog?: (payload: Record<string, unknown>) => void;
-    onStatusChange?: (payload: Record<string, unknown>) => void;
-  },
+  onStatusChange?: (payload: Record<string, unknown>) => void,
 ) {
-  const onLogRef = useRef(callbacks.onLog);
-  const onStatusRef = useRef(callbacks.onStatusChange);
+  const onStatusRef = useRef(onStatusChange);
   useEffect(() => {
-    onLogRef.current = callbacks.onLog;
-    onStatusRef.current = callbacks.onStatusChange;
+    onStatusRef.current = onStatusChange;
   });
 
   useEffect(() => {
@@ -24,18 +21,6 @@ export function useExecutionRealtime(
 
     const channel: RealtimeChannel = supabase
       .channel(`exec-${executionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "execution_logs",
-          filter: `execution_id=eq.${executionId}`,
-        },
-        (payload) => {
-          onLogRef.current?.(payload.new as Record<string, unknown>);
-        },
-      )
       .on(
         "postgres_changes",
         {
