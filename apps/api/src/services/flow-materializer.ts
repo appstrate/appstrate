@@ -22,9 +22,7 @@ export async function materializeFlow(flow: UserFlowRow, baseDir: string): Promi
   return flowDir;
 }
 
-export async function materializeAllFlows(
-  flows: UserFlowRow[],
-): Promise<Map<string, string>> {
+export async function materializeAllFlows(flows: UserFlowRow[]): Promise<Map<string, string>> {
   // Clean and recreate user-flows directory
   await rm(USER_FLOWS_DIR, { recursive: true, force: true });
   await mkdir(USER_FLOWS_DIR, { recursive: true });

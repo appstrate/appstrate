@@ -1,9 +1,10 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow } from "../hooks/use-mutations";
-import { useWsChannel } from "../hooks/use-websocket";
+import { useExecutionRealtime } from "../hooks/use-realtime";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
@@ -48,14 +49,13 @@ export function ExecutionDetailPage() {
     if (logs) {
       for (const log of logs) {
         if (log.event === "result" && log.data) {
-          result = log.data;
+          result = log.data as Record<string, unknown>;
         } else if (log.event === "execution_completed") {
           // skip
         } else {
+          const logData = (log.data ?? {}) as Record<string, unknown>;
           const message =
-            (log.data as Record<string, string>)?.message ||
-            log.message ||
-            formatEvent(log.event || "", log.data || {});
+            (logData.message as string) || log.message || formatEvent(log.event || "", logData);
           if (message) entries.push({ message, type: log.type || "progress" });
         }
       }
@@ -75,29 +75,41 @@ export function ExecutionDetailPage() {
   // Derive active tab: user override > auto-switch to result when done
   const activeTab = userTab ?? (resultData && !isRunning ? "result" : "logs");
 
-  // Live WS handler
-  const handleWsMessage = useCallback((msg: Record<string, unknown>) => {
-    const event = msg.event as string;
-    const data = (msg.data || {}) as Record<string, unknown>;
+  const qc = useQueryClient();
 
-    if (event === "result" && data) {
-      setLiveResult(data);
-      // Only auto-switch to result tab if user hasn't manually chosen a tab
-      setUserTab((prev) => (prev === null ? "result" : prev));
-    } else if (event === "execution_completed") {
-      setLiveStatus((data.status as ExecutionStatus) || "failed");
-    } else if (event === "progress") {
-      setLiveLogs((prev) => [
-        ...prev,
-        { message: (data.message as string) || "", type: "progress" },
-      ]);
-    } else {
-      const message = (data.message as string) || formatEvent(event, data);
-      if (message) setLiveLogs((prev) => [...prev, { message, type: "system" }]);
-    }
-  }, []);
+  // Subscribe to Supabase Realtime for live logs and status changes
+  useExecutionRealtime(isRunning ? execId : null, {
+    onLog: useCallback((payload: Record<string, unknown>) => {
+      const event = payload.event as string;
+      const data = payload.data as Record<string, unknown> | null;
+      const message = payload.message as string | null;
 
-  useWsChannel(isRunning ? `execution:${execId}` : null, handleWsMessage);
+      if (event === "result" && data) {
+        setLiveResult(data);
+        setUserTab((prev) => (prev === null ? "result" : prev));
+      } else if (event === "execution_completed") {
+        // Status change is handled via onStatusChange
+      } else if (event === "progress") {
+        setLiveLogs((prev) => [...prev, { message: message || "", type: "progress" }]);
+      } else {
+        const text = message || formatEvent(event, data || {});
+        if (text) setLiveLogs((prev) => [...prev, { message: text, type: "system" }]);
+      }
+    }, []),
+    onStatusChange: useCallback(
+      (payload: Record<string, unknown>) => {
+        const newStatus = payload.status as ExecutionStatus;
+        setLiveStatus(newStatus);
+        if (payload.result) {
+          setLiveResult(payload.result as Record<string, unknown>);
+        }
+        // Refresh execution and logs queries when status changes
+        qc.invalidateQueries({ queryKey: ["execution", execId] });
+        qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
+      },
+      [qc, execId],
+    ),
+  });
 
   if (isLoading) {
     return (
@@ -117,7 +129,7 @@ export function ExecutionDetailPage() {
   }
 
   const displayStatus = status || execution.status;
-  const date = formatDateField(execution.started_at);
+  const date = execution.started_at ? formatDateField(execution.started_at) : "";
   const duration = execution.duration ? `${(execution.duration / 1000).toFixed(1)}s` : "";
 
   return (

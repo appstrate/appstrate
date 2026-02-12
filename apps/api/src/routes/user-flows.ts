@@ -4,6 +4,7 @@ import { importFlowFromZip, FlowImportError } from "../services/flow-import.ts";
 import { deleteUserFlow, getUserFlow } from "../services/user-flows.ts";
 import { materializeFlow, USER_FLOWS_DIR, cleanupFlowDir } from "../services/flow-materializer.ts";
 import { getRunningExecutionsForFlow } from "../services/state.ts";
+import { isAdmin } from "../lib/supabase.ts";
 
 interface UserFlowsRouterOptions {
   flows: Map<string, LoadedFlow>;
@@ -12,8 +13,17 @@ interface UserFlowsRouterOptions {
 export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   const router = new Hono();
 
-  // POST /api/flows/import — import a flow from a ZIP file
+  // POST /api/flows/import — import a flow from a ZIP file (admin-only)
   router.post("/import", async (c) => {
+    const user = c.get("user") as { id: string };
+
+    if (!(await isAdmin(user.id))) {
+      return c.json(
+        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent importer des flows" },
+        403,
+      );
+    }
+
     const formData = await c.req.formData();
     const file = formData.get("file");
 
@@ -22,7 +32,10 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
     }
 
     if (!file.name.endsWith(".zip")) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Seuls les fichiers .zip sont acceptés" }, 400);
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Seuls les fichiers .zip sont acceptes" },
+        400,
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -50,22 +63,20 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
         });
       }
 
-      return c.json({ flowId: result.flowId, message: "Flow importé" }, 201);
+      return c.json({ flowId: result.flowId, message: "Flow importe" }, 201);
     } catch (err) {
       if (err instanceof FlowImportError) {
-        return c.json(
-          { error: err.code, message: err.message, details: err.details },
-          400,
-        );
+        return c.json({ error: err.code, message: err.message, details: err.details }, 400);
       }
       throw err;
     }
   });
 
-  // DELETE /api/flows/:id — delete a user flow
+  // DELETE /api/flows/:id — delete a user flow (admin-only)
   router.delete("/:id", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
+    const user = c.get("user") as { id: string };
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
@@ -78,10 +89,17 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
       );
     }
 
+    if (!(await isAdmin(user.id))) {
+      return c.json(
+        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent supprimer des flows" },
+        403,
+      );
+    }
+
     const running = await getRunningExecutionsForFlow(flowId);
     if (running > 0) {
       return c.json(
-        { error: "FLOW_IN_USE", message: `${running} exécution(s) en cours pour ce flow` },
+        { error: "FLOW_IN_USE", message: `${running} execution(s) en cours pour ce flow` },
         409,
       );
     }

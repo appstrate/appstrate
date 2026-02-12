@@ -1,16 +1,22 @@
+import { supabase } from "./lib/supabase";
+
 const API_BASE = "/api";
 
-export function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem("appstrate_token") || "";
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...getAuthHeaders(),
+      ...authHeaders,
       ...options.headers,
     },
   });
@@ -26,9 +32,10 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
 }
 
 export async function uploadFormData<T = unknown>(path: string, formData: FormData): Promise<T> {
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: getAuthHeaders(),
+    headers: authHeaders,
     body: formData,
   });
   if (!res.ok) {
