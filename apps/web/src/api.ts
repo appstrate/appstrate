@@ -24,7 +24,8 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(err.message || `API Error: ${res.status}`);
   }
-  return res.json();
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
