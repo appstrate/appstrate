@@ -103,7 +103,7 @@ function ScheduleForm({
 
   const [inputValues, setInputValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    const existingInput = schedule?.input ?? {};
+    const existingInput = (schedule?.input ?? {}) as Record<string, unknown>;
     for (const [key, field] of Object.entries(schema)) {
       initial[key] = String(existingInput[key] ?? field.default ?? "");
     }

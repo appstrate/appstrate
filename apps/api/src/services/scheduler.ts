@@ -1,7 +1,7 @@
 import { Cron } from "croner";
-import sql from "../db/client.ts";
+import { supabase } from "../lib/supabase.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import type { Schedule } from "@appstrate/shared-types";
+import type { Schedule, Json } from "@appstrate/shared-types";
 import { getFlowConfig, getFlowState, createExecution } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
@@ -13,30 +13,14 @@ let loadedFlows: Map<string, LoadedFlow> = new Map();
 
 // --- CRUD helpers ---
 
-export async function getAllSchedules(): Promise<Schedule[]> {
-  const rows = await sql`
-    SELECT * FROM flow_schedules
-    ORDER BY created_at DESC
-  `;
-  return rows as unknown as Schedule[];
-}
-
-export async function getSchedulesByFlow(flowId: string): Promise<Schedule[]> {
-  const rows = await sql`
-    SELECT * FROM flow_schedules
-    WHERE flow_id = ${flowId}
-    ORDER BY created_at DESC
-  `;
-  return rows as unknown as Schedule[];
-}
-
 export async function getSchedule(id: string): Promise<Schedule | null> {
-  const rows = await sql`SELECT * FROM flow_schedules WHERE id = ${id}`;
-  return (rows[0] as unknown as Schedule) ?? null;
+  const { data } = await supabase.from("flow_schedules").select("*").eq("id", id).single();
+  return data ?? null;
 }
 
 export async function createSchedule(
   flowId: string,
+  userId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -51,18 +35,26 @@ export async function createSchedule(
   const cron = new Cron(data.cronExpression, { timezone: tz, paused: true });
   const nextRun = cron.nextRun();
 
-  const rows = await sql`
-    INSERT INTO flow_schedules (id, flow_id, name, enabled, cron_expression, timezone, input, next_run_at)
-    VALUES (
-      ${id}, ${flowId}, ${data.name ?? null}, true,
-      ${data.cronExpression}, ${tz},
-      ${data.input ? sql.json(data.input) : null},
-      ${nextRun ? nextRun.toISOString() : null}
-    )
-    RETURNING *
-  `;
+  const { data: row, error } = await supabase
+    .from("flow_schedules")
+    .insert({
+      id,
+      flow_id: flowId,
+      user_id: userId,
+      name: data.name ?? null,
+      enabled: true,
+      cron_expression: data.cronExpression,
+      timezone: tz,
+      input: (data.input ?? null) as Json,
+      next_run_at: nextRun ? nextRun.toISOString() : null,
+    })
+    .select("*")
+    .single();
 
-  const schedule = rows[0] as unknown as Schedule;
+  if (error || !row) {
+    throw new Error(`Failed to create schedule: ${error?.message ?? "no row returned"}`);
+  }
+  const schedule = row;
 
   // Start the cron job
   startCronJob(schedule);
@@ -84,27 +76,34 @@ export async function updateSchedule(
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cron_expression;
-  const tz = data.timezone ?? existing.timezone;
+  const tz = data.timezone ?? existing.timezone ?? "UTC";
   const enabled = data.enabled ?? existing.enabled;
 
   // Compute next run
   const cron = new Cron(cronExpr, { timezone: tz, paused: true });
   const nextRun = enabled ? cron.nextRun() : null;
 
-  const rows = await sql`
-    UPDATE flow_schedules SET
-      name = ${data.name !== undefined ? data.name : existing.name},
-      cron_expression = ${cronExpr},
-      timezone = ${tz},
-      input = ${data.input !== undefined ? (data.input ? sql.json(data.input) : null) : sql`input`},
-      enabled = ${enabled},
-      next_run_at = ${nextRun ? nextRun.toISOString() : null},
-      updated_at = NOW()
-    WHERE id = ${id}
-    RETURNING *
-  `;
+  const payload: Record<string, unknown> = {
+    cron_expression: cronExpr,
+    timezone: tz,
+    enabled,
+    next_run_at: nextRun ? nextRun.toISOString() : null,
+    updated_at: new Date().toISOString(),
+  };
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.input !== undefined) payload.input = data.input;
 
-  const schedule = rows[0] as unknown as Schedule;
+  const { data: row, error } = await supabase
+    .from("flow_schedules")
+    .update(payload as Record<string, Json>)
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error || !row) {
+    throw new Error(`Failed to update schedule ${id}: ${error?.message ?? "no row returned"}`);
+  }
+  const schedule = row;
 
   // Restart or stop the cron job
   stopCronJob(id);
@@ -117,8 +116,8 @@ export async function updateSchedule(
 
 export async function deleteSchedule(id: string): Promise<boolean> {
   stopCronJob(id);
-  const rows = await sql`DELETE FROM flow_schedules WHERE id = ${id} RETURNING id`;
-  return rows.length > 0;
+  const { data } = await supabase.from("flow_schedules").delete().eq("id", id).select("id");
+  return (data?.length ?? 0) > 0;
 }
 
 // --- Cron job management ---
@@ -129,11 +128,16 @@ function startCronJob(schedule: Schedule) {
   const job = new Cron(
     schedule.cron_expression,
     {
-      timezone: schedule.timezone,
+      timezone: schedule.timezone ?? "UTC",
       protect: true, // Prevent overlapping runs
     },
     () => {
-      triggerScheduledExecution(schedule.id, schedule.flow_id, schedule.input ?? undefined);
+      triggerScheduledExecution(
+        schedule.id,
+        schedule.flow_id,
+        schedule.user_id,
+        (schedule.input as Record<string, unknown>) ?? undefined,
+      );
     },
   );
 
@@ -151,6 +155,7 @@ function stopCronJob(scheduleId: string) {
 async function triggerScheduledExecution(
   scheduleId: string,
   flowId: string,
+  userId: string,
   input?: Record<string, unknown>,
 ) {
   try {
@@ -163,20 +168,20 @@ async function triggerScheduledExecution(
     // Validate service dependencies — skip if not connected
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
-      const conn = await getConnectionStatus(svc.provider);
+      const conn = await getConnectionStatus(svc.provider, userId);
       if (conn.status !== "connected") {
         console.warn(
-          `[scheduler] Service '${svc.id}' not connected, skipping schedule ${scheduleId} for flow '${flowId}'`,
+          `[scheduler] Service '${svc.id}' not connected for user ${userId}, skipping schedule ${scheduleId} for flow '${flowId}'`,
         );
         return;
       }
-      const token = await getAccessToken(svc.provider);
+      const token = await getAccessToken(svc.provider, userId);
       if (token) tokens[svc.id] = token;
     }
 
     // Get config and state
     const config = await getFlowConfig(flowId);
-    const state = await getFlowState(flowId);
+    const state = await getFlowState(userId, flowId);
     const inputValues = input ?? {};
 
     // Interpolate prompt
@@ -195,14 +200,14 @@ async function triggerScheduledExecution(
     });
 
     // Create execution record with schedule_id
-    await createExecution(executionId, flowId, input ?? null, scheduleId);
+    await createExecution(executionId, flowId, userId, input ?? null, scheduleId);
 
     console.log(
-      `[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId})`,
+      `[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId}, user ${userId})`,
     );
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, flow, envVars, tokens).catch((err) => {
+    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens).catch((err) => {
       console.error(`[scheduler] Unhandled error in execution ${executionId}:`, err);
     });
 
@@ -210,13 +215,14 @@ async function triggerScheduledExecution(
     const job = activeJobs.get(scheduleId);
     const nextRun = job?.nextRun() ?? null;
 
-    await sql`
-      UPDATE flow_schedules SET
-        last_run_at = NOW(),
-        next_run_at = ${nextRun ? nextRun.toISOString() : null},
-        updated_at = NOW()
-      WHERE id = ${scheduleId}
-    `;
+    await supabase
+      .from("flow_schedules")
+      .update({
+        last_run_at: new Date().toISOString(),
+        next_run_at: nextRun ? nextRun.toISOString() : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", scheduleId);
   } catch (err) {
     console.error(
       `[scheduler] Failed to trigger schedule ${scheduleId} for flow '${flowId}':`,
@@ -230,10 +236,8 @@ async function triggerScheduledExecution(
 export async function initScheduler(flows: Map<string, LoadedFlow>) {
   loadedFlows = flows;
 
-  const rows = await sql`
-    SELECT * FROM flow_schedules WHERE enabled = true
-  `;
-  const schedules = rows as unknown as Schedule[];
+  const { data } = await supabase.from("flow_schedules").select("*").eq("enabled", true);
+  const schedules = data ?? [];
 
   let started = 0;
   for (const schedule of schedules) {

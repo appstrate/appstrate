@@ -9,7 +9,13 @@ interface ApiKeyModalProps {
   onSubmit: (apiKey: string) => void;
 }
 
-export function ApiKeyModal({ open, onClose, providerName, isPending, onSubmit }: ApiKeyModalProps) {
+export function ApiKeyModal({
+  open,
+  onClose,
+  providerName,
+  isPending,
+  onSubmit,
+}: ApiKeyModalProps) {
   const [apiKey, setApiKey] = useState("");
 
   const handleClose = () => {
@@ -40,11 +46,7 @@ export function ApiKeyModal({ open, onClose, providerName, isPending, onSubmit }
       </div>
       <div className="modal-actions">
         <button onClick={handleClose}>Annuler</button>
-        <button
-          className="primary"
-          onClick={handleSubmit}
-          disabled={!apiKey.trim() || isPending}
-        >
+        <button className="primary" onClick={handleSubmit} disabled={!apiKey.trim() || isPending}>
           Connecter
         </button>
       </div>

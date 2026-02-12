@@ -1,30 +1,20 @@
-// --- Execution Types ---
+export type { Database, Tables, TablesInsert, TablesUpdate, Json } from "./database.ts";
+import type { Tables } from "./database.ts";
+
+// --- Execution Types (derived from DB) ---
 
 export type ExecutionStatus = "pending" | "running" | "success" | "failed" | "timeout";
 
-export interface Execution {
-  id: string;
-  flow_id: string;
-  status: ExecutionStatus;
-  input: Record<string, unknown> | null;
-  result: Record<string, unknown> | null;
-  error: string | null;
-  tokens_used: number | null;
-  started_at: string;
-  completed_at: string | null;
-  duration: number | null;
-  schedule_id: string | null;
-}
+export type Execution = Tables<"executions">;
+export type ExecutionLog = Tables<"execution_logs">;
 
-export interface ExecutionLog {
-  id: number;
-  execution_id: string;
-  type: "progress" | "system" | "error" | "result";
-  event: string | null;
-  message: string | null;
-  data: Record<string, unknown> | null;
-  created_at: string;
-}
+// --- Schedule Types (derived from DB) ---
+
+export type Schedule = Tables<"flow_schedules">;
+
+// --- Profile Types (derived from DB) ---
+
+export type Profile = Tables<"profiles">;
 
 // --- Flow Field Types ---
 
@@ -94,22 +84,6 @@ export interface FlowDetail {
   state: Record<string, unknown>;
   runningExecutions: number;
   lastExecution: Partial<Execution> | null;
-}
-
-// --- Schedule Types ---
-
-export interface Schedule {
-  id: string;
-  flow_id: string;
-  name: string | null;
-  enabled: boolean;
-  cron_expression: string;
-  timezone: string;
-  input: Record<string, unknown> | null;
-  last_run_at: string | null;
-  next_run_at: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 // --- Integration Types ---

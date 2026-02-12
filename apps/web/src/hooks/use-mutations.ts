@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api, apiFetch, getAuthHeaders, uploadFormData } from "../api";
+import { api, apiFetch, uploadFormData } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -28,14 +28,7 @@ export function useResetState(flowId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/flows/${flowId}/state`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || `Erreur ${res.status}`);
-      }
+      await api(`/flows/${flowId}/state`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow", flowId] });
@@ -144,14 +137,7 @@ export function useDeleteFlow() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (flowId: string) => {
-      const res = await fetch(`/api/flows/${flowId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(err.message || `Erreur ${res.status}`);
-      }
+      await api(`/flows/${flowId}`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flows"] });

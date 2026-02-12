@@ -11,13 +11,15 @@ import {
 } from "../services/state.ts";
 import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
+import { isAdmin } from "../lib/supabase.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
 
   // GET /api/flows — list all loaded flows
   router.get("/", async (c) => {
-    const runningCounts = await getRunningExecutionsCounts();
+    const user = c.get("user") as { id: string };
+    const runningCounts = await getRunningExecutionsCounts(user.id);
 
     const flowList = Array.from(flows.values()).map((f) => ({
       id: f.id,
@@ -42,6 +44,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   router.get("/:id", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
+    const user = c.get("user") as { id: string };
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
@@ -49,11 +52,11 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
 
     const m = flow.manifest;
 
-    // Check service connections in parallel
+    // Check service connections in parallel (per-user)
     const serviceStatuses = await Promise.all(
       m.requires.services.map(async (svc) => {
         const [conn, authMode] = await Promise.all([
-          getConnectionStatus(svc.provider),
+          getConnectionStatus(svc.provider, user.id),
           getProviderAuthMode(svc.provider),
         ]);
         return {
@@ -72,12 +75,12 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       status: "available",
     }));
 
-    // Get config, state, last execution, running count in parallel
+    // Get config (global), state (per-user), last execution (per-user), running count (per-user)
     const [currentConfig, currentState, lastExec, runningCount] = await Promise.all([
       getFlowConfig(flowId),
-      getFlowState(flowId),
-      getLastExecution(flowId),
-      getRunningExecutionsForFlow(flowId),
+      getFlowState(user.id, flowId),
+      getLastExecution(flowId, user.id),
+      getRunningExecutionsForFlow(flowId, user.id),
     ]);
 
     // Merge defaults with current config
@@ -119,13 +122,25 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     });
   });
 
-  // PUT /api/flows/:id/config — save flow configuration
+  // PUT /api/flows/:id/config — save flow configuration (admin-only)
   router.put("/:id/config", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
+    const user = c.get("user") as { id: string };
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
+    }
+
+    // Admin check
+    if (!(await isAdmin(user.id))) {
+      return c.json(
+        {
+          error: "FORBIDDEN",
+          message: "Seuls les administrateurs peuvent modifier la configuration",
+        },
+        403,
+      );
     }
 
     const body = await c.req.json<Record<string, unknown>>();
@@ -158,16 +173,17 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     });
   });
 
-  // DELETE /api/flows/:id/state — reset flow state
+  // DELETE /api/flows/:id/state — reset current user's flow state
   router.delete("/:id/state", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
+    const user = c.get("user") as { id: string };
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
     }
 
-    await deleteFlowState(flowId);
+    await deleteFlowState(user.id, flowId);
     return c.body(null, 204);
   });
 

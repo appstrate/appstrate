@@ -4,13 +4,28 @@ import { FlowDetailPage } from "./pages/flow-detail";
 import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
+import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
-import { useWebSocketInit } from "./hooks/use-websocket";
+import { useAuth } from "./hooks/use-auth";
+import { Spinner } from "./components/spinner";
 
 export function App() {
   const location = useLocation();
+  const { user, profile, loading, logout } = useAuth();
 
-  useWebSocketInit();
+  if (loading) {
+    return (
+      <div className="container">
+        <div className="empty-state">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   const currentPath = location.pathname;
 
@@ -39,6 +54,15 @@ export function App() {
             Services
           </Link>
         </nav>
+        <div className="user-menu">
+          <span className="user-name">
+            {profile?.display_name || user.email}
+            {profile?.role === "admin" && <span className="admin-badge">admin</span>}
+          </span>
+          <button className="logout-btn" onClick={() => void logout()}>
+            Deconnexion
+          </button>
+        </div>
       </header>
 
       <ErrorBoundary>

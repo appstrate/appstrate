@@ -10,7 +10,7 @@ import {
   useDeleteSchedule,
 } from "../hooks/use-schedules";
 import { useRunFlow, useConnect, useDeleteFlow, useConnectApiKey } from "../hooks/use-mutations";
-import { useWsChannel } from "../hooks/use-websocket";
+import { useFlowExecutionRealtime } from "../hooks/use-realtime";
 import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
@@ -66,8 +66,9 @@ export function FlowDetailPage() {
     id: string;
   } | null>(null);
 
-  useWsChannel(flowId ? `flow:${flowId}` : null, () => {
+  useFlowExecutionRealtime(flowId, () => {
     qc.invalidateQueries({ queryKey: ["executions", flowId] });
+    qc.invalidateQueries({ queryKey: ["flow", flowId] });
   });
 
   if (isLoading) {
@@ -173,7 +174,11 @@ export function FlowDetailPage() {
                 : "Supprimer ce flow"
             }
             onClick={() => {
-              if (confirm(`Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`)) {
+              if (
+                confirm(
+                  `Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`,
+                )
+              ) {
                 deleteFlow.mutate(detail.id);
               }
             }}
@@ -211,7 +216,7 @@ export function FlowDetailPage() {
           ) : (
             <div className="exec-list">
               {executions.map((exec) => {
-                const date = formatDateField(exec.started_at);
+                const date = exec.started_at ? formatDateField(exec.started_at) : "";
                 const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
                 const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
 
