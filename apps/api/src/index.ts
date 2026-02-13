@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { supabase } from "./lib/supabase.ts";
-import { seedBuiltInFlows } from "./services/flow-seeder.ts";
 import { loadFlows } from "./services/flow-loader.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
@@ -43,11 +42,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Seed built-in flows from filesystem to DB
-console.log("Seeding built-in flows...");
-await seedBuiltInFlows();
-
-// Load all flows from DB
+// Load flows: built-in from filesystem + user flows from DB
 console.log("Loading flows...");
 const flows = await loadFlows();
 console.log(`${flows.size} flow(s) loaded.`);

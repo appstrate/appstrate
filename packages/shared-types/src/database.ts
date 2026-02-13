@@ -211,33 +211,27 @@ export type Database = {
       }
       flows: {
         Row: {
-          content_hash: string | null
           created_at: string | null
           id: string
           manifest: Json
           prompt: string
           skills: Json | null
-          source: string
           updated_at: string | null
         }
         Insert: {
-          content_hash?: string | null
           created_at?: string | null
           id: string
           manifest: Json
           prompt: string
           skills?: Json | null
-          source?: string
           updated_at?: string | null
         }
         Update: {
-          content_hash?: string | null
           created_at?: string | null
           id?: string
           manifest?: Json
           prompt?: string
           skills?: Json | null
-          source?: string
           updated_at?: string | null
         }
         Relationships: []
