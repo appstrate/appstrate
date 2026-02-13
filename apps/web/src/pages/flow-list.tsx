@@ -63,7 +63,14 @@ export function FlowList() {
     <>
       <div className="flow-list-header">
         <div />
-        <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+        <div className="flow-list-actions">
+          {isAdmin && (
+            <Link to="/flows/new">
+              <button>Creer un flow</button>
+            </Link>
+          )}
+          <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+        </div>
       </div>
       <div className="flow-grid">
         {flows.map((flow) => (
