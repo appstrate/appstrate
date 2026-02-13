@@ -13,7 +13,6 @@ async function dockerFetch(path: string, options: RequestInit = {}): Promise<Res
 export async function createClaudeCodeContainer(
   executionId: string,
   envVars: Record<string, string>,
-  flowPath?: string,
 ): Promise<string> {
   const containerName = `appstrate-cc-${executionId}`;
 
@@ -28,7 +27,6 @@ export async function createClaudeCodeContainer(
       NanoCpus: 2_000_000_000,
       AutoRemove: false,
       NetworkMode: "bridge",
-      ...(flowPath ? { Binds: [`${flowPath}:/workspace/flow:ro`] } : {}),
     },
     Labels: {
       "appstrate.execution": executionId,

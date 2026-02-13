@@ -10,6 +10,7 @@ export function buildContainerEnv(params: {
   config: Record<string, unknown>;
   state: Record<string, unknown>;
   input?: Record<string, unknown>;
+  skills?: { id: string; content: string }[];
 }): Record<string, string> {
   const envVars: Record<string, string> = {
     FLOW_PROMPT: params.prompt,
@@ -36,6 +37,11 @@ export function buildContainerEnv(params: {
     for (const [key, value] of Object.entries(params.input)) {
       envVars[`INPUT_${key.toUpperCase()}`] = String(value);
     }
+  }
+
+  // Inject skills as JSON for container reconstruction
+  if (params.skills && params.skills.length > 0) {
+    envVars["FLOW_SKILLS"] = JSON.stringify(params.skills);
   }
 
   return envVars;

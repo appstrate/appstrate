@@ -61,7 +61,6 @@ export async function executeFlowInBackground(
       for await (const msg of adapter.execute(
         executionId,
         envVars,
-        flow.path,
         timeout,
         flow.manifest.output?.schema,
       )) {
@@ -117,7 +116,6 @@ export async function executeFlowInBackground(
             for await (const msg of adapter.execute(
               executionId,
               retryEnvVars,
-              flow.path,
               Math.min(60, Math.floor(remaining / 1000)),
               outputSchema,
             )) {
@@ -291,6 +289,7 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       config,
       state,
       input: body.input,
+      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
 
     // Create execution record

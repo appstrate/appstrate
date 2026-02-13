@@ -8,6 +8,7 @@ export type {
   ExecutionStatus,
   Execution,
   ExecutionLog,
+  FlowRow,
   FlowFieldType,
   FlowFieldBase,
   FlowConfigField,
@@ -85,18 +86,18 @@ export interface FlowExecutionSpec {
   outputRetries?: number;
 }
 
-// --- Loaded Flow (manifest + prompt + path) ---
+// --- Loaded Flow (manifest + prompt from DB) ---
 
 export interface SkillMeta {
   id: string;
   description: string;
+  content?: string;
 }
 
 export interface LoadedFlow {
   id: string;
   manifest: FlowManifest;
   prompt: string;
-  path: string;
   skills: SkillMeta[];
   source: "built-in" | "user";
 }

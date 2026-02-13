@@ -8,6 +8,10 @@ export type ExecutionStatus = "pending" | "running" | "success" | "failed" | "ti
 export type Execution = Tables<"executions">;
 export type ExecutionLog = Tables<"execution_logs">;
 
+// --- Flow DB Row Type ---
+
+export type FlowRow = Tables<"flows">;
+
 // --- Schedule Types (derived from DB) ---
 
 export type Schedule = Tables<"flow_schedules">;
@@ -84,6 +88,9 @@ export interface FlowDetail {
   state: Record<string, unknown>;
   runningExecutions: number;
   lastExecution: Partial<Execution> | null;
+  updatedAt?: string | null;
+  prompt?: string;
+  rawSkills?: { id: string; description: string; content: string }[];
 }
 
 // --- Integration Types ---

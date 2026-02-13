@@ -13,7 +13,6 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
   async *execute(
     executionId: string,
     envVars: Record<string, string>,
-    flowPath: string,
     timeout: number,
     outputSchema?: Record<string, FlowOutputField>,
   ): AsyncGenerator<ExecutionMessage> {
@@ -40,14 +39,15 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
         k.startsWith("TOKEN_") ||
         k.startsWith("CONFIG_") ||
         k.startsWith("INPUT_") ||
-        k === "FLOW_STATE"
+        k === "FLOW_STATE" ||
+        k === "FLOW_SKILLS"
       ) {
         containerEnv[k] = v;
       }
     }
 
     // Create and start the container
-    const containerId = await createClaudeCodeContainer(executionId, containerEnv, flowPath);
+    const containerId = await createClaudeCodeContainer(executionId, containerEnv);
 
     yield {
       type: "progress",

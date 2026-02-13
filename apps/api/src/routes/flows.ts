@@ -12,6 +12,7 @@ import {
 import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
 import { isAdmin } from "../lib/supabase.ts";
+import { getFlowById } from "../services/user-flows.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   const router = new Hono();
@@ -76,11 +77,13 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     }));
 
     // Get config (global), state (per-user), last execution (per-user), running count (per-user)
-    const [currentConfig, currentState, lastExec, runningCount] = await Promise.all([
+    // For user flows, also fetch the raw DB row for editable content
+    const [currentConfig, currentState, lastExec, runningCount, userFlowRow] = await Promise.all([
       getFlowConfig(flowId),
       getFlowState(user.id, flowId),
       getLastExecution(flowId, user.id),
       getRunningExecutionsForFlow(flowId, user.id),
+      flow.source === "user" ? getFlowById(flowId) : Promise.resolve(null),
     ]);
 
     // Merge defaults with current config
@@ -119,6 +122,15 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
             duration: lastExec.duration,
           }
         : null,
+      ...(flow.source === "user" && userFlowRow
+        ? {
+            updatedAt: userFlowRow.updated_at,
+            prompt: flow.prompt,
+            rawSkills: userFlowRow.skills as
+              | { id: string; description: string; content: string }[]
+              | undefined,
+          }
+        : {}),
     });
   });
 
