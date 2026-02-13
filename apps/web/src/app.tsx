@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Routes, Route, useLocation, Navigate, Link } from "react-router-dom";
 import { FlowList } from "./pages/flow-list";
 import { FlowDetailPage } from "./pages/flow-detail";
+import { FlowEditorPage } from "./pages/flow-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
@@ -129,6 +130,8 @@ export function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/" element={<FlowList />} />
+          <Route path="/flows/new" element={<FlowEditorPage />} />
+          <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
           <Route path="/flows/:flowId" element={<FlowDetailPage />} />
           <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
           <Route path="/schedules" element={<SchedulesListPage />} />

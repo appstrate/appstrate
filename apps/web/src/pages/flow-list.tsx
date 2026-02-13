@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlows } from "../hooks/use-flows";
 import { useAllExecutionsRealtime } from "../hooks/use-realtime";
+import { useAuth } from "../hooks/use-auth";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
 
 export function FlowList() {
   const qc = useQueryClient();
   const { data: flows, isLoading, error } = useFlows();
+  const { isAdmin } = useAuth();
   const [importOpen, setImportOpen] = useState(false);
 
   useAllExecutionsRealtime(() => {
@@ -37,7 +39,14 @@ export function FlowList() {
       <>
         <div className="flow-list-header">
           <div />
-          <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+          <div className="flow-list-actions">
+            {isAdmin && (
+              <Link to="/flows/new">
+                <button>Creer un flow</button>
+              </Link>
+            )}
+            <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+          </div>
         </div>
         <div className="empty-state">
           <p>Aucun flow disponible.</p>

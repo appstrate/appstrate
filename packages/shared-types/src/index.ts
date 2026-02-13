@@ -91,6 +91,8 @@ export interface FlowDetail {
   updatedAt?: string | null;
   prompt?: string;
   rawSkills?: { id: string; description: string; content: string }[];
+  stateSchema?: { schema: Record<string, { type: string; format?: string }> } | null;
+  executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
 }
 
 // --- Integration Types ---
