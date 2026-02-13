@@ -1,4 +1,5 @@
 import { Nango } from "@nangohq/node";
+import { logger } from "../lib/logger.ts";
 
 const nango = new Nango({
   secretKey: process.env.NANGO_SECRET_KEY || "",
@@ -114,7 +115,10 @@ export async function getAccessToken(provider: string, userId: string): Promise<
     }
     return credentials.access_token ?? null;
   } catch (err) {
-    console.error(`[nango] Failed to fetch access token for '${provider}':`, err);
+    logger.error("Failed to fetch access token", {
+      provider,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

@@ -2,13 +2,16 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { supabase } from "./lib/supabase.ts";
-import { loadFlows } from "./services/flow-loader.ts";
+import { logger } from "./lib/logger.ts";
+import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
+import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
+import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import type { AppEnv } from "./types/index.ts";
 
@@ -16,6 +19,19 @@ const app = new Hono<AppEnv>();
 
 // Middleware
 app.use("*", cors());
+
+// Health check — before auth middleware (no auth required)
+app.route("/", healthRouter);
+
+// Shutdown gate — reject new write requests during graceful shutdown
+let shuttingDown = false;
+
+app.use("*", async (c, next) => {
+  if (shuttingDown && c.req.method === "POST") {
+    return c.json({ error: "SHUTTING_DOWN", message: "Server is shutting down" }, 503);
+  }
+  return next();
+});
 
 // Auth middleware: verify Supabase JWT and inject user into context
 async function verifyUser(authHeader: string | undefined) {
@@ -42,42 +58,67 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Load flows: built-in from filesystem + user flows from DB
-console.log("Loading flows...");
-const flows = await loadFlows();
-console.log(`${flows.size} flow(s) loaded.`);
+// Load built-in flows from filesystem
+logger.info("Loading flows...");
+await initFlowService();
+logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
 
 // Clean up orphaned executions from previous server runs
 try {
   const orphanCount = await markOrphanExecutionsFailed();
   if (orphanCount > 0) {
-    console.log(`Marked ${orphanCount} orphaned execution(s) as failed.`);
+    logger.info("Marked orphaned executions as failed", { count: orphanCount });
   }
 } catch (err) {
-  console.warn("Could not clean orphaned executions:", err);
+  logger.warn("Could not clean orphaned executions", {
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 // Initialize scheduler
 try {
-  await initScheduler(flows);
+  await initScheduler();
 } catch (err) {
-  console.warn("Could not initialize scheduler:", err);
+  logger.warn("Could not initialize scheduler", {
+    error: err instanceof Error ? err.message : String(err),
+  });
 }
 
 // Graceful shutdown
+const SHUTDOWN_TIMEOUT_MS = 30_000;
+
 const shutdown = async () => {
-  console.log("Shutting down...");
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  logger.info("Shutdown initiated, stopping scheduler...");
   shutdownScheduler();
+
+  const inFlight = getInFlightCount();
+  if (inFlight > 0) {
+    logger.info("Waiting for in-flight executions", {
+      count: inFlight,
+      timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    });
+    const drained = await waitForInFlight(SHUTDOWN_TIMEOUT_MS);
+    if (!drained) {
+      logger.warn("Shutdown timeout reached, forcing exit", {
+        remaining: getInFlightCount(),
+      });
+    }
+  }
+
+  logger.info("Shutdown complete");
   process.exit(0);
 };
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
 // Routes
-const userFlowsRouter = createUserFlowsRouter({ flows });
-const flowsRouter = createFlowsRouter(flows);
-const executionsRouter = createExecutionsRouter(flows);
-const schedulesRouter = createSchedulesRouter(flows);
+const userFlowsRouter = createUserFlowsRouter();
+const flowsRouter = createFlowsRouter();
+const executionsRouter = createExecutionsRouter();
+const schedulesRouter = createSchedulesRouter();
 
 app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
 app.route("/api/flows", flowsRouter);
@@ -100,4 +141,4 @@ export default {
   idleTimeout: 255,
 };
 
-console.log(`Appstrate running on http://localhost:${port}`);
+logger.info("Server started", { port });

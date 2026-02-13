@@ -13,7 +13,11 @@ import { ServicePicker } from "../components/flow-editor/service-picker";
 import { JsonEditor } from "../components/flow-editor/json-editor";
 import { Spinner } from "../components/spinner";
 import type { FlowFormState, EditorTab } from "../components/flow-editor/types";
-import { defaultFormState, detailToFormState, assemblePayload } from "../components/flow-editor/utils";
+import {
+  defaultFormState,
+  detailToFormState,
+  assemblePayload,
+} from "../components/flow-editor/utils";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 // --- Inner form component (receives initial state, no effects needed) ---

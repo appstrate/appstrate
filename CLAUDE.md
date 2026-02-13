@@ -39,7 +39,7 @@ bun run dev                   # turbo dev → Hono on :3000
 | Auth              | **Supabase Auth** (email/password + JWT)          | Multi-user with profiles table and RLS. First signup = admin                |
 | OAuth/API keys    | **Nango** self-hosted (`@nangohq/node`)           | Manages OAuth (Gmail, ClickUp) + API key (Brevo) integrations               |
 | Validation        | **Zod**                                           | Manifest, config, input, output validation via `services/schema.ts`         |
-| Scheduling        | **croner** (cron library)                         | In-memory cron jobs with DB persistence (`flow_schedules` table)            |
+| Scheduling        | **croner** (cron library)                         | In-memory cron jobs with DB persistence + distributed locking (`schedule_runs`) |
 | ZIP import        | **fflate** (decompression)                        | User flow import from ZIP files                                             |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
 | Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
@@ -57,7 +57,11 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
-- **Hybrid flow loading**: Built-in flows are loaded directly from the `flows/` directory at startup (filesystem is the source of truth). User-imported flows are stored in the `flows` DB table. Both are merged into one in-memory `Map<string, LoadedFlow>`. Skills include `content` field, passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint.
+- **FlowService (dual-read)**: Built-in flows are loaded from the `flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling. Skills include `content` field, passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint.
+- **Flow versioning**: Every create/update of a user flow creates a snapshot in `flow_versions` (auto-incrementing `version_number` per flow via RPC). Executions are tagged with `flow_version_id` for audit trail. Versions are non-blocking (errors caught and logged).
+- **Structured logging**: All backend logging uses `lib/logger.ts` which emits JSON to stdout (`{ level, msg, timestamp, ...data }`). No `console.*` calls.
+- **Rate limiting**: Token bucket middleware per `method:path:userId`. Applied on `POST /api/flows/:id/run` (20/min), `POST /api/flows/import` (10/min), `POST /api/flows` (10/min).
+- **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
 - **Nango auth modes**: Integrations can be OAuth2 (popup flow) or API_KEY (modal input). The `authMode` is fetched from Nango's provider metadata via `nango.getProvider()` SDK and cached.
 - **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are loaded with their content (from filesystem for built-in, from DB for user flows), passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint into `/workspace/.claude/skills/`.
 - **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and user flows are readable by all authenticated users, writable by admins only.
@@ -92,7 +96,10 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |                                |
      |   Scheduler (croner):          |-- Loads enabled schedules from DB at startup
      |                                |-- Cron triggers → triggerScheduledExecution()
+     |                                |-- Distributed lock via schedule_runs table
      |                                |-- Uses same executeFlowInBackground() path
+     |                                |
+     |   Health:                      |-- GET /health (no auth) → healthy/degraded
      |                                |
      |-- #/flows/:id/executions/:eid->|
      |   (Execution Detail)           |
@@ -125,7 +132,9 @@ appstrate/
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial.sql           # Schema with multi-user support, RLS policies, Realtime publication
-│       └── 002_execution_logs_user_id.sql  # Denormalize user_id on execution_logs for Realtime CDC
+│       ├── 002_execution_logs_user_id.sql  # Denormalize user_id on execution_logs for Realtime CDC
+│       ├── 003_schedule_locks.sql    # schedule_runs table + try_acquire_schedule_lock() for distributed cron
+│       └── 004_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
 │
 ├── apps/
 │   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
@@ -133,14 +142,18 @@ appstrate/
 │   │   ├── tsconfig.json
 │   │   ├── eslint.config.js
 │   │   └── src/
-│   │       ├── index.ts              # Hono app entry: CORS, Supabase JWT auth middleware, route mounting, scheduler init, graceful shutdown
+│   │       ├── index.ts              # Hono app entry: CORS, JWT auth, health route, shutdown gate, graceful shutdown, scheduler init
 │   │       ├── lib/
-│   │       │   └── supabase.ts       # Supabase client (service role key), getUserProfile(), isAdmin()
+│   │       │   ├── supabase.ts       # Supabase client (service role key), getUserProfile(), isAdmin()
+│   │       │   └── logger.ts         # Structured JSON logger (debug, info, warn, error → stdout)
+│   │       ├── middleware/
+│   │       │   └── rate-limit.ts     # Token bucket rate limiter per userId (in-memory, auto-cleanup)
 │   │       ├── routes/
-│   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, PUT /api/flows/:id/config (admin), DELETE /api/flows/:id/state
-│   │       │   ├── executions.ts     # POST /api/flows/:id/run (SSE), GET /api/executions/:id, interpolatePrompt(), executeFlowInBackground()
+│   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, GET /api/flows/:id/versions, PUT /api/flows/:id/config, DELETE /api/flows/:id/state
+│   │       │   ├── executions.ts     # POST /api/flows/:id/run (rate-limited), GET /api/executions/:id, interpolatePrompt(), executeFlowInBackground()
 │   │       │   ├── schedules.ts      # CRUD for /api/schedules and /api/flows/:id/schedules
-│   │       │   ├── user-flows.ts     # POST /api/flows/import (admin), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
+│   │       │   ├── user-flows.ts     # POST /api/flows/import (rate-limited), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
+│   │       │   ├── health.ts         # GET /health (no auth) — DB + flows checks → healthy/degraded
 │   │       │   ├── auth.ts           # Nango routes: GET /auth/connections, POST /auth/connect/:provider, GET /auth/integrations, DELETE /auth/connections/:provider
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
@@ -152,10 +165,12 @@ appstrate/
 │   │       │   │   └── claude-code.ts # ClaudeCodeAdapter (prompt enrichment, stream parsing, retry prompt, output schema injection)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, flow_state, executions, execution_logs tables
-│   │       │   ├── flow-loader.ts    # Loads built-in flows from filesystem + user flows from DB
+│   │       │   ├── flow-service.ts   # FlowService: built-in cache (ReadonlyMap) + DB reads for user flows (replaces flow-loader.ts)
+│   │       │   ├── flow-versions.ts  # Flow versioning: createFlowVersion(), listFlowVersions(), getLatestVersionId()
 │   │       │   ├── flow-import.ts    # importFlowFromZip(): unzip, validate manifest, extract skills, persist
 │   │       │   ├── user-flows.ts     # DB CRUD for user flows table (get, insert, update, delete with cascade)
-│   │       │   ├── scheduler.ts      # Cron job lifecycle: init, create/update/delete schedules, trigger executions
+│   │       │   ├── execution-tracker.ts # In-flight execution tracking for graceful shutdown (track/untrack/waitForInFlight)
+│   │       │   ├── scheduler.ts      # Cron job lifecycle with distributed locking (schedule_runs table)
 │   │       │   ├── schema.ts         # Zod validation: validateManifest, validateConfig, validateInput, validateOutput
 │   │       │   └── env-builder.ts    # buildContainerEnv(): builds env var map for container (shared between manual + scheduled runs)
 │   │       └── types/
@@ -246,6 +261,7 @@ appstrate/
 | `PUT`    | `/api/flows/:id/config`       | JWT+Admin | Save flow configuration (Zod-validated against manifest schema)                 |
 | `DELETE` | `/api/flows/:id/state`        | JWT       | Reset flow state                                                                |
 | `POST`   | `/api/flows/import`           | JWT+Admin | Import flow from ZIP file (multipart/form-data)                                 |
+| `GET`    | `/api/flows/:id/versions`     | JWT       | List version history for a user flow (newest first)                             |
 | `DELETE` | `/api/flows/:id`              | JWT+Admin | Delete a user-imported flow (built-in flows cannot be deleted)                  |
 
 ### Executions
@@ -281,9 +297,10 @@ appstrate/
 
 ### Other
 
-| Method | Path | Auth | Description                    |
-| ------ | ---- | ---- | ------------------------------ |
-| `GET`  | `/*` | None | Static files from `apps/web/dist/` |
+| Method | Path      | Auth | Description                                                              |
+| ------ | --------- | ---- | ------------------------------------------------------------------------ |
+| `GET`  | `/health` | None | Health check — `{ status: "healthy"\|"degraded", uptime_ms, checks }` |
+| `GET`  | `/*`      | None | Static files from `apps/web/dist/`                                       |
 
 ### SSE Events (POST /api/flows/:id/run)
 
@@ -298,7 +315,7 @@ execution_completed → {executionId, status: "success"|"failed"|"timeout"}
 
 ### Error Codes
 
-`FLOW_NOT_FOUND` (404), `VALIDATION_ERROR` (400), `DEPENDENCY_NOT_SATISFIED` (400), `CONFIG_INCOMPLETE` (400), `EXECUTION_IN_PROGRESS` (409), `UNAUTHORIZED` (401), `NAME_COLLISION` (400), `MISSING_MANIFEST` (400), `INVALID_MANIFEST` (400), `ZIP_INVALID` (400), `FILE_TOO_LARGE` (400), `MISSING_PROMPT` (400), `OPERATION_NOT_ALLOWED` (403), `FLOW_IN_USE` (409), `API_KEY_CONNECTION_FAILED` (500), `CONNECT_SESSION_FAILED` (500)
+`FLOW_NOT_FOUND` (404), `VALIDATION_ERROR` (400), `DEPENDENCY_NOT_SATISFIED` (400), `CONFIG_INCOMPLETE` (400), `EXECUTION_IN_PROGRESS` (409), `UNAUTHORIZED` (401), `NAME_COLLISION` (400), `MISSING_MANIFEST` (400), `INVALID_MANIFEST` (400), `ZIP_INVALID` (400), `FILE_TOO_LARGE` (400), `MISSING_PROMPT` (400), `OPERATION_NOT_ALLOWED` (403), `FLOW_IN_USE` (409), `RATE_LIMITED` (429), `API_KEY_CONNECTION_FAILED` (500), `CONNECT_SESSION_FAILED` (500)
 
 ## Database Schema
 
@@ -319,7 +336,7 @@ flow_state (user_id UUID + flow_id PK, state JSONB, updated_at)
   -- RLS: own data + admin sees all
 
 -- Execution records (per-user)
-executions (id PK, flow_id, user_id UUID, status, input JSONB, result JSONB, error, tokens_used, started_at, completed_at, duration, schedule_id)
+executions (id PK, flow_id, user_id UUID, status, input JSONB, result JSONB, error, tokens_used, started_at, completed_at, duration, schedule_id, flow_version_id FK→flow_versions)
   -- Indexes: flow_id, status, user_id
   -- RLS: own data + admin sees all
 
@@ -336,6 +353,16 @@ flow_schedules (id PK, flow_id, user_id UUID, name, enabled, cron_expression, ti
 -- User-imported flows (built-in flows are loaded from filesystem)
 flows (id PK, manifest JSONB, prompt TEXT, skills JSONB, created_at, updated_at)
   -- RLS: all authenticated read, admin write
+
+-- Flow version snapshots (audit trail for user flow changes)
+flow_versions (id SERIAL PK, flow_id, version_number, manifest JSONB, prompt TEXT, skills JSONB, created_by UUID FK→auth.users, created_at)
+  -- UNIQUE(flow_id, version_number)
+  -- No FK to flows (preserves history after deletion)
+
+-- Distributed schedule lock (prevents duplicate cron executions across instances)
+schedule_runs (id PK, schedule_id FK→flow_schedules ON DELETE CASCADE, fire_time TIMESTAMPTZ, execution_id FK→executions, instance_id, created_at)
+  -- UNIQUE(schedule_id, fire_time)
+  -- RPC: try_acquire_schedule_lock() uses advisory lock + unique insert
 ```
 
 Supabase Realtime publishes `executions` and `execution_logs` tables.
@@ -404,7 +431,7 @@ DOCKER_SOCKET=/var/run/docker.sock
 
 3. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
 
-4. **Scheduler is in-memory**: Cron jobs run in-process via `croner`. If the server restarts, jobs are re-loaded from DB on startup. No distributed locking — not safe for multi-instance deployments.
+4. **Scheduler is in-memory with distributed locking**: Cron jobs run in-process via `croner`. If the server restarts, jobs are re-loaded from DB on startup. Distributed locking via `schedule_runs` table + `try_acquire_schedule_lock()` RPC prevents duplicate executions across instances.
 
 5. **Supabase client navigator.locks bypass**: The frontend Supabase client bypasses `navigator.locks` to avoid a deadlock during session refresh. This is a workaround cast with `as any` in `apps/web/src/lib/supabase.ts`.
 
@@ -422,10 +449,15 @@ DOCKER_SOCKET=/var/run/docker.sock
 - Nango OAuth flow (Gmail, ClickUp, Google Calendar) with Connect Session Tokens
 - Nango API key flow (Brevo) — `authMode` detection + API key modal
 - Nango connections scoped per user (end_user.id filtering)
-- ZIP flow import with manifest validation, skill extraction, and in-memory hot-reload
-- Cron schedule CRUD with `croner` validation
+- ZIP flow import with manifest validation, skill extraction, and DB persistence
+- Cron schedule CRUD with `croner` validation and distributed locking
 - Output schema validation with Zod and retry loop (unit tested)
 - Supabase Realtime for execution status updates and execution logs (via denormalized `user_id`)
+- `GET /health` returns healthy/degraded based on DB connectivity and flow count
+- Graceful shutdown: SIGTERM → stop scheduler → wait in-flight (30s) → exit
+- Structured JSON logging on all API logs (no `console.*`)
+- Rate limiting on execution and flow creation endpoints
+- Flow versioning: create/update creates snapshot, executions tagged with `flow_version_id`
 
 ## Detailed Specs
 
