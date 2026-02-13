@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { LoadedFlow } from "../types/index.ts";
+import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
   getFlowState,
@@ -205,13 +205,13 @@ export async function executeFlowInBackground(
 // --- Router ---
 
 export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
-  const router = new Hono();
+  const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
   router.post("/flows/:id/run", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);

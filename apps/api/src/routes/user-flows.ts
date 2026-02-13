@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { LoadedFlow, FlowManifest, SkillMeta } from "../types/index.ts";
+import type { LoadedFlow, FlowManifest, SkillMeta, AppEnv } from "../types/index.ts";
 import { importFlowFromZip, FlowImportError } from "../services/flow-import.ts";
 import {
   deleteUserFlow,
@@ -28,7 +28,7 @@ async function reloadFlowFromDB(
 
   const loaded: LoadedFlow = {
     id: row.id,
-    manifest: row.manifest as FlowManifest,
+    manifest: row.manifest as unknown as FlowManifest,
     prompt: row.prompt,
     skills,
     source: row.source as "built-in" | "user",
@@ -39,11 +39,11 @@ async function reloadFlowFromDB(
 }
 
 export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
-  const router = new Hono();
+  const router = new Hono<AppEnv>();
 
   // POST /api/flows/import — import a flow from a ZIP file (admin-only)
   router.post("/import", async (c) => {
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!(await isAdmin(user.id))) {
       return c.json(
@@ -94,7 +94,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
 
   // POST /api/flows — create a flow from admin (without ZIP)
   router.post("/", async (c) => {
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!(await isAdmin(user.id))) {
       return c.json(
@@ -163,7 +163,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   router.put("/:id", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
@@ -273,7 +273,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   router.delete("/:id", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);

@@ -11,12 +11,7 @@ import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import authRouter from "./routes/auth.ts";
-
-type AppEnv = {
-  Variables: {
-    user: { id: string };
-  };
-};
+import type { AppEnv } from "./types/index.ts";
 
 const app = new Hono<AppEnv>();
 

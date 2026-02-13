@@ -85,8 +85,8 @@ function makeFlow(overrides: {
   return {
     id: "test-flow",
     prompt: "test prompt",
-    path: "/tmp/test-flow",
     skills: [],
+    source: "built-in",
     manifest: {
       version: "1.0.0",
       metadata: {
