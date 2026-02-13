@@ -1487,3 +1487,155 @@ button:disabled {
 .flow-list-actions a {
   text-decoration: none;
 }
+
+/* Editor top bar (breadcrumb + mode toggle) */
+.editor-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+/* Prompt editor wrapper */
+.prompt-editor-wrapper {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.prompt-editor-wrapper .hint {
+  padding: 0.5rem 1rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.prompt-editor-wrapper .hint code {
+  font-size: 0.7rem;
+  background: var(--bg);
+  padding: 0.1rem 0.375rem;
+  border-radius: 3px;
+}
+
+/* JSON editor wrapper */
+.json-editor-wrapper {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.json-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.json-editor-error {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Service picker */
+.service-picker-selected {
+  margin-bottom: 0.5rem;
+}
+.service-picker-selected-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.service-picker-selected-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.service-picker-selected-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.service-picker-selected-info strong {
+  font-size: 0.85rem;
+}
+.service-picker-selected-fields {
+  display: flex;
+  gap: 0.5rem;
+}
+.service-picker-selected-fields input {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+}
+.service-picker-selected-fields input:focus {
+  border-color: var(--primary);
+}
+
+/* Service picker grid */
+.service-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+}
+.service-picker-card {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  font-size: 0.8rem;
+  position: relative;
+}
+.service-picker-card:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--surface-hover);
+}
+.service-picker-card.selected {
+  border-color: var(--success);
+  opacity: 0.6;
+  cursor: default;
+}
+.service-picker-card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.service-picker-card-name {
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+.service-picker-check {
+  color: var(--success);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.auth-mode-badge {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.1rem 0.375rem;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
