@@ -106,3 +106,10 @@ export interface SSEEvent {
   event: string;
   data: Record<string, unknown>;
 }
+
+// Hono context env — shared across all routers
+export type AppEnv = {
+  Variables: {
+    user: { id: string };
+  };
+};

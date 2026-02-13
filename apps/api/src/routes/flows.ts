@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { LoadedFlow } from "../types/index.ts";
+import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
   setFlowConfig,
@@ -15,11 +15,11 @@ import { isAdmin } from "../lib/supabase.ts";
 import { getFlowById } from "../services/user-flows.ts";
 
 export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
-  const router = new Hono();
+  const router = new Hono<AppEnv>();
 
   // GET /api/flows — list all loaded flows
   router.get("/", async (c) => {
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
     const runningCounts = await getRunningExecutionsCounts(user.id);
 
     const flowList = Array.from(flows.values()).map((f) => ({
@@ -45,7 +45,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   router.get("/:id", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
@@ -138,7 +138,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   router.put("/:id/config", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
@@ -189,7 +189,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   router.delete("/:id/state", async (c) => {
     const flowId = c.req.param("id");
     const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+    const user = c.get("user");
 
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);

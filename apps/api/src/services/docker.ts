@@ -5,7 +5,6 @@ const CLAUDE_CODE_RUNTIME_IMAGE = "appstrate-claude-code:latest";
 async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
   return fetch(`http://localhost${path}`, {
     ...options,
-    // @ts-expect-error Bun-specific unix socket option
     unix: DOCKER_SOCKET,
   });
 }

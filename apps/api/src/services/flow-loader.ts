@@ -17,7 +17,7 @@ export async function loadFlows(): Promise<Map<string, LoadedFlow>> {
 
     flows.set(row.id, {
       id: row.id,
-      manifest: row.manifest as FlowManifest,
+      manifest: row.manifest as unknown as FlowManifest,
       prompt: row.prompt,
       skills,
       source: row.source as "built-in" | "user",
