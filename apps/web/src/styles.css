@@ -800,6 +800,8 @@ button:disabled {
 .main-nav {
   display: flex;
   gap: 0.25rem;
+  margin-left: auto;
+  margin-right: 1rem;
 }
 .nav-tab {
   font-size: 0.8rem;

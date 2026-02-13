@@ -123,6 +123,7 @@ export async function getLastExecution(flowId: string, userId: string) {
 
 export async function appendExecutionLog(
   executionId: string,
+  userId: string,
   type: string,
   event: string | null,
   message: string | null,
@@ -132,6 +133,7 @@ export async function appendExecutionLog(
     .from("execution_logs")
     .insert({
       execution_id: executionId,
+      user_id: userId,
       type,
       event,
       message,
