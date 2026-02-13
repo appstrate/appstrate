@@ -21,7 +21,6 @@ interface FlowFormState {
     name: string;
     displayName: string;
     description: string;
-    author: string;
     tags: string[];
   };
   prompt: string;
@@ -36,7 +35,7 @@ interface FlowFormState {
 
 function defaultFormState(): FlowFormState {
   return {
-    metadata: { name: "", displayName: "", description: "", author: "", tags: [] },
+    metadata: { name: "", displayName: "", description: "", tags: [] },
     prompt: "",
     services: [],
     inputSchema: [],
@@ -87,8 +86,7 @@ function detailToFormState(detail: FlowDetail): FlowFormState {
       name: detail.id,
       displayName: detail.displayName,
       description: detail.description,
-      author: detail.author,
-      tags: [],
+      tags: detail.tags || [],
     },
     prompt: detail.prompt || "",
     services,
@@ -150,14 +148,14 @@ function fieldsToRecord(
   return record;
 }
 
-function assemblePayload(state: FlowFormState) {
+function assemblePayload(state: FlowFormState, userEmail: string) {
   const manifest: Record<string, unknown> = {
     version: "1.0",
     metadata: {
       name: state.metadata.name,
       displayName: state.metadata.displayName,
       description: state.metadata.description,
-      author: state.metadata.author,
+      author: userEmail,
       ...(state.metadata.tags.length > 0 ? { tags: state.metadata.tags } : {}),
     },
     requires: {
@@ -211,11 +209,13 @@ function FlowEditorForm({
   detail,
   flowId,
   isEdit,
+  userEmail,
 }: {
   initialState: FlowFormState;
   detail: FlowDetail | null;
   flowId: string | undefined;
   isEdit: boolean;
+  userEmail: string;
 }) {
   const navigate = useNavigate();
   const createFlow = useCreateFlow();
@@ -239,7 +239,7 @@ function FlowEditorForm({
       return;
     }
 
-    const payload = assemblePayload(form);
+    const payload = assemblePayload(form, userEmail);
 
     if (isEdit && detail) {
       updateFlow.mutate(
@@ -344,7 +344,7 @@ function FlowEditorForm({
 export function FlowEditorPage() {
   const { flowId } = useParams<{ flowId: string }>();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const isEdit = !!flowId;
 
   const { data: detail, isLoading } = useFlowDetail(flowId);
@@ -388,6 +388,7 @@ export function FlowEditorPage() {
       detail={detail ?? null}
       flowId={flowId}
       isEdit={isEdit}
+      userEmail={user?.email ?? ""}
     />
   );
 }
