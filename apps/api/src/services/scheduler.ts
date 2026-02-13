@@ -197,6 +197,7 @@ async function triggerScheduledExecution(
       config,
       state,
       input,
+      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
 
     // Create execution record with schedule_id

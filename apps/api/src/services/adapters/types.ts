@@ -8,7 +8,6 @@ export interface ExecutionAdapter {
   execute(
     executionId: string,
     envVars: Record<string, string>,
-    flowPath: string,
     timeout: number,
     outputSchema?: Record<string, import("@appstrate/shared-types").FlowOutputField>,
   ): AsyncGenerator<ExecutionMessage>;

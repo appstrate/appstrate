@@ -57,10 +57,10 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Execution status changes are delivered via Supabase Realtime (`postgres_changes` on `executions` table). Execution logs use React Query polling (1s while running) because Realtime doesn't deliver `execution_logs` INSERTs reliably due to the subquery-based RLS policy on that table.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
-- **Two flow sources**: Built-in flows from `flows/` directory, and user-imported flows from `user_flows` DB table (materialized to `data/user-flows/` at startup).
+- **DB as single source of truth**: All flows (built-in + user-imported) live in the `flows` DB table. Built-in flows are seeded from `flows/` directory at startup via `flow-seeder.ts`. Skills are passed to containers via `FLOW_SKILLS` env var (JSON), reconstructed by the entrypoint.
 - **Nango auth modes**: Integrations can be OAuth2 (popup flow) or API_KEY (modal input). The `authMode` is fetched from Nango's provider metadata via `nango.getProvider()` SDK and cached.
-- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are listed in flow detail and their content is available to the container agent.
-- **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and user flows are readable by all authenticated users, writable by admins only.
+- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are stored in DB with their content, passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint into `/workspace/.claude/skills/`.
+- **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and flows are readable by all authenticated users, writable by admins only. Built-in flows are protected from deletion via RLS.
 - **Auth flow**: Frontend uses `@supabase/supabase-js` with anon key → `supabase.auth.signInWithPassword()` → JWT stored in Supabase session → sent as `Authorization: Bearer {jwt}` on all API calls. Backend verifies JWT via `supabase.auth.getUser(token)` with service role key.
 
 ## Architecture
@@ -103,7 +103,7 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |-- GET /api/executions/:id/logs  (REST: paginated historical logs)
      |                                |
      |-- POST /api/flows/import ------>|-- flow-import.ts: unzip, validate manifest, persist to DB
-     |-- DELETE /api/flows/:id ------->|-- user-flows.ts: delete user flow + cascade cleanup
+     |-- DELETE /api/flows/:id ------->|-- user-flows.ts: delete user flow + cascade cleanup (source='user' only)
      |                                |
      |-- #/schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
      |-- #/services (Services List) -->|-- GET /auth/integrations (with authMode)
@@ -142,7 +142,7 @@ appstrate/
 │   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, PUT /api/flows/:id/config (admin), DELETE /api/flows/:id/state
 │   │       │   ├── executions.ts     # POST /api/flows/:id/run (SSE), GET /api/executions/:id, interpolatePrompt(), executeFlowInBackground()
 │   │       │   ├── schedules.ts      # CRUD for /api/schedules and /api/flows/:id/schedules
-│   │       │   ├── user-flows.ts     # POST /api/flows/import (admin), DELETE /api/flows/:id (admin, user flows only)
+│   │       │   ├── user-flows.ts     # POST /api/flows/import (admin), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
 │   │       │   ├── auth.ts           # Nango routes: GET /auth/connections, POST /auth/connect/:provider, GET /auth/integrations, DELETE /auth/connections/:provider
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
@@ -154,10 +154,10 @@ appstrate/
 │   │       │   │   └── claude-code.ts # ClaudeCodeAdapter (prompt enrichment, stream parsing, retry prompt, output schema injection)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, flow_state, executions, execution_logs tables
-│   │       │   ├── flow-loader.ts    # Scans flows/ dir + loads user flows from DB at startup, validates manifests with Zod
+│   │       │   ├── flow-seeder.ts    # Seeds built-in flows from flows/ dir into DB at startup (idempotent via content_hash)
+│   │       │   ├── flow-loader.ts    # Loads all flows from DB into memory at startup
 │   │       │   ├── flow-import.ts    # importFlowFromZip(): unzip, validate manifest, extract skills, persist
-│   │       │   ├── flow-materializer.ts # Materializes user flows from DB to filesystem (data/user-flows/)
-│   │       │   ├── user-flows.ts     # DB CRUD for user_flows table (list, get, insert, delete with cascade)
+│   │       │   ├── user-flows.ts     # DB CRUD for flows table (list, get, insert, update, delete with cascade)
 │   │       │   ├── scheduler.ts      # Cron job lifecycle: init, create/update/delete schedules, trigger executions
 │   │       │   ├── schema.ts         # Zod validation: validateManifest, validateConfig, validateInput, validateOutput
 │   │       │   └── env-builder.ts    # buildContainerEnv(): builds env var map for container (shared between manual + scheduled runs)
@@ -229,9 +229,6 @@ appstrate/
 │       └── skills/                   # Optional: agent skills
 │           └── {skill-id}/
 │               └── SKILL.md          # Skill definition with YAML frontmatter (description)
-│
-├── data/                             # Runtime data (gitignored)
-│   └── user-flows/                   # Materialized user flows from DB
 │
 ├── runtime-claude-code/              # Docker image for Claude Code CLI
 │   ├── Dockerfile
@@ -339,9 +336,9 @@ flow_schedules (id PK, flow_id, user_id UUID, name, enabled, cron_expression, ti
   -- Indexes: flow_id, user_id
   -- RLS: own data + admin sees all
 
--- User-imported flows (admin-only write)
-user_flows (id PK, manifest JSONB, prompt TEXT, skills JSONB, created_at, updated_at)
-  -- RLS: all authenticated read, admin write
+-- All flows: built-in (seeded at startup) + user-imported
+flows (id PK, manifest JSONB, prompt TEXT, skills JSONB, source TEXT, content_hash TEXT, created_at, updated_at)
+  -- RLS: all authenticated read, admin write, delete restricted to source='user'
 ```
 
 Supabase Realtime publishes `executions` and `execution_logs` tables.
