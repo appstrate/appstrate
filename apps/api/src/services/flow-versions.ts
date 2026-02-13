@@ -53,6 +53,22 @@ export async function listFlowVersions(flowId: string): Promise<FlowVersion[]> {
   return data as FlowVersion[];
 }
 
+/** Fire-and-forget version snapshot creation (logs errors, never throws). */
+export function createVersionSnapshot(
+  flowId: string,
+  manifest: Record<string, unknown>,
+  prompt: string,
+  skills: { id: string; description: string; content: string }[],
+  userId: string,
+): void {
+  createFlowVersion(flowId, manifest, prompt, skills, userId).catch((err) => {
+    logger.error("Version creation failed", {
+      flowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 /** Get the latest version ID for a flow (used to tag executions). */
 export async function getLatestVersionId(flowId: string): Promise<number | null> {
   const { data } = await supabase

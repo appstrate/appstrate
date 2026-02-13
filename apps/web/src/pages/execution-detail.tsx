@@ -5,11 +5,11 @@ import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow } from "../hooks/use-mutations";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
-import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
@@ -119,22 +119,9 @@ export function ExecutionDetailPage() {
     ),
   );
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error || !execution) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger l'execution.</p>
-        <p className="empty-hint">{error?.message}</p>
-      </div>
-    );
-  }
+  if (error || !execution) return <ErrorState message={error?.message} />;
 
   const displayStatus = status || execution.status;
   const date = execution.started_at ? formatDateField(execution.started_at) : "";
@@ -208,9 +195,7 @@ export function ExecutionDetailPage() {
         (resultData ? (
           <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
-          <div className="empty-state empty-state-compact">
-            <p className="empty-hint">Aucun resultat</p>
-          </div>
+          <EmptyState message="Aucun resultat" compact />
         ))}
     </>
   );

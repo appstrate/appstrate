@@ -6,6 +6,7 @@ import { useAllExecutionsRealtime } from "../hooks/use-realtime";
 import { useAuth } from "../hooks/use-auth";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
+import { LoadingState, ErrorState } from "../components/page-states";
 
 export function FlowList() {
   const qc = useQueryClient();
@@ -17,22 +18,9 @@ export function FlowList() {
     qc.invalidateQueries({ queryKey: ["flows"] });
   });
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger les flows.</p>
-        <p className="empty-hint">{error.message}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorState message={error.message} />;
 
   if (!flows || flows.length === 0) {
     return (

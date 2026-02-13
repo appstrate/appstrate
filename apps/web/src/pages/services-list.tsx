@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useServices } from "../hooks/use-services";
 import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
-import { Spinner } from "../components/spinner";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { formatDateField } from "../lib/markdown";
+import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ServicesListPage() {
   const { data: integrations, isLoading, error } = useServices();
@@ -16,22 +16,9 @@ export function ServicesListPage() {
     displayName: string;
   } | null>(null);
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger les services.</p>
-        <p className="empty-hint">{error.message}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorState message={error.message} />;
 
   if (!integrations || integrations.length === 0) {
     return (

@@ -7,9 +7,9 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
-import { Spinner } from "../components/spinner";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
+import { LoadingState, ErrorState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
@@ -27,22 +27,9 @@ export function SchedulesListPage() {
   const { data: editFlowDetail } = useFlowDetail(editingSchedule?.flow_id || undefined);
   const createMutation = useCreateSchedule(createFlowId);
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger les planifications.</p>
-        <p className="empty-hint">{error.message}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorState message={error.message} />;
 
   const openCreate = () => {
     setCreateFlowId(flows?.[0]?.id ?? "");

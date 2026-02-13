@@ -111,5 +111,6 @@ export interface SSEEvent {
 export type AppEnv = {
   Variables: {
     user: { id: string };
+    flow: LoadedFlow;
   };
 };

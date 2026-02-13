@@ -14,10 +14,10 @@ import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/i
 import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
 import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
-import { getFlow } from "../services/flow-service.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requireFlow } from "../middleware/guards.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -224,14 +224,10 @@ export function createExecutionsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
-  router.post("/flows/:id/run", rateLimit(20), async (c) => {
-    const flowId = c.req.param("id");
-    const flow = await getFlow(flowId);
+  router.post("/flows/:id/run", rateLimit(20), requireFlow(), async (c) => {
+    const flow = c.get("flow");
     const user = c.get("user");
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
+    const flowId = flow.id;
 
     // Validate service dependencies (single Nango call for all services)
     const connections = await listConnections(user.id);
