@@ -69,6 +69,7 @@ export interface FlowDetail {
   description: string;
   version: string;
   author: string;
+  tags: string[];
   source: "built-in" | "user";
   requires: {
     services: ServiceStatus[];

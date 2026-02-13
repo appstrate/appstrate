@@ -4,7 +4,6 @@ interface MetadataState {
   name: string;
   displayName: string;
   description: string;
-  author: string;
   tags: string[];
 }
 
@@ -66,13 +65,6 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
             placeholder="Description du flow..."
           />
         </div>
-        <FormField
-          id="meta-author"
-          label="Auteur"
-          value={value.author}
-          onChange={(v) => update({ author: v })}
-          placeholder="Votre nom"
-        />
         <div className="form-group">
           <label>Tags</label>
           <div className="tag-chips">

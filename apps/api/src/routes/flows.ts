@@ -100,6 +100,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       description: m.metadata.description,
       version: m.version,
       author: m.metadata.author,
+      tags: m.metadata.tags ?? [],
       source: flow.source,
       requires: {
         services: serviceStatuses,
