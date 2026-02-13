@@ -129,6 +129,8 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
             rawSkills: userFlowRow.skills as
               | { id: string; description: string; content: string }[]
               | undefined,
+            stateSchema: m.state ?? null,
+            executionSettings: m.execution ?? null,
           }
         : {}),
     });

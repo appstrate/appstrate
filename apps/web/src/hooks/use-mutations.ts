@@ -132,6 +132,50 @@ export function useImportFlow() {
   });
 }
 
+export function useCreateFlow() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async (body: {
+      manifest: Record<string, unknown>;
+      prompt: string;
+      skills?: { id: string; description: string; content: string }[];
+    }) => {
+      return api<{ flowId: string }>("/flows", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      navigate(`/flows/${data.flowId}`);
+    },
+  });
+}
+
+export function useUpdateFlow(flowId: string) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async (body: {
+      manifest: Record<string, unknown>;
+      prompt: string;
+      skills?: { id: string; description: string; content: string }[];
+      updatedAt: string;
+    }) => {
+      return api<{ flowId: string; updatedAt: string }>(`/flows/${flowId}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["flow", flowId] });
+      navigate(`/flows/${flowId}`);
+    },
+  });
+}
+
 export function useDeleteFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();

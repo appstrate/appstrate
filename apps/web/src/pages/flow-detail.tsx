@@ -169,6 +169,11 @@ export function FlowDetailPage() {
               </button>
             )}
             {detail.source === "user" && (
+              <Link to={`/flows/${flowId}/edit`}>
+                <button>Modifier</button>
+              </Link>
+            )}
+            {detail.source === "user" && (
               <button
                 className="btn-danger"
                 disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
