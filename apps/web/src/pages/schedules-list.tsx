@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useFlows } from "../hooks/use-flows";
+import { useFlows, useFlowDetail } from "../hooks/use-flows";
 import {
   useAllSchedules,
   useCreateSchedule,
@@ -23,6 +23,8 @@ export function SchedulesListPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
+  const { data: createFlowDetail } = useFlowDetail(createFlowId || undefined);
+  const { data: editFlowDetail } = useFlowDetail(editingSchedule?.flow_id || undefined);
   const createMutation = useCreateSchedule(createFlowId);
 
   if (isLoading) {
@@ -96,6 +98,7 @@ export function SchedulesListPage() {
                 onClose={() => setCreateOpen(false)}
                 onSave={(data) => createMutation.mutate(data)}
                 isPending={createMutation.isPending}
+                inputSchema={createFlowDetail?.input?.schema}
                 flowPicker={
                   flows && flows.length > 1 ? (
                     <div className="form-group">
@@ -126,6 +129,7 @@ export function SchedulesListPage() {
             setEditingSchedule(null);
           }}
           schedule={editingSchedule}
+          inputSchema={editFlowDetail?.input?.schema}
           onSave={(data) => updateSchedule.mutate({ id: editingSchedule.id, ...data })}
           onDelete={() => {
             deleteSchedule.mutate(editingSchedule.id);
