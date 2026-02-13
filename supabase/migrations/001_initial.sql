@@ -99,14 +99,12 @@ CREATE TABLE public.flow_schedules (
 CREATE INDEX idx_schedules_flow_id ON public.flow_schedules(flow_id);
 CREATE INDEX idx_schedules_user_id ON public.flow_schedules(user_id);
 
--- Flows: built-in (seeded at startup) + user-imported
+-- User-imported flows (built-in flows are loaded from filesystem)
 CREATE TABLE public.flows (
   id TEXT PRIMARY KEY,
   manifest JSONB NOT NULL,
   prompt TEXT NOT NULL,
   skills JSONB DEFAULT '[]',
-  source TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('built-in', 'user')),
-  content_hash TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT flows_id_slug CHECK (id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
@@ -164,7 +162,7 @@ CREATE POLICY "flow_schedules_admin" ON public.flow_schedules FOR ALL USING (
   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
 );
 
--- flows: all authenticated read, admin write, delete restricted to user flows
+-- flows: all authenticated read, admin write
 ALTER TABLE public.flows ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "flows_select" ON public.flows FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "flows_insert" ON public.flows FOR INSERT WITH CHECK (
@@ -175,7 +173,6 @@ CREATE POLICY "flows_update" ON public.flows FOR UPDATE USING (
 );
 CREATE POLICY "flows_delete" ON public.flows FOR DELETE USING (
   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  AND source = 'user'
 );
 
 -- ============================================================

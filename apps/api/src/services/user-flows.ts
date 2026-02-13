@@ -3,23 +3,9 @@ import type { FlowRow, Json } from "@appstrate/shared-types";
 
 export type { FlowRow };
 
-export async function listUserFlows(): Promise<FlowRow[]> {
-  const { data } = await supabase
-    .from("flows")
-    .select("*")
-    .eq("source", "user")
-    .order("created_at", { ascending: false });
-  return data ?? [];
-}
-
 export async function getFlowById(id: string): Promise<FlowRow | null> {
   const { data } = await supabase.from("flows").select("*").eq("id", id).single();
   return data ?? null;
-}
-
-export async function userFlowExists(id: string): Promise<boolean> {
-  const { data } = await supabase.from("flows").select("id").eq("id", id).limit(1).single();
-  return !!data;
 }
 
 export async function insertUserFlow(
@@ -35,7 +21,6 @@ export async function insertUserFlow(
       manifest: manifest as Json,
       prompt,
       skills: skills as unknown as Json,
-      source: "user",
     })
     .select()
     .single();
@@ -61,7 +46,6 @@ export async function updateUserFlow(
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .eq("source", "user")
     .eq("updated_at", expectedUpdatedAt)
     .select()
     .single();
@@ -79,5 +63,5 @@ export async function deleteUserFlow(id: string): Promise<void> {
   await supabase.from("flow_schedules").delete().eq("flow_id", id);
   await supabase.from("flow_configs").delete().eq("flow_id", id);
   await supabase.from("flow_state").delete().eq("flow_id", id);
-  await supabase.from("flows").delete().eq("id", id).eq("source", "user");
+  await supabase.from("flows").delete().eq("id", id);
 }

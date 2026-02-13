@@ -31,7 +31,7 @@ async function reloadFlowFromDB(
     manifest: row.manifest as unknown as FlowManifest,
     prompt: row.prompt,
     skills,
-    source: row.source as "built-in" | "user",
+    source: "user",
   };
 
   flows.set(row.id, loaded);
