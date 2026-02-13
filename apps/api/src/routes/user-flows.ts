@@ -4,25 +4,17 @@ import { importFlowFromZip, FlowImportError } from "../services/flow-import.ts";
 import { deleteUserFlow, updateUserFlow, insertUserFlow } from "../services/user-flows.ts";
 import { getRunningExecutionsForFlow } from "../services/state.ts";
 import { validateManifest, validateFlowContent } from "../services/schema.ts";
-import { isAdmin } from "../lib/supabase.ts";
-import { logger } from "../lib/logger.ts";
 import { getFlow, getAllFlowIds } from "../services/flow-service.ts";
-import { createFlowVersion } from "../services/flow-versions.ts";
+import { createVersionSnapshot } from "../services/flow-versions.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 
 export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/import — import a flow from a ZIP file (admin-only)
-  router.post("/import", rateLimit(10), async (c) => {
+  router.post("/import", rateLimit(10), requireAdmin(), async (c) => {
     const user = c.get("user");
-
-    if (!(await isAdmin(user.id))) {
-      return c.json(
-        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent importer des flows" },
-        403,
-      );
-    }
 
     const formData = await c.req.formData();
     const file = formData.get("file");
@@ -47,7 +39,7 @@ export function createUserFlowsRouter() {
       // Create initial version snapshot (non-blocking)
       getFlow(result.flowId).then((flow) => {
         if (flow) {
-          createFlowVersion(
+          createVersionSnapshot(
             result.flowId,
             flow.manifest as unknown as Record<string, unknown>,
             flow.prompt,
@@ -59,12 +51,7 @@ export function createUserFlowsRouter() {
                 content: s.content!,
               })),
             user.id,
-          ).catch((err) => {
-            logger.error("Version creation failed for import", {
-              flowId: result.flowId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
+          );
         }
       });
 
@@ -78,15 +65,8 @@ export function createUserFlowsRouter() {
   });
 
   // POST /api/flows — create a flow from admin (without ZIP)
-  router.post("/", rateLimit(10), async (c) => {
+  router.post("/", rateLimit(10), requireAdmin(), async (c) => {
     const user = c.get("user");
-
-    if (!(await isAdmin(user.id))) {
-      return c.json(
-        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent creer des flows" },
-        403,
-      );
-    }
 
     const body = await c.req.json<{
       manifest: Record<string, unknown>;
@@ -131,36 +111,20 @@ export function createUserFlowsRouter() {
     await insertUserFlow(flowId, manifest, prompt, skills);
 
     // Create initial version snapshot (non-blocking)
-    createFlowVersion(flowId, manifest, prompt, skills, user.id).catch((err) => {
-      logger.error("Version creation failed for flow", {
-        flowId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    createVersionSnapshot(flowId, manifest, prompt, skills, user.id);
 
     return c.json({ flowId, message: "Flow cree" }, 201);
   });
 
   // PUT /api/flows/:id — update a user flow (admin-only)
-  router.put("/:id", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = await getFlow(flowId);
+  router.put("/:id", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
     const user = c.get("user");
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
-    }
+    const flowId = flow.id;
 
     if (flow.source !== "user") {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: "Impossible de modifier un flow built-in" },
-        403,
-      );
-    }
-
-    if (!(await isAdmin(user.id))) {
-      return c.json(
-        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent modifier des flows" },
         403,
       );
     }
@@ -231,36 +195,19 @@ export function createUserFlowsRouter() {
     }
 
     // Create version snapshot (non-blocking)
-    createFlowVersion(flowId, manifest, prompt, skills, user.id).catch((err) => {
-      logger.error("Version creation failed for flow update", {
-        flowId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    createVersionSnapshot(flowId, manifest, prompt, skills, user.id);
 
     return c.json({ flowId, message: "Flow mis a jour", updatedAt: updated.updated_at });
   });
 
   // DELETE /api/flows/:id — delete a user flow (admin-only)
-  router.delete("/:id", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = await getFlow(flowId);
-    const user = c.get("user");
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
-    }
+  router.delete("/:id", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const flowId = flow.id;
 
     if (flow.source !== "user") {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: "Impossible de supprimer un flow built-in" },
-        403,
-      );
-    }
-
-    if (!(await isAdmin(user.id))) {
-      return c.json(
-        { error: "FORBIDDEN", message: "Seuls les administrateurs peuvent supprimer des flows" },
         403,
       );
     }

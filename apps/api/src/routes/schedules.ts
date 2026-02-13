@@ -8,19 +8,15 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { validateInput } from "../services/schema.ts";
-import { getFlow } from "../services/flow-service.ts";
+import { requireFlow } from "../middleware/guards.ts";
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/schedules — create a schedule
-  router.post("/flows/:id/schedules", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = await getFlow(flowId);
+  router.post("/flows/:id/schedules", requireFlow(), async (c) => {
+    const flow = c.get("flow");
     const user = c.get("user");
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
 
     const body = await c.req.json<{
       name?: string;
@@ -50,7 +46,7 @@ export function createSchedulesRouter() {
       }
     }
 
-    const schedule = await createSchedule(flowId, user.id, body);
+    const schedule = await createSchedule(flow.id, user.id, body);
     return c.json(schedule, 201);
   });
 

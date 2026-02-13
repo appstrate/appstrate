@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import { validateManifest } from "./schema.ts";
 import type { FlowManifest, LoadedFlow, SkillMeta } from "../types/index.ts";
+import { extractSkillDescription } from "./skill-utils.ts";
 
 const FLOWS_DIR = join(process.cwd(), "flows");
 
@@ -26,12 +27,7 @@ async function loadFlowSkills(flowPath: string): Promise<SkillMeta[]> {
     if (!(await skillFile.exists())) continue;
 
     const content = await skillFile.text();
-    let description = "";
-    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (fmMatch) {
-      const descMatch = fmMatch[1]!.match(/description:\s*(.+)/);
-      if (descMatch) description = descMatch[1]!.trim();
-    }
+    const description = extractSkillDescription(content);
 
     skills.push({ id: entry, description, content });
   }
