@@ -190,14 +190,16 @@ function FlowEditorForm({
         </>
       )}
 
-      <div className="editor-actions">
-        <button type="button" onClick={() => navigate(isEdit ? `/flows/${flowId}` : "/")}>
-          Annuler
-        </button>
-        <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
-          {isPending ? <Spinner /> : isEdit ? "Enregistrer" : "Creer"}
-        </button>
-      </div>
+      {!jsonMode && (
+        <div className="editor-actions">
+          <button type="button" onClick={() => navigate(isEdit ? `/flows/${flowId}` : "/")}>
+            Annuler
+          </button>
+          <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
+            {isPending ? <Spinner /> : isEdit ? "Enregistrer" : "Creer"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
