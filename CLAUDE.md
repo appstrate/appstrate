@@ -44,7 +44,7 @@ bun run dev                   # turbo dev → Hono on :3000
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
 | Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
 | Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 HashRouter, builds to `apps/web/dist/`         |
-| Real-time         | **Supabase Realtime** (postgres_changes)          | Execution status via CDC. Logs via React Query polling (1s)                 |
+| Real-time         | **Supabase Realtime** (postgres_changes)          | Execution status + logs via CDC (denormalized `user_id` on logs)            |
 | Type generation   | **Supabase CLI**                                  | `bun run gen:types` → `packages/shared-types/src/database.ts`              |
 
 ### Key Patterns
@@ -55,7 +55,7 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Template interpolation**: `{{config.*}}`, `{{state.*}}`, `{{input.*}}`, `{{#if state.*}}...{{/if}}` in prompt.md files. Implemented in `interpolatePrompt()` in `apps/api/src/routes/executions.ts`.
 - **Credential injection**: OAuth/API key tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_BREVO_API_KEY`) to the container. Built by `env-builder.ts`.
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
-- **Supabase Realtime**: Execution status changes are delivered via Supabase Realtime (`postgres_changes` on `executions` table). Execution logs use React Query polling (1s while running) because Realtime doesn't deliver `execution_logs` INSERTs reliably due to the subquery-based RLS policy on that table.
+- **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
 - **Hybrid flow loading**: Built-in flows are loaded directly from the `flows/` directory at startup (filesystem is the source of truth). User-imported flows are stored in the `flows` DB table. Both are merged into one in-memory `Map<string, LoadedFlow>`. Skills include `content` field, passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint.
 - **Nango auth modes**: Integrations can be OAuth2 (popup flow) or API_KEY (modal input). The `authMode` is fetched from Nango's provider metadata via `nango.getProvider()` SDK and cached.
@@ -83,11 +83,8 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |                                |-- 4. Output validation loop (if output schema)
      |<-- SSE (replay + live) --------|-- 5. Subscribe to logs via pub/sub
      |                                |
-     |   Supabase Realtime:           |-- postgres_changes on executions table
-     |   (execution status updates)   |-- Frontend subscribes via useExecutionRealtime()
-     |                                |
-     |   React Query Polling (1s):    |-- Logs polled while execution is running
-     |   (execution logs)             |-- Stops when execution completes
+     |   Supabase Realtime:           |-- postgres_changes on executions + execution_logs
+     |   (status + logs)              |-- useExecutionRealtime() + useExecutionLogsRealtime()
      |                                |
      |   Background Execution:        |-- Runs independently of SSE client
      |                                |-- Persists logs to execution_logs table
@@ -127,7 +124,8 @@ appstrate/
 │
 ├── supabase/
 │   └── migrations/
-│       └── 001_initial.sql           # Schema with multi-user support, RLS policies, Realtime publication
+│       ├── 001_initial.sql           # Schema with multi-user support, RLS policies, Realtime publication
+│       └── 002_execution_logs_user_id.sql  # Denormalize user_id on execution_logs for Realtime CDC
 │
 ├── apps/
 │   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
@@ -180,16 +178,16 @@ appstrate/
 │           ├── hooks/
 │           │   ├── use-auth.ts       # useAuth(): login, signup, logout, user, profile, isAdmin (useSyncExternalStore)
 │           │   ├── use-flows.ts      # useFlows(), useFlowDetail(flowId)
-│           │   ├── use-executions.ts # useExecutions, useExecution, useExecutionLogs (with polling support)
+│           │   ├── use-executions.ts # useExecutions, useExecution, useExecutionLogs
 │           │   ├── use-services.ts   # useServices()
 │           │   ├── use-schedules.ts  # useSchedules(flowId), useAllSchedules()
 │           │   ├── use-mutations.ts  # useSaveConfig, useResetState, useRunFlow, useConnect, useConnectApiKey, useDisconnect, schedule mutations
-│           │   └── use-realtime.ts   # Supabase Realtime: useExecutionRealtime (status), useFlowExecutionRealtime, useAllExecutionsRealtime
+│           │   └── use-realtime.ts   # Supabase Realtime: useExecutionRealtime (status), useExecutionLogsRealtime (logs), useFlowExecutionRealtime, useAllExecutionsRealtime
 │           ├── pages/
 │           │   ├── login.tsx         # Login/signup form (email + password + display name)
 │           │   ├── flow-list.tsx     # #/ — flow cards grid with import button
 │           │   ├── flow-detail.tsx   # #/flows/:flowId — config/state/input modals, execution list, service connect (OAuth/API key branching)
-│           │   ├── execution-detail.tsx # #/flows/:flowId/executions/:execId — logs (polled) + result + Realtime status
+│           │   ├── execution-detail.tsx # #/flows/:flowId/executions/:execId — logs + result via Realtime
 │           │   ├── services-list.tsx # #/services — connect/disconnect integrations (OAuth popup or API key modal)
 │           │   └── schedules-list.tsx # #/schedules — manage cron schedules across all flows
 │           └── components/
@@ -304,7 +302,7 @@ execution_completed → {executionId, status: "success"|"failed"|"timeout"}
 
 ## Database Schema
 
-Managed via Supabase migrations (`supabase/migrations/001_initial.sql`). All tables have Row Level Security (RLS) enabled.
+Managed via Supabase migrations (`supabase/migrations/`). All tables have Row Level Security (RLS) enabled.
 
 ```sql
 -- User profiles (extends auth.users, auto-created on signup)
@@ -325,10 +323,10 @@ executions (id PK, flow_id, user_id UUID, status, input JSONB, result JSONB, err
   -- Indexes: flow_id, status, user_id
   -- RLS: own data + admin sees all
 
--- Execution log entries
-execution_logs (id SERIAL PK, execution_id FK→executions ON DELETE CASCADE, type, event, message, data JSONB, created_at)
-  -- Indexes: execution_id, (execution_id, id)
-  -- RLS: via subquery on executions (user_id) + admin sees all
+-- Execution log entries (user_id denormalized for Realtime CDC compatibility)
+execution_logs (id SERIAL PK, execution_id FK→executions ON DELETE CASCADE, user_id UUID FK→auth.users, type, event, message, data JSONB, created_at)
+  -- Indexes: execution_id, (execution_id, id), user_id
+  -- RLS: own data (auth.uid() = user_id) + admin sees all
 
 -- Cron schedules (per-user)
 flow_schedules (id PK, flow_id, user_id UUID, name, enabled, cron_expression, timezone, input JSONB, last_run_at, next_run_at, created_at, updated_at)
@@ -408,9 +406,7 @@ DOCKER_SOCKET=/var/run/docker.sock
 
 4. **Scheduler is in-memory**: Cron jobs run in-process via `croner`. If the server restarts, jobs are re-loaded from DB on startup. No distributed locking — not safe for multi-instance deployments.
 
-5. **Execution logs Realtime**: Supabase Realtime doesn't deliver `execution_logs` INSERTs due to the subquery-based RLS policy. Workaround: React Query polling at 1s interval while execution is running. The `executions` table (simple `user_id = auth.uid()` policy) works fine with Realtime.
-
-6. **Supabase client navigator.locks bypass**: The frontend Supabase client bypasses `navigator.locks` to avoid a deadlock during session refresh. This is a workaround cast with `as any` in `apps/web/src/lib/supabase.ts`.
+5. **Supabase client navigator.locks bypass**: The frontend Supabase client bypasses `navigator.locks` to avoid a deadlock during session refresh. This is a workaround cast with `as any` in `apps/web/src/lib/supabase.ts`.
 
 ## What's Validated
 
@@ -429,8 +425,7 @@ DOCKER_SOCKET=/var/run/docker.sock
 - ZIP flow import with manifest validation, skill extraction, and in-memory hot-reload
 - Cron schedule CRUD with `croner` validation
 - Output schema validation with Zod and retry loop (unit tested)
-- Supabase Realtime for execution status updates
-- React Query polling (1s) for execution logs during running executions
+- Supabase Realtime for execution status updates and execution logs (via denormalized `user_id`)
 
 ## Detailed Specs
 

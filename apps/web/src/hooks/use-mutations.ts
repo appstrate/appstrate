@@ -38,6 +38,7 @@ export function useResetState(flowId: string) {
 }
 
 export function useRunFlow(flowId: string) {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (input?: Record<string, unknown>) => {
@@ -47,6 +48,7 @@ export function useRunFlow(flowId: string) {
       });
     },
     onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["executions", flowId] });
       navigate(`/flows/${flowId}/executions/${data.executionId}`);
     },
     onError: onMutationError,

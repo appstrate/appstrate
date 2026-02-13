@@ -12,6 +12,7 @@ mock.module("../../services/state.ts", () => ({
   appendExecutionLog: mock(
     async (
       _executionId: string,
+      _userId: string,
       _type: string,
       event: string,
       _message: string | null,

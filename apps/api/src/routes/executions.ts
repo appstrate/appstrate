@@ -30,7 +30,7 @@ export async function executeFlowInBackground(
 
   try {
     // Emit execution_started
-    await appendExecutionLog(executionId, "system", "execution_started", null, {
+    await appendExecutionLog(executionId, userId, "system", "execution_started", null, {
       executionId,
       startedAt: new Date().toISOString(),
     });
@@ -40,7 +40,7 @@ export async function executeFlowInBackground(
     for (const svc of flow.manifest.requires.services) {
       depCheck[svc.id] = tokens[svc.id] ? "ok" : "missing";
     }
-    await appendExecutionLog(executionId, "system", "dependency_check", null, {
+    await appendExecutionLog(executionId, userId, "system", "dependency_check", null, {
       services: depCheck,
     });
 
@@ -50,7 +50,7 @@ export async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
     const adapterName = getAdapterName();
-    await appendExecutionLog(executionId, "system", "adapter_started", null, {
+    await appendExecutionLog(executionId, userId, "system", "adapter_started", null, {
       adapter: adapterName,
     });
 
@@ -65,7 +65,14 @@ export async function executeFlowInBackground(
         flow.manifest.output?.schema,
       )) {
         if (msg.type === "progress") {
-          await appendExecutionLog(executionId, "progress", "progress", msg.message ?? null, null);
+          await appendExecutionLog(
+            executionId,
+            userId,
+            "progress",
+            "progress",
+            msg.message ?? null,
+            null,
+          );
         } else if (msg.type === "result") {
           result = msg.data ?? null;
         }
@@ -79,7 +86,7 @@ export async function executeFlowInBackground(
           completed_at: new Date().toISOString(),
           duration,
         });
-        await appendExecutionLog(executionId, "error", "execution_completed", null, {
+        await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
           executionId,
           status: "timeout",
         });
@@ -102,7 +109,7 @@ export async function executeFlowInBackground(
           if (remaining < MIN_RETRY_TIME_MS) break;
 
           const attempt = maxRetries - retriesLeft + 1;
-          await appendExecutionLog(executionId, "system", "output_validation_retry", null, {
+          await appendExecutionLog(executionId, userId, "system", "output_validation_retry", null, {
             attempt,
             maxRetries,
             errors: outputValidation.errors,
@@ -122,6 +129,7 @@ export async function executeFlowInBackground(
               if (msg.type === "progress") {
                 await appendExecutionLog(
                   executionId,
+                  userId,
                   "progress",
                   "progress",
                   msg.message ?? null,
@@ -141,7 +149,7 @@ export async function executeFlowInBackground(
         }
 
         if (!outputValidation.valid) {
-          await appendExecutionLog(executionId, "system", "output_validation", null, {
+          await appendExecutionLog(executionId, userId, "system", "output_validation", null, {
             valid: false,
             errors: outputValidation.errors,
           });
@@ -166,8 +174,8 @@ export async function executeFlowInBackground(
         await setFlowState(userId, flowId, result.state as Record<string, unknown>);
       }
 
-      await appendExecutionLog(executionId, "result", "result", null, result);
-      await appendExecutionLog(executionId, "system", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, "result", "result", null, result);
+      await appendExecutionLog(executionId, userId, "system", "execution_completed", null, {
         executionId,
         status: "success",
       });
@@ -179,7 +187,7 @@ export async function executeFlowInBackground(
         completed_at: new Date().toISOString(),
         duration,
       });
-      await appendExecutionLog(executionId, "error", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
         executionId,
         status: "failed",
         error: "No result returned from adapter",
@@ -194,7 +202,7 @@ export async function executeFlowInBackground(
       completed_at: new Date().toISOString(),
       duration,
     });
-    await appendExecutionLog(executionId, "error", "execution_completed", null, {
+    await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
       executionId,
       status: "failed",
       error: errorMessage,
