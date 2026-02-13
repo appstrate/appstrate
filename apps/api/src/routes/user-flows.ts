@@ -1,48 +1,20 @@
 import { Hono } from "hono";
-import type { LoadedFlow, FlowManifest, SkillMeta, AppEnv } from "../types/index.ts";
+import type { AppEnv } from "../types/index.ts";
 import { importFlowFromZip, FlowImportError } from "../services/flow-import.ts";
-import {
-  deleteUserFlow,
-  updateUserFlow,
-  insertUserFlow,
-  getFlowById,
-} from "../services/user-flows.ts";
+import { deleteUserFlow, updateUserFlow, insertUserFlow } from "../services/user-flows.ts";
 import { getRunningExecutionsForFlow } from "../services/state.ts";
 import { validateManifest, validateFlowContent } from "../services/schema.ts";
 import { isAdmin } from "../lib/supabase.ts";
+import { logger } from "../lib/logger.ts";
+import { getFlow, getAllFlowIds } from "../services/flow-service.ts";
+import { createFlowVersion } from "../services/flow-versions.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 
-interface UserFlowsRouterOptions {
-  flows: Map<string, LoadedFlow>;
-}
-
-async function reloadFlowFromDB(
-  flowId: string,
-  flows: Map<string, LoadedFlow>,
-): Promise<LoadedFlow> {
-  const row = await getFlowById(flowId);
-  if (!row) throw new Error(`Flow '${flowId}' introuvable en DB apres write`);
-
-  const skills: SkillMeta[] = (
-    (row.skills ?? []) as { id: string; description: string; content?: string }[]
-  ).map((s) => ({ id: s.id, description: s.description, content: s.content }));
-
-  const loaded: LoadedFlow = {
-    id: row.id,
-    manifest: row.manifest as unknown as FlowManifest,
-    prompt: row.prompt,
-    skills,
-    source: "user",
-  };
-
-  flows.set(row.id, loaded);
-  return loaded;
-}
-
-export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
+export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/import — import a flow from a ZIP file (admin-only)
-  router.post("/import", async (c) => {
+  router.post("/import", rateLimit(10), async (c) => {
     const user = c.get("user");
 
     if (!(await isAdmin(user.id))) {
@@ -67,21 +39,34 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const existingIds = Array.from(flows.keys());
+    const existingIds = await getAllFlowIds();
 
     try {
       const result = await importFlowFromZip(buffer, existingIds);
 
-      try {
-        await reloadFlowFromDB(result.flowId, flows);
-      } catch (err) {
-        console.error(`Flow ${result.flowId}: reload failed after import`, err);
-        await deleteUserFlow(result.flowId).catch(() => {});
-        return c.json(
-          { error: "INTERNAL_ERROR", message: "Import echoue lors du rechargement" },
-          500,
-        );
-      }
+      // Create initial version snapshot (non-blocking)
+      getFlow(result.flowId).then((flow) => {
+        if (flow) {
+          createFlowVersion(
+            result.flowId,
+            flow.manifest as unknown as Record<string, unknown>,
+            flow.prompt,
+            flow.skills
+              .filter((s) => s.content)
+              .map((s) => ({
+                id: s.id,
+                description: s.description,
+                content: s.content!,
+              })),
+            user.id,
+          ).catch((err) => {
+            logger.error("Version creation failed for import", {
+              flowId: result.flowId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+      });
 
       return c.json({ flowId: result.flowId, message: "Flow importe" }, 201);
     } catch (err) {
@@ -93,7 +78,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   });
 
   // POST /api/flows — create a flow from admin (without ZIP)
-  router.post("/", async (c) => {
+  router.post("/", rateLimit(10), async (c) => {
     const user = c.get("user");
 
     if (!(await isAdmin(user.id))) {
@@ -134,7 +119,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
     }
 
     const flowId = (manifest.metadata as { name: string }).name;
-    const existingIds = Array.from(flows.keys());
+    const existingIds = await getAllFlowIds();
 
     if (existingIds.includes(flowId)) {
       return c.json(
@@ -145,16 +130,13 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
 
     await insertUserFlow(flowId, manifest, prompt, skills);
 
-    try {
-      await reloadFlowFromDB(flowId, flows);
-    } catch (err) {
-      console.error(`Flow ${flowId}: reload failed after create`, err);
-      await deleteUserFlow(flowId).catch(() => {});
-      return c.json(
-        { error: "INTERNAL_ERROR", message: "Creation echouee lors du rechargement" },
-        500,
-      );
-    }
+    // Create initial version snapshot (non-blocking)
+    createFlowVersion(flowId, manifest, prompt, skills, user.id).catch((err) => {
+      logger.error("Version creation failed for flow", {
+        flowId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ flowId, message: "Flow cree" }, 201);
   });
@@ -162,7 +144,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   // PUT /api/flows/:id — update a user flow (admin-only)
   router.put("/:id", async (c) => {
     const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
+    const flow = await getFlow(flowId);
     const user = c.get("user");
 
     if (!flow) {
@@ -248,23 +230,13 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
       );
     }
 
-    try {
-      await reloadFlowFromDB(flowId, flows);
-    } catch (err) {
-      // Keep the OLD entry in the Map — flow stays operational with previous version
-      console.error(
-        `Flow ${flowId}: reload failed after update, keeping old version in memory`,
-        err,
-      );
-      return c.json(
-        {
-          error: "INTERNAL_ERROR",
-          message:
-            "Mise a jour DB reussie mais rechargement echoue. L'ancienne version reste active.",
-        },
-        500,
-      );
-    }
+    // Create version snapshot (non-blocking)
+    createFlowVersion(flowId, manifest, prompt, skills, user.id).catch((err) => {
+      logger.error("Version creation failed for flow update", {
+        flowId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ flowId, message: "Flow mis a jour", updatedAt: updated.updated_at });
   });
@@ -272,7 +244,7 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
   // DELETE /api/flows/:id — delete a user flow (admin-only)
   router.delete("/:id", async (c) => {
     const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
+    const flow = await getFlow(flowId);
     const user = c.get("user");
 
     if (!flow) {
@@ -302,7 +274,6 @@ export function createUserFlowsRouter({ flows }: UserFlowsRouterOptions) {
     }
 
     await deleteUserFlow(flowId);
-    flows.delete(flowId);
 
     return c.body(null, 204);
   });

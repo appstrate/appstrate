@@ -1,4 +1,5 @@
 import type { FlowOutputField } from "@appstrate/shared-types";
+import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
 import {
   createClaudeCodeContainer,
@@ -89,7 +90,10 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     } finally {
       clearTimeout(timeoutHandle);
       await removeContainer(containerId).catch((err) => {
-        console.error(`[adapter] Failed to remove container ${containerId}:`, err);
+        logger.error("Failed to remove container", {
+          containerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }
   }

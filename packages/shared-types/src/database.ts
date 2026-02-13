@@ -86,6 +86,7 @@ export type Database = {
           duration: number | null
           error: string | null
           flow_id: string
+          flow_version_id: number | null
           id: string
           input: Json | null
           result: Json | null
@@ -100,6 +101,7 @@ export type Database = {
           duration?: number | null
           error?: string | null
           flow_id: string
+          flow_version_id?: number | null
           id: string
           input?: Json | null
           result?: Json | null
@@ -114,6 +116,7 @@ export type Database = {
           duration?: number | null
           error?: string | null
           flow_id?: string
+          flow_version_id?: number | null
           id?: string
           input?: Json | null
           result?: Json | null
@@ -123,7 +126,15 @@ export type Database = {
           tokens_used?: number | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "executions_flow_version_id_fkey"
+            columns: ["flow_version_id"]
+            isOneToOne: false
+            referencedRelation: "flow_versions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       flow_configs: {
         Row: {
@@ -212,6 +223,39 @@ export type Database = {
         }
         Relationships: []
       }
+      flow_versions: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          flow_id: string
+          id: number
+          manifest: Json
+          prompt: string
+          skills: Json | null
+          version_number: number
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          flow_id: string
+          id?: number
+          manifest: Json
+          prompt: string
+          skills?: Json | null
+          version_number: number
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          flow_id?: string
+          id?: number
+          manifest?: Json
+          prompt?: string
+          skills?: Json | null
+          version_number?: number
+        }
+        Relationships: []
+      }
       flows: {
         Row: {
           created_at: string | null
@@ -263,12 +307,71 @@ export type Database = {
         }
         Relationships: []
       }
+      schedule_runs: {
+        Row: {
+          created_at: string | null
+          execution_id: string | null
+          fire_time: string
+          id: string
+          instance_id: string | null
+          schedule_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          execution_id?: string | null
+          fire_time: string
+          id?: string
+          instance_id?: string | null
+          schedule_id: string
+        }
+        Update: {
+          created_at?: string | null
+          execution_id?: string | null
+          fire_time?: string
+          id?: string
+          instance_id?: string | null
+          schedule_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedule_runs_execution_id_fkey"
+            columns: ["execution_id"]
+            isOneToOne: false
+            referencedRelation: "executions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "schedule_runs_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "flow_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_flow_version: {
+        Args: {
+          p_created_by: string
+          p_flow_id: string
+          p_manifest: Json
+          p_prompt: string
+          p_skills: Json
+        }
+        Returns: number
+      }
+      try_acquire_schedule_lock: {
+        Args: {
+          p_fire_time: string
+          p_instance_id: string
+          p_schedule_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

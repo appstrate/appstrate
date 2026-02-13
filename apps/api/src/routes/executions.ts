@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
@@ -13,6 +14,10 @@ import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/i
 import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
 import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
+import { getFlow } from "../services/flow-service.ts";
+import { getLatestVersionId } from "../services/flow-versions.ts";
+import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -27,6 +32,7 @@ export async function executeFlowInBackground(
   tokens: Record<string, string>,
 ) {
   const startTime = Date.now();
+  trackExecution(executionId);
 
   try {
     // Emit execution_started
@@ -153,10 +159,10 @@ export async function executeFlowInBackground(
             valid: false,
             errors: outputValidation.errors,
           });
-          console.warn(
-            `[execution] Output validation failed for ${executionId}:`,
-            outputValidation.errors,
-          );
+          logger.warn("Output validation failed", {
+            executionId,
+            errors: outputValidation.errors,
+          });
         }
       }
 
@@ -207,18 +213,20 @@ export async function executeFlowInBackground(
       status: "failed",
       error: errorMessage,
     });
+  } finally {
+    untrackExecution(executionId);
   }
 }
 
 // --- Router ---
 
-export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
+export function createExecutionsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
-  router.post("/flows/:id/run", async (c) => {
+  router.post("/flows/:id/run", rateLimit(20), async (c) => {
     const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
+    const flow = await getFlow(flowId);
     const user = c.get("user");
 
     if (!flow) {
@@ -300,12 +308,26 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
 
+    // Get flow version ID for user flows (non-blocking on failure)
+    const flowVersionId =
+      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
+
     // Create execution record
-    await createExecution(executionId, flowId, user.id, body.input ?? null);
+    await createExecution(
+      executionId,
+      flowId,
+      user.id,
+      body.input ?? null,
+      undefined,
+      flowVersionId ?? undefined,
+    );
 
     // Fire-and-forget background execution
     executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens).catch((err) => {
-      console.error(`[execution] Unhandled error in background execution ${executionId}:`, err);
+      logger.error("Unhandled error in background execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 
     return c.json({ executionId });

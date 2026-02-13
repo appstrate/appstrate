@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase.ts";
+import { logger } from "../lib/logger.ts";
 import type { Json } from "../types/index.ts";
 
 // --- Flow Config (global, no user_id) ---
@@ -73,6 +74,7 @@ export async function createExecution(
   userId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
+  flowVersionId?: number,
 ): Promise<void> {
   const { error } = await supabase.from("executions").insert({
     id,
@@ -82,6 +84,7 @@ export async function createExecution(
     input: input as Json,
     started_at: new Date().toISOString(),
     schedule_id: scheduleId ?? null,
+    flow_version_id: flowVersionId ?? null,
   });
   if (error) {
     throw new Error(`Failed to create execution ${id}: ${error.message}`);
@@ -105,7 +108,7 @@ export async function updateExecution(
     .update({ ...rest, ...(result !== undefined ? { result: result as Json } : {}) })
     .eq("id", id);
   if (error) {
-    console.error(`[state] Failed to update execution ${id}:`, error.message);
+    logger.error("Failed to update execution", { executionId: id, error: error.message });
   }
 }
 
@@ -142,7 +145,7 @@ export async function appendExecutionLog(
     .select("id")
     .single();
   if (error) {
-    console.error(`[state] Failed to append log for execution ${executionId}:`, error.message);
+    logger.error("Failed to append execution log", { executionId, error: error.message });
     return 0;
   }
   return row?.id ?? 0;
