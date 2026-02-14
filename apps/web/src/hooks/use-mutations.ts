@@ -38,6 +38,7 @@ export function useResetState(flowId: string) {
 }
 
 export function useRunFlow(flowId: string) {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (input?: Record<string, unknown>) => {
@@ -47,6 +48,7 @@ export function useRunFlow(flowId: string) {
       });
     },
     onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["executions", flowId] });
       navigate(`/flows/${flowId}/executions/${data.executionId}`);
     },
     onError: onMutationError,
@@ -129,6 +131,50 @@ export function useImportFlow() {
       navigate(`/flows/${data.flowId}`);
     },
     onError: onMutationError,
+  });
+}
+
+export function useCreateFlow() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async (body: {
+      manifest: Record<string, unknown>;
+      prompt: string;
+      skills?: { id: string; description: string; content: string }[];
+    }) => {
+      return api<{ flowId: string }>("/flows", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      navigate(`/flows/${data.flowId}`);
+    },
+  });
+}
+
+export function useUpdateFlow(flowId: string) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async (body: {
+      manifest: Record<string, unknown>;
+      prompt: string;
+      skills?: { id: string; description: string; content: string }[];
+      updatedAt: string;
+    }) => {
+      return api<{ flowId: string; updatedAt: string }>(`/flows/${flowId}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["flow", flowId] });
+      navigate(`/flows/${flowId}`);
+    },
   });
 }
 

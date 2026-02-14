@@ -1,12 +1,8 @@
 import { useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { Tables } from "@appstrate/shared-types";
 
-/**
- * Subscribe to execution status changes via Supabase Realtime.
- * Logs are fetched via polling (Realtime doesn't deliver execution_logs INSERTs
- * reliably due to the subquery-based RLS policy on that table).
- */
 export function useExecutionRealtime(
   executionId: string | null | undefined,
   onStatusChange?: (payload: Record<string, unknown>) => void,
@@ -106,4 +102,42 @@ export function useAllExecutionsRealtime(callback: () => void) {
       supabase.removeChannel(channel);
     };
   }, [stableCallback]);
+}
+
+/**
+ * Subscribe to execution_logs INSERTs via Supabase Realtime.
+ * Enabled by denormalized user_id column with direct RLS policy.
+ */
+export function useExecutionLogsRealtime(
+  executionId: string | null | undefined,
+  onNewLog: (log: Tables<"execution_logs">) => void,
+) {
+  const onNewLogRef = useRef(onNewLog);
+  useEffect(() => {
+    onNewLogRef.current = onNewLog;
+  });
+
+  useEffect(() => {
+    if (!executionId) return;
+
+    const channel: RealtimeChannel = supabase
+      .channel(`exec-logs-${executionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "execution_logs",
+          filter: `execution_id=eq.${executionId}`,
+        },
+        (payload) => {
+          onNewLogRef.current(payload.new as Tables<"execution_logs">);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [executionId]);
 }

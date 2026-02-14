@@ -1,16 +1,16 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow } from "../hooks/use-mutations";
-import { useExecutionRealtime } from "../hooks/use-realtime";
-import { Spinner } from "../components/spinner";
+import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
-import type { ExecutionStatus } from "@appstrate/shared-types";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 function formatEvent(event: string, data: Record<string, unknown>): string {
@@ -34,7 +34,25 @@ export function ExecutionDetailPage() {
   const status = liveStatus || execution?.status;
   const isRunning = status === "running" || status === "pending";
 
-  const { data: logs } = useExecutionLogs(execId, isRunning);
+  const { data: logs } = useExecutionLogs(execId);
+
+  const qc = useQueryClient();
+
+  // Subscribe to new log INSERTs via Supabase Realtime while execution is running
+  useExecutionLogsRealtime(
+    isRunning ? execId : null,
+    useCallback(
+      (newLog: ExecutionLog) => {
+        qc.setQueryData<ExecutionLog[]>(["execution-logs", execId], (prev) => {
+          if (!prev) return [newLog];
+          // Deduplicate: skip if already present (race between REST fetch and Realtime)
+          if (prev.some((l) => l.id === newLog.id)) return prev;
+          return [...prev, newLog];
+        });
+      },
+      [qc, execId],
+    ),
+  );
 
   const runFlow = useRunFlow(flowId!);
   const [inputOpen, setInputOpen] = useState(false);
@@ -70,44 +88,45 @@ export function ExecutionDetailPage() {
   // Derive active tab: user override > auto-switch to result when done
   const activeTab = userTab ?? (resultData && !isRunning ? "result" : "logs");
 
-  const qc = useQueryClient();
+  // Live elapsed timer while running
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isRunning || !execution?.started_at) return;
+    const start = new Date(execution.started_at).getTime();
+    const tick = () => setElapsed(Date.now() - start);
+    tick();
+    const id = setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, [isRunning, execution?.started_at]);
 
   // Subscribe to Supabase Realtime for instant status updates
-  // Logs are fetched via polling (Realtime doesn't deliver execution_logs INSERTs reliably)
   useExecutionRealtime(
     isRunning ? execId : null,
     useCallback(
       (payload: Record<string, unknown>) => {
         const newStatus = payload.status as ExecutionStatus;
         setLiveStatus(newStatus);
-        // Refresh execution and logs queries when status changes
+        // Refresh execution data
         qc.invalidateQueries({ queryKey: ["execution", execId] });
-        qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
+        // Final refetch of logs when execution reaches terminal status (ensures completeness)
+        const terminal =
+          newStatus === "success" || newStatus === "failed" || newStatus === "timeout";
+        if (terminal) {
+          qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
+        }
       },
       [qc, execId],
     ),
   );
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error || !execution) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger l'execution.</p>
-        <p className="empty-hint">{error?.message}</p>
-      </div>
-    );
-  }
+  if (error || !execution) return <ErrorState message={error?.message} />;
 
   const displayStatus = status || execution.status;
   const date = execution.started_at ? formatDateField(execution.started_at) : "";
-  const duration = execution.duration ? `${(execution.duration / 1000).toFixed(1)}s` : "";
+  const time = execution.duration ?? elapsed;
+  const duration = isRunning ? `${(time / 1000).toFixed(1)}s` : "";
 
   return (
     <>
@@ -123,11 +142,6 @@ export function ExecutionDetailPage() {
         <Badge status={displayStatus} />
         <span className="exec-meta">{date}</span>
         {duration && <span className="exec-meta">{duration}</span>}
-        {isRunning && (
-          <span className="live-indicator">
-            <Spinner /> En direct
-          </span>
-        )}
         {!isRunning && flow && (
           <button
             className="primary"
@@ -181,9 +195,7 @@ export function ExecutionDetailPage() {
         (resultData ? (
           <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
-          <div className="empty-state empty-state-compact">
-            <p className="empty-hint">Aucun resultat</p>
-          </div>
+          <EmptyState message="Aucun resultat" compact />
         ))}
     </>
   );

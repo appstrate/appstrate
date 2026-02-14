@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useFlows } from "../hooks/use-flows";
+import { useFlows, useFlowDetail } from "../hooks/use-flows";
 import {
   useAllSchedules,
   useCreateSchedule,
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
-import { Spinner } from "../components/spinner";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
+import { LoadingState, ErrorState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
@@ -23,24 +23,13 @@ export function SchedulesListPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
+  const { data: createFlowDetail } = useFlowDetail(createFlowId || undefined);
+  const { data: editFlowDetail } = useFlowDetail(editingSchedule?.flow_id || undefined);
   const createMutation = useCreateSchedule(createFlowId);
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger les planifications.</p>
-        <p className="empty-hint">{error.message}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorState message={error.message} />;
 
   const openCreate = () => {
     setCreateFlowId(flows?.[0]?.id ?? "");
@@ -96,6 +85,7 @@ export function SchedulesListPage() {
                 onClose={() => setCreateOpen(false)}
                 onSave={(data) => createMutation.mutate(data)}
                 isPending={createMutation.isPending}
+                inputSchema={createFlowDetail?.input?.schema}
                 flowPicker={
                   flows && flows.length > 1 ? (
                     <div className="form-group">
@@ -126,6 +116,7 @@ export function SchedulesListPage() {
             setEditingSchedule(null);
           }}
           schedule={editingSchedule}
+          inputSchema={editFlowDetail?.input?.schema}
           onSave={(data) => updateSchedule.mutate({ id: editingSchedule.id, ...data })}
           onDelete={() => {
             deleteSchedule.mutate(editingSchedule.id);

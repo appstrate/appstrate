@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { AppEnv } from "../types/index.ts";
 import {
   listConnections,
   createConnectSession,
@@ -7,11 +8,11 @@ import {
   deleteConnection,
 } from "../services/nango.ts";
 
-const router = new Hono();
+const router = new Hono<AppEnv>();
 
 // GET /auth/connections — list OAuth connections for current user
 router.get("/connections", async (c) => {
-  const user = c.get("user") as { id: string };
+  const user = c.get("user");
   const connections = await listConnections(user.id);
   return c.json({ connections });
 });
@@ -19,7 +20,7 @@ router.get("/connections", async (c) => {
 // POST /auth/connect/:provider — create a connect session (returns connect_link for popup)
 router.post("/connect/:provider", async (c) => {
   const provider = c.req.param("provider");
-  const user = c.get("user") as { id: string };
+  const user = c.get("user");
   try {
     const session = await createConnectSession(provider, user.id);
     return c.json(session);
@@ -32,7 +33,7 @@ router.post("/connect/:provider", async (c) => {
 // POST /auth/connect/:provider/api-key — create an API key connection
 router.post("/connect/:provider/api-key", async (c) => {
   const provider = c.req.param("provider");
-  const user = c.get("user") as { id: string };
+  const user = c.get("user");
   try {
     const body = await c.req.json<{ apiKey?: string }>();
     if (!body.apiKey || !body.apiKey.trim()) {
@@ -48,7 +49,7 @@ router.post("/connect/:provider/api-key", async (c) => {
 
 // GET /auth/integrations — list all integrations with connection status for current user
 router.get("/integrations", async (c) => {
-  const user = c.get("user") as { id: string };
+  const user = c.get("user");
   const integrations = await getIntegrationsWithStatus(user.id);
   return c.json({ integrations });
 });
@@ -56,7 +57,7 @@ router.get("/integrations", async (c) => {
 // DELETE /auth/connections/:provider — disconnect a service for current user
 router.delete("/connections/:provider", async (c) => {
   const provider = c.req.param("provider");
-  const user = c.get("user") as { id: string };
+  const user = c.get("user");
   try {
     await deleteConnection(provider, user.id);
     return c.json({ success: true });

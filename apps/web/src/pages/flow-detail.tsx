@@ -11,7 +11,6 @@ import {
 } from "../hooks/use-schedules";
 import { useRunFlow, useConnect, useDeleteFlow, useConnectApiKey } from "../hooks/use-mutations";
 import { useFlowExecutionRealtime } from "../hooks/use-realtime";
-import { Spinner } from "../components/spinner";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
 import { StateModal } from "../components/state-modal";
@@ -21,6 +20,7 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { useAuth } from "../hooks/use-auth";
 import { truncate, formatDateField } from "../lib/markdown";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
@@ -73,22 +73,9 @@ export function FlowDetailPage() {
     qc.invalidateQueries({ queryKey: ["flow", flowId] });
   });
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error || !detail) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger le flow.</p>
-        <p className="empty-hint">{error?.message}</p>
-      </div>
-    );
-  }
+  if (error || !detail) return <ErrorState message={error?.message} />;
 
   const allConnected = detail.requires.services.every((s) => s.status === "connected");
   const hasRequiredConfig = checkRequiredConfig(detail);
@@ -169,6 +156,11 @@ export function FlowDetailPage() {
               </button>
             )}
             {detail.source === "user" && (
+              <Link to={`/flows/${flowId}/edit`}>
+                <button>Modifier</button>
+              </Link>
+            )}
+            {detail.source === "user" && (
               <button
                 className="btn-danger"
                 disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
@@ -216,9 +208,7 @@ export function FlowDetailPage() {
       {tab === "executions" && (
         <>
           {!executions || executions.length === 0 ? (
-            <div className="empty-state empty-state-compact">
-              <p className="empty-hint">Aucune execution</p>
-            </div>
+            <EmptyState message="Aucune execution" compact />
           ) : (
             <div className="exec-list">
               {executions.map((exec) => {
@@ -259,9 +249,7 @@ export function FlowDetailPage() {
             </button>
           </div>
           {!schedules || schedules.length === 0 ? (
-            <div className="empty-state empty-state-compact">
-              <p className="empty-hint">Aucune planification</p>
-            </div>
+            <EmptyState message="Aucune planification" compact />
           ) : (
             <div className="schedule-list">
               {schedules.map((sched) => (

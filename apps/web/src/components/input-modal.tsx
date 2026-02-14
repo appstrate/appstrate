@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./modal";
-import { FormField } from "./form-field";
+import { InputFields, initInputValues, buildInputPayload } from "./input-fields";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
@@ -39,21 +39,12 @@ function InputModalForm({
 }) {
   const schema = flow.input?.schema || {};
 
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const [key, field] of Object.entries(schema)) {
-      initial[key] = String(initialValues?.[key] ?? field.default ?? "");
-    }
-    return initial;
-  });
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    initInputValues(schema, initialValues),
+  );
 
   const handleSubmit = () => {
-    const input: Record<string, unknown> = {};
-    for (const [key, field] of Object.entries(schema)) {
-      let value: unknown = values[key];
-      if (field.type === "number" && value) value = Number(value);
-      input[key] = value || null;
-    }
+    const input = buildInputPayload(schema, values);
 
     for (const [key, field] of Object.entries(schema)) {
       if (field.required && (!input[key] || input[key] === "")) {
@@ -68,19 +59,11 @@ function InputModalForm({
 
   return (
     <>
-      {Object.entries(schema).map(([key, field]) => (
-        <FormField
-          key={key}
-          id={`input-${key}`}
-          label={key}
-          required={field.required}
-          type={field.type === "number" ? "number" : "text"}
-          value={values[key] || ""}
-          onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
-          placeholder={field.placeholder || field.description}
-          description={field.description}
-        />
-      ))}
+      <InputFields
+        schema={schema}
+        values={values}
+        onChange={(key, v) => setValues((prev) => ({ ...prev, [key]: v }))}
+      />
       <div className="modal-actions">
         <button onClick={onClose}>Annuler</button>
         <button className="primary" onClick={handleSubmit}>
