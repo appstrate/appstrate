@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { Cron } from "croner";
-import type { LoadedFlow } from "../types/index.ts";
+import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
   createSchedule,
@@ -8,18 +8,15 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { validateInput } from "../services/schema.ts";
+import { requireFlow } from "../middleware/guards.ts";
 
-export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
-  const router = new Hono();
+export function createSchedulesRouter() {
+  const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/schedules — create a schedule
-  router.post("/flows/:id/schedules", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
+  router.post("/flows/:id/schedules", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
 
     const body = await c.req.json<{
       name?: string;
@@ -49,7 +46,7 @@ export function createSchedulesRouter(flows: Map<string, LoadedFlow>) {
       }
     }
 
-    const schedule = await createSchedule(flowId, user.id, body);
+    const schedule = await createSchedule(flow.id, user.id, body);
     return c.json(schedule, 201);
   });
 

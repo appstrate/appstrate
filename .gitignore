@@ -44,5 +44,4 @@ data/
 
 zip-flows/
 
-supabase/.banches/
-supabase/.temp/
+supabase/.*

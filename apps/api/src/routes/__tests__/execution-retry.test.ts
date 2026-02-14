@@ -12,6 +12,7 @@ mock.module("../../services/state.ts", () => ({
   appendExecutionLog: mock(
     async (
       _executionId: string,
+      _userId: string,
       _type: string,
       event: string,
       _message: string | null,
@@ -85,8 +86,8 @@ function makeFlow(overrides: {
   return {
     id: "test-flow",
     prompt: "test prompt",
-    path: "/tmp/test-flow",
     skills: [],
+    source: "built-in",
     manifest: {
       version: "1.0.0",
       metadata: {

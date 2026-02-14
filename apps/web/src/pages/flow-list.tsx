@@ -3,41 +3,38 @@ import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlows } from "../hooks/use-flows";
 import { useAllExecutionsRealtime } from "../hooks/use-realtime";
+import { useAuth } from "../hooks/use-auth";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
+import { LoadingState, ErrorState } from "../components/page-states";
 
 export function FlowList() {
   const qc = useQueryClient();
   const { data: flows, isLoading, error } = useFlows();
+  const { isAdmin } = useAuth();
   const [importOpen, setImportOpen] = useState(false);
 
   useAllExecutionsRealtime(() => {
     qc.invalidateQueries({ queryKey: ["flows"] });
   });
 
-  if (isLoading) {
-    return (
-      <div className="empty-state">
-        <Spinner />
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingState />;
 
-  if (error) {
-    return (
-      <div className="empty-state">
-        <p>Impossible de charger les flows.</p>
-        <p className="empty-hint">{error.message}</p>
-      </div>
-    );
-  }
+  if (error) return <ErrorState message={error.message} />;
 
   if (!flows || flows.length === 0) {
     return (
       <>
         <div className="flow-list-header">
           <div />
-          <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+          <div className="flow-list-actions">
+            {isAdmin && (
+              <Link to="/flows/new">
+                <button>Creer un flow</button>
+              </Link>
+            )}
+            <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+          </div>
         </div>
         <div className="empty-state">
           <p>Aucun flow disponible.</p>
@@ -54,7 +51,14 @@ export function FlowList() {
     <>
       <div className="flow-list-header">
         <div />
-        <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+        <div className="flow-list-actions">
+          {isAdmin && (
+            <Link to="/flows/new">
+              <button>Creer un flow</button>
+            </Link>
+          )}
+          <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+        </div>
       </div>
       <div className="flow-grid">
         {flows.map((flow) => (

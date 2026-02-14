@@ -1,6 +1,7 @@
 import { unzipSync } from "fflate";
 import { validateManifest } from "./schema.ts";
 import { insertUserFlow } from "./user-flows.ts";
+import { extractSkillDescription } from "./skill-utils.ts";
 
 const MAX_ZIP_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -122,12 +123,7 @@ export async function importFlowFromZip(
     const skillId = parts[0]!;
     const content = new TextDecoder().decode(data);
 
-    let description = "";
-    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (fmMatch) {
-      const descMatch = fmMatch[1]!.match(/description:\s*(.+)/);
-      if (descMatch) description = descMatch[1]!.trim();
-    }
+    const description = extractSkillDescription(content);
 
     skills.push({ id: skillId, description, content });
   }

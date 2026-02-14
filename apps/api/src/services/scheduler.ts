@@ -1,15 +1,20 @@
+import { hostname } from "node:os";
 import { Cron } from "croner";
 import { supabase } from "../lib/supabase.ts";
-import type { LoadedFlow } from "../types/index.ts";
+import { logger } from "../lib/logger.ts";
 import type { Schedule, Json } from "@appstrate/shared-types";
 import { getFlowConfig, getFlowState, createExecution } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
 import { buildContainerEnv } from "./env-builder.ts";
+import { getFlow, flowExists } from "./flow-service.ts";
+import { getLatestVersionId } from "./flow-versions.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
-let loadedFlows: Map<string, LoadedFlow> = new Map();
+
+// Unique instance identifier for distributed locking
+const INSTANCE_ID = `${hostname()}-${process.pid}`;
 
 // --- CRUD helpers ---
 
@@ -159,9 +164,25 @@ async function triggerScheduledExecution(
   input?: Record<string, unknown>,
 ) {
   try {
-    const flow = loadedFlows.get(flowId);
+    // Distributed lock: prevent duplicate executions across instances
+    const fireTime = new Date().toISOString();
+    const { data: lockResult } = await supabase.rpc("try_acquire_schedule_lock", {
+      p_schedule_id: scheduleId,
+      p_fire_time: fireTime,
+      p_instance_id: INSTANCE_ID,
+    });
+
+    if (!lockResult) {
+      logger.info("Schedule lock not acquired, skipping (another instance won)", {
+        scheduleId,
+        fireTime,
+      });
+      return;
+    }
+
+    const flow = await getFlow(flowId);
     if (!flow) {
-      console.warn(`[scheduler] Flow '${flowId}' not found, skipping schedule ${scheduleId}`);
+      logger.warn("Flow not found, skipping schedule", { flowId, scheduleId });
       return;
     }
 
@@ -170,9 +191,12 @@ async function triggerScheduledExecution(
     for (const svc of flow.manifest.requires.services) {
       const conn = await getConnectionStatus(svc.provider, userId);
       if (conn.status !== "connected") {
-        console.warn(
-          `[scheduler] Service '${svc.id}' not connected for user ${userId}, skipping schedule ${scheduleId} for flow '${flowId}'`,
-        );
+        logger.warn("Service not connected, skipping schedule", {
+          serviceId: svc.id,
+          userId,
+          scheduleId,
+          flowId,
+        });
         return;
       }
       const token = await getAccessToken(svc.provider, userId);
@@ -197,18 +221,38 @@ async function triggerScheduledExecution(
       config,
       state,
       input,
+      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
 
-    // Create execution record with schedule_id
-    await createExecution(executionId, flowId, userId, input ?? null, scheduleId);
+    // Get flow version ID for user flows
+    const flowVersionId =
+      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
 
-    console.log(
-      `[scheduler] Triggering execution ${executionId} for flow '${flowId}' (schedule ${scheduleId}, user ${userId})`,
+    // Create execution record with schedule_id and version
+    await createExecution(
+      executionId,
+      flowId,
+      userId,
+      input ?? null,
+      scheduleId,
+      flowVersionId ?? undefined,
     );
+
+    // Link execution to the schedule run lock row
+    await supabase
+      .from("schedule_runs")
+      .update({ execution_id: executionId })
+      .eq("schedule_id", scheduleId)
+      .eq("fire_time", fireTime);
+
+    logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
     executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens).catch((err) => {
-      console.error(`[scheduler] Unhandled error in execution ${executionId}:`, err);
+      logger.error("Unhandled error in scheduled execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 
     // Update schedule timestamps
@@ -224,27 +268,27 @@ async function triggerScheduledExecution(
       })
       .eq("id", scheduleId);
   } catch (err) {
-    console.error(
-      `[scheduler] Failed to trigger schedule ${scheduleId} for flow '${flowId}':`,
-      err,
-    );
+    logger.error("Failed to trigger schedule", {
+      scheduleId,
+      flowId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
 // --- Lifecycle ---
 
-export async function initScheduler(flows: Map<string, LoadedFlow>) {
-  loadedFlows = flows;
-
+export async function initScheduler() {
   const { data } = await supabase.from("flow_schedules").select("*").eq("enabled", true);
   const schedules = data ?? [];
 
   let started = 0;
   for (const schedule of schedules) {
-    if (!flows.has(schedule.flow_id)) {
-      console.warn(
-        `[scheduler] Schedule ${schedule.id} references missing flow '${schedule.flow_id}', skipping`,
-      );
+    if (!(await flowExists(schedule.flow_id))) {
+      logger.warn("Schedule references missing flow, skipping", {
+        scheduleId: schedule.id,
+        flowId: schedule.flow_id,
+      });
       continue;
     }
     startCronJob(schedule);
@@ -252,7 +296,7 @@ export async function initScheduler(flows: Map<string, LoadedFlow>) {
   }
 
   if (started > 0) {
-    console.log(`[scheduler] Started ${started} cron job(s)`);
+    logger.info("Scheduler initialized", { cronJobsStarted: started });
   }
 }
 
@@ -261,5 +305,5 @@ export function shutdownScheduler() {
     job.stop();
     activeJobs.delete(id);
   }
-  console.log("[scheduler] All cron jobs stopped");
+  logger.info("All cron jobs stopped");
 }

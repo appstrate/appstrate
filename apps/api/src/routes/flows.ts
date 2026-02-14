@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { LoadedFlow } from "../types/index.ts";
+import type { AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
   setFlowConfig,
@@ -11,17 +11,23 @@ import {
 } from "../services/state.ts";
 import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
-import { isAdmin } from "../lib/supabase.ts";
+import { getFlowById } from "../services/user-flows.ts";
+import { listFlows } from "../services/flow-service.ts";
+import { listFlowVersions } from "../services/flow-versions.ts";
+import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 
-export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
-  const router = new Hono();
+export function createFlowsRouter() {
+  const router = new Hono<AppEnv>();
 
   // GET /api/flows — list all loaded flows
   router.get("/", async (c) => {
-    const user = c.get("user") as { id: string };
-    const runningCounts = await getRunningExecutionsCounts(user.id);
+    const user = c.get("user");
+    const [allFlows, runningCounts] = await Promise.all([
+      listFlows(),
+      getRunningExecutionsCounts(user.id),
+    ]);
 
-    const flowList = Array.from(flows.values()).map((f) => ({
+    const flowList = allFlows.map((f) => ({
       id: f.id,
       displayName: f.manifest.metadata.displayName,
       description: f.manifest.metadata.description,
@@ -41,15 +47,9 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
   });
 
   // GET /api/flows/:id — flow detail with dependency status
-  router.get("/:id", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
-
+  router.get("/:id", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
     const m = flow.manifest;
 
     // Check service connections in parallel (per-user)
@@ -76,11 +76,13 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     }));
 
     // Get config (global), state (per-user), last execution (per-user), running count (per-user)
-    const [currentConfig, currentState, lastExec, runningCount] = await Promise.all([
-      getFlowConfig(flowId),
-      getFlowState(user.id, flowId),
-      getLastExecution(flowId, user.id),
-      getRunningExecutionsForFlow(flowId, user.id),
+    // For user flows, also fetch the raw DB row for editable content
+    const [currentConfig, currentState, lastExec, runningCount, userFlowRow] = await Promise.all([
+      getFlowConfig(flow.id),
+      getFlowState(user.id, flow.id),
+      getLastExecution(flow.id, user.id),
+      getRunningExecutionsForFlow(flow.id, user.id),
+      flow.source === "user" ? getFlowById(flow.id) : Promise.resolve(null),
     ]);
 
     // Merge defaults with current config
@@ -97,6 +99,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       description: m.metadata.description,
       version: m.version,
       author: m.metadata.author,
+      tags: m.metadata.tags ?? [],
       source: flow.source,
       requires: {
         services: serviceStatuses,
@@ -119,29 +122,23 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
             duration: lastExec.duration,
           }
         : null,
+      ...(flow.source === "user" && userFlowRow
+        ? {
+            updatedAt: userFlowRow.updated_at,
+            prompt: flow.prompt,
+            rawSkills: userFlowRow.skills as
+              | { id: string; description: string; content: string }[]
+              | undefined,
+            stateSchema: m.state ?? null,
+            executionSettings: m.execution ?? null,
+          }
+        : {}),
     });
   });
 
   // PUT /api/flows/:id/config — save flow configuration (admin-only)
-  router.put("/:id/config", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
-
-    // Admin check
-    if (!(await isAdmin(user.id))) {
-      return c.json(
-        {
-          error: "FORBIDDEN",
-          message: "Seuls les administrateurs peuvent modifier la configuration",
-        },
-        403,
-      );
-    }
+  router.put("/:id/config", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
 
     const body = await c.req.json<Record<string, unknown>>();
     const schema = flow.manifest.config?.schema ?? {};
@@ -165,7 +162,7 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
       config[key] = body[key] ?? field.default ?? null;
     }
 
-    await setFlowConfig(flowId, config);
+    await setFlowConfig(flow.id, config);
 
     return c.json({
       config,
@@ -173,17 +170,34 @@ export function createFlowsRouter(flows: Map<string, LoadedFlow>) {
     });
   });
 
-  // DELETE /api/flows/:id/state — reset current user's flow state
-  router.delete("/:id/state", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
+  // GET /api/flows/:id/versions — list flow version history (user flows only)
+  router.get("/:id/versions", requireFlow(), async (c) => {
+    const flow = c.get("flow");
 
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
+    if (flow.source !== "user") {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not have version history" },
+        400,
+      );
     }
 
-    await deleteFlowState(user.id, flowId);
+    const versions = await listFlowVersions(flow.id);
+    return c.json({
+      versions: versions.map((v) => ({
+        id: v.id,
+        versionNumber: v.version_number,
+        createdBy: v.created_by,
+        createdAt: v.created_at,
+      })),
+    });
+  });
+
+  // DELETE /api/flows/:id/state — reset current user's flow state
+  router.delete("/:id/state", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+
+    await deleteFlowState(user.id, flow.id);
     return c.body(null, 204);
   });
 

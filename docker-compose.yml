@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: appstrate
       POSTGRES_PASSWORD: appstrate
       POSTGRES_DB: appstrate
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Init script to create the nango database alongside appstrate
@@ -19,8 +17,6 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

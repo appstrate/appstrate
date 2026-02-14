@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Modal } from "./modal";
-import { FormField } from "./form-field";
+import { InputFields, initInputValues, buildInputPayload } from "./input-fields";
 import type { FlowInputField, Schedule } from "@appstrate/shared-types";
 
 const CRON_PRESETS = [
@@ -52,6 +52,7 @@ export function ScheduleModal({
   flowPicker,
 }: ScheduleModalProps) {
   const isEdit = !!schedule;
+  const schemaKeys = inputSchema ? Object.keys(inputSchema).join(",") : "";
 
   return (
     <Modal
@@ -64,6 +65,7 @@ export function ScheduleModal({
         <>
           {flowPicker}
           <ScheduleForm
+            key={schemaKeys}
             schedule={schedule}
             inputSchema={inputSchema}
             onClose={onClose}
@@ -101,14 +103,9 @@ function ScheduleForm({
   const schema = inputSchema || {};
   const hasInputSchema = Object.keys(schema).length > 0;
 
-  const [inputValues, setInputValues] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    const existingInput = (schedule?.input ?? {}) as Record<string, unknown>;
-    for (const [key, field] of Object.entries(schema)) {
-      initial[key] = String(existingInput[key] ?? field.default ?? "");
-    }
-    return initial;
-  });
+  const [inputValues, setInputValues] = useState<Record<string, string>>(() =>
+    initInputValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),
+  );
 
   const handleSubmit = () => {
     if (!cronExpression.trim()) {
@@ -116,15 +113,7 @@ function ScheduleForm({
       return;
     }
 
-    let input: Record<string, unknown> | undefined;
-    if (hasInputSchema) {
-      input = {};
-      for (const [key, field] of Object.entries(schema)) {
-        let value: unknown = inputValues[key];
-        if (field.type === "number" && value) value = Number(value);
-        input[key] = value || null;
-      }
-    }
+    const input = hasInputSchema ? buildInputPayload(schema, inputValues) : undefined;
 
     onSave({
       name: name || undefined,
@@ -204,19 +193,12 @@ function ScheduleForm({
       {hasInputSchema && (
         <>
           <div className="schedule-input-title">Parametres d'entree</div>
-          {Object.entries(schema).map(([key, field]) => (
-            <FormField
-              key={key}
-              id={`sched-input-${key}`}
-              label={key}
-              required={field.required}
-              type={field.type === "number" ? "number" : "text"}
-              value={inputValues[key] || ""}
-              onChange={(v) => setInputValues((prev) => ({ ...prev, [key]: v }))}
-              placeholder={field.placeholder || field.description}
-              description={field.description}
-            />
-          ))}
+          <InputFields
+            schema={schema}
+            values={inputValues}
+            onChange={(key, v) => setInputValues((prev) => ({ ...prev, [key]: v }))}
+            idPrefix="sched-input"
+          />
         </>
       )}
 

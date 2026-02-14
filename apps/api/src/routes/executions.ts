@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import type { LoadedFlow } from "../types/index.ts";
+import { logger } from "../lib/logger.ts";
+import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
   getFlowState,
@@ -13,6 +14,10 @@ import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/i
 import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
 import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
+import { getLatestVersionId } from "../services/flow-versions.ts";
+import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
+import { requireFlow } from "../middleware/guards.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -27,10 +32,11 @@ export async function executeFlowInBackground(
   tokens: Record<string, string>,
 ) {
   const startTime = Date.now();
+  trackExecution(executionId);
 
   try {
     // Emit execution_started
-    await appendExecutionLog(executionId, "system", "execution_started", null, {
+    await appendExecutionLog(executionId, userId, "system", "execution_started", null, {
       executionId,
       startedAt: new Date().toISOString(),
     });
@@ -40,7 +46,7 @@ export async function executeFlowInBackground(
     for (const svc of flow.manifest.requires.services) {
       depCheck[svc.id] = tokens[svc.id] ? "ok" : "missing";
     }
-    await appendExecutionLog(executionId, "system", "dependency_check", null, {
+    await appendExecutionLog(executionId, userId, "system", "dependency_check", null, {
       services: depCheck,
     });
 
@@ -50,7 +56,7 @@ export async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
     const adapterName = getAdapterName();
-    await appendExecutionLog(executionId, "system", "adapter_started", null, {
+    await appendExecutionLog(executionId, userId, "system", "adapter_started", null, {
       adapter: adapterName,
     });
 
@@ -61,12 +67,18 @@ export async function executeFlowInBackground(
       for await (const msg of adapter.execute(
         executionId,
         envVars,
-        flow.path,
         timeout,
         flow.manifest.output?.schema,
       )) {
         if (msg.type === "progress") {
-          await appendExecutionLog(executionId, "progress", "progress", msg.message ?? null, null);
+          await appendExecutionLog(
+            executionId,
+            userId,
+            "progress",
+            "progress",
+            msg.message ?? null,
+            null,
+          );
         } else if (msg.type === "result") {
           result = msg.data ?? null;
         }
@@ -80,7 +92,7 @@ export async function executeFlowInBackground(
           completed_at: new Date().toISOString(),
           duration,
         });
-        await appendExecutionLog(executionId, "error", "execution_completed", null, {
+        await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
           executionId,
           status: "timeout",
         });
@@ -103,7 +115,7 @@ export async function executeFlowInBackground(
           if (remaining < MIN_RETRY_TIME_MS) break;
 
           const attempt = maxRetries - retriesLeft + 1;
-          await appendExecutionLog(executionId, "system", "output_validation_retry", null, {
+          await appendExecutionLog(executionId, userId, "system", "output_validation_retry", null, {
             attempt,
             maxRetries,
             errors: outputValidation.errors,
@@ -117,13 +129,13 @@ export async function executeFlowInBackground(
             for await (const msg of adapter.execute(
               executionId,
               retryEnvVars,
-              flow.path,
               Math.min(60, Math.floor(remaining / 1000)),
               outputSchema,
             )) {
               if (msg.type === "progress") {
                 await appendExecutionLog(
                   executionId,
+                  userId,
                   "progress",
                   "progress",
                   msg.message ?? null,
@@ -143,14 +155,14 @@ export async function executeFlowInBackground(
         }
 
         if (!outputValidation.valid) {
-          await appendExecutionLog(executionId, "system", "output_validation", null, {
+          await appendExecutionLog(executionId, userId, "system", "output_validation", null, {
             valid: false,
             errors: outputValidation.errors,
           });
-          console.warn(
-            `[execution] Output validation failed for ${executionId}:`,
-            outputValidation.errors,
-          );
+          logger.warn("Output validation failed", {
+            executionId,
+            errors: outputValidation.errors,
+          });
         }
       }
 
@@ -168,8 +180,8 @@ export async function executeFlowInBackground(
         await setFlowState(userId, flowId, result.state as Record<string, unknown>);
       }
 
-      await appendExecutionLog(executionId, "result", "result", null, result);
-      await appendExecutionLog(executionId, "system", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, "result", "result", null, result);
+      await appendExecutionLog(executionId, userId, "system", "execution_completed", null, {
         executionId,
         status: "success",
       });
@@ -181,7 +193,7 @@ export async function executeFlowInBackground(
         completed_at: new Date().toISOString(),
         duration,
       });
-      await appendExecutionLog(executionId, "error", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
         executionId,
         status: "failed",
         error: "No result returned from adapter",
@@ -196,28 +208,26 @@ export async function executeFlowInBackground(
       completed_at: new Date().toISOString(),
       duration,
     });
-    await appendExecutionLog(executionId, "error", "execution_completed", null, {
+    await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
       executionId,
       status: "failed",
       error: errorMessage,
     });
+  } finally {
+    untrackExecution(executionId);
   }
 }
 
 // --- Router ---
 
-export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
-  const router = new Hono();
+export function createExecutionsRouter() {
+  const router = new Hono<AppEnv>();
 
   // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
-  router.post("/flows/:id/run", async (c) => {
-    const flowId = c.req.param("id");
-    const flow = flows.get(flowId);
-    const user = c.get("user") as { id: string };
-
-    if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' not found` }, 404);
-    }
+  router.post("/flows/:id/run", rateLimit(20), requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const flowId = flow.id;
 
     // Validate service dependencies (single Nango call for all services)
     const connections = await listConnections(user.id);
@@ -291,14 +301,29 @@ export function createExecutionsRouter(flows: Map<string, LoadedFlow>) {
       config,
       state,
       input: body.input,
+      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
 
+    // Get flow version ID for user flows (non-blocking on failure)
+    const flowVersionId =
+      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
+
     // Create execution record
-    await createExecution(executionId, flowId, user.id, body.input ?? null);
+    await createExecution(
+      executionId,
+      flowId,
+      user.id,
+      body.input ?? null,
+      undefined,
+      flowVersionId ?? undefined,
+    );
 
     // Fire-and-forget background execution
     executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens).catch((err) => {
-      console.error(`[execution] Unhandled error in background execution ${executionId}:`, err);
+      logger.error("Unhandled error in background execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 
     return c.json({ executionId });

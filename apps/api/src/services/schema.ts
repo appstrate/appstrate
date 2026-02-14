@@ -3,6 +3,8 @@ import type { FlowFieldBase, FlowConfigField } from "@appstrate/shared-types";
 
 // --- Section A: Static manifest schema ---
 
+export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
 const flowFieldTypeEnum = z.enum(["string", "number", "boolean", "array", "object"]);
 
 const fieldBaseSchema = z.object({
@@ -40,7 +42,10 @@ const manifestSchema = z.looseObject({
   $schema: z.string().optional(),
   version: z.string(),
   metadata: z.object({
-    name: z.string().min(1),
+    name: z
+      .string()
+      .min(1)
+      .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
     displayName: z.string().min(1),
     description: z.string().min(1),
     author: z.string(),
@@ -223,4 +228,25 @@ export function validateOutput(
     (issue) => `Field '${issue.path.join(".")}': ${issue.message}`,
   );
   return { valid: false, errors };
+}
+
+export function validateFlowContent(
+  prompt: string,
+  skills: { id: string; description: string; content: string }[],
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!prompt || prompt.trim().length === 0) {
+    errors.push("prompt ne peut pas etre vide");
+  }
+  const seenIds = new Set<string>();
+  for (const skill of skills) {
+    if (!SLUG_REGEX.test(skill.id)) {
+      errors.push(`skill.id '${skill.id}' n'est pas un slug valide`);
+    }
+    if (seenIds.has(skill.id)) {
+      errors.push(`skill.id '${skill.id}' est duplique`);
+    }
+    seenIds.add(skill.id);
+  }
+  return { valid: errors.length === 0, errors };
 }

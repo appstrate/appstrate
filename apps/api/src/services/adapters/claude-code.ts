@@ -1,4 +1,5 @@
 import type { FlowOutputField } from "@appstrate/shared-types";
+import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
 import {
   createClaudeCodeContainer,
@@ -13,7 +14,6 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
   async *execute(
     executionId: string,
     envVars: Record<string, string>,
-    flowPath: string,
     timeout: number,
     outputSchema?: Record<string, FlowOutputField>,
   ): AsyncGenerator<ExecutionMessage> {
@@ -40,14 +40,15 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
         k.startsWith("TOKEN_") ||
         k.startsWith("CONFIG_") ||
         k.startsWith("INPUT_") ||
-        k === "FLOW_STATE"
+        k === "FLOW_STATE" ||
+        k === "FLOW_SKILLS"
       ) {
         containerEnv[k] = v;
       }
     }
 
     // Create and start the container
-    const containerId = await createClaudeCodeContainer(executionId, containerEnv, flowPath);
+    const containerId = await createClaudeCodeContainer(executionId, containerEnv);
 
     yield {
       type: "progress",
@@ -89,7 +90,10 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     } finally {
       clearTimeout(timeoutHandle);
       await removeContainer(containerId).catch((err) => {
-        console.error(`[adapter] Failed to remove container ${containerId}:`, err);
+        logger.error("Failed to remove container", {
+          containerId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }
   }
