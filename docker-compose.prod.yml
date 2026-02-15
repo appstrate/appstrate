@@ -28,8 +28,6 @@ services:
     image: nangohq/nango-server:hosted
     platform: linux/amd64
     restart: unless-stopped
-    ports:
-      - "${NANGO_PORT:-3003}:3003"
     environment:
       - NANGO_DB_HOST=postgres
       - NANGO_DB_PORT=5432
