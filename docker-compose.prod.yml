@@ -51,6 +51,13 @@ services:
       appstrate-redis:
         condition: service_healthy
 
+  appstrate-claude-code:
+    build:
+      context: ./runtime-claude-code
+    image: appstrate-claude-code:latest
+    restart: "no"
+    command: ["echo", "runtime image built"]
+
   appstrate:
     build:
       context: .

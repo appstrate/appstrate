@@ -189,6 +189,10 @@ export function ExecutionDetailPage() {
         </button>
       </div>
 
+      {displayStatus === "failed" && execution.error && (
+        <div className="exec-error">{execution.error}</div>
+      )}
+
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
       {activeTab === "result" &&
