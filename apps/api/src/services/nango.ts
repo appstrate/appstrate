@@ -138,8 +138,8 @@ export async function createConnectSession(
     allowed_integrations: [provider],
   });
 
-  const nangoHost = process.env.NANGO_URL || "http://localhost:3003";
-  const oauthUrl = `${nangoHost}/oauth/connect/${provider}?connect_session_token=${result.data.token}`;
+  const nangoPublicHost = process.env.NANGO_PUBLIC_URL || process.env.NANGO_URL || "http://localhost:3003";
+  const oauthUrl = `${nangoPublicHost}/oauth/connect/${provider}?connect_session_token=${result.data.token}`;
 
   return {
     token: result.data.token,
