@@ -9,6 +9,6 @@ export interface ExecutionAdapter {
     executionId: string,
     envVars: Record<string, string>,
     timeout: number,
-    outputSchema?: Record<string, import("@appstrate/shared-types").FlowOutputField>,
+    outputSchema?: import("@appstrate/shared-types").JSONSchemaObject,
   ): AsyncGenerator<ExecutionMessage>;
 }

@@ -24,51 +24,59 @@
 
   "input": {
     "schema": {
-      "topic": {
-        "type": "string",
-        "description": "Sujet à rechercher dans les newsletters",
-        "required": true,
-        "placeholder": "ex: intelligence artificielle, crypto, design..."
-      }
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Sujet à rechercher dans les newsletters",
+          "placeholder": "ex: intelligence artificielle, crypto, design..."
+        }
+      },
+      "required": ["topic"]
     }
   },
 
   "config": {
     "schema": {
-      "max_emails": {
-        "type": "number",
-        "description": "Nombre max de mails à analyser",
-        "default": 50
-      },
-      "language": {
-        "type": "string",
-        "description": "Langue du résumé",
-        "default": "fr",
-        "enum": ["fr", "en"]
+      "type": "object",
+      "properties": {
+        "max_emails": {
+          "type": "number",
+          "description": "Nombre max de mails à analyser",
+          "default": 50
+        },
+        "language": {
+          "type": "string",
+          "description": "Langue du résumé",
+          "default": "fr",
+          "enum": ["fr", "en"]
+        }
       }
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Résumé des résultats de la recherche",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Résumé des résultats de la recherche"
+        },
+        "results": {
+          "type": "array",
+          "description": "Articles/newsletters pertinents trouvés"
+        },
+        "newsletters_found": {
+          "type": "number",
+          "description": "Nombre de newsletters analysées"
+        },
+        "emails_scanned": {
+          "type": "number",
+          "description": "Nombre total de mails scannés"
+        }
       },
-      "results": {
-        "type": "array",
-        "description": "Articles/newsletters pertinents trouvés",
-        "required": true
-      },
-      "newsletters_found": {
-        "type": "number",
-        "description": "Nombre de newsletters analysées"
-      },
-      "emails_scanned": {
-        "type": "number",
-        "description": "Nombre total de mails scannés"
-      }
+      "required": ["summary", "results"]
     }
   },
 

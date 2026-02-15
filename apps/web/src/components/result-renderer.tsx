@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import type { FlowOutputField } from "@appstrate/shared-types";
+import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { escapeHtml, convertMarkdown, truncate, formatDateField } from "../lib/markdown";
 
 interface ResultRendererProps {
   data: Record<string, unknown>;
-  outputSchema?: Record<string, FlowOutputField>;
+  outputSchema?: JSONSchemaObject;
 }
 
 function renderMetadata(data: Record<string, unknown>): string {
@@ -151,66 +151,67 @@ function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]
   return html;
 }
 
-function renderSchemaField(key: string, field: FlowOutputField, value: unknown): string {
+function renderSchemaField(key: string, prop: JSONSchemaProperty, value: unknown): string {
+  const desc = prop.description || key;
   if (value === undefined || value === null) {
-    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <em>—</em></div>`;
+    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>—</em></div>`;
   }
 
-  if (field.type === "string") {
+  if (prop.type === "string") {
     const strVal = String(value);
     if (strVal.length > 80) {
-      return `<div class="result-item-content"><strong>${escapeHtml(field.description)}</strong><br>${convertMarkdown(strVal)}</div>`;
+      return `<div class="result-item-content"><strong>${escapeHtml(desc)}</strong><br>${convertMarkdown(strVal)}</div>`;
     }
-    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(strVal)}</div>`;
+    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(strVal)}</div>`;
   }
 
-  if (field.type === "number") {
-    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(String(value))}</div>`;
+  if (prop.type === "number") {
+    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
   }
 
-  if (field.type === "boolean") {
+  if (prop.type === "boolean") {
     const label = value ? "Oui" : "Non";
-    return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <span class="relevance-badge ${value ? "high" : "low"}">${label}</span></div>`;
+    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <span class="relevance-badge ${value ? "high" : "low"}">${label}</span></div>`;
   }
 
-  if (field.type === "array" && Array.isArray(value)) {
+  if (prop.type === "array" && Array.isArray(value)) {
     if (value.length === 0) {
-      return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> <em>Aucun</em></div>`;
+      return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>Aucun</em></div>`;
     }
     if (typeof value[0] === "object" && value[0] !== null) {
       return renderGenericCards(key, value as Record<string, unknown>[]);
     }
-    return renderNestedArray(field.description, value);
+    return renderNestedArray(desc, value);
   }
 
-  if (field.type === "object" && typeof value === "object" && !Array.isArray(value)) {
-    return renderNestedObject(field.description, value as Record<string, unknown>);
+  if (prop.type === "object" && typeof value === "object" && !Array.isArray(value)) {
+    return renderNestedObject(desc, value as Record<string, unknown>);
   }
 
-  return `<div class="result-item-meta"><strong>${escapeHtml(field.description)}:</strong> ${escapeHtml(String(value))}</div>`;
+  return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
 }
 
 function buildSchemaResultHtml(
   data: Record<string, unknown>,
-  schema: Record<string, FlowOutputField>,
+  schema: JSONSchemaObject,
 ): string {
   let html = `<h4>Resultat</h4>`;
 
   // Render summary first if present in schema
-  if (schema.summary && data.summary) {
+  if (schema.properties.summary && data.summary) {
     html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
   }
 
   html += renderMetadata(data);
 
   // Render schema fields in declared order (skip summary already rendered above)
-  for (const [key, field] of Object.entries(schema)) {
+  for (const [key, prop] of Object.entries(schema.properties)) {
     if (key === "summary") continue;
-    html += renderSchemaField(key, field, data[key]);
+    html += renderSchemaField(key, prop, data[key]);
   }
 
   // Render extra fields not in schema (except internal fields)
-  const schemaKeys = new Set(Object.keys(schema));
+  const schemaKeys = new Set(Object.keys(schema.properties));
   const internalKeys = new Set(["state", "tokensUsed"]);
   const metadataKeys = new Set([
     "emails_processed",
@@ -305,7 +306,7 @@ export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
 
   const html = useMemo(
     () =>
-      outputSchema && Object.keys(outputSchema).length > 0
+      outputSchema?.properties && Object.keys(outputSchema.properties).length > 0
         ? buildSchemaResultHtml(data, outputSchema)
         : buildResultHtml(data),
     [data, outputSchema],

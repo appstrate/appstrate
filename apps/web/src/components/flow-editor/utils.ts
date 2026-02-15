@@ -1,7 +1,7 @@
 import type { FlowFormState } from "./types";
 import type { ServiceEntry } from "./services-section";
 import type { SchemaField } from "./schema-section";
-import type { FlowDetail } from "@appstrate/shared-types";
+import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 
 export function defaultFormState(): FlowFormState {
   return {
@@ -17,30 +17,71 @@ export function defaultFormState(): FlowFormState {
   };
 }
 
-export function recordToFields(
-  record: Record<string, Record<string, unknown>> | undefined,
+function convertDefaultValue(value: string, type: string): unknown {
+  if (!value) return undefined;
+  if (type === "number") {
+    const n = Number(value);
+    return isNaN(n) ? value : n;
+  }
+  if (type === "boolean") return value === "true";
+  return value;
+}
+
+export function schemaToFields(
+  schema: JSONSchemaObject | undefined,
   mode: "input" | "output" | "config" | "state",
 ): SchemaField[] {
-  if (!record) return [];
-  return Object.entries(record).map(([key, field]) => ({
+  if (!schema?.properties) return [];
+  const requiredSet = new Set(schema.required || []);
+  return Object.entries(schema.properties).map(([key, prop]) => ({
     key,
-    type: (field.type as string) || "string",
-    description: (field.description as string) || "",
-    required: !!field.required,
+    type: prop.type || "string",
+    description: prop.description || "",
+    required: requiredSet.has(key),
     ...(mode === "input"
       ? {
-          placeholder: (field.placeholder as string) || "",
-          default: field.default != null ? String(field.default) : "",
+          placeholder: prop.placeholder || "",
+          default: prop.default != null ? String(prop.default) : "",
         }
       : {}),
     ...(mode === "config"
       ? {
-          default: field.default != null ? String(field.default) : "",
-          enumValues: Array.isArray(field.enum) ? field.enum.join(", ") : "",
+          default: prop.default != null ? String(prop.default) : "",
+          enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
         }
       : {}),
-    ...(mode === "state" ? { format: (field.format as string) || "" } : {}),
+    ...(mode === "state" ? { format: prop.format || "" } : {}),
   }));
+}
+
+export function fieldsToSchema(
+  fields: SchemaField[],
+  mode: "input" | "output" | "config" | "state",
+): JSONSchemaObject | null {
+  const filtered = fields.filter((f) => f.key.trim());
+  if (filtered.length === 0) return null;
+  const properties: Record<string, JSONSchemaProperty> = {};
+  const required: string[] = [];
+  for (const f of filtered) {
+    const prop: JSONSchemaProperty = { type: f.type };
+    if (mode !== "state" && f.description) prop.description = f.description;
+    if (mode === "input" || mode === "config") {
+      const def = convertDefaultValue(f.default || "", f.type);
+      if (def !== undefined) prop.default = def;
+    }
+    if (mode === "input" && f.placeholder) prop.placeholder = f.placeholder;
+    if (mode === "config") {
+      const enumVals = f.enumValues
+        ?.split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (enumVals && enumVals.length > 0) prop.enum = enumVals;
+    }
+    if (mode === "state" && f.format) prop.format = f.format;
+    if (f.required) required.push(f.key.trim());
+    properties[f.key.trim()] = prop;
+  }
+  return { type: "object", properties, ...(required.length > 0 ? { required } : {}) };
 }
 
 export function detailToFormState(detail: FlowDetail): FlowFormState {
@@ -60,22 +101,10 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     },
     prompt: detail.prompt || "",
     services,
-    inputSchema: recordToFields(
-      detail.input?.schema as unknown as Record<string, Record<string, unknown>> | undefined,
-      "input",
-    ),
-    outputSchema: recordToFields(
-      detail.output?.schema as unknown as Record<string, Record<string, unknown>> | undefined,
-      "output",
-    ),
-    configSchema: recordToFields(
-      detail.config?.schema as unknown as Record<string, Record<string, unknown>> | undefined,
-      "config",
-    ),
-    stateSchema: recordToFields(
-      detail.stateSchema?.schema as unknown as Record<string, Record<string, unknown>> | undefined,
-      "state",
-    ),
+    inputSchema: schemaToFields(detail.input?.schema, "input"),
+    outputSchema: schemaToFields(detail.output?.schema, "output"),
+    configSchema: schemaToFields(detail.config?.schema, "config"),
+    stateSchema: schemaToFields(detail.stateSchema?.schema, "state"),
     execution: {
       timeout: detail.executionSettings?.timeout ?? 300,
       maxTokens: detail.executionSettings?.maxTokens ?? 8192,
@@ -83,39 +112,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     },
     skills: detail.rawSkills || [],
   };
-}
-
-export function fieldsToRecord(
-  fields: SchemaField[],
-  mode: "input" | "output" | "config" | "state",
-): Record<string, Record<string, unknown>> | null {
-  const filtered = fields.filter((f) => f.key.trim());
-  if (filtered.length === 0) return null;
-  const record: Record<string, Record<string, unknown>> = {};
-  for (const f of filtered) {
-    const entry: Record<string, unknown> = { type: f.type };
-    if (mode !== "state") {
-      entry.description = f.description;
-      entry.required = f.required;
-    }
-    if (mode === "input") {
-      if (f.placeholder) entry.placeholder = f.placeholder;
-      if (f.default) entry.default = f.default;
-    }
-    if (mode === "config") {
-      if (f.default) entry.default = f.default;
-      const enumVals = f.enumValues
-        ?.split(",")
-        .map((v) => v.trim())
-        .filter(Boolean);
-      if (enumVals && enumVals.length > 0) entry.enum = enumVals;
-    }
-    if (mode === "state") {
-      if (f.format) entry.format = f.format;
-    }
-    record[f.key.trim()] = entry;
-  }
-  return record;
 }
 
 export function assemblePayload(state: FlowFormState, userEmail: string) {
@@ -147,16 +143,16 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
     },
   };
 
-  const inputSchema = fieldsToRecord(state.inputSchema, "input");
+  const inputSchema = fieldsToSchema(state.inputSchema, "input");
   if (inputSchema) manifest.input = { schema: inputSchema };
 
-  const outputSchema = fieldsToRecord(state.outputSchema, "output");
+  const outputSchema = fieldsToSchema(state.outputSchema, "output");
   if (outputSchema) manifest.output = { schema: outputSchema };
 
-  const configSchema = fieldsToRecord(state.configSchema, "config");
+  const configSchema = fieldsToSchema(state.configSchema, "config");
   if (configSchema) manifest.config = { schema: configSchema };
 
-  const stateSchema = fieldsToRecord(state.stateSchema, "state");
+  const stateSchema = fieldsToSchema(state.stateSchema, "state");
   if (stateSchema) manifest.state = { schema: stateSchema };
 
   manifest.execution = {
@@ -190,10 +186,10 @@ export function payloadToFormState(payload: {
     scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
   }));
 
-  const inputObj = manifest.input as Record<string, unknown> | undefined;
-  const outputObj = manifest.output as Record<string, unknown> | undefined;
-  const configObj = manifest.config as Record<string, unknown> | undefined;
-  const stateObj = manifest.state as Record<string, unknown> | undefined;
+  const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
+  const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;
+  const configObj = manifest.config as { schema?: JSONSchemaObject } | undefined;
+  const stateObj = manifest.state as { schema?: JSONSchemaObject } | undefined;
 
   return {
     metadata: {
@@ -204,22 +200,10 @@ export function payloadToFormState(payload: {
     },
     prompt,
     services,
-    inputSchema: recordToFields(
-      inputObj?.schema as Record<string, Record<string, unknown>> | undefined,
-      "input",
-    ),
-    outputSchema: recordToFields(
-      outputObj?.schema as Record<string, Record<string, unknown>> | undefined,
-      "output",
-    ),
-    configSchema: recordToFields(
-      configObj?.schema as Record<string, Record<string, unknown>> | undefined,
-      "config",
-    ),
-    stateSchema: recordToFields(
-      stateObj?.schema as Record<string, Record<string, unknown>> | undefined,
-      "state",
-    ),
+    inputSchema: schemaToFields(inputObj?.schema, "input"),
+    outputSchema: schemaToFields(outputObj?.schema, "output"),
+    configSchema: schemaToFields(configObj?.schema, "config"),
+    stateSchema: schemaToFields(stateObj?.schema, "state"),
     execution: {
       timeout: (execution.timeout as number) ?? 300,
       maxTokens: (execution.maxTokens as number) ?? 8192,

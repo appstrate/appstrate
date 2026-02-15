@@ -38,66 +38,74 @@
   "state": {
     "enabled": true,
     "schema": {
-      "last_run": { "type": "string", "format": "date-time" },
-      "prepared_event_ids": { "type": "string" }
+      "type": "object",
+      "properties": {
+        "last_run": { "type": "string", "format": "date-time" },
+        "prepared_event_ids": { "type": "string" }
+      }
     }
   },
 
   "config": {
     "schema": {
-      "hours_ahead": {
-        "type": "number",
-        "default": 24,
-        "description": "Nombre d'heures à l'avance pour chercher les réunions"
+      "type": "object",
+      "properties": {
+        "hours_ahead": {
+          "type": "number",
+          "default": 24,
+          "description": "Nombre d'heures à l'avance pour chercher les réunions"
+        },
+        "internal_domain": {
+          "type": "string",
+          "description": "Domaine email de l'entreprise (ex: mycompany.com) pour distinguer participants internes/externes"
+        },
+        "language": {
+          "type": "string",
+          "default": "fr",
+          "enum": ["fr", "en"],
+          "description": "Langue de sortie des briefings"
+        },
+        "skip_all_day": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ignorer les événements sur la journée entière"
+        },
+        "min_external_participants": {
+          "type": "number",
+          "default": 0,
+          "description": "Nombre minimum de participants externes pour déclencher un briefing (0 = toutes les réunions)"
+        }
       },
-      "internal_domain": {
-        "type": "string",
-        "required": true,
-        "description": "Domaine email de l'entreprise (ex: mycompany.com) pour distinguer participants internes/externes"
-      },
-      "language": {
-        "type": "string",
-        "default": "fr",
-        "enum": ["fr", "en"],
-        "description": "Langue de sortie des briefings"
-      },
-      "skip_all_day": {
-        "type": "boolean",
-        "default": true,
-        "description": "Ignorer les événements sur la journée entière"
-      },
-      "min_external_participants": {
-        "type": "number",
-        "default": 0,
-        "description": "Nombre minimum de participants externes pour déclencher un briefing (0 = toutes les réunions)"
-      }
+      "required": ["internal_domain"]
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Résumé des réunions préparées",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Résumé des réunions préparées"
+        },
+        "meetings": {
+          "type": "array",
+          "description": "Briefings détaillés pour chaque réunion"
+        },
+        "meetings_found": {
+          "type": "number",
+          "description": "Nombre de réunions trouvées"
+        },
+        "meetings_prepped": {
+          "type": "number",
+          "description": "Nombre de réunions préparées"
+        },
+        "meetings_skipped": {
+          "type": "number",
+          "description": "Nombre de réunions ignorées"
+        }
       },
-      "meetings": {
-        "type": "array",
-        "description": "Briefings détaillés pour chaque réunion",
-        "required": true
-      },
-      "meetings_found": {
-        "type": "number",
-        "description": "Nombre de réunions trouvées"
-      },
-      "meetings_prepped": {
-        "type": "number",
-        "description": "Nombre de réunions préparées"
-      },
-      "meetings_skipped": {
-        "type": "number",
-        "description": "Nombre de réunions ignorées"
-      }
+      "required": ["summary", "meetings"]
     }
   },
 

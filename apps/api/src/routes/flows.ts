@@ -87,9 +87,9 @@ export function createFlowsRouter() {
 
     // Merge defaults with current config
     const configWithDefaults: Record<string, unknown> = {};
-    if (m.config?.schema) {
-      for (const [key, field] of Object.entries(m.config.schema)) {
-        configWithDefaults[key] = currentConfig[key] ?? field.default ?? null;
+    if (m.config?.schema?.properties) {
+      for (const [key, prop] of Object.entries(m.config.schema.properties)) {
+        configWithDefaults[key] = currentConfig[key] ?? prop.default ?? null;
       }
     }
 
@@ -109,7 +109,7 @@ export function createFlowsRouter() {
       ...(m.input ? { input: { schema: m.input.schema } } : {}),
       ...(m.output ? { output: { schema: m.output.schema } } : {}),
       config: {
-        schema: m.config?.schema ?? {},
+        schema: m.config?.schema ?? { type: "object", properties: {} },
         current: configWithDefaults,
       },
       state: currentState,
@@ -141,9 +141,9 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
 
     const body = await c.req.json<Record<string, unknown>>();
-    const schema = flow.manifest.config?.schema ?? {};
+    const schema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
 
-    // Validate config with Zod
+    // Validate config with AJV
     const validation = validateConfig(body, schema);
     if (!validation.valid) {
       return c.json(
@@ -158,8 +158,8 @@ export function createFlowsRouter() {
 
     // Merge with defaults
     const config: Record<string, unknown> = {};
-    for (const [key, field] of Object.entries(schema)) {
-      config[key] = body[key] ?? field.default ?? null;
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      config[key] = body[key] ?? prop.default ?? null;
     }
 
     await setFlowConfig(flow.id, config);

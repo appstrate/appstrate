@@ -24,15 +24,13 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import type { Schedule } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
-  config: { schema: Record<string, { required?: boolean }>; current: Record<string, unknown> };
+  config: { schema: { properties: Record<string, unknown>; required?: string[] }; current: Record<string, unknown> };
 }): boolean {
-  const schema = detail.config?.schema || {};
+  const schema = detail.config?.schema;
   const current = detail.config?.current || {};
-  for (const [key, field] of Object.entries(schema)) {
-    if (
-      field.required &&
-      (current[key] === undefined || current[key] === null || current[key] === "")
-    ) {
+  if (!schema?.properties) return true;
+  for (const key of schema.required || []) {
+    if (current[key] === undefined || current[key] === null || current[key] === "") {
       return false;
     }
   }
@@ -79,7 +77,7 @@ export function FlowDetailPage() {
 
   const allConnected = detail.requires.services.every((s) => s.status === "connected");
   const hasRequiredConfig = checkRequiredConfig(detail);
-  const hasInputSchema = detail.input?.schema && Object.keys(detail.input.schema).length > 0;
+  const hasInputSchema = detail.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
   const hasState = detail.state && Object.keys(detail.state).length > 0;
 
   const handleRun = () => {

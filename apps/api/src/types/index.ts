@@ -10,10 +10,8 @@ export type {
   ExecutionLog,
   FlowRow,
   FlowFieldType,
-  FlowFieldBase,
-  FlowConfigField,
-  FlowInputField,
-  FlowOutputField,
+  JSONSchemaProperty,
+  JSONSchemaObject,
   ServiceStatus,
   FlowListItem,
   FlowDetail,
@@ -64,20 +62,20 @@ export interface FlowToolRequirement {
 }
 
 export interface FlowInputSpec {
-  schema: Record<string, import("@appstrate/shared-types").FlowInputField>;
+  schema: import("@appstrate/shared-types").JSONSchemaObject;
 }
 
 export interface FlowOutputSpec {
-  schema: Record<string, import("@appstrate/shared-types").FlowOutputField>;
+  schema: import("@appstrate/shared-types").JSONSchemaObject;
 }
 
 export interface FlowStateSpec {
   enabled: boolean;
-  schema: Record<string, { type: string; format?: string }>;
+  schema: import("@appstrate/shared-types").JSONSchemaObject;
 }
 
 export interface FlowConfigSpec {
-  schema: Record<string, import("@appstrate/shared-types").FlowConfigField>;
+  schema: import("@appstrate/shared-types").JSONSchemaObject;
 }
 
 export interface FlowExecutionSpec {

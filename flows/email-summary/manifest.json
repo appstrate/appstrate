@@ -25,42 +25,51 @@
   "state": {
     "enabled": true,
     "schema": {
-      "last_run": { "type": "string", "format": "date-time" },
-      "last_email_id": { "type": "string" }
+      "type": "object",
+      "properties": {
+        "last_run": { "type": "string", "format": "date-time" },
+        "last_email_id": { "type": "string" }
+      }
     }
   },
 
   "config": {
     "schema": {
-      "max_emails": {
-        "type": "number",
-        "default": 30,
-        "description": "Nombre maximum de mails à traiter par exécution"
-      },
-      "language": {
-        "type": "string",
-        "default": "fr",
-        "enum": ["fr", "en"],
-        "description": "Langue du résumé"
+      "type": "object",
+      "properties": {
+        "max_emails": {
+          "type": "number",
+          "default": 30,
+          "description": "Nombre maximum de mails à traiter par exécution"
+        },
+        "language": {
+          "type": "string",
+          "default": "fr",
+          "enum": ["fr", "en"],
+          "description": "Langue du résumé"
+        }
       }
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Résumé structuré des mails récents",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Résumé structuré des mails récents"
+        },
+        "emails_processed": {
+          "type": "number",
+          "description": "Nombre de mails traités"
+        },
+        "categories": {
+          "type": "array",
+          "description": "Mails regroupés par catégorie (urgent, action, info)"
+        }
       },
-      "emails_processed": {
-        "type": "number",
-        "description": "Nombre de mails traités"
-      },
-      "categories": {
-        "type": "array",
-        "description": "Mails regroupés par catégorie (urgent, action, info)"
-      }
+      "required": ["summary"]
     }
   },
 

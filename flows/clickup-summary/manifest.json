@@ -26,51 +26,59 @@
   "state": {
     "enabled": true,
     "schema": {
-      "last_run": { "type": "string", "format": "date-time" }
+      "type": "object",
+      "properties": {
+        "last_run": { "type": "string", "format": "date-time" }
+      }
     }
   },
 
   "config": {
     "schema": {
-      "clickup_team_id": {
-        "type": "string",
-        "required": true,
-        "description": "ID du workspace (team) ClickUp — visible dans l'URL : app.clickup.com/{team_id}/..."
+      "type": "object",
+      "properties": {
+        "clickup_team_id": {
+          "type": "string",
+          "description": "ID du workspace (team) ClickUp — visible dans l'URL : app.clickup.com/{team_id}/..."
+        },
+        "clickup_list_id": {
+          "type": "string",
+          "description": "ID d'une liste spécifique (optionnel — si vide, récupère les tickets de toutes les listes)"
+        },
+        "include_subtasks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Inclure les sous-tâches dans l'analyse"
+        },
+        "language": {
+          "type": "string",
+          "default": "fr",
+          "enum": ["fr", "en"],
+          "description": "Langue du résumé"
+        }
       },
-      "clickup_list_id": {
-        "type": "string",
-        "description": "ID d'une liste spécifique (optionnel — si vide, récupère les tickets de toutes les listes)"
-      },
-      "include_subtasks": {
-        "type": "boolean",
-        "default": true,
-        "description": "Inclure les sous-tâches dans l'analyse"
-      },
-      "language": {
-        "type": "string",
-        "default": "fr",
-        "enum": ["fr", "en"],
-        "description": "Langue du résumé"
-      }
+      "required": ["clickup_team_id"]
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Résumé priorisé des tickets ClickUp",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Résumé priorisé des tickets ClickUp"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Liste des tickets avec statut et priorité"
+        },
+        "total_tasks": {
+          "type": "number",
+          "description": "Nombre total de tickets analysés"
+        }
       },
-      "tasks": {
-        "type": "array",
-        "description": "Liste des tickets avec statut et priorité",
-        "required": true
-      },
-      "total_tasks": {
-        "type": "number",
-        "description": "Nombre total de tickets analysés"
-      }
+      "required": ["summary", "tasks"]
     }
   },
 
