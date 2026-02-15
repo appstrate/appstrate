@@ -1,5 +1,5 @@
 services:
-  postgres:
+  appstrate-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
+  appstrate-redis:
     image: redis:7.2-alpine
     restart: unless-stopped
     healthcheck:
@@ -32,23 +32,23 @@ services:
       - default
       - coolify
     environment:
-      - NANGO_DB_HOST=postgres
+      - NANGO_DB_HOST=appstrate-postgres
       - NANGO_DB_PORT=5432
       - NANGO_DB_USER=${POSTGRES_USER:-appstrate}
       - NANGO_DB_PASSWORD=${POSTGRES_PASSWORD}
       - NANGO_DB_NAME=nango
       - NANGO_DB_SSL=false
-      - NANGO_REDIS_URL=redis://redis:6379
+      - NANGO_REDIS_URL=redis://appstrate-redis:6379
       - NANGO_ENCRYPTION_KEY=${NANGO_ENCRYPTION_KEY}
       - NANGO_SECRET_KEY_DEV=${NANGO_SECRET_KEY}
       - NANGO_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_PUBLIC_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
-      - SERVER_PORT=3003
+      - SERVER_PORT=8080
       - FLAG_AUTH_ENABLED=false
     depends_on:
-      postgres:
+      appstrate-postgres:
         condition: service_healthy
-      redis:
+      appstrate-redis:
         condition: service_healthy
 
   appstrate:
@@ -68,7 +68,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - NANGO_URL=http://nango:3003
+      - NANGO_URL=http://nango:8080
       - NANGO_PUBLIC_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_SECRET_KEY=${NANGO_SECRET_KEY}
       - DOCKER_SOCKET=/var/run/docker.sock
