@@ -55,8 +55,6 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     restart: unless-stopped
-    ports:
-      - "${PORT:-3000}:3000"
     environment:
       - PORT=3000
       - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-5-20250929}
