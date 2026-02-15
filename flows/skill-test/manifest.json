@@ -16,7 +16,10 @@
   },
 
   "config": {
-    "schema": {}
+    "schema": {
+      "type": "object",
+      "properties": {}
+    }
   },
 
   "execution": {

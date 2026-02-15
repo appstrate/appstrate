@@ -38,52 +38,60 @@
   "state": {
     "enabled": true,
     "schema": {
-      "last_run": { "type": "string", "format": "date-time" },
-      "last_email_id": { "type": "string" }
+      "type": "object",
+      "properties": {
+        "last_run": { "type": "string", "format": "date-time" },
+        "last_email_id": { "type": "string" }
+      }
     }
   },
 
   "config": {
     "schema": {
-      "max_emails": {
-        "type": "number",
-        "default": 20,
-        "description": "Nombre maximum de mails à traiter par exécution"
+      "type": "object",
+      "properties": {
+        "max_emails": {
+          "type": "number",
+          "default": 20,
+          "description": "Nombre maximum de mails à traiter par exécution"
+        },
+        "clickup_list_id": {
+          "type": "string",
+          "description": "ID de la liste ClickUp où créer les tickets"
+        },
+        "language": {
+          "type": "string",
+          "default": "fr",
+          "enum": ["fr", "en"],
+          "description": "Langue des résumés et tickets"
+        }
       },
-      "clickup_list_id": {
-        "type": "string",
-        "required": true,
-        "description": "ID de la liste ClickUp où créer les tickets"
-      },
-      "language": {
-        "type": "string",
-        "default": "fr",
-        "enum": ["fr", "en"],
-        "description": "Langue des résumés et tickets"
-      }
+      "required": ["clickup_list_id"]
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Résumé de l'exécution",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Résumé de l'exécution"
+        },
+        "tickets_created": {
+          "type": "array",
+          "description": "Liste des tickets créés (titre, URL, priorité)"
+        },
+        "informational": {
+          "type": "array",
+          "description": "Mails informatifs non convertis en tickets"
+        },
+        "emails_processed": {
+          "type": "number",
+          "description": "Nombre total de mails traités"
+        }
       },
-      "tickets_created": {
-        "type": "array",
-        "description": "Liste des tickets créés (titre, URL, priorité)",
-        "required": true
-      },
-      "informational": {
-        "type": "array",
-        "description": "Mails informatifs non convertis en tickets"
-      },
-      "emails_processed": {
-        "type": "number",
-        "description": "Nombre total de mails traités"
-      }
+      "required": ["summary", "tickets_created"]
     }
   },
 

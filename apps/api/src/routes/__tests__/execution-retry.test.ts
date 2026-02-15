@@ -1,6 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import type { ExecutionAdapter, ExecutionMessage } from "../../services/adapters/types.ts";
-import type { FlowOutputField } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { LoadedFlow } from "../../types/index.ts";
 
 // --- Mocks ---
@@ -79,7 +79,7 @@ function createMockAdapter(results: (Record<string, unknown> | "timeout")[]): Ex
 }
 
 function makeFlow(overrides: {
-  outputSchema?: Record<string, FlowOutputField>;
+  outputSchema?: JSONSchemaObject;
   outputRetries?: number;
   timeout?: number;
 }): LoadedFlow {
@@ -106,9 +106,13 @@ function makeFlow(overrides: {
   };
 }
 
-const OUTPUT_SCHEMA: Record<string, FlowOutputField> = {
-  summary: { type: "string", description: "Summary text", required: true },
-  count: { type: "number", description: "Item count", required: true },
+const OUTPUT_SCHEMA: JSONSchemaObject = {
+  type: "object",
+  properties: {
+    summary: { type: "string", description: "Summary text" },
+    count: { type: "number", description: "Item count" },
+  },
+  required: ["summary", "count"],
 };
 
 function findLogs(event: string) {

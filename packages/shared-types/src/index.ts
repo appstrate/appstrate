@@ -20,28 +20,32 @@ export type Schedule = Tables<"flow_schedules">;
 
 export type Profile = Tables<"profiles">;
 
-// --- Flow Field Types ---
+// --- JSON Schema Types ---
 
 export type FlowFieldType = "string" | "number" | "boolean" | "array" | "object";
 
-export interface FlowFieldBase {
+export interface JSONSchemaProperty {
   type: string;
-  description: string;
-  required?: boolean;
-}
-
-export interface FlowConfigField extends FlowFieldBase {
+  description?: string;
   default?: unknown;
   enum?: unknown[];
+  format?: string;
+  placeholder?: string; // custom extension
 }
 
-export interface FlowInputField extends FlowFieldBase {
-  default?: unknown;
-  placeholder?: string;
+export interface JSONSchemaObject {
+  type: "object";
+  properties: Record<string, JSONSchemaProperty>;
+  required?: string[];
 }
 
-// Compatible with FlowInputField for flow chaining (output flow A → input flow B)
-export interface FlowOutputField extends FlowFieldBase {}
+export function isRequired(schema: JSONSchemaObject, key: string): boolean {
+  return schema.required?.includes(key) ?? false;
+}
+
+export function getProperty(schema: JSONSchemaObject, key: string): JSONSchemaProperty | undefined {
+  return schema.properties[key];
+}
 
 export interface ServiceStatus {
   id: string;
@@ -77,13 +81,13 @@ export interface FlowDetail {
     skills: { id: string; description: string }[];
   };
   input?: {
-    schema: Record<string, FlowInputField>;
+    schema: JSONSchemaObject;
   };
   output?: {
-    schema: Record<string, FlowOutputField>;
+    schema: JSONSchemaObject;
   };
   config: {
-    schema: Record<string, FlowConfigField>;
+    schema: JSONSchemaObject;
     current: Record<string, unknown>;
   };
   state: Record<string, unknown>;
@@ -92,7 +96,7 @@ export interface FlowDetail {
   updatedAt?: string | null;
   prompt?: string;
   rawSkills?: { id: string; description: string; content: string }[];
-  stateSchema?: { schema: Record<string, { type: string; format?: string }> } | null;
+  stateSchema?: { schema: JSONSchemaObject } | null;
   executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
 }
 

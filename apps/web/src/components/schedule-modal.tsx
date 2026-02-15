@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Modal } from "./modal";
 import { InputFields, initInputValues, buildInputPayload } from "./input-fields";
-import type { FlowInputField, Schedule } from "@appstrate/shared-types";
+import type { JSONSchemaObject, Schedule } from "@appstrate/shared-types";
 
 const CRON_PRESETS = [
   { label: "Toutes les 30 min", cron: "*/30 * * * *" },
@@ -33,7 +33,7 @@ interface ScheduleModalProps {
   open: boolean;
   onClose: () => void;
   schedule?: Schedule | null;
-  inputSchema?: Record<string, FlowInputField>;
+  inputSchema?: JSONSchemaObject;
   onSave: (data: ScheduleSaveData) => void;
   onDelete?: () => void;
   isPending?: boolean;
@@ -52,7 +52,7 @@ export function ScheduleModal({
   flowPicker,
 }: ScheduleModalProps) {
   const isEdit = !!schedule;
-  const schemaKeys = inputSchema ? Object.keys(inputSchema).join(",") : "";
+  const schemaKeys = inputSchema?.properties ? Object.keys(inputSchema.properties).join(",") : "";
 
   return (
     <Modal
@@ -88,7 +88,7 @@ function ScheduleForm({
   isPending,
 }: {
   schedule?: Schedule | null;
-  inputSchema?: Record<string, FlowInputField>;
+  inputSchema?: JSONSchemaObject;
   onClose: () => void;
   onSave: (data: ScheduleSaveData) => void;
   onDelete?: () => void;
@@ -100,8 +100,8 @@ function ScheduleForm({
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const schema = inputSchema || {};
-  const hasInputSchema = Object.keys(schema).length > 0;
+  const schema = inputSchema || { type: "object" as const, properties: {} };
+  const hasInputSchema = Object.keys(schema.properties).length > 0;
 
   const [inputValues, setInputValues] = useState<Record<string, string>>(() =>
     initInputValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { FlowFieldBase, FlowConfigField } from "@appstrate/shared-types";
+import Ajv from "ajv";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 
 // --- Section A: Static manifest schema ---
 
@@ -7,23 +8,20 @@ export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 const flowFieldTypeEnum = z.enum(["string", "number", "boolean", "array", "object"]);
 
-const fieldBaseSchema = z.object({
+const jsonSchemaPropertySchema = z.object({
   type: flowFieldTypeEnum,
-  description: z.string(),
-  required: z.boolean().optional(),
-});
-
-const configFieldSchema = fieldBaseSchema.extend({
+  description: z.string().optional(),
   default: z.unknown().optional(),
   enum: z.array(z.unknown()).optional(),
-});
-
-const inputFieldSchema = fieldBaseSchema.extend({
-  default: z.unknown().optional(),
+  format: z.string().optional(),
   placeholder: z.string().optional(),
 });
 
-const outputFieldSchema = fieldBaseSchema;
+const jsonSchemaObjectSchema = z.object({
+  type: z.literal("object"),
+  properties: z.record(z.string(), jsonSchemaPropertySchema),
+  required: z.array(z.string()).optional(),
+});
 
 const serviceRequirementSchema = z.object({
   id: z.string(),
@@ -58,29 +56,23 @@ const manifestSchema = z.looseObject({
   }),
   input: z
     .object({
-      schema: z.record(z.string(), inputFieldSchema),
+      schema: jsonSchemaObjectSchema,
     })
     .optional(),
   output: z
     .object({
-      schema: z.record(z.string(), outputFieldSchema),
+      schema: jsonSchemaObjectSchema,
     })
     .optional(),
   state: z
     .object({
       enabled: z.boolean(),
-      schema: z.record(
-        z.string(),
-        z.object({
-          type: z.string(),
-          format: z.string().optional(),
-        }),
-      ),
+      schema: jsonSchemaObjectSchema,
     })
     .optional(),
   config: z
     .object({
-      schema: z.record(z.string(), configFieldSchema),
+      schema: jsonSchemaObjectSchema,
     })
     .optional(),
   execution: z
@@ -92,55 +84,22 @@ const manifestSchema = z.looseObject({
     .optional(),
 });
 
-// --- Section B: Dynamic field schema builder ---
+// --- Section B: AJV runtime validation ---
 
-function zodTypeForField(field: FlowFieldBase): z.ZodType {
-  switch (field.type) {
-    case "string":
-      return z.string();
-    case "number":
-      return z.coerce.number();
-    case "boolean":
-      return z.coerce.boolean();
-    case "array":
-      return z.array(z.unknown());
-    case "object":
-      return z.record(z.string(), z.unknown());
-    default:
-      return z.unknown();
-  }
-}
+const ajv = new Ajv({ coerceTypes: true, allErrors: true });
 
-function buildFieldsSchema(
-  fields: Record<string, FlowFieldBase>,
-  options: { strictRequired?: boolean } = {},
-): z.ZodObject<Record<string, z.ZodType>> {
-  const { strictRequired = true } = options;
-  const shape: Record<string, z.ZodType> = {};
-
-  for (const [key, field] of Object.entries(fields)) {
-    let schema = zodTypeForField(field);
-
-    // Enum constraint for config fields
-    const configField = field as FlowConfigField;
-    if (configField.enum && Array.isArray(configField.enum) && configField.enum.length > 0) {
-      const values = configField.enum.map((v) => String(v));
-      schema = z.enum(values as [string, ...string[]]);
-    }
-
-    // Required strings must be non-empty (preserves current behavior: "" = missing)
-    if (field.required && strictRequired && field.type === "string" && !configField.enum) {
-      schema = z.string().min(1, `Le champ '${key}' ne peut pas être vide`);
-    }
-
-    if (!field.required) {
-      schema = schema.optional().nullable();
-    }
-
-    shape[key] = schema;
-  }
-
-  return z.object(shape);
+function validateWithAjv(
+  data: Record<string, unknown>,
+  schema: JSONSchemaObject,
+): ValidationResult {
+  const validate = ajv.compile(schema);
+  const valid = validate(data);
+  if (valid) return { valid: true, errors: [], data };
+  const errors = (validate.errors || []).map((e) => ({
+    field: e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown",
+    message: e.message || "Validation failed",
+  }));
+  return { valid: false, errors };
 }
 
 // --- Section C: Validation functions ---
@@ -166,66 +125,41 @@ export function validateManifest(raw: unknown): {
 
 export function validateConfig(
   data: Record<string, unknown>,
-  schema: Record<string, FlowConfigField>,
+  schema: JSONSchemaObject,
 ): ValidationResult {
-  if (Object.keys(schema).length === 0) {
+  if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [], data };
   }
-
-  const zodSchema = buildFieldsSchema(schema);
-  const result = zodSchema.safeParse(data);
-
-  if (result.success) {
-    return { valid: true, errors: [], data: result.data as Record<string, unknown> };
-  }
-
-  const errors = result.error.issues.map((issue) => ({
-    field: issue.path.join(".") || "unknown",
-    message: issue.message,
-  }));
-  return { valid: false, errors };
+  return validateWithAjv(data, schema);
 }
 
 export function validateInput(
   input: Record<string, unknown> | undefined,
-  schema: Record<string, FlowFieldBase>,
+  schema: JSONSchemaObject,
 ): ValidationResult {
-  if (Object.keys(schema).length === 0) {
+  if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [], data: input ?? {} };
   }
-
-  const zodSchema = buildFieldsSchema(schema);
-  const result = zodSchema.safeParse(input ?? {});
-
-  if (result.success) {
-    return { valid: true, errors: [], data: result.data as Record<string, unknown> };
-  }
-
-  const errors = result.error.issues.map((issue) => ({
-    field: issue.path.join(".") || "unknown",
-    message: issue.message,
-  }));
-  return { valid: false, errors };
+  return validateWithAjv(input ?? {}, schema);
 }
 
 export function validateOutput(
   result: Record<string, unknown>,
-  schema: Record<string, FlowFieldBase>,
+  schema: JSONSchemaObject,
 ): { valid: boolean; errors: string[] } {
-  if (Object.keys(schema).length === 0) {
+  if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [] };
   }
-
-  // Use looseObject to allow extra fields (state, tokensUsed, etc.)
-  const zodSchema = z.looseObject(buildFieldsSchema(schema).shape);
-  const parsed = zodSchema.safeParse(result);
-
-  if (parsed.success) {
-    return { valid: true, errors: [] };
-  }
-
-  const errors = parsed.error.issues.map(
-    (issue) => `Field '${issue.path.join(".")}': ${issue.message}`,
+  // Use additionalProperties: true to allow extra fields (state, tokensUsed, etc.)
+  const looseSchema: JSONSchemaObject & { additionalProperties: boolean } = {
+    ...schema,
+    additionalProperties: true,
+  };
+  const validate = ajv.compile(looseSchema);
+  const valid = validate(result);
+  if (valid) return { valid: true, errors: [] };
+  const errors = (validate.errors || []).map(
+    (e) => `Field '${e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown"}': ${e.message || "Validation failed"}`,
   );
   return { valid: false, errors };
 }

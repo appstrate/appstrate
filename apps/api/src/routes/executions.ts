@@ -247,7 +247,7 @@ export function createExecutionsRouter() {
 
     // Validate config
     const config = await getFlowConfig(flowId);
-    const configSchema = flow.manifest.config?.schema ?? {};
+    const configSchema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
     const configValidation = validateConfig(config, configSchema);
     if (!configValidation.valid) {
       const first = configValidation.errors[0]!;

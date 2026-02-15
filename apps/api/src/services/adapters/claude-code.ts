@@ -1,4 +1,4 @@
-import type { FlowOutputField } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
 import {
@@ -15,7 +15,7 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     executionId: string,
     envVars: Record<string, string>,
     timeout: number,
-    outputSchema?: Record<string, FlowOutputField>,
+    outputSchema?: JSONSchemaObject,
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(envVars, outputSchema);
     const model = envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
@@ -101,7 +101,7 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
 
 function buildEnrichedPrompt(
   envVars: Record<string, string>,
-  outputSchema?: Record<string, FlowOutputField>,
+  outputSchema?: JSONSchemaObject,
 ): string {
   const flowPrompt = envVars.FLOW_PROMPT || "";
 
@@ -185,18 +185,18 @@ function buildEnrichedPrompt(
     "When you have completed the task, output your final result as a JSON object inside a ```json code block.",
   );
 
-  if (outputSchema && Object.keys(outputSchema).length > 0) {
+  if (outputSchema?.properties && Object.keys(outputSchema.properties).length > 0) {
     sections.push("\nThe JSON must include the following fields:");
     const example: Record<string, unknown> = {};
-    for (const [key, field] of Object.entries(outputSchema)) {
-      const req = field.required ? "required" : "optional";
-      sections.push(`- **${key}** (${field.type}, ${req}): ${field.description}`);
+    for (const [key, prop] of Object.entries(outputSchema.properties)) {
+      const req = outputSchema.required?.includes(key) ? "required" : "optional";
+      sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
       // Build example value based on type
-      if (field.type === "string") example[key] = "...";
-      else if (field.type === "number") example[key] = 0;
-      else if (field.type === "boolean") example[key] = false;
-      else if (field.type === "array") example[key] = [];
-      else if (field.type === "object") example[key] = {};
+      if (prop.type === "string") example[key] = "...";
+      else if (prop.type === "number") example[key] = 0;
+      else if (prop.type === "boolean") example[key] = false;
+      else if (prop.type === "array") example[key] = [];
+      else if (prop.type === "object") example[key] = {};
     }
     sections.push("\nExample:");
     sections.push("```json");
@@ -289,7 +289,7 @@ function extractJsonResult(text: string): Record<string, unknown> | null {
 export function buildRetryPrompt(
   badResult: Record<string, unknown>,
   validationErrors: string[],
-  outputSchema: Record<string, FlowOutputField>,
+  outputSchema: JSONSchemaObject,
 ): string {
   const lines: string[] = [];
 
@@ -310,9 +310,9 @@ export function buildRetryPrompt(
   lines.push("");
 
   lines.push("## Expected Schema\n");
-  for (const [key, field] of Object.entries(outputSchema)) {
-    const req = field.required ? "required" : "optional";
-    lines.push(`- **${key}** (${field.type}, ${req}): ${field.description}`);
+  for (const [key, prop] of Object.entries(outputSchema.properties)) {
+    const req = outputSchema.required?.includes(key) ? "required" : "optional";
+    lines.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
   }
   lines.push("");
 

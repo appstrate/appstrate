@@ -37,7 +37,7 @@ function InputModalForm({
   onSubmit: (input: Record<string, unknown>) => void;
   initialValues?: Record<string, unknown>;
 }) {
-  const schema = flow.input?.schema || {};
+  const schema = flow.input?.schema || { type: "object" as const, properties: {} };
 
   const [values, setValues] = useState<Record<string, string>>(() =>
     initInputValues(schema, initialValues),
@@ -46,8 +46,8 @@ function InputModalForm({
   const handleSubmit = () => {
     const input = buildInputPayload(schema, values);
 
-    for (const [key, field] of Object.entries(schema)) {
-      if (field.required && (!input[key] || input[key] === "")) {
+    for (const key of Object.keys(schema.properties)) {
+      if (schema.required?.includes(key) && (!input[key] || input[key] === "")) {
         alert(`Le champ "${key}" est requis`);
         return;
       }
