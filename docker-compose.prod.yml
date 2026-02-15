@@ -40,7 +40,7 @@ services:
       - NANGO_REDIS_URL=redis://redis:6379
       - NANGO_ENCRYPTION_KEY=${NANGO_ENCRYPTION_KEY}
       - NANGO_SECRET_KEY_DEV=${NANGO_SECRET_KEY}
-      - NANGO_SERVER_URL=${NANGO_SERVER_URL:-http://nango:3003}
+      - NANGO_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_PUBLIC_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - SERVER_PORT=3003
       - FLAG_AUTH_ENABLED=false
@@ -67,6 +67,7 @@ services:
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - NANGO_URL=http://nango:3003
+      - NANGO_PUBLIC_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_SECRET_KEY=${NANGO_SECRET_KEY}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
