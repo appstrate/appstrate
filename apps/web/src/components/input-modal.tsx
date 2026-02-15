@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./modal";
-import { InputFields, initInputValues, buildInputPayload } from "./input-fields";
+import { InputFields } from "./input-fields";
+import { initInputValues, buildInputPayload } from "./input-utils";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {

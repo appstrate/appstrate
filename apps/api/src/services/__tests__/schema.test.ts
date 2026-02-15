@@ -329,6 +329,38 @@ describe("validateInput", () => {
     const result = validateInput({ topic: "AI", max_results: "5" }, INPUT_SCHEMA);
     expect(result.valid).toBe(true);
   });
+
+  test("schema with custom keyword (placeholder) does not throw", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Search topic", placeholder: "ex: AI" },
+      },
+      required: ["topic"],
+    };
+    expect(() => validateInput({ topic: "AI" }, schema)).not.toThrow();
+    const result = validateInput({ topic: "AI" }, schema);
+    expect(result.valid).toBe(true);
+  });
+});
+
+// =====================================================
+// validateConfig (with custom keywords)
+// =====================================================
+
+describe("validateConfig with custom keywords", () => {
+  test("schema with placeholder does not throw", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        api_key: { type: "string", description: "API key", placeholder: "sk-..." },
+      },
+      required: ["api_key"],
+    };
+    expect(() => validateConfig({ api_key: "sk-123" }, schema)).not.toThrow();
+    const result = validateConfig({ api_key: "sk-123" }, schema);
+    expect(result.valid).toBe(true);
+  });
 });
 
 // =====================================================

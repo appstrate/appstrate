@@ -1,3 +1,4 @@
+import Handlebars from "handlebars";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
@@ -247,7 +248,10 @@ export function createExecutionsRouter() {
 
     // Validate config
     const config = await getFlowConfig(flowId);
-    const configSchema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
+    const configSchema = flow.manifest.config?.schema ?? {
+      type: "object" as const,
+      properties: {},
+    };
     const configValidation = validateConfig(config, configSchema);
     if (!configValidation.valid) {
       const first = configValidation.errors[0]!;
@@ -338,35 +342,6 @@ export function interpolatePrompt(
   state: Record<string, unknown>,
   input: Record<string, unknown> = {},
 ): string {
-  let result = prompt;
-
-  // Replace {{input.*}}
-  result = result.replace(/\{\{input\.(\w+)\}\}/g, (_, key) => {
-    return String(input[key] ?? "");
-  });
-
-  // Replace {{config.*}}
-  result = result.replace(/\{\{config\.(\w+)\}\}/g, (_, key) => {
-    return String(config[key] ?? "");
-  });
-
-  // Replace {{state.*}}
-  result = result.replace(/\{\{state\.(\w+)\}\}/g, (_, key) => {
-    return String(state[key] ?? "");
-  });
-
-  // Handle {{#if state.*}} ... {{else}} ... {{/if}} blocks
-  result = result.replace(
-    /\{\{#if state\.(\w+)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g,
-    (_, key, ifBlock, elseBlock) => {
-      return state[key] ? ifBlock : elseBlock;
-    },
-  );
-
-  // Handle {{#if state.*}} ... {{/if}} blocks (without else)
-  result = result.replace(/\{\{#if state\.(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (_, key, ifBlock) => {
-    return state[key] ? ifBlock : "";
-  });
-
-  return result;
+  const template = Handlebars.compile(prompt, { noEscape: true });
+  return template({ config, state, input });
 }

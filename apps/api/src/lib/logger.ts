@@ -1,41 +1,21 @@
-type LogLevel = "debug" | "info" | "warn" | "error";
+import pino from "pino";
 
-function emit(level: LogLevel, msg: string, data?: Record<string, unknown>) {
-  const entry = {
-    level,
-    msg,
-    timestamp: new Date().toISOString(),
-    ...data,
+const pinoLogger = pino({
+  level: process.env.LOG_LEVEL || "info",
+});
+
+type LogFn = (msg: string, data?: Record<string, unknown>) => void;
+
+function wrap(level: "debug" | "info" | "warn" | "error"): LogFn {
+  return (msg, data) => {
+    if (data) pinoLogger[level](data, msg);
+    else pinoLogger[level](msg);
   };
-
-  const line = JSON.stringify(entry);
-
-  switch (level) {
-    case "error":
-      console.error(line);
-      break;
-    case "warn":
-      console.warn(line);
-      break;
-    case "debug":
-      console.debug(line);
-      break;
-    default:
-      console.log(line);
-  }
 }
 
 export const logger = {
-  debug(msg: string, data?: Record<string, unknown>) {
-    emit("debug", msg, data);
-  },
-  info(msg: string, data?: Record<string, unknown>) {
-    emit("info", msg, data);
-  },
-  warn(msg: string, data?: Record<string, unknown>) {
-    emit("warn", msg, data);
-  },
-  error(msg: string, data?: Record<string, unknown>) {
-    emit("error", msg, data);
-  },
+  debug: wrap("debug"),
+  info: wrap("info"),
+  warn: wrap("warn"),
+  error: wrap("error"),
 };

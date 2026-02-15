@@ -191,10 +191,7 @@ function renderSchemaField(key: string, prop: JSONSchemaProperty, value: unknown
   return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
 }
 
-function buildSchemaResultHtml(
-  data: Record<string, unknown>,
-  schema: JSONSchemaObject,
-): string {
+function buildSchemaResultHtml(data: Record<string, unknown>, schema: JSONSchemaObject): string {
   let html = `<h4>Resultat</h4>`;
 
   // Render summary first if present in schema
