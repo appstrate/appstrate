@@ -1,0 +1,14 @@
+node_modules
+.git
+*.md
+!flows/**/*.md
+!apps/api/src/**/*.md
+.env
+.env.*
+!.env.example
+supabase
+runtime-claude-code
+.turbo
+apps/web/node_modules
+apps/api/node_modules
+packages/shared-types/node_modules
