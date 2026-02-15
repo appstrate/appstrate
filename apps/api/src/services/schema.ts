@@ -86,7 +86,7 @@ const manifestSchema = z.looseObject({
 
 // --- Section B: AJV runtime validation ---
 
-const ajv = new Ajv({ coerceTypes: true, allErrors: true });
+const ajv = new Ajv({ coerceTypes: true, allErrors: true, strict: false });
 
 function validateWithAjv(
   data: Record<string, unknown>,
@@ -96,7 +96,10 @@ function validateWithAjv(
   const valid = validate(data);
   if (valid) return { valid: true, errors: [], data };
   const errors = (validate.errors || []).map((e) => ({
-    field: e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown",
+    field:
+      e.instancePath.replace(/^\//, "") ||
+      (e.params as { missingProperty?: string })?.missingProperty ||
+      "unknown",
     message: e.message || "Validation failed",
   }));
   return { valid: false, errors };
@@ -159,7 +162,8 @@ export function validateOutput(
   const valid = validate(result);
   if (valid) return { valid: true, errors: [] };
   const errors = (validate.errors || []).map(
-    (e) => `Field '${e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown"}': ${e.message || "Validation failed"}`,
+    (e) =>
+      `Field '${e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown"}': ${e.message || "Validation failed"}`,
   );
   return { valid: false, errors };
 }
