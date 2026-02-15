@@ -28,6 +28,9 @@ services:
     image: nangohq/nango-server:hosted
     platform: linux/amd64
     restart: unless-stopped
+    networks:
+      - default
+      - coolify
     environment:
       - NANGO_DB_HOST=postgres
       - NANGO_DB_PORT=5432
@@ -55,6 +58,9 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     restart: unless-stopped
+    networks:
+      - default
+      - coolify
     environment:
       - PORT=3000
       - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-5-20250929}
@@ -71,6 +77,10 @@ services:
     depends_on:
       nango:
         condition: service_started
+
+networks:
+  coolify:
+    external: true
 
 volumes:
   pgdata:
