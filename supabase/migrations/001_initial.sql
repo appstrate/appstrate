@@ -1,5 +1,5 @@
 -- ============================================================
--- Appstrate: Initial schema with multi-user support
+-- Appstrate: Full schema
 -- ============================================================
 
 -- Profiles (extends auth.users)
@@ -46,12 +46,34 @@ CREATE TABLE public.flow_state (
   PRIMARY KEY (user_id, flow_id)
 );
 
+-- User-imported flows (built-in flows are loaded from filesystem)
+CREATE TABLE public.flows (
+  id TEXT PRIMARY KEY,
+  manifest JSONB NOT NULL,
+  prompt TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT flows_id_slug CHECK (id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
+);
+
+-- Flow versioning: lightweight snapshots (content lives in Storage ZIPs)
+CREATE TABLE public.flow_versions (
+  id SERIAL PRIMARY KEY,
+  flow_id TEXT NOT NULL,  -- No FK to flows: preserve history after deletion
+  version_number INTEGER NOT NULL,
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(flow_id, version_number)
+);
+
+CREATE INDEX idx_flow_versions_flow_id ON public.flow_versions(flow_id, version_number DESC);
+
 -- Executions: per-user
 CREATE TABLE public.executions (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,
   user_id UUID NOT NULL REFERENCES auth.users(id),
-  status TEXT NOT NULL DEFAULT 'pending',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'success', 'failed', 'timeout')),
   input JSONB,
   result JSONB,
   error TEXT,
@@ -59,7 +81,8 @@ CREATE TABLE public.executions (
   started_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   duration INTEGER,
-  schedule_id TEXT
+  schedule_id TEXT,
+  flow_version_id INTEGER REFERENCES public.flow_versions(id)
 );
 
 CREATE INDEX idx_executions_flow_id ON public.executions(flow_id);
@@ -101,15 +124,18 @@ CREATE TABLE public.flow_schedules (
 CREATE INDEX idx_schedules_flow_id ON public.flow_schedules(flow_id);
 CREATE INDEX idx_schedules_user_id ON public.flow_schedules(user_id);
 
--- User-imported flows (built-in flows are loaded from filesystem)
-CREATE TABLE public.flows (
-  id TEXT PRIMARY KEY,
-  manifest JSONB NOT NULL,
-  prompt TEXT NOT NULL,
+-- Schedule run deduplication for multi-instance deployments
+CREATE TABLE public.schedule_runs (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  schedule_id TEXT NOT NULL REFERENCES public.flow_schedules(id) ON DELETE CASCADE,
+  fire_time TIMESTAMPTZ NOT NULL,
+  execution_id TEXT REFERENCES public.executions(id) ON DELETE SET NULL,
+  instance_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT flows_id_slug CHECK (id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
+  UNIQUE(schedule_id, fire_time)
 );
+
+CREATE INDEX idx_schedule_runs_created_at ON public.schedule_runs(created_at);
 
 -- ============================================================
 -- Row Level Security
@@ -140,6 +166,24 @@ CREATE POLICY "flow_state_admin" ON public.flow_state FOR ALL USING (
   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
 );
 
+-- flows: all authenticated read, admin write
+ALTER TABLE public.flows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "flows_select" ON public.flows FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "flows_insert" ON public.flows FOR INSERT WITH CHECK (
+  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+);
+CREATE POLICY "flows_update" ON public.flows FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+);
+CREATE POLICY "flows_delete" ON public.flows FOR DELETE USING (
+  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+);
+
+-- flow_versions: all authenticated read, insert via service role
+ALTER TABLE public.flow_versions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "flow_versions_select" ON public.flow_versions FOR SELECT TO authenticated USING (true);
+CREATE POLICY "flow_versions_insert" ON public.flow_versions FOR INSERT WITH CHECK (true);
+
 -- executions: own data + admin sees all
 ALTER TABLE public.executions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "executions_user" ON public.executions FOR ALL USING (auth.uid() = user_id);
@@ -161,18 +205,73 @@ CREATE POLICY "flow_schedules_admin" ON public.flow_schedules FOR ALL USING (
   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
 );
 
--- flows: all authenticated read, admin write
-ALTER TABLE public.flows ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "flows_select" ON public.flows FOR SELECT USING (auth.uid() IS NOT NULL);
-CREATE POLICY "flows_insert" ON public.flows FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-);
-CREATE POLICY "flows_update" ON public.flows FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-);
-CREATE POLICY "flows_delete" ON public.flows FOR DELETE USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-);
+-- schedule_runs: RLS enabled, no policies (service role only)
+ALTER TABLE public.schedule_runs ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- Functions
+-- ============================================================
+
+-- Atomic schedule lock acquisition
+CREATE OR REPLACE FUNCTION public.try_acquire_schedule_lock(
+  p_schedule_id TEXT,
+  p_fire_time TIMESTAMPTZ,
+  p_instance_id TEXT
+) RETURNS BOOLEAN AS $$
+DECLARE
+  lock_key BIGINT;
+BEGIN
+  lock_key := abs(hashtext(p_schedule_id || '|' || p_fire_time::text));
+
+  IF NOT pg_try_advisory_xact_lock(lock_key) THEN
+    RETURN FALSE;
+  END IF;
+
+  BEGIN
+    INSERT INTO public.schedule_runs (schedule_id, fire_time, instance_id)
+    VALUES (p_schedule_id, p_fire_time, p_instance_id);
+    RETURN TRUE;
+  EXCEPTION WHEN unique_violation THEN
+    RETURN FALSE;
+  END;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Atomically create a new flow version with auto-incremented version_number
+CREATE OR REPLACE FUNCTION public.create_flow_version(
+  p_flow_id TEXT,
+  p_created_by UUID
+) RETURNS INTEGER AS $$
+DECLARE
+  next_version INTEGER;
+  new_id INTEGER;
+BEGIN
+  SELECT COALESCE(MAX(version_number), 0) + 1 INTO next_version
+  FROM public.flow_versions
+  WHERE flow_id = p_flow_id;
+
+  INSERT INTO public.flow_versions (flow_id, version_number, created_by)
+  VALUES (p_flow_id, next_version, p_created_by)
+  RETURNING id INTO new_id;
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Clean up old schedule_runs rows
+CREATE OR REPLACE FUNCTION public.cleanup_old_schedule_runs(
+  retention_days INTEGER DEFAULT 30
+) RETURNS INTEGER AS $$
+DECLARE
+  deleted_count INTEGER;
+BEGIN
+  DELETE FROM public.schedule_runs
+  WHERE created_at < NOW() - (retention_days || ' days')::INTERVAL;
+
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- Supabase Realtime: publish execution tables

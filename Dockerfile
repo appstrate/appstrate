@@ -23,6 +23,9 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 
 COPY . .
 
+# Ensure flows/ exists (gitignored, may be absent from build context)
+RUN mkdir -p flows
+
 # VITE_* vars must be set at build time for the frontend bundle
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
