@@ -28,7 +28,7 @@ export class FlowImportError extends Error {
  * Files can be at the root or inside a single top-level folder (GitHub ZIP pattern).
  */
 function findRoot(files: Record<string, Uint8Array>): string {
-  const paths = Object.keys(files).filter((p) => !p.endsWith("/"));
+  const paths = Object.keys(files).filter((p) => !p.endsWith("/") && !p.startsWith("__MACOSX/"));
 
   // Check if manifest.json is at root
   if (paths.some((p) => p === "manifest.json")) return "";
