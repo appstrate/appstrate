@@ -17,7 +17,7 @@
     "setup-nango": "bun scripts/setup-nango.ts",
     "build-runtime": "docker build -t appstrate-claude-code ./runtime-claude-code",
     "build-runtime-pi": "docker build -t appstrate-pi ./runtime-pi",
-    "gen:types": "bunx supabase gen types typescript --local > packages/shared-types/src/database.ts",
+    "gen:types": "bunx supabase gen types typescript --linked > packages/shared-types/src/database.ts",
     "docker:dev": "docker compose -f docker-compose.yml up -d",
     "docker:prod": "docker compose -f docker-compose.prod.yml up -d"
   },

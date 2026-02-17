@@ -9,8 +9,9 @@ import {
   createExecution,
   updateExecution,
   appendExecutionLog,
+  getAdminConnections,
 } from "../services/state.ts";
-import { listConnections, getAccessToken } from "../services/nango.ts";
+import { listConnections, getAccessToken, getConnectionStatus } from "../services/nango.ts";
 import {
   getAdapter,
   getAdapterName,
@@ -237,19 +238,45 @@ export function createExecutionsRouter() {
     const user = c.get("user");
     const flowId = flow.id;
 
-    // Validate service dependencies (single Nango call for all services)
+    // Validate service dependencies
+    const adminConns = await getAdminConnections(flowId);
     const connections = await listConnections(user.id);
     const connectedProviders = new Set(connections.map((c) => c.provider));
+
     for (const svc of flow.manifest.requires.services) {
-      if (!connectedProviders.has(svc.provider)) {
-        return c.json(
-          {
-            error: "DEPENDENCY_NOT_SATISFIED",
-            message: `Le service '${svc.id}' n'est pas connecte`,
-            connectUrl: `/auth/connect/${svc.provider}`,
-          },
-          400,
-        );
+      const mode = svc.connectionMode ?? "user";
+      if (mode === "admin") {
+        const adminUserId = adminConns[svc.id];
+        if (!adminUserId) {
+          return c.json(
+            {
+              error: "DEPENDENCY_NOT_SATISFIED",
+              message: `Le service '${svc.id}' n'est pas lie par un administrateur`,
+            },
+            400,
+          );
+        }
+        const conn = await getConnectionStatus(svc.provider, adminUserId);
+        if (conn.status !== "connected") {
+          return c.json(
+            {
+              error: "DEPENDENCY_NOT_SATISFIED",
+              message: `La connexion admin pour '${svc.id}' n'est plus active`,
+            },
+            400,
+          );
+        }
+      } else {
+        if (!connectedProviders.has(svc.provider)) {
+          return c.json(
+            {
+              error: "DEPENDENCY_NOT_SATISFIED",
+              message: `Le service '${svc.id}' n'est pas connecte`,
+              connectUrl: `/auth/connect/${svc.provider}`,
+            },
+            400,
+          );
+        }
       }
     }
 
@@ -291,12 +318,16 @@ export function createExecutionsRouter() {
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Get state and tokens
+    // Get state and tokens (resolve based on connectionMode)
     const state = await getFlowState(user.id, flowId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
-      const token = await getAccessToken(svc.provider, user.id);
-      if (token) tokens[svc.id] = token;
+      const mode = svc.connectionMode ?? "user";
+      const tokenUserId = mode === "admin" ? adminConns[svc.id] : user.id;
+      if (tokenUserId) {
+        const token = await getAccessToken(svc.provider, tokenUserId);
+        if (token) tokens[svc.id] = token;
+      }
     }
 
     // Interpolate prompt

@@ -44,6 +44,10 @@ export interface ServiceStatus {
   status: "connected" | "not_connected";
   authMode?: string;
   connectUrl?: string;
+  connectionMode?: "user" | "admin";
+  adminProvided?: boolean;
+  adminUserId?: string;
+  adminDisplayName?: string;
 }
 
 export interface FlowListItem {

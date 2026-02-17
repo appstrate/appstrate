@@ -9,7 +9,14 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
-import { useRunFlow, useConnect, useDeleteFlow, useConnectApiKey } from "../hooks/use-mutations";
+import {
+  useRunFlow,
+  useConnect,
+  useDeleteFlow,
+  useConnectApiKey,
+  useBindAdminService,
+  useUnbindAdminService,
+} from "../hooks/use-mutations";
 import { useFlowExecutionRealtime } from "../hooks/use-realtime";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
@@ -44,7 +51,7 @@ type Tab = "executions" | "schedules";
 
 export function FlowDetailPage() {
   const { flowId } = useParams<{ flowId: string }>();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const qc = useQueryClient();
 
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
@@ -54,6 +61,8 @@ export function FlowDetailPage() {
   const deleteFlow = useDeleteFlow();
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
+  const bindAdmin = useBindAdminService(flowId!);
+  const unbindAdmin = useUnbindAdminService(flowId!);
   const createSchedule = useCreateSchedule(flowId!);
   const updateSchedule = useUpdateSchedule(flowId!);
   const deleteSchedule = useDeleteSchedule(flowId!);
@@ -67,6 +76,7 @@ export function FlowDetailPage() {
   const [apiKeyService, setApiKeyService] = useState<{
     provider: string;
     id: string;
+    bindAfter?: boolean;
   } | null>(null);
 
   useFlowExecutionRealtime(flowId, () => {
@@ -108,6 +118,78 @@ export function FlowDetailPage() {
       <div className="services">
         {detail.requires.services.map((svc) => {
           const isConnected = svc.status === "connected";
+          const isAdminMode = svc.connectionMode === "admin";
+
+          // Admin-provided service
+          if (isAdminMode) {
+            const handleBind = async () => {
+              try {
+                await bindAdmin.mutateAsync(svc.id);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : "";
+                if (!msg.includes("connexion active")) {
+                  alert(`Erreur : ${msg}`);
+                  return;
+                }
+                // Admin not connected to the provider — open connect flow then retry
+                try {
+                  if (svc.authMode === "API_KEY") {
+                    setApiKeyService({ provider: svc.provider, id: svc.id, bindAfter: true });
+                    return;
+                  }
+                  await connectMutation.mutateAsync(svc.provider);
+                  await bindAdmin.mutateAsync(svc.id);
+                } catch (retryErr) {
+                  const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+                  alert(`Erreur : ${retryMsg}`);
+                }
+              }
+            };
+
+            if (svc.adminProvided && isConnected) {
+              const isSelf = svc.adminUserId === user?.id;
+              return (
+                <div key={svc.id} className="service admin-provided" title={svc.description}>
+                  <span className="status-dot connected" />
+                  {svc.id}
+                  {!isSelf && (
+                    <span className="admin-service-badge">{svc.adminDisplayName ?? "admin"}</span>
+                  )}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn-unbind"
+                      onClick={() => unbindAdmin.mutate(svc.id)}
+                      disabled={unbindAdmin.isPending}
+                    >
+                      Delier
+                    </button>
+                  )}
+                </div>
+              );
+            }
+            // Admin mode but not yet bound
+            return (
+              <div key={svc.id} className="service admin-pending" title={svc.description}>
+                <span className="status-dot disconnected" />
+                {svc.id}
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    className="btn-bind"
+                    onClick={handleBind}
+                    disabled={bindAdmin.isPending || connectMutation.isPending}
+                  >
+                    Lier mon compte
+                  </button>
+                ) : (
+                  <span className="admin-service-badge pending">en attente</span>
+                )}
+              </div>
+            );
+          }
+
+          // User mode (default behavior)
           const handleServiceConnect = () => {
             if (svc.authMode === "API_KEY") {
               setApiKeyService({ provider: svc.provider, id: svc.id });
@@ -310,9 +392,17 @@ export function FlowDetailPage() {
         isPending={apiKeyMutation.isPending}
         onSubmit={(apiKey) => {
           if (apiKeyService) {
+            const { id: serviceId, bindAfter } = apiKeyService;
             apiKeyMutation.mutate(
               { provider: apiKeyService.provider, apiKey },
-              { onSuccess: () => setApiKeyService(null) },
+              {
+                onSuccess: () => {
+                  setApiKeyService(null);
+                  if (bindAfter) {
+                    bindAdmin.mutate(serviceId);
+                  }
+                },
+              },
             );
           }
         }}
