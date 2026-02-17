@@ -1,7 +1,7 @@
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates python3 python3-pip && rm -rf /var/lib/apt/lists/*
+    git curl ca-certificates python3 python3-pip unzip && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code@latest
 

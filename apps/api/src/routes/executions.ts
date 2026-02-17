@@ -11,9 +11,14 @@ import {
   appendExecutionLog,
 } from "../services/state.ts";
 import { listConnections, getAccessToken } from "../services/nango.ts";
-import { getAdapter, getAdapterName, TimeoutError } from "../services/adapters/index.ts";
-import { buildRetryPrompt } from "../services/adapters/claude-code.ts";
+import {
+  getAdapter,
+  getAdapterName,
+  TimeoutError,
+  buildRetryPrompt,
+} from "../services/adapters/index.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
+import { getFlowPackage } from "../services/flow-package.ts";
 import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
@@ -31,6 +36,7 @@ export async function executeFlowInBackground(
   flow: LoadedFlow,
   envVars: Record<string, string>,
   tokens: Record<string, string>,
+  flowPackage?: Buffer | null,
 ) {
   const startTime = Date.now();
   trackExecution(executionId);
@@ -70,6 +76,7 @@ export async function executeFlowInBackground(
         envVars,
         timeout,
         flow.manifest.output?.schema,
+        flowPackage ?? undefined,
       )) {
         if (msg.type === "progress") {
           await appendExecutionLog(
@@ -305,8 +312,10 @@ export function createExecutionsRouter() {
       config,
       state,
       input: body.input,
-      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
+
+    // Get flow package (ZIP) for injection into container
+    const flowPackage = await getFlowPackage(flow);
 
     // Get flow version ID for user flows (non-blocking on failure)
     const flowVersionId =
@@ -323,7 +332,7 @@ export function createExecutionsRouter() {
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens).catch((err) => {
+    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens, flowPackage).catch((err) => {
       logger.error("Unhandled error in background execution", {
         executionId,
         error: err instanceof Error ? err.message : String(err),

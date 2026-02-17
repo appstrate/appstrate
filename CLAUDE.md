@@ -42,7 +42,7 @@ bun run dev                   # turbo dev → Hono on :3000
 | Scheduling        | **croner** (cron library)                         | In-memory cron jobs with DB persistence + distributed locking (`schedule_runs`) |
 | ZIP import        | **fflate** (decompression)                        | User flow import from ZIP files                                             |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
-| Container runtime | **Claude Code CLI** in Node 20 Alpine             | Uses `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)                  |
+| Container runtime | **Claude Code CLI** or **Pi Coding Agent**         | Switchable via `EXECUTION_ADAPTER` env var (claude-code or pi)              |
 | Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 HashRouter, builds to `apps/web/dist/`         |
 | Real-time         | **Supabase Realtime** (postgres_changes)          | Execution status + logs via CDC (denormalized `user_id` on logs)            |
 | Type generation   | **Supabase CLI**                                  | `bun run gen:types` → `packages/shared-types/src/database.ts`              |
@@ -64,6 +64,8 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
 - **Nango auth modes**: Integrations can be OAuth2 (popup flow) or API_KEY (modal input). The `authMode` is fetched from Nango's provider metadata via `nango.getProvider()` SDK and cached.
 - **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are loaded with their content (from filesystem for built-in, from DB for user flows), passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint into `/workspace/.claude/skills/`.
+- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions ship with the Pi runtime image; custom extensions are stored in DB and reconstructed inside the container. Extensions are passed via `FLOW_EXTENSIONS` env var (JSON). Declared in `manifest.requires.extensions[]`.
+- **Dual adapter system**: The platform supports two execution adapters switchable via `EXECUTION_ADAPTER` env var: `claude-code` (default, uses Claude Code CLI + OAuth token) and `pi` (uses Pi Coding Agent SDK, supports multiple LLM providers via API keys). Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and user flows are readable by all authenticated users, writable by admins only.
 - **Auth flow**: Frontend uses `@supabase/supabase-js` with anon key → `supabase.auth.signInWithPassword()` → JWT stored in Supabase session → sent as `Authorization: Bearer {jwt}` on all API calls. Backend verifies JWT via `supabase.auth.getUser(token)` with service role key.
 
@@ -134,7 +136,8 @@ appstrate/
 │       ├── 001_initial.sql           # Schema with multi-user support, RLS policies, Realtime publication
 │       ├── 002_execution_logs_user_id.sql  # Denormalize user_id on execution_logs for Realtime CDC
 │       ├── 003_schedule_locks.sql    # schedule_runs table + try_acquire_schedule_lock() for distributed cron
-│       └── 004_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
+│       ├── 004_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
+│       └── 005_flow_extensions.sql   # Add extensions JSONB column to flows + flow_versions, update RPC
 │
 ├── apps/
 │   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
@@ -158,11 +161,13 @@ appstrate/
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
-│   │       │   ├── docker.ts         # dockerFetch(), createClaudeCodeContainer, streamLogs, etc.
+│   │       │   ├── docker.ts         # dockerFetch(), createContainer (generic), createClaudeCodeContainer, streamLogs, etc.
 │   │       │   ├── adapters/
-│   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type
-│   │       │   │   ├── index.ts      # getAdapter() factory, re-exports
-│   │       │   │   └── claude-code.ts # ClaudeCodeAdapter (prompt enrichment, stream parsing, retry prompt, output schema injection)
+│   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, TimeoutError
+│   │       │   │   ├── index.ts      # getAdapter() factory (claude-code|pi), re-exports
+│   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, extractJsonResult, buildRetryPrompt
+│   │       │   │   ├── claude-code.ts # ClaudeCodeAdapter (stream parsing for Claude Code CLI JSON events)
+│   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, flow_state, executions, execution_logs tables
 │   │       │   ├── flow-service.ts   # FlowService: built-in cache (ReadonlyMap) + DB reads for user flows (replaces flow-loader.ts)
@@ -238,13 +243,23 @@ appstrate/
 │   └── skill-test/
 │       ├── manifest.json             # Flow spec: metadata, requires, config/state/input/output schema, execution settings
 │       ├── prompt.md                 # Agent instructions with {{config.*}} / {{state.*}} / {{input.*}} vars
-│       └── skills/                   # Optional: agent skills
-│           └── {skill-id}/
-│               └── SKILL.md          # Skill definition with YAML frontmatter (description)
+│       ├── skills/                   # Optional: agent skills
+│       │   └── {skill-id}/
+│       │       └── SKILL.md          # Skill definition with YAML frontmatter (description)
+│       └── extensions/               # Optional: Pi agent extensions (TypeScript tools)
+│           └── {id}.ts               # Extension file (custom tool for pi adapter)
 │
 ├── runtime-claude-code/              # Docker image for Claude Code CLI
 │   ├── Dockerfile
 │   └── entrypoint.sh
+│
+├── runtime-pi/                       # Docker image for Pi Coding Agent SDK
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── entrypoint.ts                 # SDK session → JSON line stdout
+│   └── extensions/                   # Built-in extensions shipped with image
+│       ├── web-fetch.ts              # Fetch URL content
+│       └── web-search.ts             # DuckDuckGo web search
 │
 └── scripts/
     └── setup-nango.ts                # Creates Nango integrations (OAuth + API key) and pre-connects API key services

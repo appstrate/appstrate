@@ -30,10 +30,16 @@ const serviceRequirementSchema = z.object({
   description: z.string(),
 });
 
-const toolRequirementSchema = z.object({
-  id: z.string(),
-  type: z.enum(["static", "custom"]),
-  description: z.string(),
+const skillRequirementSchema = z.object({
+  id: z.string().min(1).regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+  name: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const extensionRequirementSchema = z.object({
+  id: z.string().min(1).regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+  name: z.string().optional(),
+  description: z.string().optional(),
 });
 
 const manifestSchema = z.looseObject({
@@ -52,7 +58,8 @@ const manifestSchema = z.looseObject({
   }),
   requires: z.object({
     services: z.array(serviceRequirementSchema),
-    tools: z.array(toolRequirementSchema).optional(),
+    skills: z.array(skillRequirementSchema).optional().default([]),
+    extensions: z.array(extensionRequirementSchema).optional().default([]),
   }),
   input: z
     .object({
@@ -170,7 +177,7 @@ export function validateOutput(
 
 export function validateFlowContent(
   prompt: string,
-  skills: { id: string; description: string; content: string }[],
+  skills: { id: string; name?: string; description: string; content: string }[],
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   if (!prompt || prompt.trim().length === 0) {

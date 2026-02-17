@@ -1,0 +1,80 @@
+import { logger } from "../../lib/logger.ts";
+import type { ExecutionMessage } from "./types.ts";
+import { TimeoutError } from "./types.ts";
+import {
+  startContainer,
+  streamLogs,
+  waitForExit,
+  stopContainer,
+  removeContainer,
+  injectFile,
+} from "../docker.ts";
+
+export interface ContainerLifecycleOptions {
+  containerId: string;
+  adapterName: string;
+  executionId: string;
+  timeout: number;
+  flowPackage?: Buffer;
+  extraData?: Record<string, unknown>;
+  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
+}
+
+/**
+ * Shared container lifecycle: package injection, start, timeout, stream loop,
+ * exit handling, and cleanup. Each adapter delegates to this after building
+ * env vars and creating the container.
+ */
+export async function* runContainerLifecycle(
+  options: ContainerLifecycleOptions,
+): AsyncGenerator<ExecutionMessage> {
+  const { containerId, adapterName, executionId, timeout, flowPackage, extraData } = options;
+
+  // Inject flow package ZIP before starting
+  if (flowPackage) {
+    await injectFile(containerId, "flow-package.zip", flowPackage, "/workspace");
+  }
+
+  yield {
+    type: "progress",
+    message: `${adapterName} container started`,
+    data: { adapter: adapterName, executionId, containerId, ...extraData },
+  };
+
+  await startContainer(containerId);
+
+  // Timeout: stop the container if it exceeds the limit
+  const timeoutMs = timeout * 1000;
+  let timedOut = false;
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    stopContainer(containerId).catch(() => {});
+  }, timeoutMs);
+
+  let hasResult = false;
+
+  try {
+    for await (const msg of options.processLogs(streamLogs(containerId))) {
+      if (msg.type === "result") hasResult = true;
+      yield msg;
+    }
+
+    const exitCode = await waitForExit(containerId);
+
+    if (timedOut) {
+      throw new TimeoutError(`Execution timed out after ${timeout}s`);
+    }
+
+    if (exitCode !== 0 && !hasResult) {
+      throw new Error(`${adapterName} container exited with code ${exitCode}`);
+    }
+  } finally {
+    clearTimeout(timeoutHandle);
+    await removeContainer(containerId).catch((err) => {
+      logger.error("Failed to remove container", {
+        containerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+}

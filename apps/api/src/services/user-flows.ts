@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase.ts";
+import { deleteFlowPackage } from "./flow-package.ts";
 import type { FlowRow, Json } from "@appstrate/shared-types";
 
 export type { FlowRow };
@@ -12,7 +13,6 @@ export async function insertUserFlow(
   id: string,
   manifest: Record<string, unknown>,
   prompt: string,
-  skills: { id: string; description: string; content: string }[],
 ): Promise<FlowRow> {
   const { data, error } = await supabase
     .from("flows")
@@ -20,7 +20,6 @@ export async function insertUserFlow(
       id,
       manifest: manifest as Json,
       prompt,
-      skills: skills as unknown as Json,
     })
     .select()
     .single();
@@ -33,18 +32,18 @@ export async function updateUserFlow(
   payload: {
     manifest: Record<string, unknown>;
     prompt: string;
-    skills: { id: string; description: string; content: string }[];
   },
   expectedUpdatedAt: string,
 ): Promise<FlowRow | null> {
+  const updatePayload: Record<string, unknown> = {
+    manifest: payload.manifest as Json,
+    prompt: payload.prompt,
+    updated_at: new Date().toISOString(),
+  };
+
   const { data, error } = await supabase
     .from("flows")
-    .update({
-      manifest: payload.manifest as Json,
-      prompt: payload.prompt,
-      skills: payload.skills as unknown as Json,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", id)
     .eq("updated_at", expectedUpdatedAt)
     .select()
@@ -64,4 +63,7 @@ export async function deleteUserFlow(id: string): Promise<void> {
   await supabase.from("flow_configs").delete().eq("flow_id", id);
   await supabase.from("flow_state").delete().eq("flow_id", id);
   await supabase.from("flows").delete().eq("id", id);
+
+  // Remove flow package from Storage
+  await deleteFlowPackage(id);
 }

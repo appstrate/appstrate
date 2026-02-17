@@ -6,6 +6,8 @@ const TABS: { id: EditorTab; label: string }[] = [
   { id: "services", label: "Services" },
   { id: "schema", label: "Schemas" },
   { id: "skills", label: "Skills" },
+  { id: "extensions", label: "Extensions" },
+  { id: "json", label: "JSON" },
 ];
 
 interface EditorTabsProps {

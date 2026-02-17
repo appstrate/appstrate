@@ -7,7 +7,7 @@ import {
   validateOutput,
   validateFlowContent,
 } from "../schema.ts";
-import { buildRetryPrompt } from "../adapters/claude-code.ts";
+import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 
 // --- Fixtures ---
 
@@ -22,7 +22,8 @@ const VALID_MANIFEST = {
   },
   requires: {
     services: [{ id: "gmail", provider: "google-mail", description: "Read emails" }],
-    tools: [{ id: "web-search", type: "static", description: "Search" }],
+    skills: [{ id: "greeting-style", name: "Greeting Style", description: "Format greetings" }],
+    extensions: [{ id: "web-search", name: "Web Search", description: "Search" }],
   },
   config: {
     schema: {

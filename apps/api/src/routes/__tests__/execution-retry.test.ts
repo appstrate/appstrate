@@ -39,6 +39,25 @@ mock.module("../../services/nango.ts", () => ({
 
 mock.module("../../services/env-builder.ts", () => ({
   buildContainerEnv: mock(() => ({})),
+  resolveExtensions: mock(() => []),
+}));
+
+mock.module("../../services/flow-versions.ts", () => ({
+  getLatestVersionId: mock(async () => null),
+}));
+
+mock.module("../../services/execution-tracker.ts", () => ({
+  trackExecution: mock(() => {}),
+  untrackExecution: mock(() => {}),
+}));
+
+mock.module("../../middleware/guards.ts", () => ({
+  requireFlow: mock(() => mock()),
+  requireAdmin: mock(() => mock()),
+}));
+
+mock.module("../../middleware/rate-limit.ts", () => ({
+  rateLimit: mock(() => mock()),
 }));
 
 // Track how many times the adapter's execute() is called
@@ -56,6 +75,12 @@ mock.module("../../services/adapters/index.ts", () => ({
   getAdapter: () => mockAdapter,
   getAdapterName: () => "mock-adapter",
   TimeoutError: MockTimeoutError,
+  buildRetryPrompt: (_badResult: unknown, _errors: string[], _schema: unknown) =>
+    "mock retry prompt",
+}));
+
+mock.module("../../services/flow-package.ts", () => ({
+  getFlowPackage: mock(async () => null),
 }));
 
 // Import after mocks are set up
@@ -87,6 +112,7 @@ function makeFlow(overrides: {
     id: "test-flow",
     prompt: "test prompt",
     skills: [],
+    extensions: [],
     source: "built-in",
     manifest: {
       version: "1.0.0",

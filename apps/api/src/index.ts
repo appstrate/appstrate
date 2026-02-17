@@ -1,19 +1,22 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
+import { zipSync, type Zippable } from "fflate";
 import { supabase } from "./lib/supabase.ts";
 import { logger } from "./lib/logger.ts";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
+import { ensureStorageBucket } from "./services/flow-package.ts";
+import { createVersionAndUpload } from "./services/flow-versions.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
-import type { AppEnv } from "./types/index.ts";
+import type { AppEnv, Json } from "./types/index.ts";
 
 const app = new Hono<AppEnv>();
 
@@ -62,6 +65,24 @@ app.use("*", async (c, next) => {
 logger.info("Loading flows...");
 await initFlowService();
 logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
+
+// Ensure Supabase Storage bucket for flow packages
+try {
+  await ensureStorageBucket();
+} catch (err) {
+  logger.warn("Could not ensure storage bucket", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Migrate existing user flows: move JSONB content to ZIP packages in Storage
+try {
+  await migrateFlowsToStorage();
+} catch (err) {
+  logger.warn("Could not run flow storage migration", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
 
 // Clean up orphaned executions from previous server runs
 try {
@@ -142,3 +163,97 @@ export default {
 };
 
 logger.info("Server started", { port });
+
+// --- Startup migration ---
+
+/**
+ * Idempotent migration: for user flows with JSONB skills/extensions that have a `content` field,
+ * reconstruct a ZIP, upload to Storage, and strip content from DB entries.
+ */
+async function migrateFlowsToStorage() {
+  const { data: flows } = await supabase.from("flows").select("*");
+  if (!flows || flows.length === 0) return;
+
+  let migrated = 0;
+
+  for (const flow of flows) {
+    try {
+      const flowAny = flow as Record<string, unknown>;
+
+      // Check for legacy JSONB columns with `content` field (pre-migration data)
+      // After migration 006, these columns no longer exist, so this is a no-op.
+      const legacySkills = ((flowAny.skills ?? []) as { id: string; name?: string; description?: string; content?: string }[]);
+      const legacyExtensions = ((flowAny.extensions ?? []) as { id: string; description?: string; content?: string }[]);
+
+      // Check if any skill or extension still has content (needs migration)
+      const hasContent =
+        legacySkills.some((s) => s.content !== undefined) ||
+        legacyExtensions.some((e) => e.content !== undefined);
+
+      if (!hasContent) continue;
+
+      // Reconstruct a ZIP from manifest + prompt + skill/extension content
+      const entries: Zippable = {
+        "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
+        "prompt.md": new TextEncoder().encode(flow.prompt),
+      };
+
+      for (const skill of legacySkills) {
+        if (skill.content) {
+          entries[`skills/${skill.id}/SKILL.md`] = new TextEncoder().encode(skill.content);
+        }
+      }
+
+      for (const ext of legacyExtensions) {
+        if (ext.content) {
+          entries[`extensions/${ext.id}.ts`] = new TextEncoder().encode(ext.content);
+        }
+      }
+
+      const zipBuffer = Buffer.from(zipSync(entries, { level: 6 }));
+
+      // Merge skills/extensions metadata into manifest.requires (source of truth)
+      const manifest = flow.manifest as Record<string, unknown>;
+      const requires = (manifest.requires ?? {}) as Record<string, unknown>;
+      if (!requires.skills || (requires.skills as unknown[]).length === 0) {
+        requires.skills = legacySkills.map((s) => ({
+          id: s.id,
+          ...(s.name ? { name: s.name } : {}),
+          ...(s.description ? { description: s.description } : {}),
+        }));
+      }
+      if (!requires.extensions || (requires.extensions as unknown[]).length === 0) {
+        requires.extensions = legacyExtensions.map((e) => ({
+          id: e.id,
+          ...(e.description ? { description: e.description } : {}),
+        }));
+      }
+
+      // Create version and upload ZIP
+      await createVersionAndUpload(
+        flow.id,
+        manifest,
+        flow.prompt,
+        "system",
+        zipBuffer,
+      );
+
+      // Update manifest in DB to include merged skills/extensions metadata
+      await supabase
+        .from("flows")
+        .update({ manifest: manifest as Json })
+        .eq("id", flow.id);
+
+      migrated++;
+    } catch (err) {
+      logger.warn("Migration failed for flow, skipping", {
+        flowId: flow.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (migrated > 0) {
+    logger.info("Migrated user flows to Storage", { count: migrated });
+  }
+}

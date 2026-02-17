@@ -1,5 +1,4 @@
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
-const CLAUDE_CODE_RUNTIME_IMAGE = "appstrate-claude-code:latest";
 
 // Bun supports fetch() with unix: option for Unix sockets
 async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
@@ -9,27 +8,28 @@ async function dockerFetch(path: string, options: RequestInit = {}): Promise<Res
   });
 }
 
-export async function createClaudeCodeContainer(
+export async function createContainer(
   executionId: string,
   envVars: Record<string, string>,
+  options: { image: string; adapterName: string; memory?: number; nanoCpus?: number },
 ): Promise<string> {
-  const containerName = `appstrate-cc-${executionId}`;
+  const containerName = `appstrate-${options.adapterName}-${executionId}`;
 
   const env = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
 
   const body = {
-    Image: CLAUDE_CODE_RUNTIME_IMAGE,
+    Image: options.image,
     Env: env,
     Tty: false,
     HostConfig: {
-      Memory: 1024 * 1024 * 1024,
-      NanoCpus: 2_000_000_000,
+      Memory: options.memory ?? 1024 * 1024 * 1024,
+      NanoCpus: options.nanoCpus ?? 2_000_000_000,
       AutoRemove: false,
       NetworkMode: "bridge",
     },
     Labels: {
       "appstrate.execution": executionId,
-      "appstrate.adapter": "claude-code",
+      "appstrate.adapter": options.adapterName,
       "appstrate.managed": "true",
     },
   };
@@ -42,7 +42,7 @@ export async function createClaudeCodeContainer(
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Failed to create claude-code container: ${res.status} ${error}`);
+    throw new Error(`Failed to create ${options.adapterName} container: ${res.status} ${error}`);
   }
 
   const data = (await res.json()) as { Id: string };
@@ -150,6 +150,82 @@ export async function removeContainer(containerId: string): Promise<void> {
     const error = await res.text();
     throw new Error(`Failed to remove container: ${res.status} ${error}`);
   }
+}
+
+/**
+ * Inject a single file into a container using Docker's archive API.
+ * Creates a minimal tar archive and PUTs it to /containers/{id}/archive.
+ * Must be called after createContainer() and before startContainer().
+ */
+export async function injectFile(
+  containerId: string,
+  fileName: string,
+  fileContent: Buffer,
+  targetDir: string,
+): Promise<void> {
+  const tar = createTarArchive(fileName, fileContent);
+
+  const res = await dockerFetch(
+    `/containers/${containerId}/archive?path=${encodeURIComponent(targetDir)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-tar" },
+      body: tar,
+    },
+  );
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to inject file into container: ${res.status} ${error}`);
+  }
+}
+
+/** Create a minimal tar archive containing a single file. */
+function createTarArchive(fileName: string, content: Buffer): Buffer {
+  // Tar header: 512 bytes
+  const header = Buffer.alloc(512, 0);
+
+  // name (0-99): file name
+  header.write(fileName, 0, Math.min(fileName.length, 100), "utf8");
+
+  // mode (100-107): file permissions
+  header.write("0000644\0", 100, 8, "utf8");
+
+  // uid (108-115)
+  header.write("0001000\0", 108, 8, "utf8");
+
+  // gid (116-123)
+  header.write("0001000\0", 116, 8, "utf8");
+
+  // size (124-135): file size in octal
+  header.write(content.length.toString(8).padStart(11, "0") + "\0", 124, 12, "utf8");
+
+  // mtime (136-147): modification time in octal
+  const mtime = Math.floor(Date.now() / 1000);
+  header.write(mtime.toString(8).padStart(11, "0") + "\0", 136, 12, "utf8");
+
+  // checksum placeholder (148-155): spaces for calculation
+  header.write("        ", 148, 8, "utf8");
+
+  // typeflag (156): '0' for regular file
+  header.write("0", 156, 1, "utf8");
+
+  // Compute checksum: sum of all bytes in the header (treating checksum field as spaces)
+  let checksum = 0;
+  for (let i = 0; i < 512; i++) {
+    checksum += header[i]!;
+  }
+  header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "utf8");
+
+  // Data blocks: content padded to 512-byte boundary
+  const dataBlocks = Math.ceil(content.length / 512);
+  const data = Buffer.alloc(dataBlocks * 512, 0);
+  content.copy(data);
+
+  // End-of-archive: two 512-byte zero blocks
+  const end = Buffer.alloc(1024, 0);
+
+  return Buffer.concat([header, data, end]);
 }
 
 export async function stopContainer(containerId: string, timeout = 5): Promise<void> {

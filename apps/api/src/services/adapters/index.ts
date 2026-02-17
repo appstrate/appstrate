@@ -1,13 +1,20 @@
 import type { ExecutionAdapter } from "./types.ts";
-import { ClaudeCodeAdapter, TimeoutError } from "./claude-code.ts";
+import { ClaudeCodeAdapter } from "./claude-code.ts";
+import { PiAdapter } from "./pi.ts";
 
-export type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
-export { TimeoutError };
+export { TimeoutError } from "./types.ts";
+export { buildRetryPrompt } from "./prompt-builder.ts";
 
 export function getAdapter(): ExecutionAdapter {
   const type = process.env.EXECUTION_ADAPTER || "claude-code";
-  if (type === "claude-code") return new ClaudeCodeAdapter();
-  throw new Error(`Unknown execution adapter: ${type}`);
+  switch (type) {
+    case "claude-code":
+      return new ClaudeCodeAdapter();
+    case "pi":
+      return new PiAdapter();
+    default:
+      throw new Error(`Unknown execution adapter: ${type}`);
+  }
 }
 
 export function getAdapterName(): string {

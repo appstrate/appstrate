@@ -1,5 +1,5 @@
 import { useServices } from "../../hooks/use-services";
-import type { ServiceEntry } from "./services-section";
+import type { ServiceEntry } from "./types";
 
 interface ServicePickerProps {
   value: ServiceEntry[];

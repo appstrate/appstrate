@@ -14,6 +14,7 @@ import { validateConfig } from "../services/schema.ts";
 import { getFlowById } from "../services/user-flows.ts";
 import { listFlows } from "../services/flow-service.ts";
 import { listFlowVersions } from "../services/flow-versions.ts";
+import { getFlowPackage } from "../services/flow-package.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 
 export function createFlowsRouter() {
@@ -36,8 +37,8 @@ export function createFlowsRouter() {
       tags: f.manifest.metadata.tags ?? [],
       requires: {
         services: f.manifest.requires.services.map((s) => s.id),
-        tools: (f.manifest.requires.tools ?? []).map((t) => t.id),
         skills: f.skills.map((s) => s.id),
+        extensions: f.extensions.map((e) => e.id),
       },
       runningExecutions: runningCounts[f.id] ?? 0,
       source: f.source,
@@ -69,12 +70,6 @@ export function createFlowsRouter() {
       }),
     );
 
-    const toolStatuses = (m.requires.tools ?? []).map((t) => ({
-      id: t.id,
-      type: t.type,
-      status: "available",
-    }));
-
     // Get config (global), state (per-user), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content
     const [currentConfig, currentState, lastExec, runningCount, userFlowRow] = await Promise.all([
@@ -103,8 +98,16 @@ export function createFlowsRouter() {
       source: flow.source,
       requires: {
         services: serviceStatuses,
-        tools: toolStatuses,
-        skills: flow.skills,
+        skills: flow.skills.map((s) => ({
+          id: s.id,
+          ...(s.name ? { name: s.name } : {}),
+          ...(s.description ? { description: s.description } : {}),
+        })),
+        extensions: flow.extensions.map((e) => ({
+          id: e.id,
+          ...(e.name ? { name: e.name } : {}),
+          ...(e.description ? { description: e.description } : {}),
+        })),
       },
       ...(m.input ? { input: { schema: m.input.schema } } : {}),
       ...(m.output ? { output: { schema: m.output.schema } } : {}),
@@ -126,9 +129,6 @@ export function createFlowsRouter() {
         ? {
             updatedAt: userFlowRow.updated_at,
             prompt: flow.prompt,
-            rawSkills: userFlowRow.skills as
-              | { id: string; description: string; content: string }[]
-              | undefined,
             stateSchema: m.state ?? null,
             executionSettings: m.execution ?? null,
           }
@@ -168,6 +168,20 @@ export function createFlowsRouter() {
       config,
       validation: { valid: true },
     });
+  });
+
+  // GET /api/flows/:id/package — download the flow ZIP
+  router.get("/:id/package", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+
+    const zipBuffer = await getFlowPackage(flow);
+    if (!zipBuffer) {
+      return c.json({ error: "FLOW_NOT_FOUND", message: "Package introuvable" }, 404);
+    }
+
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Disposition", `attachment; filename="${flow.id}.zip"`);
+    return c.body(zipBuffer);
   });
 
   // GET /api/flows/:id/versions — list flow version history (user flows only)

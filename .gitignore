@@ -43,5 +43,6 @@ scripts/setup-nango.ts
 data/
 
 zip-flows/
+flows/*
 
 supabase/.*

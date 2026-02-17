@@ -1,9 +1,20 @@
-import type { ServiceEntry } from "./services-section";
 import type { SchemaField } from "./schema-section";
 import type { ExecutionSettings } from "./execution-section";
-import type { SkillEntry } from "./skills-section";
 
-export type EditorTab = "general" | "prompt" | "services" | "schema" | "skills";
+export type EditorTab = "general" | "prompt" | "services" | "schema" | "skills" | "extensions" | "json";
+
+export interface ServiceEntry {
+  id: string;
+  provider: string;
+  description: string;
+  scopes: string;
+}
+
+export interface ResourceEntry {
+  id: string;
+  name?: string;
+  description?: string;
+}
 
 export interface FlowFormState {
   metadata: {
@@ -14,10 +25,11 @@ export interface FlowFormState {
   };
   prompt: string;
   services: ServiceEntry[];
+  skills: ResourceEntry[];
+  extensions: ResourceEntry[];
   inputSchema: SchemaField[];
   outputSchema: SchemaField[];
   configSchema: SchemaField[];
   stateSchema: SchemaField[];
   execution: ExecutionSettings;
-  skills: SkillEntry[];
 }

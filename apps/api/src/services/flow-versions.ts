@@ -1,5 +1,6 @@
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
+import { uploadFlowPackage } from "./flow-package.ts";
 import type { Json } from "../types/index.ts";
 
 export interface FlowVersion {
@@ -8,7 +9,6 @@ export interface FlowVersion {
   version_number: number;
   manifest: unknown;
   prompt: string;
-  skills: unknown;
   created_by: string | null;
   created_at: string | null;
 }
@@ -18,14 +18,12 @@ export async function createFlowVersion(
   flowId: string,
   manifest: Record<string, unknown>,
   prompt: string,
-  skills: { id: string; description: string; content: string }[],
   createdBy: string,
 ): Promise<number | null> {
   const { data, error } = await supabase.rpc("create_flow_version", {
     p_flow_id: flowId,
     p_manifest: manifest as Json,
     p_prompt: prompt,
-    p_skills: (skills ?? []) as unknown as Json,
     p_created_by: createdBy,
   });
 
@@ -53,22 +51,6 @@ export async function listFlowVersions(flowId: string): Promise<FlowVersion[]> {
   return data as FlowVersion[];
 }
 
-/** Fire-and-forget version snapshot creation (logs errors, never throws). */
-export function createVersionSnapshot(
-  flowId: string,
-  manifest: Record<string, unknown>,
-  prompt: string,
-  skills: { id: string; description: string; content: string }[],
-  userId: string,
-): void {
-  createFlowVersion(flowId, manifest, prompt, skills, userId).catch((err) => {
-    logger.error("Version creation failed", {
-      flowId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-}
-
 /** Get the latest version ID for a flow (used to tag executions). */
 export async function getLatestVersionId(flowId: string): Promise<number | null> {
   const { data } = await supabase
@@ -80,4 +62,35 @@ export async function getLatestVersionId(flowId: string): Promise<number | null>
     .single();
 
   return data?.id ?? null;
+}
+
+/**
+ * Create a version snapshot and upload the ZIP to Storage in one call.
+ * Non-blocking: logs errors but never throws.
+ */
+export async function createVersionAndUpload(
+  flowId: string,
+  manifest: Record<string, unknown>,
+  prompt: string,
+  createdBy: string,
+  zipBuffer: Buffer,
+): Promise<void> {
+  const versionId = await createFlowVersion(flowId, manifest, prompt, createdBy);
+  if (versionId !== null) {
+    const versionNumber = await getLatestVersionNumber(flowId);
+    await uploadFlowPackage(flowId, versionNumber, zipBuffer);
+  }
+}
+
+/** Get the latest version number for a flow. */
+export async function getLatestVersionNumber(flowId: string): Promise<number> {
+  const { data } = await supabase
+    .from("flow_versions")
+    .select("version_number")
+    .eq("flow_id", flowId)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .single();
+
+  return data?.version_number ?? 0;
 }
