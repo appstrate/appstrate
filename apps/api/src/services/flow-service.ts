@@ -93,7 +93,11 @@ export async function getFlow(id: string): Promise<LoadedFlow | null> {
   const builtIn = builtInFlows.get(id);
   if (builtIn) return builtIn;
 
-  const { data } = await supabase.from("flows").select("*").eq("id", id).single();
+  const { data } = await supabase
+    .from("flows")
+    .select("id, manifest, prompt")
+    .eq("id", id)
+    .single();
   if (!data) return null;
 
   return dbRowToLoadedFlow(data);
@@ -101,7 +105,7 @@ export async function getFlow(id: string): Promise<LoadedFlow | null> {
 
 /** List all flows: built-in (from cache) + user flows (from DB). */
 export async function listFlows(): Promise<LoadedFlow[]> {
-  const { data } = await supabase.from("flows").select("*");
+  const { data } = await supabase.from("flows").select("id, manifest, prompt");
   const userFlows = (data ?? []).map(dbRowToLoadedFlow);
 
   return [...builtInFlows.values(), ...userFlows];

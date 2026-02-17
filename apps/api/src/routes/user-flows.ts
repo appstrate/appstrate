@@ -125,7 +125,7 @@ export function createUserFlowsRouter() {
     // Create version + upload minimal ZIP to Storage (non-blocking)
     try {
       const zipBuffer = buildMinimalZip(manifest, prompt);
-      await createVersionAndUpload(flowId, manifest, prompt, user.id, zipBuffer);
+      await createVersionAndUpload(flowId, user.id, zipBuffer);
     } catch {
       // Storage upload failure is non-fatal — flow is persisted in DB
     }
@@ -203,7 +203,7 @@ export function createUserFlowsRouter() {
     // Rebuild ZIP: replace manifest.json + prompt.md in existing ZIP, preserve skills/extensions files
     try {
       const zipBuffer = await rebuildPackageWithNewManifestAndPrompt(flowId, manifest, prompt);
-      await createVersionAndUpload(flowId, manifest, prompt, user.id, zipBuffer);
+      await createVersionAndUpload(flowId, user.id, zipBuffer);
     } catch {
       // Storage upload failure is non-fatal — flow is persisted in DB
     }
@@ -279,7 +279,7 @@ export function createUserFlowsRouter() {
 
     // Create version + upload ZIP to Storage
     try {
-      await createVersionAndUpload(flowId, manifest, prompt, user.id, buffer);
+      await createVersionAndUpload(flowId, user.id, buffer);
     } catch {
       // Storage upload failure is non-fatal — flow is persisted in DB
     }
@@ -388,7 +388,7 @@ export function createUserFlowsRouter() {
 
     // Create version + upload ZIP
     try {
-      await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+      await createVersionAndUpload(flowId, user.id, zipBuffer);
     } catch {
       // Storage failure is non-fatal
     }
@@ -469,7 +469,7 @@ export function createUserFlowsRouter() {
           updatedManifest,
           flow.prompt,
         );
-        await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+        await createVersionAndUpload(flowId, user.id, zipBuffer);
       } catch {
         // Storage failure is non-fatal
       }
@@ -533,7 +533,7 @@ export function createUserFlowsRouter() {
 
       // Create version + upload ZIP
       try {
-        await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+        await createVersionAndUpload(flowId, user.id, zipBuffer);
       } catch {
         // Storage failure is non-fatal
       }
@@ -641,7 +641,7 @@ export function createUserFlowsRouter() {
 
     // Create version + upload ZIP
     try {
-      await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+      await createVersionAndUpload(flowId, user.id, zipBuffer);
     } catch {
       // Storage failure is non-fatal
     }
@@ -709,7 +709,7 @@ export function createUserFlowsRouter() {
 
       // Create version + upload ZIP
       try {
-        await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+        await createVersionAndUpload(flowId, user.id, zipBuffer);
       } catch {
         // Storage failure is non-fatal
       }
@@ -790,7 +790,7 @@ export function createUserFlowsRouter() {
           updatedManifest,
           flow.prompt,
         );
-        await createVersionAndUpload(flowId, updatedManifest, flow.prompt, user.id, zipBuffer);
+        await createVersionAndUpload(flowId, user.id, zipBuffer);
       } catch {
         // Storage failure is non-fatal
       }
