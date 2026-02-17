@@ -1,19 +1,23 @@
-import type { FlowFormState } from "./types";
-import type { ServiceEntry } from "./services-section";
+import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
+
+export function toResourceEntry(r: { id: string; name?: string; description?: string }): ResourceEntry {
+  return { id: r.id, name: r.name, description: r.description };
+}
 
 export function defaultFormState(): FlowFormState {
   return {
     metadata: { name: "", displayName: "", description: "", tags: [] },
     prompt: "",
     services: [],
+    skills: [],
+    extensions: [],
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
     stateSchema: [],
     execution: { timeout: 300, maxTokens: 8192, outputRetries: 2 },
-    skills: [],
   };
 }
 
@@ -101,6 +105,8 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     },
     prompt: detail.prompt || "",
     services,
+    skills: (detail.requires.skills ?? []).map(toResourceEntry),
+    extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
     inputSchema: schemaToFields(detail.input?.schema, "input"),
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
@@ -110,7 +116,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       maxTokens: detail.executionSettings?.maxTokens ?? 8192,
       outputRetries: detail.executionSettings?.outputRetries ?? 2,
     },
-    skills: detail.rawSkills || [],
   };
 }
 
@@ -140,6 +145,8 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
           if (scopes.length > 0) svc.scopes = scopes;
           return svc;
         }),
+      skills: state.skills,
+      extensions: state.extensions,
     },
   };
 
@@ -153,7 +160,7 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
   if (configSchema) manifest.config = { schema: configSchema };
 
   const stateSchema = fieldsToSchema(state.stateSchema, "state");
-  if (stateSchema) manifest.state = { schema: stateSchema };
+  if (stateSchema) manifest.state = { enabled: true, schema: stateSchema };
 
   manifest.execution = {
     timeout: state.execution.timeout,
@@ -161,19 +168,14 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
     outputRetries: state.execution.outputRetries,
   };
 
-  const skills = state.skills
-    .filter((s) => s.id && s.content)
-    .map((s) => ({ id: s.id, description: s.description, content: s.content }));
-
-  return { manifest, prompt: state.prompt, skills };
+  return { manifest, prompt: state.prompt };
 }
 
 export function payloadToFormState(payload: {
   manifest: Record<string, unknown>;
   prompt: string;
-  skills: Array<{ id: string; description: string; content: string }>;
 }): FlowFormState {
-  const { manifest, prompt, skills } = payload;
+  const { manifest, prompt } = payload;
   const meta = (manifest.metadata as Record<string, unknown>) || {};
   const requires = (manifest.requires as Record<string, unknown>) || {};
   const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
@@ -184,6 +186,20 @@ export function payloadToFormState(payload: {
     provider: (s.provider as string) || "",
     description: (s.description as string) || "",
     scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
+  }));
+
+  const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
+  const skills = rawSkills.map((s) => toResourceEntry({
+    id: (s.id as string) || "",
+    name: s.name as string | undefined,
+    description: s.description as string | undefined,
+  }));
+
+  const rawExtensions = (requires.extensions as Array<Record<string, unknown>>) || [];
+  const extensions = rawExtensions.map((e) => toResourceEntry({
+    id: (e.id as string) || "",
+    name: e.name as string | undefined,
+    description: e.description as string | undefined,
   }));
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
@@ -200,6 +216,8 @@ export function payloadToFormState(payload: {
     },
     prompt,
     services,
+    skills,
+    extensions,
     inputSchema: schemaToFields(inputObj?.schema, "input"),
     outputSchema: schemaToFields(outputObj?.schema, "output"),
     configSchema: schemaToFields(configObj?.schema, "config"),
@@ -209,6 +227,5 @@ export function payloadToFormState(payload: {
       maxTokens: (execution.maxTokens as number) ?? 8192,
       outputRetries: (execution.outputRetries as number) ?? 2,
     },
-    skills: skills.map((s) => ({ id: s.id, description: s.description, content: s.content })),
   };
 }

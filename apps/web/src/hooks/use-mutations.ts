@@ -1,11 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api, apiFetch, uploadFormData } from "../api";
+import { api, apiFetch, uploadFormData, apiBlob } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 function onMutationError(err: Error) {
   alert(`Erreur : ${err.message}`);
+}
+
+function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>, flowId: string) {
+  qc.invalidateQueries({ queryKey: ["flows"] });
+  qc.invalidateQueries({ queryKey: ["flow", flowId] });
 }
 
 export function useSaveConfig(flowId: string) {
@@ -141,7 +146,6 @@ export function useCreateFlow() {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       prompt: string;
-      skills?: { id: string; description: string; content: string }[];
     }) => {
       return api<{ flowId: string }>("/flows", {
         method: "POST",
@@ -152,6 +156,7 @@ export function useCreateFlow() {
       qc.invalidateQueries({ queryKey: ["flows"] });
       navigate(`/flows/${data.flowId}`);
     },
+    onError: onMutationError,
   });
 }
 
@@ -162,7 +167,6 @@ export function useUpdateFlow(flowId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       prompt: string;
-      skills?: { id: string; description: string; content: string }[];
       updatedAt: string;
     }) => {
       return api<{ flowId: string; updatedAt: string }>(`/flows/${flowId}`, {
@@ -171,10 +175,102 @@ export function useUpdateFlow(flowId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
-      qc.invalidateQueries({ queryKey: ["flow", flowId] });
+      invalidateFlowQueries(qc, flowId);
       navigate(`/flows/${flowId}`);
     },
+    onError: onMutationError,
+  });
+}
+
+export function useUploadPackage(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("updatedAt", updatedAt);
+      return uploadFormData<{ flowId: string; updatedAt: string }>(
+        `/flows/${flowId}/package`,
+        fd,
+        "PUT",
+      );
+    },
+    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onError: onMutationError,
+  });
+}
+
+export async function downloadPackage(flowId: string): Promise<void> {
+  const blob = await apiBlob(`/flows/${flowId}/package`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${flowId}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function useAddSkill(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("updatedAt", updatedAt);
+      return uploadFormData<{ flowId: string; updatedAt: string }>(
+        `/flows/${flowId}/skills`,
+        fd,
+      );
+    },
+    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onError: onMutationError,
+  });
+}
+
+export function useRemoveSkill(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ skillId, updatedAt }: { skillId: string; updatedAt: string }) => {
+      return api<{ flowId: string; updatedAt: string }>(
+        `/flows/${flowId}/skills/${skillId}?updatedAt=${encodeURIComponent(updatedAt)}`,
+        { method: "DELETE" },
+      );
+    },
+    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onError: onMutationError,
+  });
+}
+
+export function useAddExtension(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("updatedAt", updatedAt);
+      return uploadFormData<{ flowId: string; updatedAt: string }>(
+        `/flows/${flowId}/extensions`,
+        fd,
+      );
+    },
+    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onError: onMutationError,
+  });
+}
+
+export function useRemoveExtension(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ extId, updatedAt }: { extId: string; updatedAt: string }) => {
+      return api<{ flowId: string; updatedAt: string }>(
+        `/flows/${flowId}/extensions/${extId}?updatedAt=${encodeURIComponent(updatedAt)}`,
+        { method: "DELETE" },
+      );
+    },
+    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onError: onMutationError,
   });
 }
 

@@ -1,12 +1,20 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useFlowDetail } from "../hooks/use-flows";
-import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
+import {
+  useCreateFlow,
+  useUpdateFlow,
+  useAddSkill,
+  useRemoveSkill,
+  useAddExtension,
+  useRemoveExtension,
+} from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
 import { MetadataSection } from "../components/flow-editor/metadata-section";
 import { SchemaSection } from "../components/flow-editor/schema-section";
 import { ExecutionSection } from "../components/flow-editor/execution-section";
-import { SkillsSection } from "../components/flow-editor/skills-section";
+import { PackageSection } from "../components/flow-editor/package-section";
+import { ResourceSection } from "../components/flow-editor/resource-section";
 import { EditorTabs } from "../components/flow-editor/editor-tabs";
 import { PromptEditor } from "../components/flow-editor/prompt-editor";
 import { ServicePicker } from "../components/flow-editor/service-picker";
@@ -17,6 +25,7 @@ import {
   defaultFormState,
   detailToFormState,
   assemblePayload,
+  toResourceEntry,
 } from "../components/flow-editor/utils";
 import type { FlowDetail } from "@appstrate/shared-types";
 
@@ -39,24 +48,42 @@ function FlowEditorForm({
   const createFlow = useCreateFlow();
   const updateFlow = useUpdateFlow(flowId || "");
 
+  const addSkill = useAddSkill(flowId || "");
+  const removeSkill = useRemoveSkill(flowId || "");
+  const addExtension = useAddExtension(flowId || "");
+  const removeExtension = useRemoveExtension(flowId || "");
+
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("general");
-  const [jsonMode, setJsonMode] = useState(false);
+  const needsFullRefresh = useRef(false);
+
+  // Sync from server after API mutations refetch detail
+  useEffect(() => {
+    if (!detail) return;
+    if (needsFullRefresh.current) {
+      needsFullRefresh.current = false;
+      setForm(detailToFormState(detail));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        skills: (detail.requires.skills ?? []).map(toResourceEntry),
+        extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
+      }));
+    }
+  }, [detail?.updatedAt]);
 
   const handleSubmit = () => {
     setError(null);
 
     if (!form.metadata.name || !form.metadata.displayName || !form.metadata.description) {
       setError("Les champs identifiant, nom d'affichage et description sont requis.");
-      setJsonMode(false);
       setActiveTab("general");
       return;
     }
 
     if (!form.prompt.trim()) {
       setError("Le prompt est requis.");
-      setJsonMode(false);
       setActiveTab("prompt");
       return;
     }
@@ -76,125 +103,140 @@ function FlowEditorForm({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
+  const canEdit = isEdit && detail?.source === "user" && !!detail?.updatedAt;
 
   const handleJsonApply = (newState: FlowFormState) => {
     setForm(newState);
-    setJsonMode(false);
+    setActiveTab("general");
   };
+
+  const updatedAt = detail?.updatedAt ?? undefined;
 
   return (
     <div className="flow-editor">
-      <div className="editor-top-bar">
-        <nav className="breadcrumb" style={{ marginBottom: 0 }}>
-          <Link to="/">Flows</Link>
-          <span className="separator">/</span>
-          {isEdit && detail ? (
-            <>
-              <Link to={`/flows/${flowId}`}>{detail.displayName}</Link>
-              <span className="separator">/</span>
-              <span className="current">Modifier</span>
-            </>
-          ) : (
-            <span className="current">Nouveau flow</span>
-          )}
-        </nav>
-
-        <div className="result-view-toggle">
-          <button
-            type="button"
-            className={`result-toggle-btn${!jsonMode ? " active" : ""}`}
-            onClick={() => setJsonMode(false)}
-          >
-            Visuel
-          </button>
-          <button
-            type="button"
-            className={`result-toggle-btn${jsonMode ? " active" : ""}`}
-            onClick={() => setJsonMode(true)}
-          >
-            JSON
-          </button>
-        </div>
-      </div>
+      <nav className="breadcrumb">
+        <Link to="/">Flows</Link>
+        <span className="separator">/</span>
+        {isEdit && detail ? (
+          <>
+            <Link to={`/flows/${flowId}`}>{detail.displayName}</Link>
+            <span className="separator">/</span>
+            <span className="current">Modifier</span>
+          </>
+        ) : (
+          <span className="current">Nouveau flow</span>
+        )}
+      </nav>
 
       {error && <div className="editor-error">{error}</div>}
 
-      {jsonMode ? (
-        <JsonEditor form={form} userEmail={userEmail} onApply={handleJsonApply} />
-      ) : (
+      <EditorTabs activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {activeTab === "general" && (
         <>
-          <EditorTabs activeTab={activeTab} onTabChange={setActiveTab} />
-
-          {activeTab === "general" && (
-            <>
-              <MetadataSection
-                value={form.metadata}
-                onChange={(metadata) => setForm((s) => ({ ...s, metadata }))}
-                isEdit={isEdit}
-              />
-              <ExecutionSection
-                value={form.execution}
-                onChange={(execution) => setForm((s) => ({ ...s, execution }))}
-              />
-            </>
-          )}
-
-          {activeTab === "prompt" && (
-            <PromptEditor
-              value={form.prompt}
-              onChange={(prompt) => setForm((s) => ({ ...s, prompt }))}
-              configFields={form.configSchema}
-              stateFields={form.stateSchema}
-              inputFields={form.inputSchema}
-            />
-          )}
-
-          {activeTab === "services" && (
-            <ServicePicker
-              value={form.services}
-              onChange={(services) => setForm((s) => ({ ...s, services }))}
-            />
-          )}
-
-          {activeTab === "schema" && (
-            <>
-              <SchemaSection
-                title="Entrees (input)"
-                mode="input"
-                fields={form.inputSchema}
-                onChange={(inputSchema) => setForm((s) => ({ ...s, inputSchema }))}
-              />
-              <SchemaSection
-                title="Sorties (output)"
-                mode="output"
-                fields={form.outputSchema}
-                onChange={(outputSchema) => setForm((s) => ({ ...s, outputSchema }))}
-              />
-              <SchemaSection
-                title="Configuration"
-                mode="config"
-                fields={form.configSchema}
-                onChange={(configSchema) => setForm((s) => ({ ...s, configSchema }))}
-              />
-              <SchemaSection
-                title="Etat persistant"
-                mode="state"
-                fields={form.stateSchema}
-                onChange={(stateSchema) => setForm((s) => ({ ...s, stateSchema }))}
-              />
-            </>
-          )}
-
-          {activeTab === "skills" && (
-            <SkillsSection
-              value={form.skills}
-              onChange={(skills) => setForm((s) => ({ ...s, skills }))}
+          <MetadataSection
+            value={form.metadata}
+            onChange={(metadata) => setForm((s) => ({ ...s, metadata }))}
+            isEdit={isEdit}
+          />
+          <ExecutionSection
+            value={form.execution}
+            onChange={(execution) => setForm((s) => ({ ...s, execution }))}
+          />
+          {isEdit && (
+            <PackageSection
+              detail={detail}
+              flowId={flowId}
+              canEdit={canEdit}
+              onPackageUploaded={() => { needsFullRefresh.current = true; }}
             />
           )}
         </>
       )}
 
-      {!jsonMode && (
+      {activeTab === "prompt" && (
+        <PromptEditor
+          value={form.prompt}
+          onChange={(prompt) => setForm((s) => ({ ...s, prompt }))}
+          configFields={form.configSchema}
+          stateFields={form.stateSchema}
+          inputFields={form.inputSchema}
+        />
+      )}
+
+      {activeTab === "services" && (
+        <ServicePicker
+          value={form.services}
+          onChange={(services) => setForm((s) => ({ ...s, services }))}
+        />
+      )}
+
+      {activeTab === "schema" && (
+        <>
+          <SchemaSection
+            title="Entrees (input)"
+            mode="input"
+            fields={form.inputSchema}
+            onChange={(inputSchema) => setForm((s) => ({ ...s, inputSchema }))}
+          />
+          <SchemaSection
+            title="Sorties (output)"
+            mode="output"
+            fields={form.outputSchema}
+            onChange={(outputSchema) => setForm((s) => ({ ...s, outputSchema }))}
+          />
+          <SchemaSection
+            title="Configuration"
+            mode="config"
+            fields={form.configSchema}
+            onChange={(configSchema) => setForm((s) => ({ ...s, configSchema }))}
+          />
+          <SchemaSection
+            title="Etat persistant"
+            mode="state"
+            fields={form.stateSchema}
+            onChange={(stateSchema) => setForm((s) => ({ ...s, stateSchema }))}
+          />
+        </>
+      )}
+
+      {activeTab === "skills" && (
+        <ResourceSection
+          title="Skills"
+          emptyLabel="Aucun skill."
+          items={form.skills}
+          onChange={(skills) => setForm((s) => ({ ...s, skills }))}
+          canEdit={canEdit}
+          addMutation={addSkill}
+          removeMutation={{
+            mutate: (args) => removeSkill.mutate({ skillId: args.id, updatedAt: args.updatedAt }),
+            isPending: removeSkill.isPending,
+          }}
+          updatedAt={updatedAt}
+        />
+      )}
+
+      {activeTab === "extensions" && (
+        <ResourceSection
+          title="Extensions"
+          emptyLabel="Aucune extension."
+          items={form.extensions}
+          onChange={(extensions) => setForm((s) => ({ ...s, extensions }))}
+          canEdit={canEdit}
+          addMutation={addExtension}
+          removeMutation={{
+            mutate: (args) => removeExtension.mutate({ extId: args.id, updatedAt: args.updatedAt }),
+            isPending: removeExtension.isPending,
+          }}
+          updatedAt={updatedAt}
+        />
+      )}
+
+      {activeTab === "json" && (
+        <JsonEditor form={form} userEmail={userEmail} onApply={handleJsonApply} />
+      )}
+
+      {activeTab !== "json" && (
         <div className="editor-actions">
           <button type="button" onClick={() => navigate(isEdit ? `/flows/${flowId}` : "/")}>
             Annuler

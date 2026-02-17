@@ -10,18 +10,15 @@ git init -q /workspace
 git -C /workspace config user.email "claude@appstrate.local"
 git -C /workspace config user.name "Claude"
 
-# Reconstruct skills from FLOW_SKILLS env var (JSON array)
-if [ -n "${FLOW_SKILLS:-}" ]; then
-  mkdir -p /workspace/.claude/skills
-  echo "$FLOW_SKILLS" | python3 -c "
-import json, sys, os
-skills = json.load(sys.stdin)
-for skill in skills:
-    skill_dir = f'/workspace/.claude/skills/{skill[\"id\"]}'
-    os.makedirs(skill_dir, exist_ok=True)
-    with open(f'{skill_dir}/SKILL.md', 'w') as f:
-        f.write(skill['content'])
-"
+# Extract flow package if present
+if [ -f /workspace/flow-package.zip ]; then
+  cd /workspace && unzip -qo flow-package.zip -d /workspace/.flow-package
+  # Install skills
+  if [ -d /workspace/.flow-package/skills ]; then
+    mkdir -p /workspace/.claude/skills
+    cp -r /workspace/.flow-package/skills/* /workspace/.claude/skills/
+  fi
+  rm -rf /workspace/.flow-package /workspace/flow-package.zip
 fi
 
 echo "$FLOW_PROMPT" | claude -p --output-format stream-json --verbose \

@@ -30,7 +30,6 @@ export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
       const newState = payloadToFormState({
         manifest: parsed.manifest,
         prompt: parsed.prompt,
-        skills: Array.isArray(parsed.skills) ? parsed.skills : [],
       });
       setParseError(null);
       onApply(newState);

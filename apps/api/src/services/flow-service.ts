@@ -3,37 +3,12 @@ import { join } from "node:path";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import { validateManifest } from "./schema.ts";
-import type { FlowManifest, LoadedFlow, SkillMeta } from "../types/index.ts";
-import { extractSkillDescription } from "./skill-utils.ts";
+import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
-const FLOWS_DIR = join(process.cwd(), "flows");
+export const FLOWS_DIR = join(process.cwd(), "flows");
 
 // Immutable cache for built-in flows (loaded once at boot, never mutated)
 let builtInFlows: ReadonlyMap<string, LoadedFlow> = new Map();
-
-async function loadFlowSkills(flowPath: string): Promise<SkillMeta[]> {
-  const skillsDir = join(flowPath, "skills");
-  const skills: SkillMeta[] = [];
-
-  let entries: string[];
-  try {
-    entries = await readdir(skillsDir);
-  } catch {
-    return skills;
-  }
-
-  for (const entry of entries) {
-    const skillFile = Bun.file(join(skillsDir, entry, "SKILL.md"));
-    if (!(await skillFile.exists())) continue;
-
-    const content = await skillFile.text();
-    const description = extractSkillDescription(content);
-
-    skills.push({ id: entry, description, content });
-  }
-
-  return skills;
-}
 
 /** Load built-in flows from filesystem into the immutable cache. Call once at boot. */
 export async function initFlowService(): Promise<void> {
@@ -68,7 +43,8 @@ export async function initFlowService(): Promise<void> {
       }
 
       const manifest = validation.manifest as FlowManifest;
-      const skills = await loadFlowSkills(flowPath);
+      const skills = manifest.requires.skills ?? [];
+      const extensions = manifest.requires.extensions ?? [];
       const flowId = manifest.metadata.name;
 
       flows.set(flowId, {
@@ -76,14 +52,15 @@ export async function initFlowService(): Promise<void> {
         manifest,
         prompt,
         skills,
+        extensions,
         source: "built-in",
       });
 
-      const skillCount = skills.length;
       logger.info("Loaded built-in flow", {
         flowId,
         displayName: manifest.metadata.displayName,
-        skillCount,
+        skillCount: skills.length,
+        extensionCount: extensions.length,
       });
     } catch (e) {
       logger.warn("Skipping flow: parse error", {
@@ -100,17 +77,17 @@ function dbRowToLoadedFlow(row: {
   id: string;
   manifest: unknown;
   prompt: string;
-  skills: unknown;
 }): LoadedFlow {
-  const skills: SkillMeta[] = (
-    (row.skills ?? []) as { id: string; description: string; content?: string }[]
-  ).map((s) => ({ id: s.id, description: s.description, content: s.content }));
+  const manifest = row.manifest as unknown as FlowManifest;
+  const skills = manifest.requires.skills ?? [];
+  const extensions = manifest.requires.extensions ?? [];
 
   return {
     id: row.id,
-    manifest: row.manifest as unknown as FlowManifest,
+    manifest,
     prompt: row.prompt,
     skills,
+    extensions,
     source: "user",
   };
 }

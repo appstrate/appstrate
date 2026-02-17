@@ -22,8 +22,6 @@ export type Profile = Tables<"profiles">;
 
 // --- JSON Schema Types ---
 
-export type FlowFieldType = "string" | "number" | "boolean" | "array" | "object";
-
 export interface JSONSchemaProperty {
   type: string;
   description?: string;
@@ -37,14 +35,6 @@ export interface JSONSchemaObject {
   type: "object";
   properties: Record<string, JSONSchemaProperty>;
   required?: string[];
-}
-
-export function isRequired(schema: JSONSchemaObject, key: string): boolean {
-  return schema.required?.includes(key) ?? false;
-}
-
-export function getProperty(schema: JSONSchemaObject, key: string): JSONSchemaProperty | undefined {
-  return schema.properties[key];
 }
 
 export interface ServiceStatus {
@@ -77,8 +67,8 @@ export interface FlowDetail {
   source: "built-in" | "user";
   requires: {
     services: ServiceStatus[];
-    tools: { id: string; type: string; status: string }[];
-    skills: { id: string; description: string }[];
+    skills: { id: string; name?: string; description?: string }[];
+    extensions: { id: string; name?: string; description?: string }[];
   };
   input?: {
     schema: JSONSchemaObject;
@@ -95,7 +85,6 @@ export interface FlowDetail {
   lastExecution: Partial<Execution> | null;
   updatedAt?: string | null;
   prompt?: string;
-  rawSkills?: { id: string; description: string; content: string }[];
   stateSchema?: { schema: JSONSchemaObject } | null;
   executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
 }

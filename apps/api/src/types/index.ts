@@ -9,7 +9,6 @@ export type {
   Execution,
   ExecutionLog,
   FlowRow,
-  FlowFieldType,
   JSONSchemaProperty,
   JSONSchemaObject,
   ServiceStatus,
@@ -45,19 +44,14 @@ export interface FlowMetadata {
 
 export interface FlowRequirements {
   services: FlowServiceRequirement[];
-  tools?: FlowToolRequirement[];
+  skills?: SkillMeta[];
+  extensions?: ExtensionMeta[];
 }
 
 export interface FlowServiceRequirement {
   id: string;
   provider: string;
   scopes: string[];
-  description: string;
-}
-
-export interface FlowToolRequirement {
-  id: string;
-  type: "static" | "custom";
   description: string;
 }
 
@@ -88,8 +82,14 @@ export interface FlowExecutionSpec {
 
 export interface SkillMeta {
   id: string;
-  description: string;
-  content?: string;
+  name?: string;
+  description?: string;
+}
+
+export interface ExtensionMeta {
+  id: string;
+  name?: string;
+  description?: string;
 }
 
 export interface LoadedFlow {
@@ -97,12 +97,8 @@ export interface LoadedFlow {
   manifest: FlowManifest;
   prompt: string;
   skills: SkillMeta[];
+  extensions: ExtensionMeta[];
   source: "built-in" | "user";
-}
-
-export interface SSEEvent {
-  event: string;
-  data: Record<string, unknown>;
 }
 
 // Hono context env — shared across all routers

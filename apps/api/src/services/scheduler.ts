@@ -7,6 +7,7 @@ import { getFlowConfig, getFlowState, createExecution } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
 import { buildContainerEnv } from "./env-builder.ts";
+import { getFlowPackage } from "./flow-package.ts";
 import { getFlow, flowExists } from "./flow-service.ts";
 import { getLatestVersionId } from "./flow-versions.ts";
 
@@ -221,8 +222,10 @@ async function triggerScheduledExecution(
       config,
       state,
       input,
-      skills: flow.skills.filter((s) => s.content).map((s) => ({ id: s.id, content: s.content! })),
     });
+
+    // Get flow package (ZIP) for injection into container
+    const flowPackage = await getFlowPackage(flow);
 
     // Get flow version ID for user flows
     const flowVersionId =
@@ -248,7 +251,7 @@ async function triggerScheduledExecution(
     logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens).catch((err) => {
+    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens, flowPackage).catch((err) => {
       logger.error("Unhandled error in scheduled execution", {
         executionId,
         error: err instanceof Error ? err.message : String(err),

@@ -1,0 +1,11 @@
+{
+  "name": "appstrate-pi-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.52.12",
+    "@sinclair/typebox": "^0.34.0",
+    "tsx": "^4.0.0"
+  }
+}
