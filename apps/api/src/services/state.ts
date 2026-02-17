@@ -115,7 +115,7 @@ export async function updateExecution(
 export async function getLastExecution(flowId: string, userId: string) {
   const { data } = await supabase
     .from("executions")
-    .select("*")
+    .select("id, status, started_at, duration")
     .eq("flow_id", flowId)
     .eq("user_id", userId)
     .order("started_at", { ascending: false })

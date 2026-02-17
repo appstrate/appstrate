@@ -62,6 +62,7 @@ export async function deleteUserFlow(id: string): Promise<void> {
   await supabase.from("flow_schedules").delete().eq("flow_id", id);
   await supabase.from("flow_configs").delete().eq("flow_id", id);
   await supabase.from("flow_state").delete().eq("flow_id", id);
+  await supabase.from("flow_versions").delete().eq("flow_id", id);
   await supabase.from("flows").delete().eq("id", id);
 
   // Remove flow package from Storage

@@ -1,29 +1,19 @@
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import { uploadFlowPackage } from "./flow-package.ts";
-import type { Json } from "../types/index.ts";
 
 export interface FlowVersion {
   id: number;
   flow_id: string;
   version_number: number;
-  manifest: unknown;
-  prompt: string;
   created_by: string | null;
   created_at: string | null;
 }
 
 /** Create a new version snapshot for a user flow. Returns the version row ID. */
-export async function createFlowVersion(
-  flowId: string,
-  manifest: Record<string, unknown>,
-  prompt: string,
-  createdBy: string,
-): Promise<number | null> {
+export async function createFlowVersion(flowId: string, createdBy: string): Promise<number | null> {
   const { data, error } = await supabase.rpc("create_flow_version", {
     p_flow_id: flowId,
-    p_manifest: manifest as Json,
-    p_prompt: prompt,
     p_created_by: createdBy,
   });
 
@@ -39,7 +29,7 @@ export async function createFlowVersion(
 export async function listFlowVersions(flowId: string): Promise<FlowVersion[]> {
   const { data, error } = await supabase
     .from("flow_versions")
-    .select("*")
+    .select("id, flow_id, version_number, created_by, created_at")
     .eq("flow_id", flowId)
     .order("version_number", { ascending: false });
 
@@ -70,12 +60,10 @@ export async function getLatestVersionId(flowId: string): Promise<number | null>
  */
 export async function createVersionAndUpload(
   flowId: string,
-  manifest: Record<string, unknown>,
-  prompt: string,
   createdBy: string,
   zipBuffer: Buffer,
 ): Promise<void> {
-  const versionId = await createFlowVersion(flowId, manifest, prompt, createdBy);
+  const versionId = await createFlowVersion(flowId, createdBy);
   if (versionId !== null) {
     const versionNumber = await getLatestVersionNumber(flowId);
     await uploadFlowPackage(flowId, versionNumber, zipBuffer);

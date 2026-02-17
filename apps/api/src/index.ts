@@ -94,6 +94,20 @@ try {
   });
 }
 
+// Clean up old schedule_runs rows (retention: 30 days)
+try {
+  const { data: deletedCount } = await supabase.rpc("cleanup_old_schedule_runs", {
+    retention_days: 30,
+  });
+  if (deletedCount && deletedCount > 0) {
+    logger.info("Cleaned up old schedule_runs", { deleted: deletedCount });
+  }
+} catch (err) {
+  logger.warn("Could not clean up old schedule_runs", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
 // Graceful shutdown
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 

@@ -14,7 +14,11 @@ export const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
 });
 
 export async function getUserProfile(userId: string) {
-  const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, role, display_name")
+    .eq("id", userId)
+    .single();
   return data ?? null;
 }
 

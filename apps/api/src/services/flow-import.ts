@@ -212,7 +212,7 @@ export async function importFlowFromZip(
   // Create version snapshot and upload ZIP to Storage (non-blocking — import succeeds even if Storage fails)
   try {
     logger.info("importFlowFromZip: creating version + uploading ZIP", { flowId, userId });
-    await createVersionAndUpload(flowId, manifest, prompt, userId, zipBuffer);
+    await createVersionAndUpload(flowId, userId, zipBuffer);
     logger.info("importFlowFromZip: version + ZIP uploaded", { flowId });
   } catch (err) {
     logger.error("Failed to upload flow package to Storage", {

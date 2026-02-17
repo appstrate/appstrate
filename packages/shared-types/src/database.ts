@@ -229,8 +229,6 @@ export type Database = {
           created_by: string | null
           flow_id: string
           id: number
-          manifest: Json
-          prompt: string
           version_number: number
         }
         Insert: {
@@ -238,8 +236,6 @@ export type Database = {
           created_by?: string | null
           flow_id: string
           id?: number
-          manifest: Json
-          prompt: string
           version_number: number
         }
         Update: {
@@ -247,8 +243,6 @@ export type Database = {
           created_by?: string | null
           flow_id?: string
           id?: number
-          manifest?: Json
-          prompt?: string
           version_number?: number
         }
         Relationships: []
@@ -348,13 +342,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_old_schedule_runs: {
+        Args: { retention_days?: number }
+        Returns: number
+      }
       create_flow_version: {
-        Args: {
-          p_created_by: string
-          p_flow_id: string
-          p_manifest: Json
-          p_prompt: string
-        }
+        Args: { p_created_by: string; p_flow_id: string }
         Returns: number
       }
       try_acquire_schedule_lock: {
