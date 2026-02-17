@@ -53,6 +53,7 @@ export interface FlowServiceRequirement {
   provider: string;
   scopes: string[];
   description: string;
+  connectionMode?: "user" | "admin";
 }
 
 export interface FlowInputSpec {

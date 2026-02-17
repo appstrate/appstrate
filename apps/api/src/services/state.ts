@@ -185,6 +185,51 @@ export async function getRunningExecutionsCounts(userId?: string): Promise<Recor
   return counts;
 }
 
+// --- Admin Connections ---
+
+export async function getAdminConnections(flowId: string): Promise<Record<string, string>> {
+  const { data } = await supabase
+    .from("flow_admin_connections")
+    .select("service_id, admin_user_id")
+    .eq("flow_id", flowId);
+  const result: Record<string, string> = {};
+  for (const row of data ?? []) {
+    result[row.service_id] = row.admin_user_id;
+  }
+  return result;
+}
+
+export async function bindAdminConnection(
+  flowId: string,
+  serviceId: string,
+  adminUserId: string,
+): Promise<void> {
+  const { error } = await supabase.from("flow_admin_connections").upsert(
+    {
+      flow_id: flowId,
+      service_id: serviceId,
+      admin_user_id: adminUserId,
+      connected_at: new Date().toISOString(),
+    },
+    { onConflict: "flow_id,service_id" },
+  );
+  if (error) {
+    throw new Error(`Failed to bind admin connection: ${error.message}`);
+  }
+}
+
+export async function unbindAdminConnection(flowId: string, serviceId: string): Promise<void> {
+  await supabase
+    .from("flow_admin_connections")
+    .delete()
+    .eq("flow_id", flowId)
+    .eq("service_id", serviceId);
+}
+
+export async function deleteAdminConnectionsForFlow(flowId: string): Promise<void> {
+  await supabase.from("flow_admin_connections").delete().eq("flow_id", flowId);
+}
+
 export async function markOrphanExecutionsFailed(): Promise<number> {
   const { data } = await supabase
     .from("executions")

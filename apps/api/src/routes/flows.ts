@@ -8,8 +8,12 @@ import {
   getLastExecution,
   getRunningExecutionsCounts,
   getRunningExecutionsForFlow,
+  getAdminConnections,
+  bindAdminConnection,
+  unbindAdminConnection,
 } from "../services/state.ts";
 import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
+import { getUserProfile } from "../lib/supabase.ts";
 import { validateConfig } from "../services/schema.ts";
 import { getFlowById } from "../services/user-flows.ts";
 import { listFlows } from "../services/flow-service.ts";
@@ -53,19 +57,54 @@ export function createFlowsRouter() {
     const user = c.get("user");
     const m = flow.manifest;
 
-    // Check service connections in parallel (per-user)
+    // Fetch admin connections for this flow
+    const adminConns = await getAdminConnections(flow.id);
+
+    // Check service connections in parallel (per-user or admin-provided)
     const serviceStatuses = await Promise.all(
       m.requires.services.map(async (svc) => {
-        const [conn, authMode] = await Promise.all([
-          getConnectionStatus(svc.provider, user.id),
-          getProviderAuthMode(svc.provider),
-        ]);
+        const mode = svc.connectionMode ?? "user";
+        const authMode = await getProviderAuthMode(svc.provider);
+
+        if (mode === "admin") {
+          const adminUserId = adminConns[svc.id];
+          if (adminUserId) {
+            const [conn, adminProfile] = await Promise.all([
+              getConnectionStatus(svc.provider, adminUserId),
+              getUserProfile(adminUserId),
+            ]);
+            return {
+              id: svc.id,
+              provider: svc.provider,
+              description: svc.description,
+              status: conn.status,
+              authMode,
+              connectionMode: "admin" as const,
+              adminProvided: true,
+              adminUserId,
+              adminDisplayName: adminProfile?.display_name ?? undefined,
+            };
+          }
+          return {
+            id: svc.id,
+            provider: svc.provider,
+            description: svc.description,
+            status: "not_connected" as const,
+            authMode,
+            connectionMode: "admin" as const,
+            adminProvided: false,
+          };
+        }
+
+        // Default user mode
+        const conn = await getConnectionStatus(svc.provider, user.id);
         return {
           id: svc.id,
           provider: svc.provider,
           description: svc.description,
           status: conn.status,
           authMode,
+          connectionMode: "user" as const,
         };
       }),
     );
@@ -213,6 +252,63 @@ export function createFlowsRouter() {
 
     await deleteFlowState(user.id, flow.id);
     return c.body(null, 204);
+  });
+
+  // POST /api/flows/:id/services/:serviceId/bind — bind admin's connection to a service
+  router.post("/:id/services/:serviceId/bind", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const serviceId = c.req.param("serviceId");
+
+    // Verify the service exists and is in admin mode
+    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+    if (!svc) {
+      return c.json(
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        404,
+      );
+    }
+    if ((svc.connectionMode ?? "user") !== "admin") {
+      return c.json(
+        {
+          error: "INVALID_CONNECTION_MODE",
+          message: `Le service '${serviceId}' n'est pas en mode admin`,
+        },
+        400,
+      );
+    }
+
+    // Verify admin has a connection for this provider
+    const conn = await getConnectionStatus(svc.provider, user.id);
+    if (conn.status !== "connected") {
+      return c.json(
+        {
+          error: "ADMIN_NOT_CONNECTED",
+          message: `Vous n'avez pas de connexion active pour '${svc.provider}'`,
+        },
+        400,
+      );
+    }
+
+    await bindAdminConnection(flow.id, serviceId, user.id);
+    return c.json({ bound: true });
+  });
+
+  // DELETE /api/flows/:id/services/:serviceId/bind — unbind admin's connection from a service
+  router.delete("/:id/services/:serviceId/bind", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const serviceId = c.req.param("serviceId");
+
+    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+    if (!svc) {
+      return c.json(
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        404,
+      );
+    }
+
+    await unbindAdminConnection(flow.id, serviceId);
+    return c.json({ unbound: true });
   });
 
   return router;

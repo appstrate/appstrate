@@ -3,7 +3,7 @@ import { Cron } from "croner";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, Json } from "@appstrate/shared-types";
-import { getFlowConfig, getFlowState, createExecution } from "./state.ts";
+import { getFlowConfig, getFlowState, createExecution, getAdminConnections } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
 import { buildContainerEnv } from "./env-builder.ts";
@@ -188,19 +188,38 @@ async function triggerScheduledExecution(
     }
 
     // Validate service dependencies — skip if not connected
+    const adminConns = await getAdminConnections(flowId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
-      const conn = await getConnectionStatus(svc.provider, userId);
+      const mode = svc.connectionMode ?? "user";
+      let tokenUserId: string;
+
+      if (mode === "admin") {
+        const adminUserId = adminConns[svc.id];
+        if (!adminUserId) {
+          logger.warn("Admin service not bound, skipping schedule", {
+            serviceId: svc.id,
+            scheduleId,
+            flowId,
+          });
+          return;
+        }
+        tokenUserId = adminUserId;
+      } else {
+        tokenUserId = userId;
+      }
+
+      const conn = await getConnectionStatus(svc.provider, tokenUserId);
       if (conn.status !== "connected") {
         logger.warn("Service not connected, skipping schedule", {
           serviceId: svc.id,
-          userId,
+          userId: tokenUserId,
           scheduleId,
           flowId,
         });
         return;
       }
-      const token = await getAccessToken(svc.provider, userId);
+      const token = await getAccessToken(svc.provider, tokenUserId);
       if (token) tokens[svc.id] = token;
     }
 

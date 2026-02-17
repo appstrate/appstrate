@@ -122,6 +122,28 @@ export function useDisconnect() {
   });
 }
 
+export function useBindAdminService(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (serviceId: string) => {
+      return api(`/flows/${flowId}/services/${serviceId}/bind`, { method: "POST" });
+    },
+    onSuccess: () => invalidateServiceRelated(qc),
+    // No onError — handled by the component (may open connect flow before retrying)
+  });
+}
+
+export function useUnbindAdminService(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (serviceId: string) => {
+      return api(`/flows/${flowId}/services/${serviceId}/bind`, { method: "DELETE" });
+    },
+    onSuccess: () => invalidateServiceRelated(qc),
+    onError: onMutationError,
+  });
+}
+
 export function useImportFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();

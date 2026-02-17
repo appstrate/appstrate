@@ -136,6 +136,27 @@ export type Database = {
           },
         ]
       }
+      flow_admin_connections: {
+        Row: {
+          admin_user_id: string
+          connected_at: string | null
+          flow_id: string
+          service_id: string
+        }
+        Insert: {
+          admin_user_id: string
+          connected_at?: string | null
+          flow_id: string
+          service_id: string
+        }
+        Update: {
+          admin_user_id?: string
+          connected_at?: string | null
+          flow_id?: string
+          service_id?: string
+        }
+        Relationships: []
+      }
       flow_configs: {
         Row: {
           config: Json
