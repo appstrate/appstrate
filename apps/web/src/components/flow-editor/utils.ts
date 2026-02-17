@@ -2,7 +2,11 @@ import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 
-export function toResourceEntry(r: { id: string; name?: string; description?: string }): ResourceEntry {
+export function toResourceEntry(r: {
+  id: string;
+  name?: string;
+  description?: string;
+}): ResourceEntry {
   return { id: r.id, name: r.name, description: r.description };
 }
 
@@ -189,18 +193,22 @@ export function payloadToFormState(payload: {
   }));
 
   const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
-  const skills = rawSkills.map((s) => toResourceEntry({
-    id: (s.id as string) || "",
-    name: s.name as string | undefined,
-    description: s.description as string | undefined,
-  }));
+  const skills = rawSkills.map((s) =>
+    toResourceEntry({
+      id: (s.id as string) || "",
+      name: s.name as string | undefined,
+      description: s.description as string | undefined,
+    }),
+  );
 
   const rawExtensions = (requires.extensions as Array<Record<string, unknown>>) || [];
-  const extensions = rawExtensions.map((e) => toResourceEntry({
-    id: (e.id as string) || "",
-    name: e.name as string | undefined,
-    description: e.description as string | undefined,
-  }));
+  const extensions = rawExtensions.map((e) =>
+    toResourceEntry({
+      id: (e.id as string) || "",
+      name: e.name as string | undefined,
+      description: e.description as string | undefined,
+    }),
+  );
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;

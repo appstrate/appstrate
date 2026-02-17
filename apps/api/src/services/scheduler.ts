@@ -251,12 +251,14 @@ async function triggerScheduledExecution(
     logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens, flowPackage).catch((err) => {
-      logger.error("Unhandled error in scheduled execution", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens, flowPackage).catch(
+      (err) => {
+        logger.error("Unhandled error in scheduled execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
 
     // Update schedule timestamps
     const job = activeJobs.get(scheduleId);

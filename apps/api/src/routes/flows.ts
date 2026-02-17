@@ -181,7 +181,7 @@ export function createFlowsRouter() {
 
     c.header("Content-Type", "application/zip");
     c.header("Content-Disposition", `attachment; filename="${flow.id}.zip"`);
-    return c.body(zipBuffer);
+    return c.body(new Uint8Array(zipBuffer));
   });
 
   // GET /api/flows/:id/versions — list flow version history (user flows only)

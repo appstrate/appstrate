@@ -73,11 +73,7 @@ export async function initFlowService(): Promise<void> {
   builtInFlows = flows;
 }
 
-function dbRowToLoadedFlow(row: {
-  id: string;
-  manifest: unknown;
-  prompt: string;
-}): LoadedFlow {
+function dbRowToLoadedFlow(row: { id: string; manifest: unknown; prompt: string }): LoadedFlow {
   const manifest = row.manifest as unknown as FlowManifest;
   const skills = manifest.requires.skills ?? [];
   const extensions = manifest.requires.extensions ?? [];

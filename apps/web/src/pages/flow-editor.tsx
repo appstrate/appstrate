@@ -59,6 +59,7 @@ function FlowEditorForm({
   const needsFullRefresh = useRef(false);
 
   // Sync from server after API mutations refetch detail
+  /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from server data to local form state */
   useEffect(() => {
     if (!detail) return;
     if (needsFullRefresh.current) {
@@ -71,7 +72,7 @@ function FlowEditorForm({
         extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
       }));
     }
-  }, [detail?.updatedAt]);
+  }, [detail]);
 
   const handleSubmit = () => {
     setError(null);
@@ -148,7 +149,9 @@ function FlowEditorForm({
               detail={detail}
               flowId={flowId}
               canEdit={canEdit}
-              onPackageUploaded={() => { needsFullRefresh.current = true; }}
+              onPackageUploaded={() => {
+                needsFullRefresh.current = true;
+              }}
             />
           )}
         </>

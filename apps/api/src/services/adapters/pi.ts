@@ -105,7 +105,11 @@ export class PiAdapter implements ExecutionAdapter {
 
             // Flush when the buffer is large enough.
             // Skip flush if buffer ends with backtick(s) (partial fence).
-            if (textBuffer.length >= 300 && !textBuffer.endsWith("`") && !textBuffer.endsWith("``")) {
+            if (
+              textBuffer.length >= 300 &&
+              !textBuffer.endsWith("`") &&
+              !textBuffer.endsWith("``")
+            ) {
               const flushed = emitBuffer();
               if (flushed) yield flushed;
             }

@@ -231,7 +231,6 @@ export type Database = {
           id: number
           manifest: Json
           prompt: string
-          skills: Json | null
           version_number: number
         }
         Insert: {
@@ -241,7 +240,6 @@ export type Database = {
           id?: number
           manifest: Json
           prompt: string
-          skills?: Json | null
           version_number: number
         }
         Update: {
@@ -251,7 +249,6 @@ export type Database = {
           id?: number
           manifest?: Json
           prompt?: string
-          skills?: Json | null
           version_number?: number
         }
         Relationships: []
@@ -262,7 +259,6 @@ export type Database = {
           id: string
           manifest: Json
           prompt: string
-          skills: Json | null
           updated_at: string | null
         }
         Insert: {
@@ -270,7 +266,6 @@ export type Database = {
           id: string
           manifest: Json
           prompt: string
-          skills?: Json | null
           updated_at?: string | null
         }
         Update: {
@@ -278,7 +273,6 @@ export type Database = {
           id?: string
           manifest?: Json
           prompt?: string
-          skills?: Json | null
           updated_at?: string | null
         }
         Relationships: []
@@ -360,7 +354,6 @@ export type Database = {
           p_flow_id: string
           p_manifest: Json
           p_prompt: string
-          p_skills: Json
         }
         Returns: number
       }

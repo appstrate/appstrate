@@ -123,7 +123,11 @@ export function parseFlowZip(zipBuffer: Buffer): ParsedFlowZip {
 
     if (!manifestSkillMap.has(skillId)) {
       // File found in ZIP but not declared in manifest — add with extracted metadata
-      manifestSkillMap.set(skillId, { id: skillId, ...(name ? { name } : {}), ...(description ? { description } : {}) });
+      manifestSkillMap.set(skillId, {
+        id: skillId,
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
+      });
     }
   }
 
@@ -131,7 +135,11 @@ export function parseFlowZip(zipBuffer: Buffer): ParsedFlowZip {
   (manifest.requires as Record<string, unknown>).skills = [...manifestSkillMap.values()];
 
   // Merge ZIP-detected .ts extensions with manifest-declared extensions
-  const manifestExtensions = (requires.extensions ?? []) as { id: string; name?: string; description?: string }[];
+  const manifestExtensions = (requires.extensions ?? []) as {
+    id: string;
+    name?: string;
+    description?: string;
+  }[];
   const manifestExtMap = new Map(manifestExtensions.map((e) => [e.id, e]));
 
   const extPrefix = root + "extensions/";
@@ -162,7 +170,10 @@ export async function importFlowFromZip(
   const { manifest, prompt } = parseFlowZip(zipBuffer);
 
   const metadata = manifest.metadata as { name: string; displayName: string };
-  const requires = (manifest.requires ?? {}) as { skills?: { id: string }[]; extensions?: { id: string }[] };
+  const requires = (manifest.requires ?? {}) as {
+    skills?: { id: string }[];
+    extensions?: { id: string }[];
+  };
   const skills = requires.skills ?? [];
   const extensions = requires.extensions ?? [];
   const flowId = metadata.name;

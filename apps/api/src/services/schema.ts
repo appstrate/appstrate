@@ -31,13 +31,19 @@ const serviceRequirementSchema = z.object({
 });
 
 const skillRequirementSchema = z.object({
-  id: z.string().min(1).regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+  id: z
+    .string()
+    .min(1)
+    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
   name: z.string().optional(),
   description: z.string().optional(),
 });
 
 const extensionRequirementSchema = z.object({
-  id: z.string().min(1).regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+  id: z
+    .string()
+    .min(1)
+    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
   name: z.string().optional(),
   description: z.string().optional(),
 });

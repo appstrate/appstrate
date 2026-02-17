@@ -83,7 +83,7 @@ export async function createVersionAndUpload(
 }
 
 /** Get the latest version number for a flow. */
-export async function getLatestVersionNumber(flowId: string): Promise<number> {
+async function getLatestVersionNumber(flowId: string): Promise<number> {
   const { data } = await supabase
     .from("flow_versions")
     .select("version_number")

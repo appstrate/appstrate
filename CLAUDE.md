@@ -57,14 +57,15 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
-- **FlowService (dual-read)**: Built-in flows are loaded from the `flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling. Skills include `content` field, passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint.
+- **FlowService (dual-read)**: Built-in flows are loaded from the `flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling.
 - **Flow versioning**: Every create/update of a user flow creates a snapshot in `flow_versions` (auto-incrementing `version_number` per flow via RPC). Executions are tagged with `flow_version_id` for audit trail. Versions are non-blocking (errors caught and logged).
 - **Structured logging**: All backend logging uses `lib/logger.ts` which emits JSON to stdout (`{ level, msg, timestamp, ...data }`). No `console.*` calls.
 - **Rate limiting**: Token bucket middleware per `method:path:userId`. Applied on `POST /api/flows/:id/run` (20/min), `POST /api/flows/import` (10/min), `POST /api/flows` (10/min).
 - **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
 - **Nango auth modes**: Integrations can be OAuth2 (popup flow) or API_KEY (modal input). The `authMode` is fetched from Nango's provider metadata via `nango.getProvider()` SDK and cached.
-- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are loaded with their content (from filesystem for built-in, from DB for user flows), passed to containers via `FLOW_SKILLS` env var (JSON), and reconstructed by the entrypoint into `/workspace/.claude/skills/`.
-- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions ship with the Pi runtime image; custom extensions are stored in DB and reconstructed inside the container. Extensions are passed via `FLOW_EXTENSIONS` env var (JSON). Declared in `manifest.requires.extensions[]`.
+- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. For user flows, skills are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime.
+- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions ship with the Pi runtime image. For user flows, custom extensions are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime. Declared in `manifest.requires.extensions[]`.
+- **Flow packages (ZIP)**: User flows are stored as ZIP packages in Supabase Storage (`flow-packages` bucket). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
 - **Dual adapter system**: The platform supports two execution adapters switchable via `EXECUTION_ADAPTER` env var: `claude-code` (default, uses Claude Code CLI + OAuth token) and `pi` (uses Pi Coding Agent SDK, supports multiple LLM providers via API keys). Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and user flows are readable by all authenticated users, writable by admins only.
 - **Auth flow**: Frontend uses `@supabase/supabase-js` with anon key → `supabase.auth.signInWithPassword()` → JWT stored in Supabase session → sent as `Authorization: Bearer {jwt}` on all API calls. Backend verifies JWT via `supabase.auth.getUser(token)` with service role key.
@@ -114,11 +115,11 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |-- #/schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
      |-- #/services (Services List) -->|-- GET /auth/integrations (with authMode)
      |                                |
-     |            Ephemeral Container (Claude Code CLI)
-     |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, INPUT_*, CLAUDE_CODE_OAUTH_TOKEN
-     |            - Claude Code executes the prompt with access to bash/tools
-     |            - Outputs JSON lines on stdout (parsed by ClaudeCodeAdapter)
-     |            - Skills available as files in the container
+     |            Ephemeral Container (Claude Code CLI or Pi Coding Agent)
+     |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, INPUT_*, auth tokens
+     |            - Flow package ZIP mounted + extracted (skills, extensions)
+     |            - Agent executes the prompt with access to bash/tools
+     |            - Outputs JSON lines on stdout (parsed by adapter)
 ```
 
 ## Project Structure
@@ -133,11 +134,9 @@ appstrate/
 │
 ├── supabase/
 │   └── migrations/
-│       ├── 001_initial.sql           # Schema with multi-user support, RLS policies, Realtime publication
-│       ├── 002_execution_logs_user_id.sql  # Denormalize user_id on execution_logs for Realtime CDC
-│       ├── 003_schedule_locks.sql    # schedule_runs table + try_acquire_schedule_lock() for distributed cron
-│       ├── 004_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
-│       └── 005_flow_extensions.sql   # Add extensions JSONB column to flows + flow_versions, update RPC
+│       ├── 001_initial.sql           # Full schema: profiles, flow_configs, flow_state, executions, execution_logs (with user_id), flow_schedules, flows, RLS, Realtime
+│       ├── 002_schedule_locks.sql    # schedule_runs table + try_acquire_schedule_lock() for distributed cron
+│       └── 003_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
 │
 ├── apps/
 │   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
@@ -171,7 +170,7 @@ appstrate/
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, flow_state, executions, execution_logs tables
 │   │       │   ├── flow-service.ts   # FlowService: built-in cache (ReadonlyMap) + DB reads for user flows (replaces flow-loader.ts)
-│   │       │   ├── flow-versions.ts  # Flow versioning: createFlowVersion(), listFlowVersions(), getLatestVersionId()
+│   │       │   ├── flow-versions.ts  # Flow versioning: createFlowVersion(), listFlowVersions(), getLatestVersionId(), createVersionAndUpload()
 │   │       │   ├── flow-import.ts    # importFlowFromZip(): unzip, validate manifest, extract skills, persist
 │   │       │   ├── user-flows.ts     # DB CRUD for user flows table (get, insert, update, delete with cascade)
 │   │       │   ├── execution-tracker.ts # In-flight execution tracking for graceful shutdown (track/untrack/waitForInFlight)
@@ -334,7 +333,7 @@ execution_completed → {executionId, status: "success"|"failed"|"timeout"}
 
 ## Database Schema
 
-Managed via Supabase migrations (`supabase/migrations/`). All tables have Row Level Security (RLS) enabled.
+Managed via 3 Supabase migrations (`supabase/migrations/`). All tables have Row Level Security (RLS) enabled.
 
 ```sql
 -- User profiles (extends auth.users, auto-created on signup)
@@ -366,11 +365,11 @@ flow_schedules (id PK, flow_id, user_id UUID, name, enabled, cron_expression, ti
   -- RLS: own data + admin sees all
 
 -- User-imported flows (built-in flows are loaded from filesystem)
-flows (id PK, manifest JSONB, prompt TEXT, skills JSONB, created_at, updated_at)
+flows (id PK, manifest JSONB, prompt TEXT, created_at, updated_at)
   -- RLS: all authenticated read, admin write
 
 -- Flow version snapshots (audit trail for user flow changes)
-flow_versions (id SERIAL PK, flow_id, version_number, manifest JSONB, prompt TEXT, skills JSONB, created_by UUID FK→auth.users, created_at)
+flow_versions (id SERIAL PK, flow_id, version_number, manifest JSONB, prompt TEXT, created_by UUID FK→auth.users, created_at)
   -- UNIQUE(flow_id, version_number)
   -- No FK to flows (preserves history after deletion)
 
@@ -407,7 +406,7 @@ The Claude Code runtime container streams JSON events on stdout. The `ClaudeCode
 - **`result` messages** → parsed for JSON code blocks containing the final result
 - The last ` ```json ``` ` block in assistant text is extracted as the result
 
-The adapter enriches the flow prompt with: API access instructions (per-service token usage), user input, configuration, previous state, and output format requirements (with field-level schema if defined).
+The adapter enriches the flow prompt with: API access instructions (per-service token usage), user input, configuration, previous state, and output format requirements (with field-level schema if defined). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.claude/skills/` or `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 

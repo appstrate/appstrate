@@ -1,7 +1,14 @@
 import type { SchemaField } from "./schema-section";
 import type { ExecutionSettings } from "./execution-section";
 
-export type EditorTab = "general" | "prompt" | "services" | "schema" | "skills" | "extensions" | "json";
+export type EditorTab =
+  | "general"
+  | "prompt"
+  | "services"
+  | "schema"
+  | "skills"
+  | "extensions"
+  | "json";
 
 export interface ServiceEntry {
   id: string;

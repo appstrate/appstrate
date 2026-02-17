@@ -66,10 +66,11 @@ CREATE INDEX idx_executions_flow_id ON public.executions(flow_id);
 CREATE INDEX idx_executions_status ON public.executions(status);
 CREATE INDEX idx_executions_user_id ON public.executions(user_id);
 
--- Execution logs: filtered via FK on executions
+-- Execution logs: user_id denormalized for Supabase Realtime CDC compatibility
 CREATE TABLE public.execution_logs (
   id SERIAL PRIMARY KEY,
   execution_id TEXT NOT NULL REFERENCES public.executions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id),
   type TEXT NOT NULL DEFAULT 'progress',
   event TEXT,
   message TEXT,
@@ -79,6 +80,7 @@ CREATE TABLE public.execution_logs (
 
 CREATE INDEX idx_execution_logs_execution_id ON public.execution_logs(execution_id);
 CREATE INDEX idx_execution_logs_lookup ON public.execution_logs(execution_id, id);
+CREATE INDEX idx_execution_logs_user_id ON public.execution_logs(user_id);
 
 -- Flow schedules: per-user
 CREATE TABLE public.flow_schedules (
@@ -104,7 +106,6 @@ CREATE TABLE public.flows (
   id TEXT PRIMARY KEY,
   manifest JSONB NOT NULL,
   prompt TEXT NOT NULL,
-  skills JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT flows_id_slug CHECK (id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
@@ -146,14 +147,12 @@ CREATE POLICY "executions_admin" ON public.executions FOR ALL USING (
   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
 );
 
--- execution_logs: via join on executions
+-- execution_logs: direct column-based RLS (compatible with Supabase Realtime CDC)
 ALTER TABLE public.execution_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "execution_logs_user" ON public.execution_logs FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.executions WHERE id = execution_logs.execution_id AND user_id = auth.uid())
-);
-CREATE POLICY "execution_logs_admin" ON public.execution_logs FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "execution_logs_user" ON public.execution_logs
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "execution_logs_admin" ON public.execution_logs
+  FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
 
 -- flow_schedules: own data + admin sees all
 ALTER TABLE public.flow_schedules ENABLE ROW LEVEL SECURITY;
