@@ -332,12 +332,14 @@ export function createExecutionsRouter() {
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens, flowPackage).catch((err) => {
-      logger.error("Unhandled error in background execution", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens, flowPackage).catch(
+      (err) => {
+        logger.error("Unhandled error in background execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
 
     return c.json({ executionId });
   });

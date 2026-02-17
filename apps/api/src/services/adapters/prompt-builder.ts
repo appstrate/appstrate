@@ -1,9 +1,17 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 
 /** Copy TOKEN_*, CONFIG_*, INPUT_*, and FLOW_STATE entries from source into target. */
-export function filterFlowEnvVars(source: Record<string, string>, target: Record<string, string>): void {
+export function filterFlowEnvVars(
+  source: Record<string, string>,
+  target: Record<string, string>,
+): void {
   for (const [k, v] of Object.entries(source)) {
-    if (k.startsWith("TOKEN_") || k.startsWith("CONFIG_") || k.startsWith("INPUT_") || k === "FLOW_STATE") {
+    if (
+      k.startsWith("TOKEN_") ||
+      k.startsWith("CONFIG_") ||
+      k.startsWith("INPUT_") ||
+      k === "FLOW_STATE"
+    ) {
       target[k] = v;
     }
   }

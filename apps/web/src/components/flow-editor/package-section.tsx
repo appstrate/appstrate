@@ -10,7 +10,12 @@ interface PackageSectionProps {
   onPackageUploaded?: () => void;
 }
 
-export function PackageSection({ detail, flowId, canEdit, onPackageUploaded }: PackageSectionProps) {
+export function PackageSection({
+  detail,
+  flowId,
+  canEdit,
+  onPackageUploaded,
+}: PackageSectionProps) {
   const zipFileRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadPackage(flowId || "");
 

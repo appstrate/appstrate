@@ -102,7 +102,7 @@ if (fs.existsSync(packagePath)) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
-// --- 4. Setup auth + model ---
+// --- 3. Setup auth + model ---
 
 const provider = process.env.LLM_PROVIDER || "anthropic";
 const modelId = process.env.LLM_MODEL_ID || "claude-sonnet-4-5-20250929";
@@ -133,7 +133,7 @@ if (!model) {
   die(`Model not found: ${provider}/${modelId}`);
 }
 
-// --- 5. Build resource loader ---
+// --- 4. Build resource loader ---
 
 const systemPrompt = process.env.FLOW_PROMPT;
 if (!systemPrompt) {
@@ -152,7 +152,7 @@ const resourceLoader = new DefaultResourceLoader({
 });
 await resourceLoader.reload();
 
-// --- 6. Create agent session ---
+// --- 5. Create agent session ---
 
 try {
   const { session } = await createAgentSession({
@@ -176,7 +176,7 @@ try {
     }),
   });
 
-  // --- 7. Subscribe to events → emit JSON lines ---
+  // --- 6. Subscribe to events → emit JSON lines ---
 
   session.subscribe((event) => {
     switch (event.type) {
@@ -231,7 +231,7 @@ try {
     }
   });
 
-  // --- 8. Run the prompt ---
+  // --- 7. Run the prompt ---
 
   await session.prompt(systemPrompt);
 

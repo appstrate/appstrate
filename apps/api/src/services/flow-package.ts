@@ -142,17 +142,18 @@ export async function rebuildPackageWithNewManifestAndPrompt(
   manifest: Record<string, unknown>,
   prompt: string,
 ): Promise<Buffer> {
-  return modifyPackage(flowId, (entries) => {
-    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
-    entries["prompt.md"] = new TextEncoder().encode(prompt);
-  }, true);
+  return modifyPackage(
+    flowId,
+    (entries) => {
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      entries["prompt.md"] = new TextEncoder().encode(prompt);
+    },
+    true,
+  );
 }
 
 /** Build a minimal ZIP with just manifest.json + prompt.md. */
-export function buildMinimalZip(
-  manifest: Record<string, unknown>,
-  prompt: string,
-): Buffer {
+export function buildMinimalZip(manifest: Record<string, unknown>, prompt: string): Buffer {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(prompt),
@@ -224,10 +225,7 @@ export async function addFileToPackage(
  * Download the current ZIP for a user flow, remove all files matching a path prefix,
  * and return the new ZIP buffer. Throws if no ZIP exists in Storage.
  */
-export async function removeFilesFromPackage(
-  flowId: string,
-  pathPrefix: string,
-): Promise<Buffer> {
+export async function removeFilesFromPackage(flowId: string, pathPrefix: string): Promise<Buffer> {
   return modifyPackage(flowId, (entries) => {
     for (const path of Object.keys(entries)) {
       if (path.startsWith(pathPrefix)) delete entries[path];

@@ -63,7 +63,11 @@ export function ResourceSection({
     onChange(
       items.map((item) =>
         item.id === editing.id
-          ? { id: item.id, name: editing.name || undefined, description: editing.description || undefined }
+          ? {
+              id: item.id,
+              name: editing.name || undefined,
+              description: editing.description || undefined,
+            }
           : item,
       ),
     );
@@ -82,7 +86,9 @@ export function ResourceSection({
               <div key={item.id} className="package-item">
                 <div className="package-item-info">
                   <strong>{item.name || item.id}</strong>
-                  {item.description && <span className="package-item-desc">{item.description}</span>}
+                  {item.description && (
+                    <span className="package-item-desc">{item.description}</span>
+                  )}
                 </div>
                 {canEdit && (
                   <div className="skill-actions">
@@ -90,7 +96,11 @@ export function ResourceSection({
                       type="button"
                       className="btn-icon"
                       onClick={() =>
-                        setEditing({ id: item.id, name: item.name ?? "", description: item.description ?? "" })
+                        setEditing({
+                          id: item.id,
+                          name: item.name ?? "",
+                          description: item.description ?? "",
+                        })
                       }
                       disabled={anyPending}
                       title="Modifier"

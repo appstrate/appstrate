@@ -143,10 +143,7 @@ export function useCreateFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      prompt: string;
-    }) => {
+    mutationFn: async (body: { manifest: Record<string, unknown>; prompt: string }) => {
       return api<{ flowId: string }>("/flows", {
         method: "POST",
         body: JSON.stringify(body),
@@ -219,10 +216,7 @@ export function useAddSkill(flowId: string) {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("updatedAt", updatedAt);
-      return uploadFormData<{ flowId: string; updatedAt: string }>(
-        `/flows/${flowId}/skills`,
-        fd,
-      );
+      return uploadFormData<{ flowId: string; updatedAt: string }>(`/flows/${flowId}/skills`, fd);
     },
     onSuccess: () => invalidateFlowQueries(qc, flowId),
     onError: onMutationError,
