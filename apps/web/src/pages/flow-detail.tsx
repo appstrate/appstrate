@@ -78,6 +78,7 @@ export function FlowDetailPage() {
     id: string;
     bindAfter?: boolean;
   } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useFlowExecutionRealtime(flowId, () => {
     qc.invalidateQueries({ queryKey: ["executions", flowId] });
@@ -100,6 +101,14 @@ export function FlowDetailPage() {
     } else {
       runFlow.mutate(undefined);
     }
+  };
+
+  const handleShare = () => {
+    const url = `${window.location.origin}/flows/${flowId}/run`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
@@ -229,6 +238,9 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
+        <button onClick={handleShare} title="Copier le lien de partage">
+          {copied ? "Copie !" : "Partager"}
+        </button>
         {isAdmin && (
           <div className="actions-admin">
             <button onClick={() => setConfigOpen(true)}>Configurer</button>
@@ -309,6 +321,9 @@ export function FlowDetailPage() {
                     <Badge status={exec.status} />
                     <span className="exec-date">{date}</span>
                     {duration && <span className="exec-duration">{duration}</span>}
+                    {exec.tokens_used != null && (
+                      <span className="exec-tokens">{exec.tokens_used.toLocaleString()} tok</span>
+                    )}
                     {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
                     {exec.schedule_id && <span className="tag">cron</span>}
                   </Link>
@@ -357,7 +372,8 @@ export function FlowDetailPage() {
         open={inputOpen}
         onClose={() => setInputOpen(false)}
         flow={detail}
-        onSubmit={(input) => runFlow.mutate(input)}
+        onSubmit={(input, files) => runFlow.mutate({ input, files })}
+        isPending={runFlow.isPending}
       />
       <ScheduleModal
         open={scheduleOpen}

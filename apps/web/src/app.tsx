@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Routes, Route, useLocation, Navigate, Link } from "react-router-dom";
+import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { FlowList } from "./pages/flow-list";
 import { FlowDetailPage } from "./pages/flow-detail";
 import { FlowEditorPage } from "./pages/flow-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
+import { ShareableRunPage } from "./pages/shareable-run";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { LoginPage } from "./pages/login";
@@ -69,31 +70,16 @@ function UserMenu({
   );
 }
 
-export function App() {
+function MainLayout() {
   const location = useLocation();
   const queryClient = useQueryClient();
-  const { user, profile, loading, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
+  const currentPath = location.pathname;
 
   const handleLogout = async () => {
     await logout();
     queryClient.clear();
   };
-
-  if (loading) {
-    return (
-      <div className="container">
-        <div className="empty-state">
-          <Spinner />
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginPage />;
-  }
-
-  const currentPath = location.pathname;
 
   return (
     <div className="container">
@@ -121,14 +107,38 @@ export function App() {
           </Link>
         </nav>
         <UserMenu
-          displayName={profile?.display_name || user.email || ""}
+          displayName={profile?.display_name || user!.email || ""}
           isAdmin={profile?.role === "admin"}
           onLogout={() => void handleLogout()}
         />
       </header>
+      <Outlet />
+    </div>
+  );
+}
 
-      <ErrorBoundary>
-        <Routes>
+export function App() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="container">
+        <div className="empty-state">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  return (
+    <ErrorBoundary>
+      <Routes>
+        <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
+        <Route element={<MainLayout />}>
           <Route path="/" element={<FlowList />} />
           <Route path="/flows/new" element={<FlowEditorPage />} />
           <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
@@ -137,8 +147,8 @@ export function App() {
           <Route path="/schedules" element={<SchedulesListPage />} />
           <Route path="/services" element={<ServicesListPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </ErrorBoundary>
-    </div>
+        </Route>
+      </Routes>
+    </ErrorBoundary>
   );
 }

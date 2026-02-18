@@ -1,5 +1,5 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
+import type { ExecutionAdapter, ExecutionMessage, FileReference } from "./types.ts";
 import { buildEnrichedPrompt, extractJsonResult, filterFlowEnvVars } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { createContainer } from "../docker.ts";
@@ -13,8 +13,9 @@ export class PiAdapter implements ExecutionAdapter {
     timeout: number,
     outputSchema?: JSONSchemaObject,
     flowPackage?: Buffer,
+    files?: FileReference[],
   ): AsyncGenerator<ExecutionMessage> {
-    const prompt = buildEnrichedPrompt(envVars, outputSchema);
+    const prompt = buildEnrichedPrompt(envVars, outputSchema, files);
 
     // Resolve LLM provider + model from env
     const provider = process.env.LLM_PROVIDER || "anthropic";
@@ -158,6 +159,20 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
 
       case "tool_end":
         return null;
+
+      case "usage": {
+        const t = obj.tokens || {};
+        return {
+          type: "result",
+          usage: {
+            input_tokens: t.input ?? 0,
+            output_tokens: t.output ?? 0,
+            cache_creation_input_tokens: t.cacheWrite ?? 0,
+            cache_read_input_tokens: t.cacheRead ?? 0,
+            cost_usd: typeof obj.cost === "number" ? obj.cost : undefined,
+          },
+        };
+      }
 
       case "agent_end":
         return null;

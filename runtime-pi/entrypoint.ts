@@ -178,6 +178,9 @@ try {
 
   // --- 6. Subscribe to events → emit JSON lines ---
 
+  // Token usage accumulator across all assistant turns
+  const totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+
   session.subscribe((event) => {
     switch (event.type) {
       case "message_update": {
@@ -194,6 +197,16 @@ try {
         if (entries.length > 0) {
           const last = entries[entries.length - 1];
           if (last && (last as any).role === "assistant") {
+            // Accumulate token usage from assistant message
+            const u = (last as any).usage;
+            if (u) {
+              totalUsage.input += u.input ?? 0;
+              totalUsage.output += u.output ?? 0;
+              totalUsage.cacheRead += u.cacheRead ?? 0;
+              totalUsage.cacheWrite += u.cacheWrite ?? 0;
+              totalUsage.cost += u.cost?.total ?? 0;
+            }
+
             const content = (last as any).content;
             if (Array.isArray(content)) {
               const text = content
@@ -222,6 +235,17 @@ try {
       }
 
       case "agent_end": {
+        // Emit accumulated token usage before agent_end
+        emit({
+          type: "usage",
+          tokens: {
+            input: totalUsage.input,
+            output: totalUsage.output,
+            cacheRead: totalUsage.cacheRead,
+            cacheWrite: totalUsage.cacheWrite,
+          },
+          cost: totalUsage.cost,
+        });
         emit({ type: "agent_end" });
         break;
       }

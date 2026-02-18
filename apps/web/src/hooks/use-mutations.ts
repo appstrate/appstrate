@@ -46,10 +46,31 @@ export function useRunFlow(flowId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (input?: Record<string, unknown>) => {
+    mutationFn: async (params?: {
+      input?: Record<string, unknown>;
+      files?: Record<string, File[]>;
+    }) => {
+      const { input, files } = params ?? {};
+
+      // If files are present, use FormData
+      const hasFiles = files && Object.values(files).some((f) => f.length > 0);
+      if (hasFiles) {
+        const fd = new FormData();
+        if (input && Object.keys(input).length > 0) {
+          fd.append("input", JSON.stringify(input));
+        }
+        for (const [key, fileList] of Object.entries(files!)) {
+          for (const file of fileList) {
+            fd.append(key, file);
+          }
+        }
+        return uploadFormData<{ executionId: string }>(`/flows/${flowId}/run`, fd);
+      }
+
+      // JSON mode (existing behavior)
       return api<{ executionId: string }>(`/flows/${flowId}/run`, {
         method: "POST",
-        body: JSON.stringify({ stream: false, ...(input ? { input } : {}) }),
+        body: JSON.stringify(input ? { input } : {}),
       });
     },
     onSuccess: (data) => {

@@ -142,6 +142,14 @@ export function ExecutionDetailPage() {
         <Badge status={displayStatus} />
         <span className="exec-meta">{date}</span>
         {duration && <span className="exec-meta">{duration}</span>}
+        {!isRunning && execution.tokens_used != null && (
+          <span className="exec-meta">{execution.tokens_used.toLocaleString()} tokens</span>
+        )}
+        {!isRunning && (execution as Record<string, unknown>).cost_usd != null && (
+          <span className="exec-meta">
+            ${Number((execution as Record<string, unknown>).cost_usd).toFixed(4)}
+          </span>
+        )}
         {!isRunning && flow && (
           <button
             className="primary"
@@ -165,7 +173,8 @@ export function ExecutionDetailPage() {
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           flow={flow}
-          onSubmit={(input) => runFlow.mutate(input)}
+          onSubmit={(input, files) => runFlow.mutate({ input, files })}
+          isPending={runFlow.isPending}
           initialValues={(execution.input as Record<string, unknown>) ?? undefined}
         />
       )}

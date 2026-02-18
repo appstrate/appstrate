@@ -26,3 +26,15 @@ export async function isAdmin(userId: string): Promise<boolean> {
   const profile = await getUserProfile(userId);
   return profile?.role === "admin";
 }
+
+export async function ensureBucket(name: string): Promise<void> {
+  const { data } = await supabase.storage.getBucket(name);
+  if (!data) {
+    const { error } = await supabase.storage.createBucket(name, { public: false });
+    if (error) {
+      logger.error("Failed to create storage bucket", { bucket: name, error: error.message });
+      throw error;
+    }
+    logger.info("Created storage bucket", { bucket: name });
+  }
+}

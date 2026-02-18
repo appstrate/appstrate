@@ -83,6 +83,7 @@ export type Database = {
       executions: {
         Row: {
           completed_at: string | null
+          cost_usd: number | null
           duration: number | null
           error: string | null
           flow_id: string
@@ -93,11 +94,13 @@ export type Database = {
           schedule_id: string | null
           started_at: string | null
           status: string
+          token_usage: Json | null
           tokens_used: number | null
           user_id: string
         }
         Insert: {
           completed_at?: string | null
+          cost_usd?: number | null
           duration?: number | null
           error?: string | null
           flow_id: string
@@ -108,11 +111,13 @@ export type Database = {
           schedule_id?: string | null
           started_at?: string | null
           status?: string
+          token_usage?: Json | null
           tokens_used?: number | null
           user_id: string
         }
         Update: {
           completed_at?: string | null
+          cost_usd?: number | null
           duration?: number | null
           error?: string | null
           flow_id?: string
@@ -123,6 +128,7 @@ export type Database = {
           schedule_id?: string | null
           started_at?: string | null
           status?: string
+          token_usage?: Json | null
           tokens_used?: number | null
           user_id?: string
         }
