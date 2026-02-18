@@ -9,6 +9,7 @@ import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
 import { ensureFilesBucket } from "./services/file-storage.ts";
+import { requireOrgContext } from "./middleware/org-context.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
@@ -17,6 +18,7 @@ import { createShareRouter } from "./routes/share.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
+import orgsRouter from "./routes/organizations.ts";
 import type { AppEnv } from "./types/index.ts";
 
 const app = new Hono<AppEnv>();
@@ -60,6 +62,20 @@ app.use("*", async (c, next) => {
   }
   c.set("user", user);
   return next();
+});
+
+// Org context middleware: require X-Org-Id for all /api/* and /auth/* routes
+// EXCEPT: /api/orgs (list/create without org context), /health, /share/*, /internal/*
+app.use("*", async (c, next) => {
+  const path = c.req.path;
+
+  // Skip org context for routes that don't need it
+  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  if (path === "/api/orgs" || path === "/api/orgs/") return next();
+  // Allow /api/orgs/:orgId/* routes (they handle their own auth)
+  if (path.startsWith("/api/orgs/")) return next();
+
+  return requireOrgContext()(c, next);
 });
 
 // Load built-in flows from filesystem
@@ -153,6 +169,9 @@ const userFlowsRouter = createUserFlowsRouter();
 const flowsRouter = createFlowsRouter();
 const executionsRouter = createExecutionsRouter();
 const schedulesRouter = createSchedulesRouter();
+
+// Organization routes (no org context needed — self-managed auth)
+app.route("/api/orgs", orgsRouter);
 
 app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
 app.route("/api/flows", flowsRouter);

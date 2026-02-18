@@ -17,6 +17,10 @@ export type {
   Integration,
   Schedule,
   Profile,
+  OrgRole,
+  Organization,
+  OrganizationMember,
+  OrganizationWithRole,
 } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
@@ -101,5 +105,7 @@ export type AppEnv = {
   Variables: {
     user: { id: string };
     flow: LoadedFlow;
+    orgId: string;
+    orgRole: import("@appstrate/shared-types").OrgRole;
   };
 };

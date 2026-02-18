@@ -16,15 +16,10 @@ export const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
 export async function getUserProfile(userId: string) {
   const { data } = await supabase
     .from("profiles")
-    .select("id, role, display_name")
+    .select("id, display_name")
     .eq("id", userId)
     .single();
   return data ?? null;
-}
-
-export async function isAdmin(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-  return profile?.role === "admin";
 }
 
 export async function ensureBucket(name: string): Promise<void> {

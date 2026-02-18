@@ -22,7 +22,7 @@ export function createInternalRouter() {
     // Look up the execution — must exist and be running
     const { data: execution, error } = await supabase
       .from("executions")
-      .select("flow_id, user_id, status")
+      .select("flow_id, user_id, org_id, status")
       .eq("id", executionId)
       .single();
 
@@ -53,7 +53,7 @@ export function createInternalRouter() {
     }
 
     try {
-      const executions = await getRecentExecutions(execution.flow_id, execution.user_id, {
+      const executions = await getRecentExecutions(execution.flow_id, execution.user_id, execution.org_id, {
         limit,
         fields,
         excludeExecutionId: executionId,

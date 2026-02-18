@@ -26,6 +26,7 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { ShareDropdown } from "../components/share-dropdown";
 import { useAuth } from "../hooks/use-auth";
+import { useOrg } from "../hooks/use-org";
 import { truncate, formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
@@ -51,7 +52,8 @@ type Tab = "executions" | "schedules";
 
 export function FlowDetailPage() {
   const { flowId } = useParams<{ flowId: string }>();
-  const { isAdmin, user } = useAuth();
+  const { user } = useAuth();
+  const { isOrgAdmin } = useOrg();
   const qc = useQueryClient();
 
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
@@ -64,8 +66,8 @@ export function FlowDetailPage() {
   const bindAdmin = useBindAdminService(flowId!);
   const unbindAdmin = useUnbindAdminService(flowId!);
   const createSchedule = useCreateSchedule(flowId!);
-  const updateSchedule = useUpdateSchedule(flowId!);
-  const deleteSchedule = useDeleteSchedule(flowId!);
+  const updateSchedule = useUpdateSchedule();
+  const deleteSchedule = useDeleteSchedule();
 
   const [tab, setTab] = useState<Tab>("executions");
   const [configOpen, setConfigOpen] = useState(false);
@@ -79,8 +81,8 @@ export function FlowDetailPage() {
   } | null>(null);
 
   useFlowExecutionRealtime(flowId, () => {
-    qc.invalidateQueries({ queryKey: ["executions", flowId] });
-    qc.invalidateQueries({ queryKey: ["flow", flowId] });
+    qc.invalidateQueries({ queryKey: ["executions"] });
+    qc.invalidateQueries({ queryKey: ["flow"] });
   });
 
   if (isLoading) return <LoadingState />;
@@ -91,6 +93,8 @@ export function FlowDetailPage() {
   const hasRequiredConfig = checkRequiredConfig(detail);
   const hasInputSchema =
     detail.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
+  const hasConfigSchema =
+    detail.config?.schema?.properties && Object.keys(detail.config.schema.properties).length > 0;
 
   const handleRun = () => {
     if (hasInputSchema) {
@@ -153,7 +157,7 @@ export function FlowDetailPage() {
                   {!isSelf && (
                     <span className="admin-service-badge">{svc.adminDisplayName ?? "admin"}</span>
                   )}
-                  {isAdmin && (
+                  {isOrgAdmin && (
                     <button
                       type="button"
                       className="btn-unbind"
@@ -171,7 +175,7 @@ export function FlowDetailPage() {
               <div key={svc.id} className="service admin-pending" title={svc.description}>
                 <span className="status-dot disconnected" />
                 {svc.id}
-                {isAdmin ? (
+                {isOrgAdmin ? (
                   <button
                     type="button"
                     className="btn-bind"
@@ -227,10 +231,12 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
-        <ShareDropdown flowId={flowId!} isAdmin={isAdmin} services={detail.requires.services} />
-        {isAdmin && (
+        <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
+        {isOrgAdmin && (
           <div className="actions-admin">
-            <button onClick={() => setConfigOpen(true)}>Configurer</button>
+            {hasConfigSchema && (
+              <button onClick={() => setConfigOpen(true)}>Configurer</button>
+            )}
             {detail.source === "user" && (
               <Link to={`/flows/${flowId}/edit`}>
                 <button>Modifier</button>

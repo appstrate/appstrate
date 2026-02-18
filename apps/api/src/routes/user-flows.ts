@@ -47,9 +47,10 @@ export function createUserFlowsRouter() {
       userId: user.id,
     });
 
+    const orgId = c.get("orgId");
     let existingIds: string[];
     try {
-      existingIds = await getAllFlowIds();
+      existingIds = await getAllFlowIds(orgId);
       logger.info("Flow import: existing IDs fetched", {
         count: existingIds.length,
         ids: existingIds,
@@ -63,7 +64,7 @@ export function createUserFlowsRouter() {
     }
 
     try {
-      const result = await importFlowFromZip(buffer, existingIds, user.id);
+      const result = await importFlowFromZip(buffer, existingIds, user.id, orgId);
       logger.info("Flow import: success", { flowId: result.flowId });
       return c.json({ flowId: result.flowId, message: "Flow importe" }, 201);
     } catch (err) {
@@ -110,7 +111,8 @@ export function createUserFlowsRouter() {
     }
 
     const flowId = (manifest.metadata as { name: string }).name;
-    const existingIds = await getAllFlowIds();
+    const orgId = c.get("orgId");
+    const existingIds = await getAllFlowIds(orgId);
 
     if (existingIds.includes(flowId)) {
       return c.json(
@@ -120,7 +122,7 @@ export function createUserFlowsRouter() {
     }
 
     // Store in DB (skills + extensions metadata live inside manifest.requires)
-    await insertUserFlow(flowId, manifest, prompt);
+    await insertUserFlow(flowId, orgId, manifest, prompt);
 
     // Create version + upload minimal ZIP to Storage (non-blocking)
     try {

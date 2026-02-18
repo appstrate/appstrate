@@ -166,6 +166,7 @@ export async function importFlowFromZip(
   zipBuffer: Buffer,
   existingFlowIds: string[],
   userId: string,
+  orgId: string,
 ): Promise<ImportResult> {
   const { manifest, prompt } = parseFlowZip(zipBuffer);
 
@@ -198,7 +199,7 @@ export async function importFlowFromZip(
   // Persist metadata to DB (skills + extensions are inside manifest.requires)
   logger.info("importFlowFromZip: inserting into DB", { flowId });
   try {
-    await insertUserFlow(flowId, manifest, prompt);
+    await insertUserFlow(flowId, orgId, manifest, prompt);
   } catch (err) {
     logger.error("importFlowFromZip: DB insert failed", {
       flowId,

@@ -8,10 +8,14 @@ import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
+import { CreateOrgPage } from "./pages/create-org";
+import { OrgSettingsPage } from "./pages/org-settings";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
+import { OrgSwitcher } from "./components/org-switcher";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./hooks/use-auth";
+import { useOrg } from "./hooks/use-org";
 import { Spinner } from "./components/spinner";
 
 function UserMenu({
@@ -75,6 +79,7 @@ function MainLayout() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user, profile, logout } = useAuth();
+  const { isOrgAdmin } = useOrg();
   const currentPath = location.pathname;
 
   const handleLogout = async () => {
@@ -107,15 +112,54 @@ function MainLayout() {
             Services
           </Link>
         </nav>
+        <OrgSwitcher />
         <UserMenu
           displayName={profile?.display_name || user!.email || ""}
-          isAdmin={profile?.role === "admin"}
+          isAdmin={isOrgAdmin}
           onLogout={() => void handleLogout()}
         />
       </header>
       <Outlet />
     </div>
   );
+}
+
+function OrgGate({ children }: { children: React.ReactNode }) {
+  const { currentOrg, orgs, loading } = useOrg();
+  const location = useLocation();
+
+  // Allow create-org route through without org context
+  if (location.pathname === "/create-org") {
+    return <>{children}</>;
+  }
+
+  if (loading) {
+    return (
+      <div className="container">
+        <div className="empty-state">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
+
+  // No orgs at all — redirect to create
+  if (orgs.length === 0) {
+    return <Navigate to="/create-org" replace />;
+  }
+
+  // Orgs exist but none selected yet (auto-select happening)
+  if (!currentOrg) {
+    return (
+      <div className="container">
+        <div className="empty-state">
+          <Spinner />
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 export function App() {
@@ -149,19 +193,23 @@ export function App() {
 
   return (
     <ErrorBoundary>
-      <Routes>
-        <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
-        <Route element={<MainLayout />}>
-          <Route path="/" element={<FlowList />} />
-          <Route path="/flows/new" element={<FlowEditorPage />} />
-          <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
-          <Route path="/flows/:flowId" element={<FlowDetailPage />} />
-          <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
-          <Route path="/schedules" element={<SchedulesListPage />} />
-          <Route path="/services" element={<ServicesListPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      <OrgGate>
+        <Routes>
+          <Route path="/create-org" element={<CreateOrgPage />} />
+          <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
+          <Route element={<MainLayout />}>
+            <Route path="/" element={<FlowList />} />
+            <Route path="/flows/new" element={<FlowEditorPage />} />
+            <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
+            <Route path="/flows/:flowId" element={<FlowDetailPage />} />
+            <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
+            <Route path="/schedules" element={<SchedulesListPage />} />
+            <Route path="/services" element={<ServicesListPage />} />
+            <Route path="/org-settings" element={<OrgSettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </OrgGate>
     </ErrorBoundary>
   );
 }

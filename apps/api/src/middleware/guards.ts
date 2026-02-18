@@ -1,14 +1,13 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { isAdmin } from "../lib/supabase.ts";
 import { getFlow } from "../services/flow-service.ts";
 import { getRunningExecutionsForFlow } from "../services/state.ts";
 
-/** Middleware: reject with 403 if the current user is not admin. */
+/** Middleware: reject with 403 if the current user is not org admin/owner. */
 export function requireAdmin() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const user = c.get("user");
-    if (!(await isAdmin(user.id))) {
+    const orgRole = c.get("orgRole");
+    if (orgRole !== "admin" && orgRole !== "owner") {
       return c.json({ error: "FORBIDDEN", message: "Acces reserve aux administrateurs" }, 403);
     }
     return next();
@@ -19,7 +18,8 @@ export function requireAdmin() {
 export function requireFlow(paramName = "id") {
   return async (c: Context<AppEnv>, next: Next) => {
     const flowId = c.req.param(paramName);
-    const flow = await getFlow(flowId);
+    const orgId = c.get("orgId");
+    const flow = await getFlow(flowId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
     }

@@ -8,9 +8,9 @@ function onMutationError(err: Error) {
   alert(`Erreur : ${err.message}`);
 }
 
-function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>, flowId: string) {
+function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["flows"] });
-  qc.invalidateQueries({ queryKey: ["flow", flowId] });
+  qc.invalidateQueries({ queryKey: ["flow"] });
 }
 
 export function useSaveConfig(flowId: string) {
@@ -23,7 +23,7 @@ export function useSaveConfig(flowId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow", flowId] });
+      qc.invalidateQueries({ queryKey: ["flow"] });
     },
     onError: onMutationError,
   });
@@ -61,7 +61,7 @@ export function useRunFlow(flowId: string) {
       });
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["executions", flowId] });
+      qc.invalidateQueries({ queryKey: ["executions"] });
       navigate(`/flows/${flowId}/executions/${data.executionId}`);
     },
     onError: onMutationError,
@@ -202,7 +202,7 @@ export function useUpdateFlow(flowId: string) {
       });
     },
     onSuccess: () => {
-      invalidateFlowQueries(qc, flowId);
+      invalidateFlowQueries(qc);
       navigate(`/flows/${flowId}`);
     },
     onError: onMutationError,
@@ -222,7 +222,7 @@ export function useUploadPackage(flowId: string) {
         "PUT",
       );
     },
-    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onSuccess: () => invalidateFlowQueries(qc),
     onError: onMutationError,
   });
 }
@@ -248,7 +248,7 @@ export function useAddSkill(flowId: string) {
       fd.append("updatedAt", updatedAt);
       return uploadFormData<{ flowId: string; updatedAt: string }>(`/flows/${flowId}/skills`, fd);
     },
-    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onSuccess: () => invalidateFlowQueries(qc),
     onError: onMutationError,
   });
 }
@@ -262,7 +262,7 @@ export function useRemoveSkill(flowId: string) {
         { method: "DELETE" },
       );
     },
-    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onSuccess: () => invalidateFlowQueries(qc),
     onError: onMutationError,
   });
 }
@@ -279,7 +279,7 @@ export function useAddExtension(flowId: string) {
         fd,
       );
     },
-    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onSuccess: () => invalidateFlowQueries(qc),
     onError: onMutationError,
   });
 }
@@ -293,7 +293,7 @@ export function useRemoveExtension(flowId: string) {
         { method: "DELETE" },
       );
     },
-    onSuccess: () => invalidateFlowQueries(qc, flowId),
+    onSuccess: () => invalidateFlowQueries(qc),
     onError: onMutationError,
   });
 }

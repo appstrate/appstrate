@@ -47,6 +47,7 @@ export type Database = {
           execution_id: string
           id: number
           message: string | null
+          org_id: string
           type: string
           user_id: string
         }
@@ -57,6 +58,7 @@ export type Database = {
           execution_id: string
           id?: number
           message?: string | null
+          org_id: string
           type?: string
           user_id: string
         }
@@ -67,6 +69,7 @@ export type Database = {
           execution_id?: string
           id?: number
           message?: string | null
+          org_id?: string
           type?: string
           user_id?: string
         }
@@ -76,6 +79,13 @@ export type Database = {
             columns: ["execution_id"]
             isOneToOne: false
             referencedRelation: "executions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "execution_logs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -90,6 +100,7 @@ export type Database = {
           flow_version_id: number | null
           id: string
           input: Json | null
+          org_id: string
           result: Json | null
           schedule_id: string | null
           started_at: string | null
@@ -108,6 +119,7 @@ export type Database = {
           flow_version_id?: number | null
           id: string
           input?: Json | null
+          org_id: string
           result?: Json | null
           schedule_id?: string | null
           started_at?: string | null
@@ -126,6 +138,7 @@ export type Database = {
           flow_version_id?: number | null
           id?: string
           input?: Json | null
+          org_id?: string
           result?: Json | null
           schedule_id?: string | null
           started_at?: string | null
@@ -143,6 +156,13 @@ export type Database = {
             referencedRelation: "flow_versions"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "executions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
         ]
       }
       flow_admin_connections: {
@@ -150,42 +170,64 @@ export type Database = {
           admin_user_id: string
           connected_at: string | null
           flow_id: string
+          org_id: string
           service_id: string
         }
         Insert: {
           admin_user_id: string
           connected_at?: string | null
           flow_id: string
+          org_id: string
           service_id: string
         }
         Update: {
           admin_user_id?: string
           connected_at?: string | null
           flow_id?: string
+          org_id?: string
           service_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "flow_admin_connections_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       flow_configs: {
         Row: {
           config: Json
           created_at: string | null
           flow_id: string
+          org_id: string
           updated_at: string | null
         }
         Insert: {
           config?: Json
           created_at?: string | null
           flow_id: string
+          org_id: string
           updated_at?: string | null
         }
         Update: {
           config?: Json
           created_at?: string | null
           flow_id?: string
+          org_id?: string
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "flow_configs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       flow_schedules: {
         Row: {
@@ -198,6 +240,7 @@ export type Database = {
           last_run_at: string | null
           name: string | null
           next_run_at: string | null
+          org_id: string
           timezone: string | null
           updated_at: string | null
           user_id: string
@@ -212,6 +255,7 @@ export type Database = {
           last_run_at?: string | null
           name?: string | null
           next_run_at?: string | null
+          org_id: string
           timezone?: string | null
           updated_at?: string | null
           user_id: string
@@ -226,11 +270,20 @@ export type Database = {
           last_run_at?: string | null
           name?: string | null
           next_run_at?: string | null
+          org_id?: string
           timezone?: string | null
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "flow_schedules_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       flow_versions: {
         Row: {
@@ -261,6 +314,7 @@ export type Database = {
           created_at: string | null
           id: string
           manifest: Json
+          org_id: string
           prompt: string
           updated_at: string | null
         }
@@ -268,6 +322,7 @@ export type Database = {
           created_at?: string | null
           id: string
           manifest: Json
+          org_id: string
           prompt: string
           updated_at?: string | null
         }
@@ -275,7 +330,72 @@ export type Database = {
           created_at?: string | null
           id?: string
           manifest?: Json
+          org_id?: string
           prompt?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flows_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_members: {
+        Row: {
+          joined_at: string | null
+          org_id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          joined_at?: string | null
+          org_id: string
+          role?: string
+          user_id: string
+        }
+        Update: {
+          joined_at?: string | null
+          org_id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_members_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organizations: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          id: string
+          name: string
+          slug: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          name: string
+          slug: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          name?: string
+          slug?: string
           updated_at?: string | null
         }
         Relationships: []
@@ -285,21 +405,18 @@ export type Database = {
           created_at: string | null
           display_name: string | null
           id: string
-          role: string
           updated_at: string | null
         }
         Insert: {
           created_at?: string | null
           display_name?: string | null
           id: string
-          role?: string
           updated_at?: string | null
         }
         Update: {
           created_at?: string | null
           display_name?: string | null
           id?: string
-          role?: string
           updated_at?: string | null
         }
         Relationships: []
@@ -355,6 +472,7 @@ export type Database = {
           expires_at: string
           flow_id: string
           id: string
+          org_id: string
           token: string
         }
         Insert: {
@@ -365,6 +483,7 @@ export type Database = {
           expires_at: string
           flow_id: string
           id?: string
+          org_id: string
           token: string
         }
         Update: {
@@ -375,6 +494,7 @@ export type Database = {
           expires_at?: string
           flow_id?: string
           id?: string
+          org_id?: string
           token?: string
         }
         Relationships: [
@@ -383,6 +503,13 @@ export type Database = {
             columns: ["execution_id"]
             isOneToOne: false
             referencedRelation: "executions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "share_tokens_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -408,6 +535,8 @@ export type Database = {
         Args: { p_created_by: string; p_flow_id: string }
         Returns: number
       }
+      is_org_admin: { Args: { p_org_id: string }; Returns: boolean }
+      is_org_member: { Args: { p_org_id: string }; Returns: boolean }
       try_acquire_schedule_lock: {
         Args: {
           p_fire_time: string

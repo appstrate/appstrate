@@ -46,7 +46,7 @@ export function createSchedulesRouter() {
       }
     }
 
-    const schedule = await createSchedule(flow.id, user.id, body);
+    const schedule = await createSchedule(flow.id, user.id, c.get("orgId"), body);
     return c.json(schedule, 201);
   });
 

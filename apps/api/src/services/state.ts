@@ -2,26 +2,36 @@ import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { Json } from "../types/index.ts";
 
-// --- Flow Config (global, no user_id) ---
+// --- Flow Config (per-org) ---
 
-export async function getFlowConfig(flowId: string): Promise<Record<string, unknown>> {
+export async function getFlowConfig(
+  orgId: string,
+  flowId: string,
+): Promise<Record<string, unknown>> {
   const { data } = await supabase
     .from("flow_configs")
     .select("config")
+    .eq("org_id", orgId)
     .eq("flow_id", flowId)
     .single();
   return (data?.config ?? {}) as Record<string, unknown>;
 }
 
 export async function setFlowConfig(
+  orgId: string,
   flowId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
   const { error } = await supabase
     .from("flow_configs")
     .upsert(
-      { flow_id: flowId, config: config as Json, updated_at: new Date().toISOString() },
-      { onConflict: "flow_id" },
+      {
+        org_id: orgId,
+        flow_id: flowId,
+        config: config as Json,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "org_id,flow_id" },
     );
   if (error) {
     throw new Error(`Failed to save config for flow ${flowId}: ${error.message}`);
@@ -34,6 +44,7 @@ export async function createExecution(
   id: string,
   flowId: string,
   userId: string,
+  orgId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
   flowVersionId?: number,
@@ -42,6 +53,7 @@ export async function createExecution(
     id,
     flow_id: flowId,
     user_id: userId,
+    org_id: orgId,
     status: "pending",
     input: input as Json,
     started_at: new Date().toISOString(),
@@ -85,12 +97,14 @@ export async function updateExecution(
 export async function getLastExecutionState(
   flowId: string,
   userId: string,
+  orgId: string,
 ): Promise<Record<string, unknown> | null> {
   const { data } = await supabase
     .from("executions")
     .select("state")
     .eq("flow_id", flowId)
     .eq("user_id", userId)
+    .eq("org_id", orgId)
     .not("state", "is", null)
     .order("started_at", { ascending: false })
     .limit(1)
@@ -101,6 +115,7 @@ export async function getLastExecutionState(
 export async function getRecentExecutions(
   flowId: string,
   userId: string,
+  orgId: string,
   options: {
     limit?: number;
     fields?: ("state" | "result")[];
@@ -110,12 +125,12 @@ export async function getRecentExecutions(
   const limit = options.limit ?? 10;
   const fields = options.fields ?? ["state"];
 
-  // Select all potentially needed columns (static string for Supabase typing)
   let query = supabase
     .from("executions")
     .select("id, status, started_at, duration, state, result")
     .eq("flow_id", flowId)
     .eq("user_id", userId)
+    .eq("org_id", orgId)
     .eq("status", "success")
     .order("started_at", { ascending: false })
     .limit(limit);
@@ -138,12 +153,13 @@ export async function getRecentExecutions(
   });
 }
 
-export async function getLastExecution(flowId: string, userId: string) {
+export async function getLastExecution(flowId: string, userId: string, orgId: string) {
   const { data } = await supabase
     .from("executions")
     .select("id, status, started_at, duration")
     .eq("flow_id", flowId)
     .eq("user_id", userId)
+    .eq("org_id", orgId)
     .order("started_at", { ascending: false })
     .limit(1)
     .single();
@@ -153,6 +169,7 @@ export async function getLastExecution(flowId: string, userId: string) {
 export async function appendExecutionLog(
   executionId: string,
   userId: string,
+  orgId: string,
   type: string,
   event: string | null,
   message: string | null,
@@ -163,6 +180,7 @@ export async function appendExecutionLog(
     .insert({
       execution_id: executionId,
       user_id: userId,
+      org_id: orgId,
       type,
       event,
       message,
@@ -195,14 +213,13 @@ export async function getRunningExecutionsForFlow(
   return count ?? 0;
 }
 
-export async function getRunningExecutionsCounts(userId?: string): Promise<Record<string, number>> {
-  let query = supabase.from("executions").select("flow_id").in("status", ["running", "pending"]);
+export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
+  const { data } = await supabase
+    .from("executions")
+    .select("flow_id")
+    .eq("org_id", orgId)
+    .in("status", ["running", "pending"]);
 
-  if (userId) {
-    query = query.eq("user_id", userId);
-  }
-
-  const { data } = await query;
   const counts: Record<string, number> = {};
   for (const row of data ?? []) {
     const flowId = row.flow_id;
@@ -211,12 +228,16 @@ export async function getRunningExecutionsCounts(userId?: string): Promise<Recor
   return counts;
 }
 
-// --- Admin Connections ---
+// --- Admin Connections (per-org) ---
 
-export async function getAdminConnections(flowId: string): Promise<Record<string, string>> {
+export async function getAdminConnections(
+  orgId: string,
+  flowId: string,
+): Promise<Record<string, string>> {
   const { data } = await supabase
     .from("flow_admin_connections")
     .select("service_id, admin_user_id")
+    .eq("org_id", orgId)
     .eq("flow_id", flowId);
   const result: Record<string, string> = {};
   for (const row of data ?? []) {
@@ -226,12 +247,14 @@ export async function getAdminConnections(flowId: string): Promise<Record<string
 }
 
 export async function bindAdminConnection(
+  orgId: string,
   flowId: string,
   serviceId: string,
   adminUserId: string,
 ): Promise<void> {
   const { error } = await supabase.from("flow_admin_connections").upsert(
     {
+      org_id: orgId,
       flow_id: flowId,
       service_id: serviceId,
       admin_user_id: adminUserId,
@@ -244,16 +267,17 @@ export async function bindAdminConnection(
   }
 }
 
-export async function unbindAdminConnection(flowId: string, serviceId: string): Promise<void> {
+export async function unbindAdminConnection(orgId: string, flowId: string, serviceId: string): Promise<void> {
   await supabase
     .from("flow_admin_connections")
     .delete()
+    .eq("org_id", orgId)
     .eq("flow_id", flowId)
     .eq("service_id", serviceId);
 }
 
-export async function deleteAdminConnectionsForFlow(flowId: string): Promise<void> {
-  await supabase.from("flow_admin_connections").delete().eq("flow_id", flowId);
+export async function deleteAdminConnectionsForFlow(orgId: string, flowId: string): Promise<void> {
+  await supabase.from("flow_admin_connections").delete().eq("org_id", orgId).eq("flow_id", flowId);
 }
 
 export async function markOrphanExecutionsFailed(): Promise<number> {

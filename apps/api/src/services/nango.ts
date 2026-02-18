@@ -16,11 +16,16 @@ export interface ConnectionStatus {
   connectedAt?: string;
 }
 
-// Per-user connection cache: "userId:provider" → connectionId
+/** Composite end_user.id for Nango: org-scoped per user */
+function nangoEndUserId(orgId: string, userId: string): string {
+  return `${orgId}:${userId}`;
+}
+
+// Per-user connection cache: "orgId:userId:provider" → connectionId
 const connectionIdCache = new Map<string, string>();
 
-function cacheKey(userId: string, provider: string): string {
-  return `${userId}:${provider}`;
+function cacheKey(orgId: string, userId: string, provider: string): string {
+  return `${orgId}:${userId}:${provider}`;
 }
 
 // Cache provider → auth_mode (static, fetched once per provider)
@@ -42,10 +47,11 @@ export async function getProviderAuthMode(providerName: string): Promise<string 
 export async function createApiKeyConnection(
   provider: string,
   apiKey: string,
+  orgId: string,
   userId: string,
 ): Promise<void> {
   const session = await nango.createConnectSession({
-    end_user: { id: userId },
+    end_user: { id: nangoEndUserId(orgId, userId) },
     allowed_integrations: [provider],
   });
   const nangoHost = process.env.NANGO_URL || "http://localhost:3003";
@@ -63,19 +69,24 @@ export async function createApiKeyConnection(
   }
 }
 
-export async function listConnections(userId: string): Promise<ConnectionStatus[]> {
+export async function listConnections(
+  orgId: string,
+  userId: string,
+): Promise<ConnectionStatus[]> {
+  const endUserId = nangoEndUserId(orgId, userId);
   try {
     const { connections } = await nango.listConnections();
-    // Filter connections by end_user.id for the current user
+    // Filter connections by composite end_user.id
     const userConnections = connections.filter(
-      (c) => (c as unknown as { end_user?: { id?: string } }).end_user?.id === userId,
+      (c) => (c as unknown as { end_user?: { id?: string } }).end_user?.id === endUserId,
     );
-    // Rebuild cache for this user
+    // Rebuild cache for this org:user
+    const prefix = `${orgId}:${userId}:`;
     for (const key of connectionIdCache.keys()) {
-      if (key.startsWith(`${userId}:`)) connectionIdCache.delete(key);
+      if (key.startsWith(prefix)) connectionIdCache.delete(key);
     }
     return userConnections.map((c) => {
-      connectionIdCache.set(cacheKey(userId, c.provider_config_key), c.connection_id);
+      connectionIdCache.set(cacheKey(orgId, userId, c.provider_config_key), c.connection_id);
       return {
         provider: c.provider_config_key,
         status: "connected" as const,
@@ -90,19 +101,24 @@ export async function listConnections(userId: string): Promise<ConnectionStatus[
 
 export async function getConnectionStatus(
   provider: string,
+  orgId: string,
   userId: string,
 ): Promise<ConnectionStatus> {
-  const all = await listConnections(userId);
+  const all = await listConnections(orgId, userId);
   const found = all.find((c) => c.provider === provider);
   if (found) return found;
   return { provider, status: "not_connected" };
 }
 
-export async function getAccessToken(provider: string, userId: string): Promise<string | null> {
-  let connId = connectionIdCache.get(cacheKey(userId, provider));
+export async function getAccessToken(
+  provider: string,
+  orgId: string,
+  userId: string,
+): Promise<string | null> {
+  let connId = connectionIdCache.get(cacheKey(orgId, userId, provider));
   if (!connId) {
-    await listConnections(userId);
-    connId = connectionIdCache.get(cacheKey(userId, provider));
+    await listConnections(orgId, userId);
+    connId = connectionIdCache.get(cacheKey(orgId, userId, provider));
   }
   if (!connId) return null;
 
@@ -134,10 +150,11 @@ export interface ConnectSession {
 
 export async function createConnectSession(
   provider: string,
+  orgId: string,
   userId: string,
 ): Promise<ConnectSession> {
   const result = await nango.createConnectSession({
-    end_user: { id: userId },
+    end_user: { id: nangoEndUserId(orgId, userId) },
     allowed_integrations: [provider],
   });
 
@@ -157,15 +174,19 @@ export async function listIntegrations() {
   return configs;
 }
 
-export async function deleteConnection(provider: string, userId: string): Promise<void> {
-  let connId = connectionIdCache.get(cacheKey(userId, provider));
+export async function deleteConnection(
+  provider: string,
+  orgId: string,
+  userId: string,
+): Promise<void> {
+  let connId = connectionIdCache.get(cacheKey(orgId, userId, provider));
   if (!connId) {
-    await listConnections(userId);
-    connId = connectionIdCache.get(cacheKey(userId, provider));
+    await listConnections(orgId, userId);
+    connId = connectionIdCache.get(cacheKey(orgId, userId, provider));
   }
   if (!connId) throw new Error(`No connection found for ${provider}`);
   await nango.deleteConnection(provider, connId);
-  connectionIdCache.delete(cacheKey(userId, provider));
+  connectionIdCache.delete(cacheKey(orgId, userId, provider));
 }
 
 export interface IntegrationWithStatus {
@@ -179,10 +200,13 @@ export interface IntegrationWithStatus {
   connectedAt?: string;
 }
 
-export async function getIntegrationsWithStatus(userId: string): Promise<IntegrationWithStatus[]> {
+export async function getIntegrationsWithStatus(
+  orgId: string,
+  userId: string,
+): Promise<IntegrationWithStatus[]> {
   const [integrations, connections] = await Promise.all([
     listIntegrations(),
-    listConnections(userId),
+    listConnections(orgId, userId),
   ]);
   const results = await Promise.all(
     integrations.map(async (integ) => {
@@ -210,6 +234,7 @@ export async function getIntegrationsWithStatus(userId: string): Promise<Integra
 export async function resolveServiceStatuses(
   services: FlowServiceRequirement[],
   adminConns: Record<string, string>,
+  orgId: string,
   userId?: string,
 ): Promise<ServiceStatus[]> {
   return Promise.all(
@@ -221,7 +246,7 @@ export async function resolveServiceStatuses(
         const adminUserId = adminConns[svc.id];
         if (adminUserId) {
           const [conn, adminProfile] = await Promise.all([
-            getConnectionStatus(svc.provider, adminUserId),
+            getConnectionStatus(svc.provider, orgId, adminUserId),
             getUserProfile(adminUserId),
           ]);
           return {
@@ -248,7 +273,7 @@ export async function resolveServiceStatuses(
       }
 
       const conn = userId
-        ? await getConnectionStatus(svc.provider, userId)
+        ? await getConnectionStatus(svc.provider, orgId, userId)
         : { status: "not_connected" as const };
       return {
         id: svc.id,

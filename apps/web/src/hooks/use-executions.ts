@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
+import { useCurrentOrgId } from "./use-org";
 
 export function useExecutions(flowId: string | undefined) {
+  const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["executions", flowId],
+    queryKey: ["executions", orgId, flowId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("executions")
@@ -19,8 +21,9 @@ export function useExecutions(flowId: string | undefined) {
 }
 
 export function useExecution(execId: string | undefined) {
+  const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["execution", execId],
+    queryKey: ["execution", orgId, execId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("executions")
@@ -35,8 +38,9 @@ export function useExecution(execId: string | undefined) {
 }
 
 export function useExecutionLogs(execId: string | undefined) {
+  const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["execution-logs", execId],
+    queryKey: ["execution-logs", orgId, execId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("execution_logs")

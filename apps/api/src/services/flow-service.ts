@@ -88,33 +88,48 @@ function dbRowToLoadedFlow(row: { id: string; manifest: unknown; prompt: string 
   };
 }
 
-/** Get a single flow by ID. Checks built-in cache first, then DB. */
-export async function getFlow(id: string): Promise<LoadedFlow | null> {
+/** Get a single flow by ID. Checks built-in cache first, then DB filtered by orgId. */
+export async function getFlow(id: string, orgId?: string): Promise<LoadedFlow | null> {
+  // Built-in flows are global (accessible in all orgs)
   const builtIn = builtInFlows.get(id);
   if (builtIn) return builtIn;
 
-  const { data } = await supabase
+  // User flows are scoped by org
+  let query = supabase
     .from("flows")
     .select("id, manifest, prompt")
-    .eq("id", id)
-    .single();
+    .eq("id", id);
+
+  if (orgId) {
+    query = query.eq("org_id", orgId);
+  }
+
+  const { data } = await query.single();
   if (!data) return null;
 
   return dbRowToLoadedFlow(data);
 }
 
-/** List all flows: built-in (from cache) + user flows (from DB). */
-export async function listFlows(): Promise<LoadedFlow[]> {
-  const { data } = await supabase.from("flows").select("id, manifest, prompt");
+/** List all flows: built-in (from cache) + user flows (from DB, scoped by org). */
+export async function listFlows(orgId?: string): Promise<LoadedFlow[]> {
+  let query = supabase.from("flows").select("id, manifest, prompt");
+  if (orgId) {
+    query = query.eq("org_id", orgId);
+  }
+  const { data } = await query;
   const userFlows = (data ?? []).map(dbRowToLoadedFlow);
 
   return [...builtInFlows.values(), ...userFlows];
 }
 
-/** Get all flow IDs (built-in + user). Used for collision checks. */
-export async function getAllFlowIds(): Promise<string[]> {
+/** Get all flow IDs (built-in + user, scoped by org). Used for collision checks. */
+export async function getAllFlowIds(orgId?: string): Promise<string[]> {
   const builtInIds = [...builtInFlows.keys()];
-  const { data } = await supabase.from("flows").select("id");
+  let query = supabase.from("flows").select("id");
+  if (orgId) {
+    query = query.eq("org_id", orgId);
+  }
+  const { data } = await query;
   const userIds = (data ?? []).map((r) => r.id);
 
   return [...builtInIds, ...userIds];

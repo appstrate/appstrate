@@ -24,10 +24,10 @@ export function createFlowsRouter() {
 
   // GET /api/flows — list all loaded flows
   router.get("/", async (c) => {
-    const user = c.get("user");
+    const orgId = c.get("orgId");
     const [allFlows, runningCounts] = await Promise.all([
-      listFlows(),
-      getRunningExecutionsCounts(user.id),
+      listFlows(orgId),
+      getRunningExecutionsCounts(orgId),
     ]);
 
     const flowList = allFlows.map((f) => ({
@@ -53,17 +53,18 @@ export function createFlowsRouter() {
   router.get("/:id", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
+    const orgId = c.get("orgId");
     const m = flow.manifest;
 
     // Fetch admin connections and resolve service statuses
-    const adminConns = await getAdminConnections(flow.id);
-    const serviceStatuses = await resolveServiceStatuses(m.requires.services, adminConns, user.id);
+    const adminConns = await getAdminConnections(orgId, flow.id);
+    const serviceStatuses = await resolveServiceStatuses(m.requires.services, adminConns, orgId, user.id);
 
     // Get config (global), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content
     const [currentConfig, lastExec, runningCount, userFlowRow] = await Promise.all([
-      getFlowConfig(flow.id),
-      getLastExecution(flow.id, user.id),
+      getFlowConfig(orgId, flow.id),
+      getLastExecution(flow.id, user.id, orgId),
       getRunningExecutionsForFlow(flow.id, user.id),
       flow.source === "user" ? getFlowById(flow.id) : Promise.resolve(null),
     ]);
@@ -148,7 +149,8 @@ export function createFlowsRouter() {
       config[key] = body[key] ?? prop.default ?? null;
     }
 
-    await setFlowConfig(flow.id, config);
+    const orgId = c.get("orgId");
+    await setFlowConfig(orgId, flow.id, config);
 
     return c.json({
       config,
@@ -217,7 +219,8 @@ export function createFlowsRouter() {
     }
 
     // Verify admin has a connection for this provider
-    const conn = await getConnectionStatus(svc.provider, user.id);
+    const orgId = c.get("orgId");
+    const conn = await getConnectionStatus(svc.provider, orgId, user.id);
     if (conn.status !== "connected") {
       return c.json(
         {
@@ -228,7 +231,7 @@ export function createFlowsRouter() {
       );
     }
 
-    await bindAdminConnection(flow.id, serviceId, user.id);
+    await bindAdminConnection(orgId, flow.id, serviceId, user.id);
     return c.json({ bound: true });
   });
 
@@ -245,7 +248,7 @@ export function createFlowsRouter() {
       );
     }
 
-    await unbindAdminConnection(flow.id, serviceId);
+    await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
     return c.json({ unbound: true });
   });
 
@@ -253,6 +256,7 @@ export function createFlowsRouter() {
   router.post("/:id/share-token", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
+    const orgId = c.get("orgId");
     const services = flow.manifest.requires.services;
 
     // Verify the flow is shareable publicly
@@ -271,7 +275,7 @@ export function createFlowsRouter() {
       }
 
       // All services are admin-mode — verify each is bound
-      const adminConns = await getAdminConnections(flow.id);
+      const adminConns = await getAdminConnections(orgId, flow.id);
       for (const svc of services) {
         if (!adminConns[svc.id]) {
           return c.json(
@@ -285,7 +289,7 @@ export function createFlowsRouter() {
       }
     }
 
-    const shareToken = await createShareToken(flow.id, user.id);
+    const shareToken = await createShareToken(flow.id, user.id, orgId);
     return c.json({
       token: shareToken.token,
       expiresAt: shareToken.expires_at,

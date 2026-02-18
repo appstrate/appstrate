@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlows } from "../hooks/use-flows";
 import { useAllExecutionsRealtime } from "../hooks/use-realtime";
-import { useAuth } from "../hooks/use-auth";
+import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -11,7 +11,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 export function FlowList() {
   const qc = useQueryClient();
   const { data: flows, isLoading, error } = useFlows();
-  const { isAdmin } = useAuth();
+  const { isOrgAdmin } = useOrg();
   const [importOpen, setImportOpen] = useState(false);
 
   useAllExecutionsRealtime(() => {
@@ -28,7 +28,7 @@ export function FlowList() {
         <div className="flow-list-header">
           <div />
           <div className="flow-list-actions">
-            {isAdmin && (
+            {isOrgAdmin && (
               <Link to="/flows/new">
                 <button>Creer un flow</button>
               </Link>
@@ -52,7 +52,7 @@ export function FlowList() {
       <div className="flow-list-header">
         <div />
         <div className="flow-list-actions">
-          {isAdmin && (
+          {isOrgAdmin && (
             <Link to="/flows/new">
               <button>Creer un flow</button>
             </Link>
