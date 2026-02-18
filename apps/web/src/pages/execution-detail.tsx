@@ -5,6 +5,7 @@ import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow } from "../hooks/use-mutations";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
+import { useCurrentOrgId } from "../hooks/use-org";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
@@ -38,6 +39,7 @@ function formatEvent(event: string, data: Record<string, unknown>): string {
 
 export function ExecutionDetailPage() {
   const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
+  const orgId = useCurrentOrgId();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
@@ -54,14 +56,14 @@ export function ExecutionDetailPage() {
     isRunning ? execId : null,
     useCallback(
       (newLog: ExecutionLog) => {
-        qc.setQueryData<ExecutionLog[]>(["execution-logs", execId], (prev) => {
+        qc.setQueryData<ExecutionLog[]>(["execution-logs", orgId, execId], (prev) => {
           if (!prev) return [newLog];
           // Deduplicate: skip if already present (race between REST fetch and Realtime)
           if (prev.some((l) => l.id === newLog.id)) return prev;
           return [...prev, newLog];
         });
       },
-      [qc, execId],
+      [qc, orgId, execId],
     ),
   );
 
@@ -122,15 +124,15 @@ export function ExecutionDetailPage() {
         const newStatus = payload.status as ExecutionStatus;
         setLiveStatus(newStatus);
         // Refresh execution data
-        qc.invalidateQueries({ queryKey: ["execution", execId] });
+        qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
         // Final refetch of logs when execution reaches terminal status (ensures completeness)
         const terminal =
           newStatus === "success" || newStatus === "failed" || newStatus === "timeout";
         if (terminal) {
-          qc.invalidateQueries({ queryKey: ["execution-logs", execId] });
+          qc.invalidateQueries({ queryKey: ["execution-logs", orgId, execId] });
         }
       },
-      [qc, execId],
+      [qc, orgId, execId],
     ),
   );
 
