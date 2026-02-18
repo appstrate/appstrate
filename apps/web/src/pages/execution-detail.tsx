@@ -13,6 +13,17 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
+function formatToolArgs(args: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (value === undefined || value === null) continue;
+    const str = typeof value === "string" ? value : JSON.stringify(value);
+    parts.push(`${key}: ${str}`);
+  }
+  const joined = parts.join(", ");
+  return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
+}
+
 function formatEvent(event: string, data: Record<string, unknown>): string {
   if (event === "execution_started") return `Execution demarree (${data?.executionId || ""})`;
   if (event === "dependency_check") {
@@ -73,7 +84,11 @@ export function ExecutionDetailPage() {
           const logData = (log.data ?? {}) as Record<string, unknown>;
           const message =
             (logData.message as string) || log.message || formatEvent(log.event || "", logData);
-          if (message) entries.push({ message, type: log.type || "progress" });
+          if (message) {
+            const args = logData.args as Record<string, unknown> | undefined;
+            const detail = args ? formatToolArgs(args) : undefined;
+            entries.push({ message, type: log.type || "progress", detail });
+          }
         }
       }
     }

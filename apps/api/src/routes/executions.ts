@@ -111,7 +111,7 @@ export async function executeFlowInBackground(
             "progress",
             "progress",
             msg.message ?? null,
-            null,
+            msg.data ?? null,
           );
         } else if (msg.type === "result" && msg.data) {
           result = msg.data;
@@ -182,7 +182,7 @@ export async function executeFlowInBackground(
                   "progress",
                   "progress",
                   msg.message ?? null,
-                  null,
+                  msg.data ?? null,
                 );
               } else if (msg.type === "result" && msg.data) {
                 result = msg.data;

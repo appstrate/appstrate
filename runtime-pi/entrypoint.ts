@@ -224,7 +224,7 @@ try {
 
       case "tool_execution_start": {
         const e = event as any;
-        emit({ type: "tool_start", name: e.toolName || "unknown", args: e.input || {} });
+        emit({ type: "tool_start", name: e.toolName || "unknown", args: e.args });
         break;
       }
 
