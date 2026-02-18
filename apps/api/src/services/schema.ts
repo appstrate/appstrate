@@ -243,6 +243,47 @@ export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
   return Object.values(schema.properties).some((p) => p.type === "file");
 }
 
+/** Parse FormData to extract input JSON + uploaded files from a multipart request */
+export async function parseFormDataFiles(
+  formData: FormData,
+  schema: JSONSchemaObject,
+): Promise<{ input: Record<string, unknown>; files: UploadedFile[] }> {
+  const inputRaw = formData.get("input");
+  const input = typeof inputRaw === "string" && inputRaw ? JSON.parse(inputRaw) : {};
+
+  const files: UploadedFile[] = [];
+  const nameCounts = new Map<string, number>();
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    if (prop.type !== "file") continue;
+    const entries = formData.getAll(key);
+    for (const entry of entries) {
+      if (!(entry instanceof File)) continue;
+      let fileName = entry.name;
+      const count = nameCounts.get(fileName) ?? 0;
+      if (count > 0) {
+        const dotIdx = fileName.lastIndexOf(".");
+        if (dotIdx > 0) {
+          fileName = `${fileName.substring(0, dotIdx)}_${count}${fileName.substring(dotIdx)}`;
+        } else {
+          fileName = `${fileName}_${count}`;
+        }
+      }
+      nameCounts.set(entry.name, count + 1);
+
+      const buffer = Buffer.from(await entry.arrayBuffer());
+      files.push({
+        fieldName: key,
+        name: fileName,
+        type: entry.type,
+        size: entry.size,
+        buffer,
+      });
+    }
+  }
+
+  return { input, files };
+}
+
 export function validateOutput(
   result: Record<string, unknown>,
   schema: JSONSchemaObject,

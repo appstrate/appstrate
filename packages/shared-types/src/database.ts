@@ -364,6 +364,47 @@ export type Database = {
           },
         ]
       }
+      share_tokens: {
+        Row: {
+          consumed_at: string | null
+          created_at: string | null
+          created_by: string
+          execution_id: string | null
+          expires_at: string
+          flow_id: string
+          id: string
+          token: string
+        }
+        Insert: {
+          consumed_at?: string | null
+          created_at?: string | null
+          created_by: string
+          execution_id?: string | null
+          expires_at: string
+          flow_id: string
+          id?: string
+          token: string
+        }
+        Update: {
+          consumed_at?: string | null
+          created_at?: string | null
+          created_by?: string
+          execution_id?: string | null
+          expires_at?: string
+          flow_id?: string
+          id?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "share_tokens_execution_id_fkey"
+            columns: ["execution_id"]
+            isOneToOne: false
+            referencedRelation: "executions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -372,6 +413,14 @@ export type Database = {
       cleanup_old_schedule_runs: {
         Args: { retention_days?: number }
         Returns: number
+      }
+      consume_share_token: {
+        Args: { p_token: string }
+        Returns: {
+          created_by: string
+          flow_id: string
+          id: string
+        }[]
       }
       create_flow_version: {
         Args: { p_created_by: string; p_flow_id: string }

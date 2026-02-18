@@ -5,6 +5,7 @@ import { FlowDetailPage } from "./pages/flow-detail";
 import { FlowEditorPage } from "./pages/flow-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ShareableRunPage } from "./pages/shareable-run";
+import { PublicShareRunPage } from "./pages/public-share-run";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { LoginPage } from "./pages/login";
@@ -119,6 +120,18 @@ function MainLayout() {
 
 export function App() {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
+  // Public share routes — no authentication required
+  if (location.pathname.startsWith("/share/")) {
+    return (
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/share/:token" element={<PublicShareRunPage />} />
+        </Routes>
+      </ErrorBoundary>
+    );
+  }
 
   if (loading) {
     return (

@@ -20,6 +20,7 @@ import { listFlows } from "../services/flow-service.ts";
 import { listFlowVersions } from "../services/flow-versions.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
+import { createShareToken } from "../services/share-tokens.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -309,6 +310,50 @@ export function createFlowsRouter() {
 
     await unbindAdminConnection(flow.id, serviceId);
     return c.json({ unbound: true });
+  });
+
+  // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)
+  router.post("/:id/share-token", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const services = flow.manifest.requires.services;
+
+    // Verify the flow is shareable publicly
+    if (services.length > 0) {
+      // Check for user-mode services
+      const userModeService = services.find((s) => (s.connectionMode ?? "user") === "user");
+      if (userModeService) {
+        return c.json(
+          {
+            error: "SHARE_NOT_ALLOWED",
+            message:
+              "Ce flow ne peut pas etre partage publiquement car il necessite des connexions utilisateur.",
+          },
+          400,
+        );
+      }
+
+      // All services are admin-mode — verify each is bound
+      const adminConns = await getAdminConnections(flow.id);
+      for (const svc of services) {
+        if (!adminConns[svc.id]) {
+          return c.json(
+            {
+              error: "SHARE_NOT_READY",
+              message:
+                "Tous les services admin doivent etre lies avant de generer un lien public.",
+            },
+            400,
+          );
+        }
+      }
+    }
+
+    const shareToken = await createShareToken(flow.id, user.id);
+    return c.json({
+      token: shareToken.token,
+      expiresAt: shareToken.expires_at,
+    });
   });
 
   return router;
