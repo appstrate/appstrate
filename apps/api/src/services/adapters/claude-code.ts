@@ -49,37 +49,40 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
       flowPackage,
       processLogs: async function* (logs) {
         for await (const line of logs) {
-          const msg = parseStreamJsonLine(line);
-          if (msg) yield msg;
+          for (const msg of parseStreamJsonLine(line)) {
+            yield msg;
+          }
         }
       },
     });
   }
 }
 
-function parseStreamJsonLine(line: string): ExecutionMessage | null {
+function parseStreamJsonLine(line: string): ExecutionMessage[] {
   try {
     const obj = JSON.parse(line);
 
-    // assistant message with text content → progress
+    // assistant message with text + tool_use content → progress
     if (obj.type === "assistant" && obj.message?.content) {
-      const textParts = obj.message.content
-        .filter((c: { type: string }) => c.type === "text")
-        .map((c: { text: string }) => c.text);
+      const messages: ExecutionMessage[] = [];
 
-      if (textParts.length > 0) {
-        const text = textParts.join("\n");
-
-        // Check if the text contains a final JSON result block
-        const jsonResult = extractJsonResult(text);
-        if (jsonResult) {
-          return { type: "result", data: jsonResult };
+      for (const block of obj.message.content) {
+        if (block.type === "text" && block.text) {
+          const jsonResult = extractJsonResult(block.text);
+          if (jsonResult) {
+            return [{ type: "result", data: jsonResult }];
+          }
+          messages.push({ type: "progress", message: block.text });
+        } else if (block.type === "tool_use" && block.name) {
+          messages.push({
+            type: "progress",
+            message: `Tool: ${block.name}`,
+            data: { tool: block.name, args: block.input },
+          });
         }
-
-        return { type: "progress", message: text };
       }
 
-      return null;
+      return messages;
     }
 
     // result type → extract result text and parse JSON
@@ -100,16 +103,16 @@ function parseStreamJsonLine(line: string): ExecutionMessage | null {
       }
 
       if (jsonResult) {
-        return { type: "result", data: jsonResult, usage };
+        return [{ type: "result", data: jsonResult, usage }];
       }
       // If no JSON block found, wrap the text as summary
-      return { type: "result", data: { summary: resultText }, usage };
+      return [{ type: "result", data: { summary: resultText }, usage }];
     }
 
     // system message or other → ignore
-    return null;
+    return [];
   } catch {
     // Not JSON → ignore
-    return null;
+    return [];
   }
 }

@@ -505,6 +505,12 @@ button:disabled {
 .log-entry.error {
   color: var(--danger);
 }
+.log-detail {
+  margin-left: 0.5em;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-size: 0.85em;
+}
 
 /* Result */
 .result-section {
