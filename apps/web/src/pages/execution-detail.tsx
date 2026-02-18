@@ -188,7 +188,9 @@ export function ExecutionDetailPage() {
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           flow={flow}
-          onSubmit={(input, files) => runFlow.mutate({ input, files })}
+          onSubmit={(input, files) => {
+            runFlow.mutate({ input, files }, { onSuccess: () => setInputOpen(false) });
+          }}
           isPending={runFlow.isPending}
           initialValues={(execution.input as Record<string, unknown>) ?? undefined}
         />
