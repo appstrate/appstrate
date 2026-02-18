@@ -56,3 +56,23 @@ export function rateLimit(maxPerMinute: number) {
     return next();
   };
 }
+
+/** IP-based rate limiter for public (unauthenticated) routes. */
+export function rateLimitByIp(maxPerMinute: number) {
+  return async (c: Context, next: Next) => {
+    const ip =
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+      c.req.header("x-real-ip") ||
+      "unknown";
+    const key = `ip:${c.req.method}:${c.req.path}:${ip}`;
+
+    if (!consume(key, maxPerMinute, maxPerMinute)) {
+      return c.json(
+        { error: "RATE_LIMITED", message: "Trop de requetes. Reessayez dans quelques instants." },
+        429,
+      );
+    }
+
+    return next();
+  };
+}

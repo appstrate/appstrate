@@ -2,9 +2,11 @@ import { useState, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutionRealtime } from "../hooks/use-realtime";
+import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
 import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
 import { ResultRenderer } from "../components/result-renderer";
+import { ApiKeyModal } from "../components/api-key-modal";
 import { Spinner } from "../components/spinner";
 import { api, uploadFormData } from "../api";
 
@@ -13,11 +15,17 @@ type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
 export function ShareableRunPage() {
   const { flowId } = useParams<{ flowId: string }>();
   const { data: flow, isLoading, error } = useFlowDetail(flowId);
+  const connectMutation = useConnect();
+  const apiKeyMutation = useConnectApiKey();
 
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [status, setStatus] = useState<PageStatus>("idle");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  const [apiKeyService, setApiKeyService] = useState<{
+    provider: string;
+    id: string;
+  } | null>(null);
 
   const schema = flow?.input?.schema;
   const hasInput = !!schema?.properties && Object.keys(schema.properties).length > 0;
@@ -45,6 +53,9 @@ export function ShareableRunPage() {
   }, []);
 
   useExecutionRealtime(executionId, handleStatusChange);
+
+  const services = flow?.requires?.services ?? [];
+  const allConnected = services.every((s) => s.status === "connected");
 
   const handleRun = async () => {
     if (!flowId) return;
@@ -119,6 +130,67 @@ export function ShareableRunPage() {
           {flow.description && <p className="description">{flow.description}</p>}
         </div>
 
+        {services.length > 0 && (
+          <div className="shareable-run-services">
+            {services.map((svc) => {
+              const isConnected = svc.status === "connected";
+              const isAdminMode = svc.connectionMode === "admin";
+
+              if (isAdminMode) {
+                return (
+                  <div
+                    key={svc.id}
+                    className={`service ${svc.adminProvided && isConnected ? "admin-provided" : "admin-pending"}`}
+                    title={svc.description}
+                  >
+                    <span
+                      className={`status-dot ${svc.adminProvided && isConnected ? "connected" : "disconnected"}`}
+                    />
+                    {svc.id}
+                    {svc.adminProvided && isConnected && svc.adminDisplayName && (
+                      <span className="admin-service-badge">{svc.adminDisplayName}</span>
+                    )}
+                    {!(svc.adminProvided && isConnected) && (
+                      <span className="admin-service-badge pending">en attente</span>
+                    )}
+                  </div>
+                );
+              }
+
+              // User-mode service
+              if (isConnected) {
+                return (
+                  <div key={svc.id} className="service" title={svc.description}>
+                    <span className="status-dot connected" />
+                    {svc.id}
+                  </div>
+                );
+              }
+
+              const handleServiceConnect = () => {
+                if (svc.authMode === "API_KEY") {
+                  setApiKeyService({ provider: svc.provider, id: svc.id });
+                } else {
+                  connectMutation.mutate(svc.provider);
+                }
+              };
+
+              return (
+                <button
+                  key={svc.id}
+                  type="button"
+                  className="service not-connected"
+                  onClick={handleServiceConnect}
+                  title={svc.description}
+                >
+                  <span className="status-dot disconnected" />
+                  {svc.id} (connecter)
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {status === "idle" && (
           <div className="shareable-run-form">
             {hasInput && (
@@ -131,7 +203,12 @@ export function ShareableRunPage() {
                 idPrefix="shareable-input"
               />
             )}
-            <button className="primary shareable-run-btn" onClick={handleRun}>
+            <button
+              className="primary shareable-run-btn"
+              onClick={handleRun}
+              disabled={!allConnected}
+              title={!allConnected ? "Connectez tous les services d'abord" : "Lancer le flow"}
+            >
               Executer
             </button>
           </div>
@@ -154,6 +231,21 @@ export function ShareableRunPage() {
           </div>
         )}
       </div>
+
+      <ApiKeyModal
+        open={!!apiKeyService}
+        onClose={() => setApiKeyService(null)}
+        providerName={apiKeyService?.id ?? ""}
+        isPending={apiKeyMutation.isPending}
+        onSubmit={(apiKey) => {
+          if (apiKeyService) {
+            apiKeyMutation.mutate(
+              { provider: apiKeyService.provider, apiKey },
+              { onSuccess: () => setApiKeyService(null) },
+            );
+          }
+        }}
+      />
     </div>
   );
 }

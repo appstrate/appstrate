@@ -29,6 +29,7 @@ import {
   validateOutput,
   validateFileInputs,
   schemaHasFileFields,
+  parseFormDataFiles,
 } from "../services/schema.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
@@ -360,44 +361,11 @@ export function createExecutionsRouter() {
     let uploadedFiles: UploadedFile[] | undefined;
 
     if (hasFileFields) {
-      // FormData mode: "input" is a JSON string, files are named by schema key
       try {
         const formData = await c.req.formData();
-        const inputRaw = formData.get("input");
-        const parsedInput = typeof inputRaw === "string" && inputRaw ? JSON.parse(inputRaw) : {};
-        body = { input: parsedInput };
-
-        // Collect uploaded files
-        uploadedFiles = [];
-        const nameCounts = new Map<string, number>();
-        for (const [key, prop] of Object.entries(inputSchema!.properties)) {
-          if (prop.type !== "file") continue;
-          const entries = formData.getAll(key);
-          for (const entry of entries) {
-            if (!(entry instanceof File)) continue;
-            // Deduplicate file names
-            let fileName = entry.name;
-            const count = nameCounts.get(fileName) ?? 0;
-            if (count > 0) {
-              const dotIdx = fileName.lastIndexOf(".");
-              if (dotIdx > 0) {
-                fileName = `${fileName.substring(0, dotIdx)}_${count}${fileName.substring(dotIdx)}`;
-              } else {
-                fileName = `${fileName}_${count}`;
-              }
-            }
-            nameCounts.set(entry.name, count + 1);
-
-            const buffer = Buffer.from(await entry.arrayBuffer());
-            uploadedFiles.push({
-              fieldName: key,
-              name: fileName,
-              type: entry.type,
-              size: entry.size,
-              buffer,
-            });
-          }
-        }
+        const parsed = await parseFormDataFiles(formData, inputSchema!);
+        body = { input: parsed.input };
+        uploadedFiles = parsed.files;
       } catch (err) {
         return c.json(
           {
@@ -408,7 +376,6 @@ export function createExecutionsRouter() {
         );
       }
 
-      // Validate file constraints
       if (uploadedFiles.length > 0) {
         const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
         if (!fileValidation.valid) {
@@ -420,7 +387,6 @@ export function createExecutionsRouter() {
         }
       }
     } else {
-      // JSON mode (existing behavior)
       try {
         body = await c.req.json<{ input?: Record<string, unknown> }>();
       } catch {

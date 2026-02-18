@@ -25,6 +25,7 @@ import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
+import { ShareDropdown } from "../components/share-dropdown";
 import { useAuth } from "../hooks/use-auth";
 import { truncate, formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -78,7 +79,6 @@ export function FlowDetailPage() {
     id: string;
     bindAfter?: boolean;
   } | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useFlowExecutionRealtime(flowId, () => {
     qc.invalidateQueries({ queryKey: ["executions", flowId] });
@@ -101,14 +101,6 @@ export function FlowDetailPage() {
     } else {
       runFlow.mutate(undefined);
     }
-  };
-
-  const handleShare = () => {
-    const url = `${window.location.origin}/flows/${flowId}/run`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
   };
 
   return (
@@ -238,9 +230,11 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
-        <button onClick={handleShare} title="Copier le lien de partage">
-          {copied ? "Copie !" : "Partager"}
-        </button>
+        <ShareDropdown
+          flowId={flowId!}
+          isAdmin={isAdmin}
+          services={detail.requires.services}
+        />
         {isAdmin && (
           <div className="actions-admin">
             <button onClick={() => setConfigOpen(true)}>Configurer</button>
