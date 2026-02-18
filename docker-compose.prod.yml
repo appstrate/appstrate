@@ -55,14 +55,14 @@ services:
       context: ./runtime-claude-code
     image: appstrate-claude-code:latest
     restart: "no"
-    command: ["echo", "runtime image built"]
+    entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
 
   appstrate-pi:
     build:
       context: ./runtime-pi
     image: appstrate-pi:latest
     restart: "no"
-    command: ["echo", "runtime image built"]
+    entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
 
   appstrate:
     build:
