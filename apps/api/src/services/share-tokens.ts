@@ -6,6 +6,7 @@ const DEFAULT_EXPIRES_DAYS = 7;
 export async function createShareToken(
   flowId: string,
   createdBy: string,
+  orgId: string,
   expiresInDays = DEFAULT_EXPIRES_DAYS,
 ) {
   const token = crypto.randomBytes(32).toString("hex");
@@ -13,7 +14,7 @@ export async function createShareToken(
 
   const { data, error } = await supabase
     .from("share_tokens")
-    .insert({ token, flow_id: flowId, created_by: createdBy, expires_at: expiresAt })
+    .insert({ token, flow_id: flowId, created_by: createdBy, org_id: orgId, expires_at: expiresAt })
     .select()
     .single();
 
@@ -30,7 +31,7 @@ export async function consumeShareToken(token: string) {
   const { data } = await supabase.rpc("consume_share_token", { p_token: token });
   if (!data || (Array.isArray(data) && data.length === 0)) return null;
   const row = Array.isArray(data) ? data[0] : data;
-  return row as { id: string; flow_id: string; created_by: string };
+  return row as { id: string; flow_id: string; created_by: string; org_id: string };
 }
 
 export async function linkExecutionToToken(tokenId: string, executionId: string) {

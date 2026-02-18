@@ -32,11 +32,16 @@ function setState(next: AuthState) {
 async function resolveSession(session: Session | null) {
   let profile: Profile | null = null;
   if (session?.user) {
-    const { data } = await supabase
+    const { data, status } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", session.user.id)
       .single<Profile>();
+    if (status === 406) {
+      await supabase.auth.signOut();
+      setState({ session: null, user: null, profile: null, loading: false });
+      return;
+    }
     profile = data ?? null;
   }
   setState({ session, user: session?.user ?? null, profile, loading: false });
@@ -87,7 +92,6 @@ export function useAuth() {
     user: state.user,
     profile: state.profile,
     loading: state.loading,
-    isAdmin: state.profile?.role === "admin",
     login,
     signup,
     logout,

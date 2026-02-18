@@ -22,6 +22,9 @@ const activeJobs = new Map<string, Cron>();
 // Unique instance identifier for distributed locking
 const INSTANCE_ID = `${hostname()}-${process.pid}`;
 
+// Cache schedule orgId for trigger context
+const scheduleOrgCache = new Map<string, string>();
+
 // --- CRUD helpers ---
 
 export async function getSchedule(id: string): Promise<Schedule | null> {
@@ -32,6 +35,7 @@ export async function getSchedule(id: string): Promise<Schedule | null> {
 export async function createSchedule(
   flowId: string,
   userId: string,
+  orgId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -52,6 +56,7 @@ export async function createSchedule(
       id,
       flow_id: flowId,
       user_id: userId,
+      org_id: orgId,
       name: data.name ?? null,
       enabled: true,
       cron_expression: data.cronExpression,
@@ -67,8 +72,9 @@ export async function createSchedule(
   }
   const schedule = row;
 
-  // Start the cron job
-  startCronJob(schedule);
+  // Cache orgId and start the cron job
+  scheduleOrgCache.set(schedule.id, orgId);
+  startCronJob(schedule, orgId);
 
   return schedule;
 }
@@ -119,7 +125,8 @@ export async function updateSchedule(
   // Restart or stop the cron job
   stopCronJob(id);
   if (schedule.enabled) {
-    startCronJob(schedule);
+    const orgId = scheduleOrgCache.get(id) ?? (existing as unknown as { org_id: string }).org_id;
+    startCronJob(schedule, orgId);
   }
 
   return schedule;
@@ -127,14 +134,18 @@ export async function updateSchedule(
 
 export async function deleteSchedule(id: string): Promise<boolean> {
   stopCronJob(id);
+  scheduleOrgCache.delete(id);
   const { data } = await supabase.from("flow_schedules").delete().eq("id", id).select("id");
   return (data?.length ?? 0) > 0;
 }
 
 // --- Cron job management ---
 
-function startCronJob(schedule: Schedule) {
+function startCronJob(schedule: Schedule, orgId: string) {
   if (activeJobs.has(schedule.id)) return;
+
+  // Cache orgId for later trigger use
+  scheduleOrgCache.set(schedule.id, orgId);
 
   const job = new Cron(
     schedule.cron_expression,
@@ -147,6 +158,7 @@ function startCronJob(schedule: Schedule) {
         schedule.id,
         schedule.flow_id,
         schedule.user_id,
+        orgId,
         (schedule.input as Record<string, unknown>) ?? undefined,
       );
     },
@@ -167,6 +179,7 @@ async function triggerScheduledExecution(
   scheduleId: string,
   flowId: string,
   userId: string,
+  orgId: string,
   input?: Record<string, unknown>,
 ) {
   try {
@@ -186,14 +199,14 @@ async function triggerScheduledExecution(
       return;
     }
 
-    const flow = await getFlow(flowId);
+    const flow = await getFlow(flowId, orgId);
     if (!flow) {
       logger.warn("Flow not found, skipping schedule", { flowId, scheduleId });
       return;
     }
 
     // Validate service dependencies — skip if not connected
-    const adminConns = await getAdminConnections(flowId);
+    const adminConns = await getAdminConnections(orgId, flowId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
@@ -214,7 +227,7 @@ async function triggerScheduledExecution(
         tokenUserId = userId;
       }
 
-      const conn = await getConnectionStatus(svc.provider, tokenUserId);
+      const conn = await getConnectionStatus(svc.provider, orgId, tokenUserId);
       if (conn.status !== "connected") {
         logger.warn("Service not connected, skipping schedule", {
           serviceId: svc.id,
@@ -224,13 +237,13 @@ async function triggerScheduledExecution(
         });
         return;
       }
-      const token = await getAccessToken(svc.provider, tokenUserId);
+      const token = await getAccessToken(svc.provider, orgId, tokenUserId);
       if (token) tokens[svc.id] = token;
     }
 
     // Get config and previous state
-    const config = await getFlowConfig(flowId);
-    const previousState = await getLastExecutionState(flowId, userId);
+    const config = await getFlowConfig(orgId, flowId);
+    const previousState = await getLastExecutionState(flowId, userId, orgId);
 
     // Build prompt context
     const executionId = `exec_${crypto.randomUUID()}`;
@@ -255,6 +268,7 @@ async function triggerScheduledExecution(
       executionId,
       flowId,
       userId,
+      orgId,
       input ?? null,
       scheduleId,
       flowVersionId ?? undefined,
@@ -267,10 +281,10 @@ async function triggerScheduledExecution(
       .eq("schedule_id", scheduleId)
       .eq("fire_time", fireTime);
 
-    logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId });
+    logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId, orgId });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, userId, flow, promptContext, flowPackage).catch(
+    executeFlowInBackground(executionId, flowId, userId, orgId, flow, promptContext, flowPackage).catch(
       (err) => {
         logger.error("Unhandled error in scheduled execution", {
           executionId,
@@ -315,7 +329,8 @@ export async function initScheduler() {
       });
       continue;
     }
-    startCronJob(schedule);
+    const orgId = (schedule as unknown as { org_id: string }).org_id;
+    startCronJob(schedule, orgId);
     started++;
   }
 
@@ -329,5 +344,6 @@ export function shutdownScheduler() {
     job.stop();
     activeJobs.delete(id);
   }
+  scheduleOrgCache.clear();
   logger.info("All cron jobs stopped");
 }

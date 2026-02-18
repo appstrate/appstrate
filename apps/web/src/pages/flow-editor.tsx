@@ -10,6 +10,7 @@ import {
   useRemoveExtension,
 } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
+import { useOrg } from "../hooks/use-org";
 import { MetadataSection } from "../components/flow-editor/metadata-section";
 import { SchemaSection } from "../components/flow-editor/schema-section";
 import { ExecutionSection } from "../components/flow-editor/execution-section";
@@ -249,12 +250,13 @@ function FlowEditorForm({
 export function FlowEditorPage() {
   const { flowId } = useParams<{ flowId: string }>();
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { user } = useAuth();
+  const { isOrgAdmin } = useOrg();
   const isEdit = !!flowId;
 
   const { data: detail, isLoading } = useFlowDetail(flowId);
 
-  if (!isAdmin) {
+  if (!isOrgAdmin) {
     return (
       <div className="empty-state">
         <p>Acces reserve aux administrateurs.</p>

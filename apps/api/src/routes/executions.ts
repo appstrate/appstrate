@@ -54,6 +54,7 @@ export async function executeFlowInBackground(
   executionId: string,
   flowId: string,
   userId: string,
+  orgId: string,
   flow: LoadedFlow,
   promptContext: PromptContext,
   flowPackage?: Buffer | null,
@@ -63,7 +64,7 @@ export async function executeFlowInBackground(
 
   try {
     // Emit execution_started
-    await appendExecutionLog(executionId, userId, "system", "execution_started", null, {
+    await appendExecutionLog(executionId, userId, orgId, "system", "execution_started", null, {
       executionId,
       startedAt: new Date().toISOString(),
     });
@@ -73,7 +74,7 @@ export async function executeFlowInBackground(
     for (const svc of flow.manifest.requires.services) {
       depCheck[svc.id] = promptContext.tokens[svc.id] ? "ok" : "missing";
     }
-    await appendExecutionLog(executionId, userId, "system", "dependency_check", null, {
+    await appendExecutionLog(executionId, userId, orgId, "system", "dependency_check", null, {
       services: depCheck,
     });
 
@@ -83,7 +84,7 @@ export async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
     const adapterName = getAdapterName();
-    await appendExecutionLog(executionId, userId, "system", "adapter_started", null, {
+    await appendExecutionLog(executionId, userId, orgId, "system", "adapter_started", null, {
       adapter: adapterName,
     });
 
@@ -103,6 +104,7 @@ export async function executeFlowInBackground(
           await appendExecutionLog(
             executionId,
             userId,
+            orgId,
             "progress",
             "progress",
             msg.message ?? null,
@@ -129,7 +131,7 @@ export async function executeFlowInBackground(
               }
             : {}),
         });
-        await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
+        await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
           executionId,
           status: "timeout",
         });
@@ -152,7 +154,7 @@ export async function executeFlowInBackground(
           if (remaining < MIN_RETRY_TIME_MS) break;
 
           const attempt = maxRetries - retriesLeft + 1;
-          await appendExecutionLog(executionId, userId, "system", "output_validation_retry", null, {
+          await appendExecutionLog(executionId, userId, orgId, "system", "output_validation_retry", null, {
             attempt,
             maxRetries,
             errors: outputValidation.errors,
@@ -181,6 +183,7 @@ export async function executeFlowInBackground(
                 await appendExecutionLog(
                   executionId,
                   userId,
+                  orgId,
                   "progress",
                   "progress",
                   msg.message ?? null,
@@ -200,7 +203,7 @@ export async function executeFlowInBackground(
         }
 
         if (!outputValidation.valid) {
-          await appendExecutionLog(executionId, userId, "system", "output_validation", null, {
+          await appendExecutionLog(executionId, userId, orgId, "system", "output_validation", null, {
             valid: false,
             errors: outputValidation.errors,
           });
@@ -237,8 +240,8 @@ export async function executeFlowInBackground(
           : {}),
       });
 
-      await appendExecutionLog(executionId, userId, "result", "result", null, result);
-      await appendExecutionLog(executionId, userId, "system", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, orgId, "result", "result", null, result);
+      await appendExecutionLog(executionId, userId, orgId, "system", "execution_completed", null, {
         executionId,
         status: "success",
       });
@@ -250,7 +253,7 @@ export async function executeFlowInBackground(
         completed_at: new Date().toISOString(),
         duration,
       });
-      await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
+      await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
         executionId,
         status: "failed",
         error: "No result returned from adapter",
@@ -265,7 +268,7 @@ export async function executeFlowInBackground(
       completed_at: new Date().toISOString(),
       duration,
     });
-    await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
+    await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
       executionId,
       status: "failed",
       error: errorMessage,
@@ -292,11 +295,12 @@ export function createExecutionsRouter() {
   router.post("/flows/:id/run", rateLimit(20), requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
+    const orgId = c.get("orgId");
     const flowId = flow.id;
 
     // Validate service dependencies
-    const adminConns = await getAdminConnections(flowId);
-    const connections = await listConnections(user.id);
+    const adminConns = await getAdminConnections(orgId, flowId);
+    const connections = await listConnections(orgId, user.id);
     const connectedProviders = new Set(connections.map((c) => c.provider));
 
     for (const svc of flow.manifest.requires.services) {
@@ -312,7 +316,7 @@ export function createExecutionsRouter() {
             400,
           );
         }
-        const conn = await getConnectionStatus(svc.provider, adminUserId);
+        const conn = await getConnectionStatus(svc.provider, orgId, adminUserId);
         if (conn.status !== "connected") {
           return c.json(
             {
@@ -337,7 +341,7 @@ export function createExecutionsRouter() {
     }
 
     // Validate config
-    const config = await getFlowConfig(flowId);
+    const config = await getFlowConfig(orgId, flowId);
     const configSchema = flow.manifest.config?.schema ?? {
       type: "object" as const,
       properties: {},
@@ -423,13 +427,13 @@ export function createExecutionsRouter() {
     }
 
     // Get previous state and tokens (resolve based on connectionMode)
-    const previousState = await getLastExecutionState(flowId, user.id);
+    const previousState = await getLastExecutionState(flowId, user.id, orgId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
       const tokenUserId = mode === "admin" ? adminConns[svc.id] : user.id;
       if (tokenUserId) {
-        const token = await getAccessToken(svc.provider, tokenUserId);
+        const token = await getAccessToken(svc.provider, orgId, tokenUserId);
         if (token) tokens[svc.id] = token;
       }
     }
@@ -457,13 +461,14 @@ export function createExecutionsRouter() {
       executionId,
       flowId,
       user.id,
+      orgId,
       body.input ?? null,
       undefined,
       flowVersionId ?? undefined,
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, user.id, flow, promptContext, flowPackage).catch(
+    executeFlowInBackground(executionId, flowId, user.id, orgId, flow, promptContext, flowPackage).catch(
       (err) => {
         logger.error("Unhandled error in background execution", {
           executionId,

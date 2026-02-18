@@ -41,16 +41,18 @@ export function createShareRouter() {
       return c.json({ error: "TOKEN_INVALID", message: "Ce lien n'est plus valide." }, 410);
     }
 
-    const flow = await getFlow(shareToken.flow_id);
+    const orgId = shareToken.org_id as string;
+    const flow = await getFlow(shareToken.flow_id, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow introuvable." }, 404);
     }
 
     // Resolve service statuses
-    const adminConns = await getAdminConnections(flow.id);
+    const adminConns = await getAdminConnections(orgId, flow.id);
     const serviceStatuses = await resolveServiceStatuses(
       flow.manifest.requires.services,
       adminConns,
+      orgId,
     );
 
     const result: Record<string, unknown> = {
@@ -95,9 +97,9 @@ export function createShareRouter() {
       );
     }
 
-    const { id: tokenId, flow_id: flowId, created_by: userId } = consumed;
+    const { id: tokenId, flow_id: flowId, created_by: userId, org_id: orgId } = consumed;
 
-    const flow = await getFlow(flowId);
+    const flow = await getFlow(flowId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow introuvable." }, 404);
     }
@@ -170,15 +172,15 @@ export function createShareRouter() {
     }
 
     // Resolve config, previous state, and tokens using the admin's (created_by) credentials
-    const adminConns = await getAdminConnections(flowId);
-    const config = await getFlowConfig(flowId);
-    const previousState = await getLastExecutionState(flowId, userId);
+    const adminConns = await getAdminConnections(orgId, flowId);
+    const config = await getFlowConfig(orgId, flowId);
+    const previousState = await getLastExecutionState(flowId, userId, orgId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
       const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
       if (tokenUserId) {
-        const accessToken = await getAccessToken(svc.provider, tokenUserId);
+        const accessToken = await getAccessToken(svc.provider, orgId, tokenUserId);
         if (accessToken) tokens[svc.id] = accessToken;
       }
     }
@@ -206,6 +208,7 @@ export function createShareRouter() {
       executionId,
       flowId,
       userId,
+      orgId,
       body.input ?? null,
       undefined,
       flowVersionId ?? undefined,
@@ -213,7 +216,7 @@ export function createShareRouter() {
     await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
-    executeFlowInBackground(executionId, flowId, userId, flow, promptContext, flowPackage).catch(
+    executeFlowInBackground(executionId, flowId, userId, orgId, flow, promptContext, flowPackage).catch(
       (err) => {
         logger.error("Unhandled error in shared execution", {
           executionId,

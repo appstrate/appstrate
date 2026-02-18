@@ -20,6 +20,30 @@ export type Schedule = Tables<"flow_schedules">;
 
 export type Profile = Tables<"profiles">;
 
+// --- Organization Types ---
+
+export type OrgRole = "owner" | "admin" | "member";
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+export interface OrganizationMember {
+  orgId: string;
+  userId: string;
+  role: OrgRole;
+  joinedAt: string;
+  displayName?: string;
+  email?: string;
+}
+
+export interface OrganizationWithRole extends Organization {
+  role: OrgRole;
+}
+
 // --- JSON Schema Types ---
 
 export interface JSONSchemaProperty {

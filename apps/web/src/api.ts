@@ -1,4 +1,5 @@
 import { supabase } from "./lib/supabase";
+import { getCurrentOrgId } from "./hooks/use-org";
 
 const API_BASE = "/api";
 
@@ -14,7 +15,11 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     data: { session },
   } = await supabase.auth.getSession();
   const token = session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const orgId = getCurrentOrgId();
+  if (orgId) headers["X-Org-Id"] = orgId;
+  return headers;
 }
 
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {

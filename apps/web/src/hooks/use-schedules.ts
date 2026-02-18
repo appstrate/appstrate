@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { api } from "../api";
+import { useCurrentOrgId } from "./use-org";
 import type { Schedule } from "@appstrate/shared-types";
 
 export function useAllSchedules() {
+  const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["schedules"],
+    queryKey: ["schedules", orgId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("flow_schedules")
@@ -18,8 +20,9 @@ export function useAllSchedules() {
 }
 
 export function useSchedules(flowId: string | undefined) {
+  const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["schedules", flowId],
+    queryKey: ["schedules", orgId, flowId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("flow_schedules")
@@ -33,9 +36,8 @@ export function useSchedules(flowId: string | undefined) {
   });
 }
 
-function invalidateSchedules(qc: ReturnType<typeof useQueryClient>, flowId?: string) {
+function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["schedules"] });
-  if (flowId) qc.invalidateQueries({ queryKey: ["schedules", flowId] });
 }
 
 // Mutations still go through the API (croner sync needed on the backend)
@@ -54,11 +56,11 @@ export function useCreateSchedule(flowId: string) {
         body: JSON.stringify(data),
       });
     },
-    onSuccess: () => invalidateSchedules(qc, flowId),
+    onSuccess: () => invalidateSchedules(qc),
   });
 }
 
-export function useUpdateSchedule(flowId?: string) {
+export function useUpdateSchedule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -77,16 +79,16 @@ export function useUpdateSchedule(flowId?: string) {
         body: JSON.stringify(data),
       });
     },
-    onSuccess: () => invalidateSchedules(qc, flowId),
+    onSuccess: () => invalidateSchedules(qc),
   });
 }
 
-export function useDeleteSchedule(flowId?: string) {
+export function useDeleteSchedule() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       return api(`/schedules/${id}`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateSchedules(qc, flowId),
+    onSuccess: () => invalidateSchedules(qc),
   });
 }

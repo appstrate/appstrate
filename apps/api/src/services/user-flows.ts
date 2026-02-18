@@ -11,6 +11,7 @@ export async function getFlowById(id: string): Promise<FlowRow | null> {
 
 export async function insertUserFlow(
   id: string,
+  orgId: string,
   manifest: Record<string, unknown>,
   prompt: string,
 ): Promise<FlowRow> {
@@ -18,6 +19,7 @@ export async function insertUserFlow(
     .from("flows")
     .insert({
       id,
+      org_id: orgId,
       manifest: manifest as Json,
       prompt,
     })
