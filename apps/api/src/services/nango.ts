@@ -72,17 +72,13 @@ export async function createApiKeyConnection(
 export async function listConnections(orgId: string, userId: string): Promise<ConnectionStatus[]> {
   const endUserId = nangoEndUserId(orgId, userId);
   try {
-    const { connections } = await nango.listConnections();
-    // Filter connections by composite end_user.id
-    const userConnections = connections.filter(
-      (c) => (c as unknown as { end_user?: { id?: string } }).end_user?.id === endUserId,
-    );
+    const { connections } = await nango.listConnections({ userId: endUserId });
     // Rebuild cache for this org:user
     const prefix = `${orgId}:${userId}:`;
     for (const key of connectionIdCache.keys()) {
       if (key.startsWith(prefix)) connectionIdCache.delete(key);
     }
-    return userConnections.map((c) => {
+    return connections.map((c) => {
       connectionIdCache.set(cacheKey(orgId, userId, c.provider_config_key), c.connection_id);
       return {
         provider: c.provider_config_key,
