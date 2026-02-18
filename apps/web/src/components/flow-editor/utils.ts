@@ -98,6 +98,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     provider: s.provider,
     description: s.description,
     scopes: "",
+    connectionMode: s.connectionMode === "admin" ? "admin" : "user",
   }));
 
   return {
@@ -147,6 +148,7 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
             .map((v) => v.trim())
             .filter(Boolean);
           if (scopes.length > 0) svc.scopes = scopes;
+          svc.connectionMode = s.connectionMode || "user";
           return svc;
         }),
       skills: state.skills,
@@ -190,6 +192,7 @@ export function payloadToFormState(payload: {
     provider: (s.provider as string) || "",
     description: (s.description as string) || "",
     scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
+    connectionMode: (s.connectionMode as "user" | "admin") || "user",
   }));
 
   const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
