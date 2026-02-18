@@ -1,6 +1,6 @@
 # Create a New Appstrate Flow
 
-You are creating a new flow for the Appstrate platform. A flow is a one-shot AI task executed in an ephemeral Docker container by Claude Code CLI. The user will describe what the flow should do, and you will generate the complete flow package.
+You are creating a new flow for the Appstrate platform. A flow is a one-shot AI task executed in an ephemeral Docker container by the Pi Coding Agent. The user will describe what the flow should do, and you will generate the complete flow package.
 
 ## What You Must Produce
 
@@ -9,7 +9,7 @@ A flow is a directory containing:
 ```
 {flow-name}/
   manifest.json      # Required: flow definition, schema, metadata
-  prompt.md          # Required: agent instructions (the prompt Claude Code will execute)
+  prompt.md          # Required: agent instructions (the prompt the Pi agent will execute)
   skills/            # Optional: reusable knowledge modules
     {skill-id}/
       SKILL.md       # Skill definition with YAML frontmatter
@@ -158,14 +158,14 @@ When defined, the platform validates the agent's JSON output. On mismatch, it se
 
 **execution**: Resource limits:
 - `timeout`: Seconds before the container is killed (120-600, typically 180-300)
-- `maxTokens`: Token budget for Claude Code (10000-100000)
+- `maxTokens`: Token budget for the agent (10000-100000)
 - `outputRetries`: Number of retry attempts for output validation (0-5, default 2)
 
 Scale these to flow complexity: simple read-only = 180s/30000, complex multi-service = 300-600s/100000.
 
 ## Step 3: Write prompt.md
 
-The prompt is the core of the flow. It's what Claude Code executes inside the container.
+The prompt is the core of the flow. It's what the Pi agent executes inside the container.
 
 ### How Context is Injected
 
@@ -299,8 +299,8 @@ Concrete examples of input → output.
 ### How Skills Work at Runtime
 
 1. The flow directory (including `skills/`) is mounted read-only at `/workspace/flow/`
-2. The entrypoint creates symlinks: `/workspace/flow/skills/{id}/` → `/workspace/.claude/skills/{id}/`
-3. Claude Code can discover and read skills from `/workspace/.claude/skills/`
+2. The entrypoint creates symlinks: `/workspace/flow/skills/{id}/` → `/workspace/.pi/skills/{id}/`
+3. The Pi agent can discover and read skills from `/workspace/.pi/skills/`
 4. Skills are also listed in the flow detail API response (`requires.skills[]`)
 
 ## Step 5: Write Files and Package
