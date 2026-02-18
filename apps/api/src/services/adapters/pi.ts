@@ -1,6 +1,9 @@
-import type { JSONSchemaObject } from "@appstrate/shared-types";
-import type { ExecutionAdapter, ExecutionMessage, FileReference } from "./types.ts";
-import { buildEnrichedPrompt, extractJsonResult, filterFlowEnvVars } from "./prompt-builder.ts";
+import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.ts";
+import {
+  buildEnrichedPrompt,
+  extractJsonResult,
+  buildContainerTokenEnv,
+} from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { createContainer } from "../docker.ts";
 
@@ -9,23 +12,22 @@ const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
 export class PiAdapter implements ExecutionAdapter {
   async *execute(
     executionId: string,
-    envVars: Record<string, string>,
+    ctx: PromptContext,
     timeout: number,
-    outputSchema?: JSONSchemaObject,
     flowPackage?: Buffer,
-    files?: FileReference[],
   ): AsyncGenerator<ExecutionMessage> {
-    const prompt = buildEnrichedPrompt(envVars, outputSchema, files);
+    const prompt = buildEnrichedPrompt(ctx);
 
     // Resolve LLM provider + model from env
     const provider = process.env.LLM_PROVIDER || "anthropic";
-    const modelId = process.env.LLM_MODEL_ID || envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
+    const modelId = process.env.LLM_MODEL_ID || ctx.llmModel;
 
     // Build container environment variables
     const containerEnv: Record<string, string> = {
       FLOW_PROMPT: prompt,
       LLM_PROVIDER: provider,
       LLM_MODEL_ID: modelId,
+      ...buildContainerTokenEnv(ctx.tokens),
     };
 
     // Forward provider API keys from host environment
@@ -43,9 +45,6 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv[key] = process.env[key]!;
       }
     }
-
-    // Forward flow-specific env vars
-    filterFlowEnvVars(envVars, containerEnv);
 
     // Create the container
     const containerId = await createContainer(executionId, containerEnv, {

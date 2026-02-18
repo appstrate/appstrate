@@ -29,14 +29,28 @@ export interface FileReference {
   url: string;
 }
 
+export interface PromptContext {
+  rawPrompt: string;
+  tokens: Record<string, string>;
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
+  input: Record<string, unknown>;
+  files?: FileReference[];
+  schemas: {
+    input?: import("@appstrate/shared-types").JSONSchemaObject;
+    config?: import("@appstrate/shared-types").JSONSchemaObject;
+    output?: import("@appstrate/shared-types").JSONSchemaObject;
+  };
+  services: Array<{ id: string; provider: string; description: string }>;
+  llmModel: string;
+}
+
 export interface ExecutionAdapter {
   execute(
     executionId: string,
-    envVars: Record<string, string>,
+    ctx: PromptContext,
     timeout: number,
-    outputSchema?: import("@appstrate/shared-types").JSONSchemaObject,
     flowPackage?: Buffer,
-    files?: FileReference[],
   ): AsyncGenerator<ExecutionMessage>;
 }
 
