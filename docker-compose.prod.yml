@@ -50,13 +50,6 @@ services:
       appstrate-redis:
         condition: service_healthy
 
-  appstrate-claude-code:
-    build:
-      context: ./runtime-claude-code
-    image: appstrate-claude-code:latest
-    restart: "no"
-    entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
-
   appstrate-pi:
     build:
       context: ./runtime-pi
@@ -76,22 +69,19 @@ services:
     environment:
       - PORT=3000
       - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-5-20250929}
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - NANGO_URL=http://nango:8080
       - NANGO_PUBLIC_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_SECRET_KEY=${NANGO_SECRET_KEY}
-      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-claude-code}
+      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       nango:
         condition: service_started
-      appstrate-claude-code:
-        condition: service_completed_successfully
       appstrate-pi:
         condition: service_completed_successfully
 

@@ -7,7 +7,6 @@ node_modules
 .env.*
 !.env.example
 supabase
-runtime-claude-code
 .turbo
 apps/web/node_modules
 apps/api/node_modules

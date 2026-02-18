@@ -15,9 +15,9 @@ bunx supabase start           # Runs migrations automatically from supabase/migr
 bun run setup-nango           # Idempotent: safe to run multiple times
 
 # 4. Build runtime image
-bun run build-runtime         # docker build -t appstrate-claude-code ./runtime-claude-code
+bun run build-runtime         # docker build -t appstrate-pi ./runtime-pi
 
-# 5. Configure .env (copy .env.example, set CLAUDE_CODE_OAUTH_TOKEN + Supabase keys)
+# 5. Configure .env (copy .env.example, set Pi adapter keys + Supabase keys)
 
 # 6. Build everything (shared-types + frontend)
 bun run build                 # turbo build → apps/web/dist/
@@ -42,7 +42,7 @@ bun run dev                   # turbo dev → Hono on :3000
 | Scheduling        | **croner** (cron library)                         | In-memory cron jobs with DB persistence + distributed locking (`schedule_runs`) |
 | ZIP import        | **fflate** (decompression)                        | User flow import from ZIP files                                             |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                        |
-| Container runtime | **Claude Code CLI** or **Pi Coding Agent**         | Switchable via `EXECUTION_ADAPTER` env var (claude-code or pi)              |
+| Container runtime | **Pi Coding Agent**                                | Uses Pi Coding Agent SDK, supports multiple LLM providers via API keys      |
 | Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 HashRouter, builds to `apps/web/dist/`         |
 | Real-time         | **Supabase Realtime** (postgres_changes)          | Execution status + logs via CDC (denormalized `user_id` on logs)            |
 | Type generation   | **Supabase CLI**                                  | `bun run gen:types` → `packages/shared-types/src/database.ts`              |
@@ -66,7 +66,7 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. For user flows, skills are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime.
 - **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions ship with the Pi runtime image. For user flows, custom extensions are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime. Declared in `manifest.requires.extensions[]`.
 - **Flow packages (ZIP)**: User flows are stored as ZIP packages in Supabase Storage (`flow-packages` bucket). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
-- **Dual adapter system**: The platform supports two execution adapters switchable via `EXECUTION_ADAPTER` env var: `claude-code` (default, uses Claude Code CLI + OAuth token) and `pi` (uses Pi Coding Agent SDK, supports multiple LLM providers via API keys). Shared prompt building logic lives in `adapters/prompt-builder.ts`.
+- **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-user isolation**: All data tables have Row Level Security (RLS). Users see only their own executions, state, and schedules. Admins see everything. Flow configs and user flows are readable by all authenticated users, writable by admins only.
 - **Auth flow**: Frontend uses `@supabase/supabase-js` with anon key → `supabase.auth.signInWithPassword()` → JWT stored in Supabase session → sent as `Authorization: Bearer {jwt}` on all API calls. Backend verifies JWT via `supabase.auth.getUser(token)` with service role key.
 
@@ -115,7 +115,7 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |-- #/schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
      |-- #/services (Services List) -->|-- GET /auth/integrations (with authMode)
      |                                |
-     |            Ephemeral Container (Claude Code CLI or Pi Coding Agent)
+     |            Ephemeral Container (Pi Coding Agent)
      |            - Receives: FLOW_PROMPT, TOKEN_*, LLM_MODEL, adapter-specific auth
      |            - Flow package ZIP mounted + extracted (skills, extensions)
      |            - Agent executes the prompt with access to bash/tools
@@ -163,12 +163,11 @@ appstrate/
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
-│   │       │   ├── docker.ts         # dockerFetch(), createContainer (generic), createClaudeCodeContainer, streamLogs, etc.
+│   │       │   ├── docker.ts         # dockerFetch(), createContainer (generic), streamLogs, etc.
 │   │       │   ├── adapters/
 │   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, PromptContext, TimeoutError
-│   │       │   │   ├── index.ts      # getAdapter() factory (claude-code|pi), re-exports
+│   │       │   │   ├── index.ts      # getAdapter() factory, re-exports
 │   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, buildContainerTokenEnv, extractJsonResult, buildRetryPrompt
-│   │       │   │   ├── claude-code.ts # ClaudeCodeAdapter (stream parsing for Claude Code CLI JSON events)
 │   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, executions (with state), execution_logs tables
@@ -251,10 +250,6 @@ appstrate/
 │       └── extensions/               # Optional: Pi agent extensions (TypeScript tools)
 │           └── {id}.ts               # Extension file (custom tool for pi adapter)
 │
-├── runtime-claude-code/              # Docker image for Claude Code CLI
-│   ├── Dockerfile
-│   └── entrypoint.sh
-│
 ├── runtime-pi/                       # Docker image for Pi Coding Agent SDK
 │   ├── Dockerfile
 │   ├── package.json
@@ -329,7 +324,7 @@ appstrate/
 ```
 execution_started   → {executionId, startedAt}
 dependency_check    → {services: {gmail: "ok", clickup: "ok"}}
-adapter_started     → {adapter: "claude-code"}
+adapter_started     → {adapter: "pi"}
 progress            → {message: "..."}           (repeated)
 result              → {summary, tickets_created, ...}
 execution_completed → {executionId, status: "success"|"failed"|"timeout"}
@@ -403,13 +398,9 @@ Flows can include agent skills in `skills/{skill-id}/SKILL.md`. The SKILL.md fil
 
 ## Container Protocol
 
-The Claude Code runtime container streams JSON events on stdout. The `ClaudeCodeAdapter` (`apps/api/src/services/adapters/claude-code.ts`) parses these events:
+The Pi runtime container streams JSON line events on stdout. The `PiAdapter` (`apps/api/src/services/adapters/pi.ts`) parses these events into `ExecutionMessage` types (progress, result, etc.).
 
-- **`assistant` messages** with text content → forwarded as `progress` SSE events
-- **`result` messages** → parsed for JSON code blocks containing the final result
-- The last ` ```json ``` ` block in assistant text is extracted as the result
-
-The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives only `FLOW_PROMPT`, `TOKEN_*`, `LLM_MODEL`, and adapter-specific auth vars. For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.claude/skills/` or `.pi/skills/`, extensions → loaded dynamically).
+The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives `FLOW_PROMPT`, `TOKEN_*`, `LLM_MODEL`, and Pi-specific auth vars (`LLM_PROVIDER`, `LLM_MODEL_ID`, provider API keys). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
@@ -419,7 +410,6 @@ If `result.state` is present, the platform persists it to the `state` column of 
 
 ```env
 LLM_MODEL=claude-sonnet-4-5-20250929
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  # Run `claude setup-token` to generate
 
 # Supabase (cloud or self-hosted)
 SUPABASE_URL=http://localhost:8000          # or https://xxx.supabase.co
@@ -439,6 +429,16 @@ NANGO_ENCRYPTION_KEY=<base64-256bit>  # openssl rand -base64 32 (required for Co
 PORT=3000
 DOCKER_SOCKET=/var/run/docker.sock
 PLATFORM_API_URL=http://host.docker.internal:3000  # Optional: override container-to-host URL
+
+# Execution Adapter (pi is the default and only active adapter)
+EXECUTION_ADAPTER=pi
+
+# Pi Adapter config
+LLM_PROVIDER=anthropic
+LLM_MODEL_ID=claude-sonnet-4-5-20250929
+ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# GEMINI_API_KEY=...
 ```
 
 ## Known Issues & Technical Debt
