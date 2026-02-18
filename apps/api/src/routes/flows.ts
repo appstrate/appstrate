@@ -12,8 +12,7 @@ import {
   bindAdminConnection,
   unbindAdminConnection,
 } from "../services/state.ts";
-import { getConnectionStatus, getProviderAuthMode } from "../services/nango.ts";
-import { getUserProfile } from "../lib/supabase.ts";
+import { getConnectionStatus, resolveServiceStatuses } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
 import { getFlowById } from "../services/user-flows.ts";
 import { listFlows } from "../services/flow-service.ts";
@@ -58,57 +57,9 @@ export function createFlowsRouter() {
     const user = c.get("user");
     const m = flow.manifest;
 
-    // Fetch admin connections for this flow
+    // Fetch admin connections and resolve service statuses
     const adminConns = await getAdminConnections(flow.id);
-
-    // Check service connections in parallel (per-user or admin-provided)
-    const serviceStatuses = await Promise.all(
-      m.requires.services.map(async (svc) => {
-        const mode = svc.connectionMode ?? "user";
-        const authMode = await getProviderAuthMode(svc.provider);
-
-        if (mode === "admin") {
-          const adminUserId = adminConns[svc.id];
-          if (adminUserId) {
-            const [conn, adminProfile] = await Promise.all([
-              getConnectionStatus(svc.provider, adminUserId),
-              getUserProfile(adminUserId),
-            ]);
-            return {
-              id: svc.id,
-              provider: svc.provider,
-              description: svc.description,
-              status: conn.status,
-              authMode,
-              connectionMode: "admin" as const,
-              adminProvided: true,
-              adminUserId,
-              adminDisplayName: adminProfile?.display_name ?? undefined,
-            };
-          }
-          return {
-            id: svc.id,
-            provider: svc.provider,
-            description: svc.description,
-            status: "not_connected" as const,
-            authMode,
-            connectionMode: "admin" as const,
-            adminProvided: false,
-          };
-        }
-
-        // Default user mode
-        const conn = await getConnectionStatus(svc.provider, user.id);
-        return {
-          id: svc.id,
-          provider: svc.provider,
-          description: svc.description,
-          status: conn.status,
-          authMode,
-          connectionMode: "user" as const,
-        };
-      }),
-    );
+    const serviceStatuses = await resolveServiceStatuses(m.requires.services, adminConns, user.id);
 
     // Get config (global), state (per-user), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content
@@ -340,8 +291,7 @@ export function createFlowsRouter() {
           return c.json(
             {
               error: "SHARE_NOT_READY",
-              message:
-                "Tous les services admin doivent etre lies avant de generer un lien public.",
+              message: "Tous les services admin doivent etre lies avant de generer un lien public.",
             },
             400,
           );

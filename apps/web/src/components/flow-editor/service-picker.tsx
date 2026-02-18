@@ -21,7 +21,10 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
   const addFromIntegration = (uniqueKey: string, provider: string) => {
     const alreadySelected = value.some((s) => s.id === uniqueKey);
     if (alreadySelected) return;
-    onChange([...value, { id: uniqueKey, provider, description: "", scopes: "", connectionMode: "user" }]);
+    onChange([
+      ...value,
+      { id: uniqueKey, provider, description: "", scopes: "", connectionMode: "user" },
+    ]);
   };
 
   const selectedIds = new Set(value.map((s) => s.id));

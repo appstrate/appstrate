@@ -230,11 +230,7 @@ export function FlowDetailPage() {
         >
           Lancer
         </button>
-        <ShareDropdown
-          flowId={flowId!}
-          isAdmin={isAdmin}
-          services={detail.requires.services}
-        />
+        <ShareDropdown flowId={flowId!} isAdmin={isAdmin} services={detail.requires.services} />
         {isAdmin && (
           <div className="actions-admin">
             <button onClick={() => setConfigOpen(true)}>Configurer</button>

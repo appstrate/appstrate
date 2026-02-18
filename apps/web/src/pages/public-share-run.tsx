@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, ServiceStatus } from "@appstrate/shared-types";
 import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
 import { ResultRenderer } from "../components/result-renderer";
@@ -12,6 +12,7 @@ interface FlowInfo {
   displayName: string;
   description?: string;
   input?: { schema: JSONSchemaObject };
+  services?: ServiceStatus[];
   consumed: boolean;
   execution?: {
     id: string;
@@ -218,6 +219,38 @@ export function PublicShareRunPage() {
           <h2>{flowInfo.displayName}</h2>
           {flowInfo.description && <p className="description">{flowInfo.description}</p>}
         </div>
+
+        {flowInfo.services && flowInfo.services.length > 0 && (
+          <div className="shareable-run-services">
+            {flowInfo.services.map((svc) => {
+              const isConnected = svc.status === "connected";
+              if (svc.connectionMode === "admin" && svc.adminProvided) {
+                return (
+                  <div key={svc.id} className="service admin-provided" title={svc.description}>
+                    <span className="status-dot connected" />
+                    {svc.id}
+                    <span className="admin-service-badge">{svc.adminDisplayName ?? "admin"}</span>
+                  </div>
+                );
+              }
+              if (svc.connectionMode === "admin") {
+                return (
+                  <div key={svc.id} className="service admin-pending" title={svc.description}>
+                    <span className="status-dot disconnected" />
+                    {svc.id}
+                    <span className="admin-service-badge pending">en attente</span>
+                  </div>
+                );
+              }
+              return (
+                <div key={svc.id} className="service" title={svc.description}>
+                  <span className={`status-dot ${isConnected ? "connected" : "disconnected"}`} />
+                  {svc.id}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {pageStatus === "idle" && (
           <div className="shareable-run-form">

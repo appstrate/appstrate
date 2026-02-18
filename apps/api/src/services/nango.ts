@@ -1,5 +1,8 @@
 import { Nango } from "@nangohq/node";
 import { logger } from "../lib/logger.ts";
+import { getUserProfile } from "../lib/supabase.ts";
+import type { FlowServiceRequirement } from "../types/index.ts";
+import type { ServiceStatus } from "@appstrate/shared-types";
 
 const nango = new Nango({
   secretKey: process.env.NANGO_SECRET_KEY || "",
@@ -198,4 +201,63 @@ export async function getIntegrationsWithStatus(userId: string): Promise<Integra
     }),
   );
   return results;
+}
+
+/**
+ * Resolve service statuses for a flow's required services.
+ * Used by both flow detail and public share routes.
+ */
+export async function resolveServiceStatuses(
+  services: FlowServiceRequirement[],
+  adminConns: Record<string, string>,
+  userId?: string,
+): Promise<ServiceStatus[]> {
+  return Promise.all(
+    services.map(async (svc) => {
+      const mode = svc.connectionMode ?? "user";
+      const authMode = await getProviderAuthMode(svc.provider);
+
+      if (mode === "admin") {
+        const adminUserId = adminConns[svc.id];
+        if (adminUserId) {
+          const [conn, adminProfile] = await Promise.all([
+            getConnectionStatus(svc.provider, adminUserId),
+            getUserProfile(adminUserId),
+          ]);
+          return {
+            id: svc.id,
+            provider: svc.provider,
+            description: svc.description,
+            status: conn.status,
+            authMode,
+            connectionMode: "admin" as const,
+            adminProvided: true,
+            adminUserId,
+            adminDisplayName: adminProfile?.display_name ?? undefined,
+          };
+        }
+        return {
+          id: svc.id,
+          provider: svc.provider,
+          description: svc.description,
+          status: "not_connected" as const,
+          authMode,
+          connectionMode: "admin" as const,
+          adminProvided: false,
+        };
+      }
+
+      const conn = userId
+        ? await getConnectionStatus(svc.provider, userId)
+        : { status: "not_connected" as const };
+      return {
+        id: svc.id,
+        provider: svc.provider,
+        description: svc.description,
+        status: conn.status,
+        authMode,
+        connectionMode: "user" as const,
+      };
+    }),
+  );
 }
