@@ -2,6 +2,7 @@ services:
   appstrate-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    mem_limit: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-appstrate}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -18,6 +19,8 @@ services:
   appstrate-redis:
     image: redis:7.2-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -28,6 +31,7 @@ services:
     image: nangohq/nango-server:hosted
     platform: linux/amd64
     restart: unless-stopped
+    mem_limit: 1g
     networks:
       - default
     environment:
@@ -64,6 +68,7 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     restart: unless-stopped
+    mem_limit: 512m
     networks:
       - default
     environment:
