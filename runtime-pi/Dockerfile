@@ -1,7 +1,7 @@
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates unzip && rm -rf /var/lib/apt/lists/*
+    git curl ca-certificates unzip python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /runtime
 
