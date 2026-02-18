@@ -281,17 +281,29 @@ async function triggerScheduledExecution(
       .eq("schedule_id", scheduleId)
       .eq("fire_time", fireTime);
 
-    logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId, orgId });
+    logger.info("Triggering scheduled execution", {
+      executionId,
+      flowId,
+      scheduleId,
+      userId,
+      orgId,
+    });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, userId, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in scheduled execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      flowId,
+      userId,
+      orgId,
+      flow,
+      promptContext,
+      flowPackage,
+    ).catch((err) => {
+      logger.error("Unhandled error in scheduled execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     // Update schedule timestamps
     const job = activeJobs.get(scheduleId);

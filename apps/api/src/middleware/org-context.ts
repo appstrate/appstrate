@@ -10,10 +10,7 @@ export function requireOrgContext() {
   return async (c: Context<AppEnv>, next: Next) => {
     const orgId = c.req.header("X-Org-Id");
     if (!orgId) {
-      return c.json(
-        { error: "MISSING_ORG_CONTEXT", message: "Header X-Org-Id est requis" },
-        400,
-      );
+      return c.json({ error: "MISSING_ORG_CONTEXT", message: "Header X-Org-Id est requis" }, 400);
     }
 
     const user = c.get("user");

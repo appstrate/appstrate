@@ -69,10 +69,7 @@ export async function createApiKeyConnection(
   }
 }
 
-export async function listConnections(
-  orgId: string,
-  userId: string,
-): Promise<ConnectionStatus[]> {
+export async function listConnections(orgId: string, userId: string): Promise<ConnectionStatus[]> {
   const endUserId = nangoEndUserId(orgId, userId);
   try {
     const { connections } = await nango.listConnections();

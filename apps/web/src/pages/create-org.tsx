@@ -106,11 +106,7 @@ export function CreateOrgPage() {
             </div>
           </div>
           {error && <p className="form-error">{error}</p>}
-          <button
-            className="primary login-btn"
-            type="submit"
-            disabled={createMutation.isPending}
-          >
+          <button className="primary login-btn" type="submit" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Creation..." : "Creer l'organisation"}
           </button>
         </form>

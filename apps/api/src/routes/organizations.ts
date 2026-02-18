@@ -52,10 +52,7 @@ router.post("/", async (c) => {
   }
 
   if (!(await isSlugAvailable(slug))) {
-    return c.json(
-      { error: "SLUG_TAKEN", message: `Le slug '${slug}' est deja utilise` },
-      400,
-    );
+    return c.json({ error: "SLUG_TAKEN", message: `Le slug '${slug}' est deja utilise` }, 400);
   }
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
@@ -192,10 +189,7 @@ router.post("/:orgId/members", async (c) => {
 
   const targetUser = await findUserByEmail(body.email.trim());
   if (!targetUser) {
-    return c.json(
-      { error: "USER_NOT_FOUND", message: "Aucun utilisateur avec cet email" },
-      404,
-    );
+    return c.json({ error: "USER_NOT_FOUND", message: "Aucun utilisateur avec cet email" }, 404);
   }
 
   try {
@@ -233,10 +227,7 @@ router.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "NOT_FOUND", message: "Membre introuvable" }, 404);
   }
   if (target.role === "owner") {
-    return c.json(
-      { error: "FORBIDDEN", message: "Impossible de retirer le proprietaire" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Impossible de retirer le proprietaire" }, 403);
   }
 
   await removeMember(orgId, targetUserId);
@@ -267,10 +258,7 @@ router.put("/:orgId/members/:userId", async (c) => {
 
   // Cannot change own role
   if (targetUserId === user.id) {
-    return c.json(
-      { error: "FORBIDDEN", message: "Impossible de changer votre propre role" },
-      400,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Impossible de changer votre propre role" }, 400);
   }
 
   await updateMemberRole(orgId, targetUserId, body.role as "member" | "admin");

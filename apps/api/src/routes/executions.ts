@@ -154,11 +154,19 @@ export async function executeFlowInBackground(
           if (remaining < MIN_RETRY_TIME_MS) break;
 
           const attempt = maxRetries - retriesLeft + 1;
-          await appendExecutionLog(executionId, userId, orgId, "system", "output_validation_retry", null, {
-            attempt,
-            maxRetries,
-            errors: outputValidation.errors,
-          });
+          await appendExecutionLog(
+            executionId,
+            userId,
+            orgId,
+            "system",
+            "output_validation_retry",
+            null,
+            {
+              attempt,
+              maxRetries,
+              errors: outputValidation.errors,
+            },
+          );
 
           const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
           const retryCtx: PromptContext = {
@@ -203,10 +211,18 @@ export async function executeFlowInBackground(
         }
 
         if (!outputValidation.valid) {
-          await appendExecutionLog(executionId, userId, orgId, "system", "output_validation", null, {
-            valid: false,
-            errors: outputValidation.errors,
-          });
+          await appendExecutionLog(
+            executionId,
+            userId,
+            orgId,
+            "system",
+            "output_validation",
+            null,
+            {
+              valid: false,
+              errors: outputValidation.errors,
+            },
+          );
           logger.warn("Output validation failed", {
             executionId,
             errors: outputValidation.errors,
@@ -468,14 +484,20 @@ export function createExecutionsRouter() {
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, user.id, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in background execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      flowId,
+      user.id,
+      orgId,
+      flow,
+      promptContext,
+      flowPackage,
+    ).catch((err) => {
+      logger.error("Unhandled error in background execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ executionId });
   });
