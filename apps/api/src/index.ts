@@ -14,6 +14,7 @@ import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
+import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import type { AppEnv } from "./types/index.ts";
@@ -162,6 +163,10 @@ app.route("/auth", authRouter);
 // Public share routes (no JWT required — path doesn't start with /api/ or /auth/)
 const shareRouter = createShareRouter();
 app.route("/share", shareRouter);
+
+// Internal routes (container-to-host, auth via execution token — no JWT)
+const internalRouter = createInternalRouter();
+app.route("/internal", internalRouter);
 
 // Static files for UI
 app.use("/*", serveStatic({ root: "./apps/web/dist" }));

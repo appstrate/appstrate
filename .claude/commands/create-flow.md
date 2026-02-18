@@ -131,17 +131,7 @@ Field types: `string`, `number`, `boolean`, `array`, `object`. Values are automa
 ```
 Supports `default`, `required`, `enum`. Values are automatically injected as a structured `## Configuration` section before the prompt, with field descriptions and types from the schema.
 
-**state.schema** (optional): Data persisted between runs for incremental processing:
-```json
-"state": {
-  "enabled": true,
-  "schema": {
-    "last_run": { "type": "string", "format": "date-time" },
-    "last_item_id": { "type": "string" }
-  }
-}
-```
-The agent includes a `state` object in its JSON output, which the platform persists. Available next run as a structured `## Previous State` section (JSON) injected before the prompt.
+**Execution-level state** (automatic): The agent can include a `state` object in its JSON output. The platform persists it on the execution record. Before the next run, the latest execution's state is injected as `## Previous State`. The agent can also fetch historical executions on demand via `GET /internal/execution-history` (authenticated with `$EXECUTION_TOKEN`, documented in `## Execution History API` section). No manifest declaration needed — state is free-form.
 
 **output.schema** (recommended): Expected result structure. Enables Zod validation + automatic retry:
 ```json
@@ -183,7 +173,8 @@ The platform automatically prepends structured sections before the prompt:
 - `## API Access` — Token env vars and curl examples for each connected service
 - `## User Input` — All input field values with descriptions and types from the schema
 - `## Configuration` — All config field values with descriptions and types from the schema
-- `## Previous State` — JSON dump of persisted state (if any)
+- `## Previous State` — latest execution's state JSON (if any)
+- `## Execution History API` — curl command to fetch historical executions on demand
 - `## Output Format` — Expected output structure from output.schema
 
 **The prompt.md is appended as-is after these sections.** No template interpolation — write plain Markdown. The agent sees all context in the structured sections above the prompt.
@@ -215,6 +206,7 @@ Explain the expected output structure.
 
 ## Incremental Processing
 If previous state is available (see Previous State section above), only process items since the last run.
+For deeper history, use the Execution History API to fetch older executions on demand.
 On first run, process all recent items.
 
 ## Output Format
@@ -246,7 +238,7 @@ Return a JSON object in a ```json code block with the following structure:
 
 3. **Read-only by default**: Always state explicitly that the agent must not modify source data (no archiving emails, no deleting tasks, no sending messages) unless the flow's purpose requires writes.
 
-4. **Handle incremental runs**: If the flow has state, instruct the agent to check the Previous State section for `last_run` and filter data since last execution. Also handle the first-run case (no state available).
+4. **Handle incremental runs**: If the flow uses state, instruct the agent to check the Previous State section for `last_run` and filter data since last execution. For deeper history, the agent can use the Execution History API. Also handle the first-run case (no previous state).
 
 5. **Define output precisely**: Describe each field, its type, and what it contains. The more specific, the better the agent's output quality.
 
@@ -258,7 +250,7 @@ Return a JSON object in a ```json code block with the following structure:
 
 9. **JSON output is mandatory**: The agent MUST output a ```json code block. This is how the platform extracts the result. Always end the prompt with a clear output format section.
 
-10. **State persistence**: If using state, always instruct the agent to include a `state` object in its JSON output. The platform persists this automatically for the next run.
+10. **State persistence**: If using state, always instruct the agent to include a `state` object in its JSON output. The platform persists this on the execution record and injects the latest state as `## Previous State` on the next run. Historical executions are available on demand via the Execution History API.
 
 ## Step 4: Create Skills (Optional)
 
@@ -470,14 +462,6 @@ If the flow needs a service not in this list, tell the user they need to:
         "enum": ["fr", "en"],
         "description": "Output language"
       }
-    }
-  },
-
-  "state": {
-    "enabled": true,
-    "schema": {
-      "last_run": { "type": "string", "format": "date-time" },
-      "last_email_id": { "type": "string" }
     }
   },
 

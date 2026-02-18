@@ -33,7 +33,8 @@ export interface PromptContext {
   rawPrompt: string;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
-  state: Record<string, unknown>;
+  previousState: Record<string, unknown> | null;
+  executionApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: {

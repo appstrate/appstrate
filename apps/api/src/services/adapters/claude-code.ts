@@ -34,6 +34,12 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
       ...buildContainerTokenEnv(ctx.tokens),
     };
 
+    // Inject execution API credentials for container-to-host calls
+    if (ctx.executionApi) {
+      containerEnv.EXECUTION_TOKEN = ctx.executionApi.token;
+      containerEnv.PLATFORM_API_URL = ctx.executionApi.url;
+    }
+
     // Create the container
     const containerId = await createContainer(executionId, containerEnv, {
       image: CLAUDE_CODE_RUNTIME_IMAGE,

@@ -52,7 +52,7 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Docker Engine API**: All Docker operations use `fetch()` with Bun's `unix:` socket option (`apps/api/src/services/docker.ts`). The `@ts-expect-error` on the unix option is intentional.
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
-- **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, state, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is.
+- **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is. Only the latest execution's state is injected in the prompt (lightweight). Historical executions are available on demand via the internal API.
 - **Credential injection**: OAuth/API key tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_BREVO_API_KEY`) to the container. Built by `buildContainerTokenEnv()` in `prompt-builder.ts`.
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
@@ -134,9 +134,11 @@ appstrate/
 │
 ├── supabase/
 │   └── migrations/
-│       ├── 001_initial.sql           # Full schema: profiles, flow_configs, flow_state, executions, execution_logs (with user_id), flow_schedules, flows, RLS, Realtime
+│       ├── 001_initial.sql           # Full schema: profiles, flow_configs, executions, execution_logs (with user_id), flow_schedules, flows, RLS, Realtime
 │       ├── 002_schedule_locks.sql    # schedule_runs table + try_acquire_schedule_lock() for distributed cron
-│       └── 003_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
+│       ├── 003_flow_versions.sql     # flow_versions table + create_flow_version() RPC + executions.flow_version_id
+│       ├── 004_share_tokens.sql      # share_tokens table for one-time public share links
+│       └── 005_execution_state.sql   # Add state JSONB to executions, drop flow_state table
 │
 ├── apps/
 │   ├── api/                          # @appstrate/api — Backend (Hono + Bun)
@@ -151,12 +153,13 @@ appstrate/
 │   │       ├── middleware/
 │   │       │   └── rate-limit.ts     # Token bucket rate limiter per userId (in-memory, auto-cleanup)
 │   │       ├── routes/
-│   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, GET /api/flows/:id/versions, PUT /api/flows/:id/config, DELETE /api/flows/:id/state
+│   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, GET /api/flows/:id/versions, PUT /api/flows/:id/config
 │   │       │   ├── executions.ts     # POST /api/flows/:id/run (rate-limited), GET /api/executions/:id, executeFlowInBackground()
 │   │       │   ├── schedules.ts      # CRUD for /api/schedules and /api/flows/:id/schedules
 │   │       │   ├── user-flows.ts     # POST /api/flows/import (rate-limited), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
 │   │       │   ├── health.ts         # GET /health (no auth) — DB + flows checks → healthy/degraded
 │   │       │   ├── auth.ts           # Nango routes: GET /auth/connections, POST /auth/connect/:provider, GET /auth/integrations, DELETE /auth/connections/:provider
+│   │       │   ├── internal.ts      # GET /internal/execution-history (container-to-host, auth via execution token)
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
@@ -168,7 +171,7 @@ appstrate/
 │   │       │   │   ├── claude-code.ts # ClaudeCodeAdapter (stream parsing for Claude Code CLI JSON events)
 │   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
-│   │       │   ├── state.ts          # Supabase CRUD for flow_configs, flow_state, executions, execution_logs tables
+│   │       │   ├── state.ts          # Supabase CRUD for flow_configs, executions (with state), execution_logs tables
 │   │       │   ├── flow-service.ts   # FlowService: built-in cache (ReadonlyMap) + DB reads for user flows (replaces flow-loader.ts)
 │   │       │   ├── flow-versions.ts  # Flow versioning: createFlowVersion(), listFlowVersions(), getLatestVersionId(), createVersionAndUpload()
 │   │       │   ├── flow-import.ts    # importFlowFromZip(): unzip, validate manifest, extract skills, persist
@@ -273,7 +276,6 @@ appstrate/
 | `GET`    | `/api/flows`                  | JWT       | List all flows (built-in + user) with `runningExecutions` count                 |
 | `GET`    | `/api/flows/:id`              | JWT       | Flow detail with service statuses (incl. `authMode`), config, state, skills     |
 | `PUT`    | `/api/flows/:id/config`       | JWT+Admin | Save flow configuration (Zod-validated against manifest schema)                 |
-| `DELETE` | `/api/flows/:id/state`        | JWT       | Reset flow state                                                                |
 | `POST`   | `/api/flows/import`           | JWT+Admin | Import flow from ZIP file (multipart/form-data)                                 |
 | `GET`    | `/api/flows/:id/versions`     | JWT       | List version history for a user flow (newest first)                             |
 | `DELETE` | `/api/flows/:id`              | JWT+Admin | Delete a user-imported flow (built-in flows cannot be deleted)                  |
@@ -308,6 +310,12 @@ appstrate/
 | `POST`   | `/auth/connect/:provider`         | JWT    | Create Nango Connect Session (returns `connectLink` for OAuth popup)|
 | `POST`   | `/auth/connect/:provider/api-key` | JWT    | Connect an API key integration (body: `{ apiKey }`)                 |
 | `DELETE` | `/auth/connections/:provider`     | JWT    | Disconnect a service                                                |
+
+### Internal (container-to-host)
+
+| Method | Path                            | Auth              | Description                                                                 |
+| ------ | ------------------------------- | ----------------- | --------------------------------------------------------------------------- |
+| `GET`  | `/internal/execution-history`   | Bearer execId     | Fetch historical executions for the current flow (fields: state, result)    |
 
 ### Other
 
@@ -345,12 +353,8 @@ profiles (id UUID PK→auth.users, display_name, role CHECK('admin','user'), cre
 flow_configs (flow_id PK, config JSONB, created_at, updated_at)
   -- RLS: all authenticated read, admin write
 
--- Flow persistent state (per-user, updated between runs)
-flow_state (user_id UUID + flow_id PK, state JSONB, updated_at)
-  -- RLS: own data + admin sees all
-
--- Execution records (per-user)
-executions (id PK, flow_id, user_id UUID, status, input JSONB, result JSONB, error, tokens_used, started_at, completed_at, duration, schedule_id, flow_version_id FK→flow_versions)
+-- Execution records (per-user, state persisted per-execution)
+executions (id PK, flow_id, user_id UUID, status, input JSONB, result JSONB, state JSONB, error, tokens_used, started_at, completed_at, duration, schedule_id, flow_version_id FK→flow_versions)
   -- Indexes: flow_id, status, user_id
   -- RLS: own data + admin sees all
 
@@ -391,7 +395,6 @@ Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`
 - **input.schema**: Per-execution user input — `{type, description, required, default, placeholder}`
 - **output.schema**: Expected result fields — `{type, description, required}`. Enables Zod validation + retry loop.
 - **config.schema**: User-configurable params — `{type, default, required, enum, description}`
-- **state.schema**: Persisted state between runs — `{type, format}`
 - **execution**: `timeout` (seconds), `maxTokens`, `outputRetries` (0-5, default 2 when output schema exists)
 
 ### Skills
@@ -410,7 +413,7 @@ The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections 
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
-If `result.state` is present, the platform persists it to `flow_state`.
+If `result.state` is present, the platform persists it to the `state` column of the execution record. The latest execution's state is injected into the next run as `## Previous State`. The agent can also fetch historical executions on demand via `GET /internal/execution-history` (authenticated with `$EXECUTION_TOKEN`).
 
 ## Environment Variables
 
@@ -435,6 +438,7 @@ NANGO_ENCRYPTION_KEY=<base64-256bit>  # openssl rand -base64 32 (required for Co
 # Platform
 PORT=3000
 DOCKER_SOCKET=/var/run/docker.sock
+PLATFORM_API_URL=http://host.docker.internal:3000  # Optional: override container-to-host URL
 ```
 
 ## Known Issues & Technical Debt

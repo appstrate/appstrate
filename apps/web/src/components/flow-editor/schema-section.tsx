@@ -9,7 +9,7 @@ export interface SchemaField {
   format?: string;
 }
 
-type SchemaMode = "input" | "output" | "config" | "state";
+type SchemaMode = "input" | "output" | "config";
 
 interface SchemaSectionProps {
   title: string;
@@ -28,7 +28,6 @@ function emptyField(mode: SchemaMode): SchemaField {
     required: false,
     ...(mode === "input" ? { placeholder: "", default: "" } : {}),
     ...(mode === "config" ? { default: "", enumValues: "" } : {}),
-    ...(mode === "state" ? { format: "" } : {}),
   };
 }
 
@@ -64,34 +63,21 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
                 </option>
               ))}
             </select>
-            {mode !== "state" && (
+            <input
+              type="text"
+              placeholder="description"
+              value={field.description}
+              onChange={(e) => update(i, { description: e.target.value })}
+              className="field-row-grow"
+            />
+            <label className="field-checkbox">
               <input
-                type="text"
-                placeholder="description"
-                value={field.description}
-                onChange={(e) => update(i, { description: e.target.value })}
-                className="field-row-grow"
+                type="checkbox"
+                checked={field.required}
+                onChange={(e) => update(i, { required: e.target.checked })}
               />
-            )}
-            {mode !== "state" && (
-              <label className="field-checkbox">
-                <input
-                  type="checkbox"
-                  checked={field.required}
-                  onChange={(e) => update(i, { required: e.target.checked })}
-                />
-                req
-              </label>
-            )}
-            {mode === "state" && (
-              <input
-                type="text"
-                placeholder="format (ex: date-time)"
-                value={field.format ?? ""}
-                onChange={(e) => update(i, { format: e.target.value })}
-                className="field-row-grow"
-              />
-            )}
+              req
+            </label>
             {(mode === "input" || mode === "config") && (
               <input
                 type="text"

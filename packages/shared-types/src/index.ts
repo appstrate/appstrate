@@ -88,12 +88,10 @@ export interface FlowDetail {
     schema: JSONSchemaObject;
     current: Record<string, unknown>;
   };
-  state: Record<string, unknown>;
   runningExecutions: number;
   lastExecution: Partial<Execution> | null;
   updatedAt?: string | null;
   prompt?: string;
-  stateSchema?: { schema: JSONSchemaObject } | null;
   executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
 }
 

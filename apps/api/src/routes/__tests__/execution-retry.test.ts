@@ -29,9 +29,8 @@ mock.module("../../services/state.ts", () => ({
   updateExecution: mock(async (id: string, upd: Record<string, unknown>) => {
     updates.push({ id, updates: upd });
   }),
-  setFlowState: mock(async () => {}),
   getFlowConfig: mock(async () => ({})),
-  getFlowState: mock(async () => ({})),
+  getLastExecutionState: mock(async () => null),
   createExecution: mock(async () => {}),
   getAdminConnections: mock(async () => ({})),
 }));
@@ -44,6 +43,7 @@ mock.module("../../services/nango.ts", () => ({
 
 mock.module("../../services/env-builder.ts", () => ({
   buildPromptContext: mock(() => makePromptContext()),
+  buildExecutionApi: mock((id: string) => ({ url: "http://localhost:3000", token: id })),
 }));
 
 mock.module("../../services/flow-versions.ts", () => ({
@@ -102,7 +102,7 @@ function makePromptContext(): PromptContext {
     rawPrompt: "test prompt",
     tokens: {},
     config: {},
-    state: {},
+    previousState: null,
     input: {},
     schemas: {},
     services: [],

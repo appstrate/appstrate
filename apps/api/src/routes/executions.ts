@@ -3,8 +3,7 @@ import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
-  getFlowState,
-  setFlowState,
+  getLastExecutionState,
   createExecution,
   updateExecution,
   appendExecutionLog,
@@ -20,7 +19,7 @@ import {
 import type { TokenUsage, FileReference } from "../services/adapters/index.ts";
 import type { UploadedFile, PromptContext } from "../services/adapters/types.ts";
 import { uploadExecutionFiles, cleanupExecutionFiles } from "../services/file-storage.ts";
-import { buildPromptContext } from "../services/env-builder.ts";
+import { buildPromptContext, buildExecutionApi } from "../services/env-builder.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import {
   validateConfig,
@@ -164,7 +163,7 @@ export async function executeFlowInBackground(
             rawPrompt: retryPrompt,
             tokens: promptContext.tokens,
             config: {},
-            state: {},
+            previousState: null,
             input: {},
             schemas: { output: outputSchema },
             services: [],
@@ -214,9 +213,14 @@ export async function executeFlowInBackground(
 
       const duration = Date.now() - startTime;
       const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+      const resultState =
+        result.state && typeof result.state === "object"
+          ? (result.state as Record<string, unknown>)
+          : undefined;
       await updateExecution(executionId, {
         status: "success",
         result,
+        ...(resultState ? { state: resultState } : {}),
         completed_at: new Date().toISOString(),
         duration,
         tokens_used:
@@ -232,11 +236,6 @@ export async function executeFlowInBackground(
             }
           : {}),
       });
-
-      // Update flow state if result includes state
-      if (result.state && typeof result.state === "object") {
-        await setFlowState(userId, flowId, result.state as Record<string, unknown>);
-      }
 
       await appendExecutionLog(executionId, userId, "result", "result", null, result);
       await appendExecutionLog(executionId, userId, "system", "execution_completed", null, {
@@ -423,8 +422,8 @@ export function createExecutionsRouter() {
       }
     }
 
-    // Get state and tokens (resolve based on connectionMode)
-    const state = await getFlowState(user.id, flowId);
+    // Get previous state and tokens (resolve based on connectionMode)
+    const previousState = await getLastExecutionState(flowId, user.id);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
@@ -440,7 +439,8 @@ export function createExecutionsRouter() {
       flow,
       tokens,
       config,
-      state,
+      previousState,
+      executionApi: buildExecutionApi(executionId),
       input: body.input,
       files: fileRefs,
     });

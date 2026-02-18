@@ -26,6 +26,7 @@ export async function createContainer(
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
       AutoRemove: false,
       NetworkMode: "bridge",
+      ExtraHosts: ["host.docker.internal:host-gateway"],
     },
     Labels: {
       "appstrate.execution": executionId,

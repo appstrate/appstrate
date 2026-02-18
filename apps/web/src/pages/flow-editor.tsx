@@ -191,12 +191,6 @@ function FlowEditorForm({
             fields={form.configSchema}
             onChange={(configSchema) => setForm((s) => ({ ...s, configSchema }))}
           />
-          <SchemaSection
-            title="Etat persistant"
-            mode="state"
-            fields={form.stateSchema}
-            onChange={(stateSchema) => setForm((s) => ({ ...s, stateSchema }))}
-          />
         </>
       )}
 

@@ -93,6 +93,7 @@ export type Database = {
           result: Json | null
           schedule_id: string | null
           started_at: string | null
+          state: Json | null
           status: string
           token_usage: Json | null
           tokens_used: number | null
@@ -110,6 +111,7 @@ export type Database = {
           result?: Json | null
           schedule_id?: string | null
           started_at?: string | null
+          state?: Json | null
           status?: string
           token_usage?: Json | null
           tokens_used?: number | null
@@ -127,6 +129,7 @@ export type Database = {
           result?: Json | null
           schedule_id?: string | null
           started_at?: string | null
+          state?: Json | null
           status?: string
           token_usage?: Json | null
           tokens_used?: number | null
@@ -224,27 +227,6 @@ export type Database = {
           name?: string | null
           next_run_at?: string | null
           timezone?: string | null
-          updated_at?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
-      flow_state: {
-        Row: {
-          flow_id: string
-          state: Json
-          updated_at: string | null
-          user_id: string
-        }
-        Insert: {
-          flow_id: string
-          state?: Json
-          updated_at?: string | null
-          user_id: string
-        }
-        Update: {
-          flow_id?: string
-          state?: Json
           updated_at?: string | null
           user_id?: string
         }

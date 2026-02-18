@@ -29,19 +29,6 @@ export function useSaveConfig(flowId: string) {
   });
 }
 
-export function useResetState(flowId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      await api(`/flows/${flowId}/state`, { method: "DELETE" });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow", flowId] });
-    },
-    onError: onMutationError,
-  });
-}
-
 export function useRunFlow(flowId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();

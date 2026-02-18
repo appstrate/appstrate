@@ -28,44 +28,6 @@ export async function setFlowConfig(
   }
 }
 
-// --- Flow State (per-user) ---
-
-export async function getFlowState(
-  userId: string,
-  flowId: string,
-): Promise<Record<string, unknown>> {
-  const { data } = await supabase
-    .from("flow_state")
-    .select("state")
-    .eq("user_id", userId)
-    .eq("flow_id", flowId)
-    .single();
-  return (data?.state ?? {}) as Record<string, unknown>;
-}
-
-export async function deleteFlowState(userId: string, flowId: string): Promise<void> {
-  await supabase.from("flow_state").delete().eq("user_id", userId).eq("flow_id", flowId);
-}
-
-export async function setFlowState(
-  userId: string,
-  flowId: string,
-  state: Record<string, unknown>,
-): Promise<void> {
-  const { error } = await supabase.from("flow_state").upsert(
-    {
-      user_id: userId,
-      flow_id: flowId,
-      state: state as Json,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,flow_id" },
-  );
-  if (error) {
-    throw new Error(`Failed to save state for flow ${flowId}: ${error.message}`);
-  }
-}
-
 // --- Executions ---
 
 export async function createExecution(
@@ -96,6 +58,7 @@ export async function updateExecution(
   updates: {
     status?: string;
     result?: Record<string, unknown>;
+    state?: Record<string, unknown>;
     error?: string;
     tokens_used?: number;
     completed_at?: string;
@@ -104,18 +67,75 @@ export async function updateExecution(
     cost_usd?: number;
   },
 ): Promise<void> {
-  const { result, token_usage, ...rest } = updates;
+  const { result, state, token_usage, ...rest } = updates;
   const { error } = await supabase
     .from("executions")
     .update({
       ...rest,
       ...(result !== undefined ? { result: result as Json } : {}),
+      ...(state !== undefined ? { state: state as Json } : {}),
       ...(token_usage !== undefined ? { token_usage: token_usage as Json } : {}),
     })
     .eq("id", id);
   if (error) {
     logger.error("Failed to update execution", { executionId: id, error: error.message });
   }
+}
+
+export async function getLastExecutionState(
+  flowId: string,
+  userId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await supabase
+    .from("executions")
+    .select("state")
+    .eq("flow_id", flowId)
+    .eq("user_id", userId)
+    .not("state", "is", null)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .single();
+  return (data?.state as Record<string, unknown>) ?? null;
+}
+
+export async function getRecentExecutions(
+  flowId: string,
+  userId: string,
+  options: {
+    limit?: number;
+    fields?: ("state" | "result")[];
+    excludeExecutionId?: string;
+  } = {},
+): Promise<Record<string, unknown>[]> {
+  const limit = options.limit ?? 10;
+  const fields = options.fields ?? ["state"];
+
+  // Select all potentially needed columns (static string for Supabase typing)
+  let query = supabase
+    .from("executions")
+    .select("id, status, started_at, duration, state, result")
+    .eq("flow_id", flowId)
+    .eq("user_id", userId)
+    .eq("status", "success")
+    .order("started_at", { ascending: false })
+    .limit(limit);
+
+  if (options.excludeExecutionId) {
+    query = query.neq("id", options.excludeExecutionId);
+  }
+
+  const { data } = await query;
+  return (data ?? []).map((row) => {
+    const entry: Record<string, unknown> = {
+      id: row.id,
+      status: row.status,
+      date: row.started_at,
+      duration: row.duration,
+    };
+    if (fields.includes("state")) entry.state = row.state;
+    if (fields.includes("result")) entry.result = row.result;
+    return entry;
+  });
 }
 
 export async function getLastExecution(flowId: string, userId: string) {

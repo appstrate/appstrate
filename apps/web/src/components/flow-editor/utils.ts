@@ -20,7 +20,6 @@ export function defaultFormState(): FlowFormState {
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    stateSchema: [],
     execution: { timeout: 300, maxTokens: 8192, outputRetries: 2 },
   };
 }
@@ -37,7 +36,7 @@ function convertDefaultValue(value: string, type: string): unknown {
 
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
-  mode: "input" | "output" | "config" | "state",
+  mode: "input" | "output" | "config",
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
@@ -58,13 +57,12 @@ export function schemaToFields(
           enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
         }
       : {}),
-    ...(mode === "state" ? { format: prop.format || "" } : {}),
   }));
 }
 
 export function fieldsToSchema(
   fields: SchemaField[],
-  mode: "input" | "output" | "config" | "state",
+  mode: "input" | "output" | "config",
 ): JSONSchemaObject | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -72,7 +70,7 @@ export function fieldsToSchema(
   const required: string[] = [];
   for (const f of filtered) {
     const prop: JSONSchemaProperty = { type: f.type };
-    if (mode !== "state" && f.description) prop.description = f.description;
+    if (f.description) prop.description = f.description;
     if (mode === "input" || mode === "config") {
       const def = convertDefaultValue(f.default || "", f.type);
       if (def !== undefined) prop.default = def;
@@ -85,7 +83,6 @@ export function fieldsToSchema(
         .filter(Boolean);
       if (enumVals && enumVals.length > 0) prop.enum = enumVals;
     }
-    if (mode === "state" && f.format) prop.format = f.format;
     if (f.required) required.push(f.key.trim());
     properties[f.key.trim()] = prop;
   }
@@ -115,7 +112,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     inputSchema: schemaToFields(detail.input?.schema, "input"),
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
-    stateSchema: schemaToFields(detail.stateSchema?.schema, "state"),
     execution: {
       timeout: detail.executionSettings?.timeout ?? 300,
       maxTokens: detail.executionSettings?.maxTokens ?? 8192,
@@ -165,9 +161,6 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
   const configSchema = fieldsToSchema(state.configSchema, "config");
   if (configSchema) manifest.config = { schema: configSchema };
 
-  const stateSchema = fieldsToSchema(state.stateSchema, "state");
-  if (stateSchema) manifest.state = { enabled: true, schema: stateSchema };
-
   manifest.execution = {
     timeout: state.execution.timeout,
     maxTokens: state.execution.maxTokens,
@@ -216,7 +209,6 @@ export function payloadToFormState(payload: {
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;
   const configObj = manifest.config as { schema?: JSONSchemaObject } | undefined;
-  const stateObj = manifest.state as { schema?: JSONSchemaObject } | undefined;
 
   return {
     metadata: {
@@ -232,7 +224,6 @@ export function payloadToFormState(payload: {
     inputSchema: schemaToFields(inputObj?.schema, "input"),
     outputSchema: schemaToFields(outputObj?.schema, "output"),
     configSchema: schemaToFields(configObj?.schema, "config"),
-    stateSchema: schemaToFields(stateObj?.schema, "state"),
     execution: {
       timeout: (execution.timeout as number) ?? 300,
       maxTokens: (execution.maxTokens as number) ?? 8192,
