@@ -1,22 +1,5 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import type { FileReference } from "./types.ts";
-
-/** Copy TOKEN_*, CONFIG_*, INPUT_*, and FLOW_STATE entries from source into target. */
-export function filterFlowEnvVars(
-  source: Record<string, string>,
-  target: Record<string, string>,
-): void {
-  for (const [k, v] of Object.entries(source)) {
-    if (
-      k.startsWith("TOKEN_") ||
-      k.startsWith("CONFIG_") ||
-      k.startsWith("INPUT_") ||
-      k === "FLOW_STATE"
-    ) {
-      target[k] = v;
-    }
-  }
-}
+import type { PromptContext } from "./types.ts";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -24,99 +7,132 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function buildEnrichedPrompt(
-  envVars: Record<string, string>,
-  outputSchema?: JSONSchemaObject,
-  files?: FileReference[],
-): string {
-  const flowPrompt = envVars.FLOW_PROMPT || "";
+/**
+ * Build TOKEN_* env vars from a tokens map.
+ * Only these are needed in the container (read by entrypoints for curl).
+ */
+export function buildContainerTokenEnv(tokens: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [svcId, token] of Object.entries(tokens)) {
+    env[`TOKEN_${svcId.toUpperCase().replace(/-/g, "_")}`] = token;
+  }
+  return env;
+}
 
-  const tokenEntries = Object.entries(envVars).filter(([k]) => k.startsWith("TOKEN_"));
-  const configEntries = Object.entries(envVars).filter(([k]) => k.startsWith("CONFIG_"));
-  const inputEntries = Object.entries(envVars).filter(([k]) => k.startsWith("INPUT_"));
-
+export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
 
-  // API access instructions
-  if (tokenEntries.length > 0) {
+  // API access instructions — use ctx.services + ctx.tokens
+  const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
+  if (connectedServices.length > 0) {
     sections.push("## API Access\n");
     sections.push(
       "You have OAuth tokens available as environment variables. Use them with curl via Bash.\n",
     );
 
-    for (const [key, _] of tokenEntries) {
-      const svcName = key.replace("TOKEN_", "").toLowerCase();
-      sections.push(`- **${svcName}**: \`$${key}\``);
+    for (const svc of connectedServices) {
+      const envKey = `TOKEN_${svc.id.toUpperCase().replace(/-/g, "_")}`;
+      sections.push(`- **${svc.id}** (${svc.description}): \`$${envKey}\``);
 
-      if (svcName === "gmail") {
+      if (svc.provider === "gmail" || svc.id === "gmail") {
         sections.push(
-          `  Example: \`curl -s -H "Authorization: Bearer $${key}" "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20"\``,
+          `  Example: \`curl -s -H "Authorization: Bearer $${envKey}" "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20"\``,
         );
         sections.push(
-          `  Get message: \`curl -s -H "Authorization: Bearer $${key}" "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}?format=full"\``,
+          `  Get message: \`curl -s -H "Authorization: Bearer $${envKey}" "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}?format=full"\``,
         );
-      } else if (svcName === "clickup") {
+      } else if (svc.provider === "clickup" || svc.id === "clickup") {
         sections.push(
-          `  Example: \`curl -s -H "Authorization: Bearer $${key}" "https://api.clickup.com/api/v2/team"\``,
+          `  Example: \`curl -s -H "Authorization: Bearer $${envKey}" "https://api.clickup.com/api/v2/team"\``,
         );
         sections.push(
-          `  Create task: \`curl -s -X POST -H "Authorization: Bearer $${key}" -H "Content-Type: application/json" -d '{"name":"...","description":"..."}' "https://api.clickup.com/api/v2/list/{list_id}/task"\``,
+          `  Create task: \`curl -s -X POST -H "Authorization: Bearer $${envKey}" -H "Content-Type: application/json" -d '{"name":"...","description":"..."}' "https://api.clickup.com/api/v2/list/{list_id}/task"\``,
         );
-      } else if (svcName === "facebook") {
+      } else if (svc.provider === "facebook" || svc.id === "facebook") {
         sections.push(
-          `  List Pages: \`curl -s -H "Authorization: Bearer $${key}" "https://graph.facebook.com/v21.0/me/accounts"\``,
+          `  List Pages: \`curl -s -H "Authorization: Bearer $${envKey}" "https://graph.facebook.com/v21.0/me/accounts"\``,
         );
         sections.push(
           `  Post to Page: \`curl -s -X POST "https://graph.facebook.com/v21.0/{page_id}/feed" -H "Content-Type: application/json" -d '{"message":"...","access_token":"PAGE_ACCESS_TOKEN"}'\``,
         );
         sections.push(
-          `  Note: Use the Page Access Token from /me/accounts (not $${key}) when posting to a Page.`,
+          `  Note: Use the Page Access Token from /me/accounts (not $${envKey}) when posting to a Page.`,
         );
       }
     }
     sections.push("");
   }
 
-  // User input for this execution
-  if (inputEntries.length > 0) {
+  // User input — enriched with schema metadata
+  const inputProps = ctx.schemas.input?.properties;
+  const inputRequired = ctx.schemas.input?.required ?? [];
+  const nonFileInputEntries = Object.entries(ctx.input).filter(([key]) => {
+    // Exclude file-type fields (they appear in ## Documents)
+    const prop = inputProps?.[key];
+    return prop?.type !== "file";
+  });
+
+  if (nonFileInputEntries.length > 0 || (inputProps && Object.keys(inputProps).length > 0)) {
     sections.push("## User Input\n");
-    for (const [key, value] of inputEntries) {
-      const name = key.replace("INPUT_", "").toLowerCase();
-      sections.push(`- **${name}**: ${value}`);
+    if (inputProps) {
+      for (const [key, prop] of Object.entries(inputProps)) {
+        if (prop.type === "file") continue;
+        const req = inputRequired.includes(key) ? "required" : "optional";
+        const value = ctx.input[key];
+        const valueStr = value !== undefined ? ` — \`${value}\`` : "";
+        sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
+      }
+    } else {
+      for (const [key, value] of nonFileInputEntries) {
+        sections.push(`- **${key}**: ${value}`);
+      }
     }
     sections.push("");
   }
 
   // Uploaded documents
-  if (files && files.length > 0) {
+  if (ctx.files && ctx.files.length > 0) {
     sections.push("## Documents\n");
     sections.push("The following documents have been uploaded and are available for download:\n");
-    for (const file of files) {
+    for (const file of ctx.files) {
       sections.push(`- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)})`);
       sections.push(`  Download: \`curl -sL -o "${file.name}" "${file.url}"\``);
     }
     sections.push("\nDownload each document using curl before processing it.\n");
   }
 
-  // Config
-  if (configEntries.length > 0) {
+  // Configuration — enriched with schema metadata
+  const configProps = ctx.schemas.config?.properties;
+  const configRequired = ctx.schemas.config?.required ?? [];
+  const configEntries = Object.entries(ctx.config);
+
+  if (configEntries.length > 0 || (configProps && Object.keys(configProps).length > 0)) {
     sections.push("## Configuration\n");
-    for (const [key, value] of configEntries) {
-      const name = key.replace("CONFIG_", "").toLowerCase();
-      sections.push(`- **${name}**: ${value}`);
+    if (configProps) {
+      for (const [key, prop] of Object.entries(configProps)) {
+        const req = configRequired.includes(key) ? "required" : "optional";
+        const value = ctx.config[key];
+        const valueStr = value !== undefined ? ` — \`${value}\`` : "";
+        sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
+      }
+    } else {
+      for (const [key, value] of configEntries) {
+        sections.push(`- **${key}**: ${value}`);
+      }
     }
     sections.push("");
   }
 
-  // State
-  if (envVars.FLOW_STATE && envVars.FLOW_STATE !== "{}") {
+  // Previous state
+  if (Object.keys(ctx.state).length > 0) {
     sections.push("## Previous State\n");
     sections.push("```json");
-    sections.push(envVars.FLOW_STATE);
+    sections.push(JSON.stringify(ctx.state));
     sections.push("```\n");
   }
 
   // Output format
+  const outputSchema = ctx.schemas.output;
   sections.push("## Output Format\n");
   sections.push(
     "When you have completed the task, output your final result as a JSON object inside a ```json code block.",
@@ -128,7 +144,6 @@ export function buildEnrichedPrompt(
     for (const [key, prop] of Object.entries(outputSchema.properties)) {
       const req = outputSchema.required?.includes(key) ? "required" : "optional";
       sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
-      // Build example value based on type
       if (prop.type === "string") example[key] = "...";
       else if (prop.type === "number") example[key] = 0;
       else if (prop.type === "boolean") example[key] = false;
@@ -161,7 +176,8 @@ export function buildEnrichedPrompt(
     "\nIf you need to update persistent state for the next run, include a `state` object.\n",
   );
 
-  return sections.join("\n") + "\n---\n\n" + flowPrompt;
+  // Append raw prompt at the end, without any interpolation
+  return sections.join("\n") + "\n---\n\n" + ctx.rawPrompt;
 }
 
 export function extractJsonResult(text: string): Record<string, unknown> | null {

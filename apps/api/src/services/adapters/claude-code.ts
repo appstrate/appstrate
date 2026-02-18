@@ -1,6 +1,9 @@
-import type { JSONSchemaObject } from "@appstrate/shared-types";
-import type { ExecutionAdapter, ExecutionMessage, FileReference } from "./types.ts";
-import { buildEnrichedPrompt, extractJsonResult, filterFlowEnvVars } from "./prompt-builder.ts";
+import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.ts";
+import {
+  buildEnrichedPrompt,
+  extractJsonResult,
+  buildContainerTokenEnv,
+} from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { createContainer } from "../docker.ts";
 
@@ -9,14 +12,11 @@ const CLAUDE_CODE_RUNTIME_IMAGE = "appstrate-claude-code:latest";
 export class ClaudeCodeAdapter implements ExecutionAdapter {
   async *execute(
     executionId: string,
-    envVars: Record<string, string>,
+    ctx: PromptContext,
     timeout: number,
-    outputSchema?: JSONSchemaObject,
     flowPackage?: Buffer,
-    files?: FileReference[],
   ): AsyncGenerator<ExecutionMessage> {
-    const prompt = buildEnrichedPrompt(envVars, outputSchema, files);
-    const model = envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
+    const prompt = buildEnrichedPrompt(ctx);
 
     // Auth via CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, uses Claude subscription)
     const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -29,11 +29,10 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     // Build container environment variables
     const containerEnv: Record<string, string> = {
       FLOW_PROMPT: prompt,
-      LLM_MODEL: model,
+      LLM_MODEL: ctx.llmModel,
       CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+      ...buildContainerTokenEnv(ctx.tokens),
     };
-
-    filterFlowEnvVars(envVars, containerEnv);
 
     // Create the container
     const containerId = await createContainer(executionId, containerEnv, {

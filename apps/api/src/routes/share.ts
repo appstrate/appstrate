@@ -20,11 +20,11 @@ import {
   schemaHasFileFields,
   parseFormDataFiles,
 } from "../services/schema.ts";
-import { buildContainerEnv } from "../services/env-builder.ts";
+import { buildPromptContext } from "../services/env-builder.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { uploadExecutionFiles } from "../services/file-storage.ts";
-import { executeFlowInBackground, interpolatePrompt } from "./executions.ts";
+import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import type { UploadedFile } from "../services/adapters/types.ts";
 import type { FileReference } from "../services/adapters/index.ts";
@@ -183,19 +183,14 @@ export function createShareRouter() {
       }
     }
 
-    // Interpolate prompt
-    const input = body.input ?? {};
-    const prompt = interpolatePrompt(flow.prompt, config, state, input);
-
-    // Build container env
-    const envVars = buildContainerEnv({
-      flowId,
-      executionId,
-      prompt,
+    // Build prompt context
+    const promptContext = buildPromptContext({
+      flow,
       tokens,
       config,
       state,
       input: body.input,
+      files: fileRefs,
     });
 
     // Get flow package
@@ -217,21 +212,14 @@ export function createShareRouter() {
     await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
-    executeFlowInBackground(
-      executionId,
-      flowId,
-      userId,
-      flow,
-      envVars,
-      tokens,
-      flowPackage,
-      fileRefs,
-    ).catch((err) => {
-      logger.error("Unhandled error in shared execution", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    executeFlowInBackground(executionId, flowId, userId, flow, promptContext, flowPackage).catch(
+      (err) => {
+        logger.error("Unhandled error in shared execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
 
     return c.json({ executionId });
   });

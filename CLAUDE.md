@@ -52,8 +52,8 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Docker Engine API**: All Docker operations use `fetch()` with Bun's `unix:` socket option (`apps/api/src/services/docker.ts`). The `@ts-expect-error` on the unix option is intentional.
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
-- **Template interpolation**: `{{config.*}}`, `{{state.*}}`, `{{input.*}}`, `{{#if state.*}}...{{/if}}` in prompt.md files. Implemented in `interpolatePrompt()` in `apps/api/src/routes/executions.ts`.
-- **Credential injection**: OAuth/API key tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_BREVO_API_KEY`) to the container. Built by `env-builder.ts`.
+- **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, state, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is.
+- **Credential injection**: OAuth/API key tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_BREVO_API_KEY`) to the container. Built by `buildContainerTokenEnv()` in `prompt-builder.ts`.
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
@@ -116,7 +116,7 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |-- #/services (Services List) -->|-- GET /auth/integrations (with authMode)
      |                                |
      |            Ephemeral Container (Claude Code CLI or Pi Coding Agent)
-     |            - Receives: FLOW_PROMPT, TOKEN_*, CONFIG_*, INPUT_*, auth tokens
+     |            - Receives: FLOW_PROMPT, TOKEN_*, LLM_MODEL, adapter-specific auth
      |            - Flow package ZIP mounted + extracted (skills, extensions)
      |            - Agent executes the prompt with access to bash/tools
      |            - Outputs JSON lines on stdout (parsed by adapter)
@@ -152,7 +152,7 @@ appstrate/
 │   │       │   └── rate-limit.ts     # Token bucket rate limiter per userId (in-memory, auto-cleanup)
 │   │       ├── routes/
 │   │       │   ├── flows.ts          # GET /api/flows, GET /api/flows/:id, GET /api/flows/:id/versions, PUT /api/flows/:id/config, DELETE /api/flows/:id/state
-│   │       │   ├── executions.ts     # POST /api/flows/:id/run (rate-limited), GET /api/executions/:id, interpolatePrompt(), executeFlowInBackground()
+│   │       │   ├── executions.ts     # POST /api/flows/:id/run (rate-limited), GET /api/executions/:id, executeFlowInBackground()
 │   │       │   ├── schedules.ts      # CRUD for /api/schedules and /api/flows/:id/schedules
 │   │       │   ├── user-flows.ts     # POST /api/flows/import (rate-limited), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
 │   │       │   ├── health.ts         # GET /health (no auth) — DB + flows checks → healthy/degraded
@@ -162,9 +162,9 @@ appstrate/
 │   │       ├── services/
 │   │       │   ├── docker.ts         # dockerFetch(), createContainer (generic), createClaudeCodeContainer, streamLogs, etc.
 │   │       │   ├── adapters/
-│   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, TimeoutError
+│   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, PromptContext, TimeoutError
 │   │       │   │   ├── index.ts      # getAdapter() factory (claude-code|pi), re-exports
-│   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, extractJsonResult, buildRetryPrompt
+│   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, buildContainerTokenEnv, extractJsonResult, buildRetryPrompt
 │   │       │   │   ├── claude-code.ts # ClaudeCodeAdapter (stream parsing for Claude Code CLI JSON events)
 │   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
@@ -176,7 +176,7 @@ appstrate/
 │   │       │   ├── execution-tracker.ts # In-flight execution tracking for graceful shutdown (track/untrack/waitForInFlight)
 │   │       │   ├── scheduler.ts      # Cron job lifecycle with distributed locking (schedule_runs table)
 │   │       │   ├── schema.ts         # Zod validation: validateManifest, validateConfig, validateInput, validateOutput
-│   │       │   └── env-builder.ts    # buildContainerEnv(): builds env var map for container (shared between manual + scheduled runs)
+│   │       │   └── env-builder.ts    # buildPromptContext(): builds typed PromptContext from flow data (shared between manual + scheduled + shared runs)
 │   │       └── types/
 │   │           └── index.ts          # Backend-only types (FlowManifest, LoadedFlow, SkillMeta) + re-exports from @appstrate/shared-types
 │   │
@@ -241,7 +241,7 @@ appstrate/
 │   ├── newsletter-search/
 │   └── skill-test/
 │       ├── manifest.json             # Flow spec: metadata, requires, config/state/input/output schema, execution settings
-│       ├── prompt.md                 # Agent instructions with {{config.*}} / {{state.*}} / {{input.*}} vars
+│       ├── prompt.md                 # Agent instructions (appended as-is after structured context sections)
 │       ├── skills/                   # Optional: agent skills
 │       │   └── {skill-id}/
 │       │       └── SKILL.md          # Skill definition with YAML frontmatter (description)
@@ -406,7 +406,7 @@ The Claude Code runtime container streams JSON events on stdout. The `ClaudeCode
 - **`result` messages** → parsed for JSON code blocks containing the final result
 - The last ` ```json ``` ` block in assistant text is extracted as the result
 
-The adapter enriches the flow prompt with: API access instructions (per-service token usage), user input, configuration, previous state, and output format requirements (with field-level schema if defined). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.claude/skills/` or `.pi/skills/`, extensions → loaded dynamically).
+The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives only `FLOW_PROMPT`, `TOKEN_*`, `LLM_MODEL`, and adapter-specific auth vars. For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.claude/skills/` or `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
@@ -443,11 +443,9 @@ DOCKER_SOCKET=/var/run/docker.sock
 
 2. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous `stream: false` mode that returns the full result as JSON — not yet implemented. The request body accepts `stream?: boolean` but it's ignored.
 
-3. **Prompt interpolation is basic**: The `{{#if}}` blocks only support `state.*` variables. No filter support (e.g. `| default:`). No flows currently use filters so this is theoretical.
+3. **Scheduler is in-memory with distributed locking**: Cron jobs run in-process via `croner`. If the server restarts, jobs are re-loaded from DB on startup. Distributed locking via `schedule_runs` table + `try_acquire_schedule_lock()` RPC prevents duplicate executions across instances.
 
-4. **Scheduler is in-memory with distributed locking**: Cron jobs run in-process via `croner`. If the server restarts, jobs are re-loaded from DB on startup. Distributed locking via `schedule_runs` table + `try_acquire_schedule_lock()` RPC prevents duplicate executions across instances.
-
-5. **Supabase client navigator.locks bypass**: The frontend Supabase client bypasses `navigator.locks` to avoid a deadlock during session refresh. This is a workaround cast with `as any` in `apps/web/src/lib/supabase.ts`.
+4. **Supabase client navigator.locks bypass**: The frontend Supabase client bypasses `navigator.locks` to avoid a deadlock during session refresh. This is a workaround cast with `as any` in `apps/web/src/lib/supabase.ts`.
 
 ## What's Validated
 

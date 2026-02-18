@@ -1,4 +1,3 @@
-import Handlebars from "handlebars";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
@@ -19,9 +18,9 @@ import {
   buildRetryPrompt,
 } from "../services/adapters/index.ts";
 import type { TokenUsage, FileReference } from "../services/adapters/index.ts";
-import type { UploadedFile } from "../services/adapters/types.ts";
+import type { UploadedFile, PromptContext } from "../services/adapters/types.ts";
 import { uploadExecutionFiles, cleanupExecutionFiles } from "../services/file-storage.ts";
-import { buildContainerEnv } from "../services/env-builder.ts";
+import { buildPromptContext } from "../services/env-builder.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import {
   validateConfig,
@@ -57,10 +56,8 @@ export async function executeFlowInBackground(
   flowId: string,
   userId: string,
   flow: LoadedFlow,
-  envVars: Record<string, string>,
-  tokens: Record<string, string>,
+  promptContext: PromptContext,
   flowPackage?: Buffer | null,
-  files?: FileReference[],
 ) {
   const startTime = Date.now();
   trackExecution(executionId);
@@ -75,7 +72,7 @@ export async function executeFlowInBackground(
     // Check dependencies
     const depCheck: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
-      depCheck[svc.id] = tokens[svc.id] ? "ok" : "missing";
+      depCheck[svc.id] = promptContext.tokens[svc.id] ? "ok" : "missing";
     }
     await appendExecutionLog(executionId, userId, "system", "dependency_check", null, {
       services: depCheck,
@@ -98,11 +95,9 @@ export async function executeFlowInBackground(
     try {
       for await (const msg of adapter.execute(
         executionId,
-        envVars,
+        promptContext,
         timeout,
-        flow.manifest.output?.schema,
         flowPackage ?? undefined,
-        files,
       )) {
         if (msg.usage) accumulateUsage(accumulated, msg.usage);
         if (msg.type === "progress") {
@@ -165,15 +160,22 @@ export async function executeFlowInBackground(
           });
 
           const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
-          const retryEnvVars: Record<string, string> = { FLOW_PROMPT: retryPrompt };
-          if (envVars.LLM_MODEL) retryEnvVars.LLM_MODEL = envVars.LLM_MODEL;
+          const retryCtx: PromptContext = {
+            rawPrompt: retryPrompt,
+            tokens: promptContext.tokens,
+            config: {},
+            state: {},
+            input: {},
+            schemas: { output: outputSchema },
+            services: [],
+            llmModel: promptContext.llmModel,
+          };
 
           try {
             for await (const msg of adapter.execute(
               executionId,
-              retryEnvVars,
+              retryCtx,
               Math.min(60, Math.floor(remaining / 1000)),
-              outputSchema,
             )) {
               if (msg.usage) accumulateUsage(accumulated, msg.usage);
               if (msg.type === "progress") {
@@ -271,7 +273,7 @@ export async function executeFlowInBackground(
     });
   } finally {
     untrackExecution(executionId);
-    if (files?.length) {
+    if (promptContext.files?.length) {
       cleanupExecutionFiles(executionId).catch((err) => {
         logger.warn("Failed to cleanup execution files", {
           executionId,
@@ -433,19 +435,14 @@ export function createExecutionsRouter() {
       }
     }
 
-    // Interpolate prompt
-    const input = body.input ?? {};
-    const prompt = interpolatePrompt(flow.prompt, config, state, input);
-
-    // Prepare env vars for container
-    const envVars = buildContainerEnv({
-      flowId,
-      executionId,
-      prompt,
+    // Build prompt context
+    const promptContext = buildPromptContext({
+      flow,
       tokens,
       config,
       state,
       input: body.input,
+      files: fileRefs,
     });
 
     // Get flow package (ZIP) for injection into container
@@ -466,34 +463,17 @@ export function createExecutionsRouter() {
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(
-      executionId,
-      flowId,
-      user.id,
-      flow,
-      envVars,
-      tokens,
-      flowPackage,
-      fileRefs,
-    ).catch((err) => {
-      logger.error("Unhandled error in background execution", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    executeFlowInBackground(executionId, flowId, user.id, flow, promptContext, flowPackage).catch(
+      (err) => {
+        logger.error("Unhandled error in background execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
 
     return c.json({ executionId });
   });
 
   return router;
-}
-
-export function interpolatePrompt(
-  prompt: string,
-  config: Record<string, unknown>,
-  state: Record<string, unknown>,
-  input: Record<string, unknown> = {},
-): string {
-  const template = Handlebars.compile(prompt, { noEscape: true });
-  return template({ config, state, input });
 }

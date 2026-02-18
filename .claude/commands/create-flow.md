@@ -104,7 +104,7 @@ Currently the only available tool is `web-search` (static). Leave as empty array
   }
 }
 ```
-Field types: `string`, `number`, `boolean`, `array`, `object`. Values injected in prompt as `{{input.field_name}}` and in container as `INPUT_FIELD_NAME` env var.
+Field types: `string`, `number`, `boolean`, `array`, `object`. Values are automatically injected as a structured `## User Input` section before the prompt, with field descriptions and types from the schema.
 
 **config.schema** (optional): User-configurable parameters that persist between runs:
 ```json
@@ -129,7 +129,7 @@ Field types: `string`, `number`, `boolean`, `array`, `object`. Values injected i
   }
 }
 ```
-Supports `default`, `required`, `enum`. Values available in prompt as `{{config.field_name}}` and in container as `CONFIG_FIELD_NAME`.
+Supports `default`, `required`, `enum`. Values are automatically injected as a structured `## Configuration` section before the prompt, with field descriptions and types from the schema.
 
 **state.schema** (optional): Data persisted between runs for incremental processing:
 ```json
@@ -141,7 +141,7 @@ Supports `default`, `required`, `enum`. Values available in prompt as `{{config.
   }
 }
 ```
-The agent includes a `state` object in its JSON output, which the platform persists. Available next run as `{{state.field_name}}` and `FLOW_STATE` env var (JSON).
+The agent includes a `state` object in its JSON output, which the platform persists. Available next run as a structured `## Previous State` section (JSON) injected before the prompt.
 
 **output.schema** (recommended): Expected result structure. Enables Zod validation + automatic retry:
 ```json
@@ -177,13 +177,16 @@ Scale these to flow complexity: simple read-only = 180s/30000, complex multi-ser
 
 The prompt is the core of the flow. It's what Claude Code executes inside the container.
 
-### Template Variables
+### How Context is Injected
 
-Use these interpolation patterns in prompt.md:
-- `{{config.field_name}}` — User configuration values
-- `{{state.field_name}}` — Persisted state from last run
-- `{{input.field_name}}` — Per-execution user input
-- `{{#if state.field_name}}...{{/if}}` — Conditional blocks (only for state.* variables)
+The platform automatically prepends structured sections before the prompt:
+- `## API Access` — Token env vars and curl examples for each connected service
+- `## User Input` — All input field values with descriptions and types from the schema
+- `## Configuration` — All config field values with descriptions and types from the schema
+- `## Previous State` — JSON dump of persisted state (if any)
+- `## Output Format` — Expected output structure from output.schema
+
+**The prompt.md is appended as-is after these sections.** No template interpolation — write plain Markdown. The agent sees all context in the structured sections above the prompt.
 
 ### Prompt Structure Best Practices
 
@@ -201,23 +204,18 @@ Include curl examples with the correct token variable.
 
 Example for Gmail:
 curl -s -H "Authorization: Bearer $TOKEN_GMAIL" \
-  "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults={{config.max_emails}}"
+  "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20"
 
 ### 2. Process Data
 Explain the processing logic, classification rules, etc.
+Reference values from the Configuration and User Input sections above as needed.
 
 ### 3. Generate Output
 Explain the expected output structure.
 
-## Configuration
-- **language**: {{config.language}}
-- **max_items**: {{config.max_items}}
-
-{{#if state.last_run}}
-## Previous Run
-Last execution: {{state.last_run}}
-Only process items since this date.
-{{/if}}
+## Incremental Processing
+If previous state is available (see Previous State section above), only process items since the last run.
+On first run, process all recent items.
 
 ## Output Format
 Return a JSON object in a ```json code block with the following structure:
@@ -248,7 +246,7 @@ Return a JSON object in a ```json code block with the following structure:
 
 3. **Read-only by default**: Always state explicitly that the agent must not modify source data (no archiving emails, no deleting tasks, no sending messages) unless the flow's purpose requires writes.
 
-4. **Handle incremental runs**: If the flow has state, include `{{#if state.last_run}}` blocks to filter data since last execution. Also handle the first-run case.
+4. **Handle incremental runs**: If the flow has state, instruct the agent to check the Previous State section for `last_run` and filter data since last execution. Also handle the first-run case (no state available).
 
 5. **Define output precisely**: Describe each field, its type, and what it contains. The more specific, the better the agent's output quality.
 
@@ -388,7 +386,7 @@ rm -rf /tmp/appstrate-flow-{flow-name}
 After creating the flow files (before packaging):
 
 1. **Check the manifest is valid JSON**: `cat /tmp/appstrate-flow-{flow-name}/{flow-name}/manifest.json | jq .`
-2. **Verify template variables**: Every `{{config.*}}` in prompt.md must have a corresponding field in `config.schema`, and same for `{{state.*}}`, `{{input.*}}`
+2. **Verify prompt doesn't use template syntax**: Prompts should NOT contain `{{...}}` — all context is injected automatically as structured sections
 3. **Verify service IDs**: Each service in `requires.services` must reference a real Nango provider
 4. **For built-in flows**: Restart the dev server (`bun run dev`), the flow should appear in the flow list. Check the logs for "Loaded flow: {name}"
 5. **For ZIP imports**: Import via the UI or API, check the flow appears in the flow list without restart

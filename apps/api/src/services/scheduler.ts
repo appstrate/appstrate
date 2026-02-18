@@ -5,8 +5,8 @@ import { logger } from "../lib/logger.ts";
 import type { Schedule, Json } from "@appstrate/shared-types";
 import { getFlowConfig, getFlowState, createExecution, getAdminConnections } from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
-import { executeFlowInBackground, interpolatePrompt } from "../routes/executions.ts";
-import { buildContainerEnv } from "./env-builder.ts";
+import { executeFlowInBackground } from "../routes/executions.ts";
+import { buildPromptContext } from "./env-builder.ts";
 import { getFlowPackage } from "./flow-package.ts";
 import { getFlow, flowExists } from "./flow-service.ts";
 import { getLatestVersionId } from "./flow-versions.ts";
@@ -226,17 +226,11 @@ async function triggerScheduledExecution(
     // Get config and state
     const config = await getFlowConfig(flowId);
     const state = await getFlowState(userId, flowId);
-    const inputValues = input ?? {};
 
-    // Interpolate prompt
-    const prompt = interpolatePrompt(flow.prompt, config, state, inputValues);
-
-    // Prepare env vars
+    // Build prompt context
     const executionId = `exec_${crypto.randomUUID()}`;
-    const envVars = buildContainerEnv({
-      flowId,
-      executionId,
-      prompt,
+    const promptContext = buildPromptContext({
+      flow,
       tokens,
       config,
       state,
@@ -270,7 +264,7 @@ async function triggerScheduledExecution(
     logger.info("Triggering scheduled execution", { executionId, flowId, scheduleId, userId });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens, flowPackage).catch(
+    executeFlowInBackground(executionId, flowId, userId, flow, promptContext, flowPackage).catch(
       (err) => {
         logger.error("Unhandled error in scheduled execution", {
           executionId,

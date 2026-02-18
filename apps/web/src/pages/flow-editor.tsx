@@ -161,9 +161,6 @@ function FlowEditorForm({
         <PromptEditor
           value={form.prompt}
           onChange={(prompt) => setForm((s) => ({ ...s, prompt }))}
-          configFields={form.configSchema}
-          stateFields={form.stateSchema}
-          inputFields={form.inputSchema}
         />
       )}
 
