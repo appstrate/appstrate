@@ -216,14 +216,20 @@ export function createShareRouter() {
     await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
-    executeFlowInBackground(executionId, flowId, userId, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in shared execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      flowId,
+      userId,
+      orgId,
+      flow,
+      promptContext,
+      flowPackage,
+    ).catch((err) => {
+      logger.error("Unhandled error in shared execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ executionId });
   });

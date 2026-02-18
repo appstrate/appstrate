@@ -95,10 +95,7 @@ export async function getFlow(id: string, orgId?: string): Promise<LoadedFlow | 
   if (builtIn) return builtIn;
 
   // User flows are scoped by org
-  let query = supabase
-    .from("flows")
-    .select("id, manifest, prompt")
-    .eq("id", id);
+  let query = supabase.from("flows").select("id, manifest, prompt").eq("id", id);
 
   if (orgId) {
     query = query.eq("org_id", orgId);

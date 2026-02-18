@@ -69,9 +69,7 @@ export function OrgSwitcher() {
           <circle cx="10" cy="8" r="5" />
           <path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3" />
         </svg>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {currentOrg.name}
-        </span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{currentOrg.name}</span>
         <svg
           width="10"
           height="10"
@@ -122,7 +120,9 @@ export function OrgSwitcher() {
                   fontWeight: isActive ? 500 : 400,
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span
+                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
                   {org.name}
                 </span>
                 {isActive && (
@@ -144,7 +144,13 @@ export function OrgSwitcher() {
             );
           })}
 
-          <div style={{ borderTop: "1px solid var(--border)", marginTop: "0.375rem", paddingTop: "0.375rem" }}>
+          <div
+            style={{
+              borderTop: "1px solid var(--border)",
+              marginTop: "0.375rem",
+              paddingTop: "0.375rem",
+            }}
+          >
             <Link
               to="/org-settings"
               onClick={() => setOpen(false)}

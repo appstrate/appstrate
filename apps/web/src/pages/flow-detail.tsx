@@ -234,9 +234,7 @@ export function FlowDetailPage() {
         <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
         {isOrgAdmin && (
           <div className="actions-admin">
-            {hasConfigSchema && (
-              <button onClick={() => setConfigOpen(true)}>Configurer</button>
-            )}
+            {hasConfigSchema && <button onClick={() => setConfigOpen(true)}>Configurer</button>}
             {detail.source === "user" && (
               <Link to={`/flows/${flowId}/edit`}>
                 <button>Modifier</button>

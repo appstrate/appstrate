@@ -166,7 +166,10 @@ export function OrgSettingsPage() {
         <div className="service-card-header">
           <div className="service-info">
             {editingName ? (
-              <form onSubmit={handleSaveName} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <form
+                onSubmit={handleSaveName}
+                style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
+              >
                 <input
                   type="text"
                   value={newName}
@@ -187,10 +190,7 @@ export function OrgSettingsPage() {
                 <button className="primary" type="submit" disabled={updateNameMutation.isPending}>
                   {updateNameMutation.isPending ? "..." : "Enregistrer"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingName(false)}
-                >
+                <button type="button" onClick={() => setEditingName(false)}>
                   Annuler
                 </button>
               </form>
@@ -281,7 +281,11 @@ export function OrgSettingsPage() {
               {isOrgAdmin && !isOwner && (
                 <div
                   className="service-card-actions"
-                  style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }}
+                  style={{
+                    marginTop: "0.75rem",
+                    paddingTop: "0.75rem",
+                    borderTop: "1px solid var(--border)",
+                  }}
                 >
                   {isOrgOwner && (
                     <select
@@ -326,7 +330,9 @@ export function OrgSettingsPage() {
       {/* Danger zone */}
       {isOrgOwner && (
         <>
-          <div className="section-title" style={{ marginTop: "2rem" }}>Zone de danger</div>
+          <div className="section-title" style={{ marginTop: "2rem" }}>
+            Zone de danger
+          </div>
           <div className="service-card" style={{ borderColor: "var(--danger, #e53e3e)" }}>
             <div className="service-card-header" style={{ marginBottom: 0 }}>
               <div className="service-info">

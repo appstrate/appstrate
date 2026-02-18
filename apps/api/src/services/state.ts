@@ -22,17 +22,15 @@ export async function setFlowConfig(
   flowId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("flow_configs")
-    .upsert(
-      {
-        org_id: orgId,
-        flow_id: flowId,
-        config: config as Json,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "org_id,flow_id" },
-    );
+  const { error } = await supabase.from("flow_configs").upsert(
+    {
+      org_id: orgId,
+      flow_id: flowId,
+      config: config as Json,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "org_id,flow_id" },
+  );
   if (error) {
     throw new Error(`Failed to save config for flow ${flowId}: ${error.message}`);
   }
@@ -267,7 +265,11 @@ export async function bindAdminConnection(
   }
 }
 
-export async function unbindAdminConnection(orgId: string, flowId: string, serviceId: string): Promise<void> {
+export async function unbindAdminConnection(
+  orgId: string,
+  flowId: string,
+  serviceId: string,
+): Promise<void> {
   await supabase
     .from("flow_admin_connections")
     .delete()

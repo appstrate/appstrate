@@ -64,10 +64,7 @@ export function useOrg() {
   const queryClient = useQueryClient();
   const currentOrgId = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  const {
-    data: orgs = [],
-    isLoading,
-  } = useQuery({
+  const { data: orgs = [], isLoading } = useQuery({
     queryKey: ["orgs"],
     queryFn: async () => {
       const data = await api<{ organizations: OrganizationWithRole[] }>("/orgs");

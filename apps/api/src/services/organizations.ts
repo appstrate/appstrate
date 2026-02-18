@@ -107,10 +107,7 @@ export async function getOrgMembers(
   }));
 }
 
-export async function getOrgMember(
-  orgId: string,
-  userId: string,
-): Promise<OrgMemberRow | null> {
+export async function getOrgMember(orgId: string, userId: string): Promise<OrgMemberRow | null> {
   const { data } = await supabase
     .from("organization_members")
     .select("*")
@@ -124,13 +121,19 @@ export async function getOrgMember(
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
   // Look up user in auth.users via profiles join
   // Since we use service role, we can query auth.users
-  const { data } = await supabase.rpc("get_user_id_by_email" as never, {
-    p_email: email,
-  } as never);
+  const { data } = await supabase.rpc(
+    "get_user_id_by_email" as never,
+    {
+      p_email: email,
+    } as never,
+  );
 
   // Fallback: search in auth admin API
   if (!data) {
-    const { data: { users }, error } = await supabase.auth.admin.listUsers();
+    const {
+      data: { users },
+      error,
+    } = await supabase.auth.admin.listUsers();
     if (error) return null;
     const user = users.find((u) => u.email === email);
     return user ? { id: user.id } : null;
@@ -151,7 +154,8 @@ export async function addMember(
   });
 
   if (error) {
-    if (error.code === "23505") throw new Error("Cet utilisateur est deja membre de cette organisation");
+    if (error.code === "23505")
+      throw new Error("Cet utilisateur est deja membre de cette organisation");
     throw new Error(`Failed to add member: ${error.message}`);
   }
 }

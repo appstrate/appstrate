@@ -58,7 +58,12 @@ export function createFlowsRouter() {
 
     // Fetch admin connections and resolve service statuses
     const adminConns = await getAdminConnections(orgId, flow.id);
-    const serviceStatuses = await resolveServiceStatuses(m.requires.services, adminConns, orgId, user.id);
+    const serviceStatuses = await resolveServiceStatuses(
+      m.requires.services,
+      adminConns,
+      orgId,
+      user.id,
+    );
 
     // Get config (global), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content

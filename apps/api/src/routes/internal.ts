@@ -53,11 +53,16 @@ export function createInternalRouter() {
     }
 
     try {
-      const executions = await getRecentExecutions(execution.flow_id, execution.user_id, execution.org_id, {
-        limit,
-        fields,
-        excludeExecutionId: executionId,
-      });
+      const executions = await getRecentExecutions(
+        execution.flow_id,
+        execution.user_id,
+        execution.org_id,
+        {
+          limit,
+          fields,
+          excludeExecutionId: executionId,
+        },
+      );
 
       return c.json({ executions });
     } catch (err) {
