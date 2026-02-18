@@ -21,7 +21,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
   const addFromIntegration = (uniqueKey: string, provider: string) => {
     const alreadySelected = value.some((s) => s.id === uniqueKey);
     if (alreadySelected) return;
-    onChange([...value, { id: uniqueKey, provider, description: "", scopes: "" }]);
+    onChange([...value, { id: uniqueKey, provider, description: "", scopes: "", connectionMode: "user" }]);
   };
 
   const selectedIds = new Set(value.map((s) => s.id));
@@ -65,6 +65,15 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                   value={svc.scopes}
                   onChange={(e) => update(i, { scopes: e.target.value })}
                 />
+                <select
+                  value={svc.connectionMode}
+                  onChange={(e) =>
+                    update(i, { connectionMode: e.target.value as "user" | "admin" })
+                  }
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
               </div>
             </div>
           ))}

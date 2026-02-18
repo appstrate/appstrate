@@ -15,6 +15,7 @@ export interface ServiceEntry {
   provider: string;
   description: string;
   scopes: string;
+  connectionMode: "user" | "admin";
 }
 
 export interface ResourceEntry {

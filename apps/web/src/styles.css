@@ -1843,8 +1843,27 @@ button:disabled {
   outline: none;
   min-width: 0;
 }
-.service-picker-selected-fields input:focus {
+.service-picker-selected-fields input:focus,
+.service-picker-selected-fields select:focus {
   border-color: var(--primary);
+}
+.service-picker-selected-fields select {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  outline: none;
+  width: 90px;
+  flex-shrink: 0;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a1a1aa'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  padding-right: 1.5rem;
 }
 
 /* Service picker grid */
