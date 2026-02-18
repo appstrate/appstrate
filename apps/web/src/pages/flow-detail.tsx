@@ -20,7 +20,6 @@ import {
 import { useFlowExecutionRealtime } from "../hooks/use-realtime";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
-import { StateModal } from "../components/state-modal";
 import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
@@ -70,7 +69,6 @@ export function FlowDetailPage() {
 
   const [tab, setTab] = useState<Tab>("executions");
   const [configOpen, setConfigOpen] = useState(false);
-  const [stateOpen, setStateOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
@@ -93,7 +91,6 @@ export function FlowDetailPage() {
   const hasRequiredConfig = checkRequiredConfig(detail);
   const hasInputSchema =
     detail.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
-  const hasState = detail.state && Object.keys(detail.state).length > 0;
 
   const handleRun = () => {
     if (hasInputSchema) {
@@ -234,13 +231,6 @@ export function FlowDetailPage() {
         {isAdmin && (
           <div className="actions-admin">
             <button onClick={() => setConfigOpen(true)}>Configurer</button>
-            {hasState ? (
-              <button onClick={() => setStateOpen(true)}>Etat</button>
-            ) : (
-              <button disabled title="Aucun etat persiste">
-                Etat (vide)
-              </button>
-            )}
             {detail.source === "user" && (
               <Link to={`/flows/${flowId}/edit`}>
                 <button>Modifier</button>
@@ -357,7 +347,6 @@ export function FlowDetailPage() {
       )}
 
       <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} flow={detail} />
-      <StateModal open={stateOpen} onClose={() => setStateOpen(false)} flow={detail} />
       <InputModal
         open={inputOpen}
         onClose={() => setInputOpen(false)}

@@ -3,10 +3,15 @@ import { Cron } from "croner";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, Json } from "@appstrate/shared-types";
-import { getFlowConfig, getFlowState, createExecution, getAdminConnections } from "./state.ts";
+import {
+  getFlowConfig,
+  getLastExecutionState,
+  createExecution,
+  getAdminConnections,
+} from "./state.ts";
 import { getConnectionStatus, getAccessToken } from "./nango.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import { buildPromptContext } from "./env-builder.ts";
+import { buildPromptContext, buildExecutionApi } from "./env-builder.ts";
 import { getFlowPackage } from "./flow-package.ts";
 import { getFlow, flowExists } from "./flow-service.ts";
 import { getLatestVersionId } from "./flow-versions.ts";
@@ -223,9 +228,9 @@ async function triggerScheduledExecution(
       if (token) tokens[svc.id] = token;
     }
 
-    // Get config and state
+    // Get config and previous state
     const config = await getFlowConfig(flowId);
-    const state = await getFlowState(userId, flowId);
+    const previousState = await getLastExecutionState(flowId, userId);
 
     // Build prompt context
     const executionId = `exec_${crypto.randomUUID()}`;
@@ -233,7 +238,8 @@ async function triggerScheduledExecution(
       flow,
       tokens,
       config,
-      state,
+      previousState,
+      executionApi: buildExecutionApi(executionId),
       input,
     });
 

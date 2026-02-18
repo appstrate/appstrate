@@ -3,14 +3,23 @@ import type { LoadedFlow } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 
 /**
+ * Build the execution API descriptor for container-to-host calls.
+ */
+export function buildExecutionApi(executionId: string): { url: string; token: string } {
+  const url =
+    process.env.PLATFORM_API_URL || `http://host.docker.internal:${process.env.PORT || "3000"}`;
+  return { url, token: executionId };
+}
+
+/**
  * Builds a structured PromptContext from flow data.
- * Replaces the old buildContainerEnv() that flattened everything into env vars.
  */
 export function buildPromptContext(params: {
   flow: LoadedFlow;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
-  state: Record<string, unknown>;
+  previousState: Record<string, unknown> | null;
+  executionApi?: { url: string; token: string };
   input?: Record<string, unknown>;
   files?: FileReference[];
 }): PromptContext {
@@ -18,7 +27,8 @@ export function buildPromptContext(params: {
     rawPrompt: params.flow.prompt,
     tokens: params.tokens,
     config: params.config,
-    state: params.state,
+    previousState: params.previousState,
+    executionApi: params.executionApi,
     input: params.input ?? {},
     files: params.files,
     schemas: {

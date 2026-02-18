@@ -123,12 +123,33 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // Previous state
-  if (Object.keys(ctx.state).length > 0) {
+  // Previous state (latest execution only)
+  if (ctx.previousState) {
     sections.push("## Previous State\n");
+    sections.push("State from the most recent execution:\n");
     sections.push("```json");
-    sections.push(JSON.stringify(ctx.state));
+    sections.push(JSON.stringify(ctx.previousState, null, 2));
     sections.push("```\n");
+  }
+
+  // Execution History API (on-demand access to historical executions)
+  if (ctx.executionApi) {
+    sections.push("## Execution History API\n");
+    sections.push(
+      "You can fetch historical execution data on demand using the platform's internal API.\n",
+    );
+    sections.push("```bash");
+    sections.push('curl -s -H "Authorization: Bearer $EXECUTION_TOKEN" \\');
+    sections.push('  "$PLATFORM_API_URL/internal/execution-history?limit=10&fields=state"');
+    sections.push("```\n");
+    sections.push("Query parameters:");
+    sections.push("- `limit` (1-50, default 10): Number of past executions to return");
+    sections.push(
+      "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
+    );
+    sections.push(
+      "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
+    );
   }
 
   // Output format
@@ -173,7 +194,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   sections.push(
-    "\nIf you need to update persistent state for the next run, include a `state` object.\n",
+    "\nIf you need to persist state for the next run, include a `state` object in your result.\n",
   );
 
   // Append raw prompt at the end, without any interpolation

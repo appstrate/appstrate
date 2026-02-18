@@ -3,8 +3,6 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
   setFlowConfig,
-  getFlowState,
-  deleteFlowState,
   getLastExecution,
   getRunningExecutionsCounts,
   getRunningExecutionsForFlow,
@@ -61,11 +59,10 @@ export function createFlowsRouter() {
     const adminConns = await getAdminConnections(flow.id);
     const serviceStatuses = await resolveServiceStatuses(m.requires.services, adminConns, user.id);
 
-    // Get config (global), state (per-user), last execution (per-user), running count (per-user)
+    // Get config (global), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content
-    const [currentConfig, currentState, lastExec, runningCount, userFlowRow] = await Promise.all([
+    const [currentConfig, lastExec, runningCount, userFlowRow] = await Promise.all([
       getFlowConfig(flow.id),
-      getFlowState(user.id, flow.id),
       getLastExecution(flow.id, user.id),
       getRunningExecutionsForFlow(flow.id, user.id),
       flow.source === "user" ? getFlowById(flow.id) : Promise.resolve(null),
@@ -106,7 +103,6 @@ export function createFlowsRouter() {
         schema: m.config?.schema ?? { type: "object", properties: {} },
         current: configWithDefaults,
       },
-      state: currentState,
       runningExecutions: runningCount,
       lastExecution: lastExec
         ? {
@@ -120,7 +116,6 @@ export function createFlowsRouter() {
         ? {
             updatedAt: userFlowRow.updated_at,
             prompt: flow.prompt,
-            stateSchema: m.state ?? null,
             executionSettings: m.execution ?? null,
           }
         : {}),
@@ -195,15 +190,6 @@ export function createFlowsRouter() {
         createdAt: v.created_at,
       })),
     });
-  });
-
-  // DELETE /api/flows/:id/state — reset current user's flow state
-  router.delete("/:id/state", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-
-    await deleteFlowState(user.id, flow.id);
-    return c.body(null, 204);
   });
 
   // POST /api/flows/:id/services/:serviceId/bind — bind admin's connection to a service

@@ -28,7 +28,6 @@ export interface FlowManifest {
   requires: FlowRequirements;
   input?: FlowInputSpec;
   output?: FlowOutputSpec;
-  state?: FlowStateSpec;
   config?: FlowConfigSpec;
   execution?: FlowExecutionSpec;
 }
@@ -61,11 +60,6 @@ export interface FlowInputSpec {
 }
 
 export interface FlowOutputSpec {
-  schema: import("@appstrate/shared-types").JSONSchemaObject;
-}
-
-export interface FlowStateSpec {
-  enabled: boolean;
   schema: import("@appstrate/shared-types").JSONSchemaObject;
 }
 

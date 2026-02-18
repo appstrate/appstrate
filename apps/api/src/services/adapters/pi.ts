@@ -30,6 +30,12 @@ export class PiAdapter implements ExecutionAdapter {
       ...buildContainerTokenEnv(ctx.tokens),
     };
 
+    // Inject execution API credentials for container-to-host calls
+    if (ctx.executionApi) {
+      containerEnv.EXECUTION_TOKEN = ctx.executionApi.token;
+      containerEnv.PLATFORM_API_URL = ctx.executionApi.url;
+    }
+
     // Forward provider API keys from host environment
     const apiKeyEnvVars = [
       "ANTHROPIC_API_KEY",

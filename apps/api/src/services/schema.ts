@@ -83,12 +83,6 @@ const manifestSchema = z.looseObject({
       schema: jsonSchemaObjectSchema,
     })
     .optional(),
-  state: z
-    .object({
-      enabled: z.boolean(),
-      schema: jsonSchemaObjectSchema,
-    })
-    .optional(),
   config: z
     .object({
       schema: jsonSchemaObjectSchema,

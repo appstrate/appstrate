@@ -9,7 +9,7 @@ import {
 import { getFlow } from "../services/flow-service.ts";
 import {
   getFlowConfig,
-  getFlowState,
+  getLastExecutionState,
   createExecution,
   getAdminConnections,
 } from "../services/state.ts";
@@ -20,7 +20,7 @@ import {
   schemaHasFileFields,
   parseFormDataFiles,
 } from "../services/schema.ts";
-import { buildPromptContext } from "../services/env-builder.ts";
+import { buildPromptContext, buildExecutionApi } from "../services/env-builder.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { uploadExecutionFiles } from "../services/file-storage.ts";
@@ -169,10 +169,10 @@ export function createShareRouter() {
       }
     }
 
-    // Resolve config, state, and tokens using the admin's (created_by) credentials
+    // Resolve config, previous state, and tokens using the admin's (created_by) credentials
     const adminConns = await getAdminConnections(flowId);
     const config = await getFlowConfig(flowId);
-    const state = await getFlowState(userId, flowId);
+    const previousState = await getLastExecutionState(flowId, userId);
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
@@ -188,7 +188,8 @@ export function createShareRouter() {
       flow,
       tokens,
       config,
-      state,
+      previousState,
+      executionApi: buildExecutionApi(executionId),
       input: body.input,
       files: fileRefs,
     });

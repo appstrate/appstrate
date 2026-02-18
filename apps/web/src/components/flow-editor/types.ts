@@ -38,6 +38,5 @@ export interface FlowFormState {
   inputSchema: SchemaField[];
   outputSchema: SchemaField[];
   configSchema: SchemaField[];
-  stateSchema: SchemaField[];
   execution: ExecutionSettings;
 }
