@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import { supabase } from "../lib/supabase.ts";
-import { getShareToken, consumeShareToken, linkExecutionToToken } from "../services/share-tokens.ts";
+import {
+  getShareToken,
+  consumeShareToken,
+  linkExecutionToToken,
+} from "../services/share-tokens.ts";
 import { getFlow } from "../services/flow-service.ts";
 import {
   getFlowConfig,
@@ -9,7 +13,7 @@ import {
   createExecution,
   getAdminConnections,
 } from "../services/state.ts";
-import { getAccessToken } from "../services/nango.ts";
+import { getAccessToken, resolveServiceStatuses } from "../services/nango.ts";
 import {
   validateInput,
   validateFileInputs,
@@ -34,24 +38,26 @@ export function createShareRouter() {
     const shareToken = await getShareToken(token);
 
     if (!shareToken || shareToken.expires_at! < new Date().toISOString()) {
-      return c.json(
-        { error: "TOKEN_INVALID", message: "Ce lien n'est plus valide." },
-        410,
-      );
+      return c.json({ error: "TOKEN_INVALID", message: "Ce lien n'est plus valide." }, 410);
     }
 
     const flow = await getFlow(shareToken.flow_id);
     if (!flow) {
-      return c.json(
-        { error: "FLOW_NOT_FOUND", message: "Flow introuvable." },
-        404,
-      );
+      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow introuvable." }, 404);
     }
+
+    // Resolve service statuses
+    const adminConns = await getAdminConnections(flow.id);
+    const serviceStatuses = await resolveServiceStatuses(
+      flow.manifest.requires.services,
+      adminConns,
+    );
 
     const result: Record<string, unknown> = {
       displayName: flow.manifest.metadata.displayName,
       description: flow.manifest.metadata.description,
       ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
+      ...(serviceStatuses.length > 0 ? { services: serviceStatuses } : {}),
       consumed: !!shareToken.consumed_at,
     };
 
@@ -200,18 +206,32 @@ export function createShareRouter() {
       flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
 
     // Create execution record (using admin's user_id), then link to share token
-    await createExecution(executionId, flowId, userId, body.input ?? null, undefined, flowVersionId ?? undefined);
+    await createExecution(
+      executionId,
+      flowId,
+      userId,
+      body.input ?? null,
+      undefined,
+      flowVersionId ?? undefined,
+    );
     await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
-    executeFlowInBackground(executionId, flowId, userId, flow, envVars, tokens, flowPackage, fileRefs).catch(
-      (err) => {
-        logger.error("Unhandled error in shared execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      flowId,
+      userId,
+      flow,
+      envVars,
+      tokens,
+      flowPackage,
+      fileRefs,
+    ).catch((err) => {
+      logger.error("Unhandled error in shared execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ executionId });
   });

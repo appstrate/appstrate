@@ -22,11 +22,7 @@ export async function createShareToken(
 }
 
 export async function getShareToken(token: string) {
-  const { data } = await supabase
-    .from("share_tokens")
-    .select("*")
-    .eq("token", token)
-    .single();
+  const { data } = await supabase.from("share_tokens").select("*").eq("token", token).single();
   return data ?? null;
 }
 

@@ -43,7 +43,8 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
   const canSharePublic =
     services.length === 0 ||
     services.every(
-      (s) => (s.connectionMode ?? "user") === "admin" && s.adminProvided && s.status === "connected",
+      (s) =>
+        (s.connectionMode ?? "user") === "admin" && s.adminProvided && s.status === "connected",
     );
 
   const hasUserModeServices = services.some((s) => (s.connectionMode ?? "user") === "user");
