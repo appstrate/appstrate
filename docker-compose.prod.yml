@@ -57,6 +57,13 @@ services:
     restart: "no"
     command: ["echo", "runtime image built"]
 
+  appstrate-pi:
+    build:
+      context: ./runtime-pi
+    image: appstrate-pi:latest
+    restart: "no"
+    command: ["echo", "runtime image built"]
+
   appstrate:
     build:
       context: .
@@ -76,12 +83,17 @@ services:
       - NANGO_URL=http://nango:8080
       - NANGO_PUBLIC_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
       - NANGO_SECRET_KEY=${NANGO_SECRET_KEY}
+      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-claude-code}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       nango:
         condition: service_started
+      appstrate-claude-code:
+        condition: service_completed_successfully
+      appstrate-pi:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
