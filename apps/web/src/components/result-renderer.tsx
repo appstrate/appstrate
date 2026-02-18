@@ -18,7 +18,6 @@ function renderMetadata(data: Record<string, unknown>): string {
     parts.push(`${data.meetings_prepped} reunions preparees`);
   if (data.meetings_skipped !== undefined) parts.push(`${data.meetings_skipped} ignorees`);
   if (data.ignored_count) parts.push(`${data.ignored_count} ignores`);
-  if (data.tokensUsed) parts.push(`${data.tokensUsed} tokens`);
   if (parts.length === 0) return "";
   return `<p class="result-metadata">${parts.join(" — ")}</p>`;
 }

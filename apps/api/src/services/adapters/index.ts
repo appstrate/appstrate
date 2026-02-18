@@ -3,6 +3,7 @@ import { ClaudeCodeAdapter } from "./claude-code.ts";
 import { PiAdapter } from "./pi.ts";
 
 export { TimeoutError } from "./types.ts";
+export type { TokenUsage, FileReference } from "./types.ts";
 export { buildRetryPrompt } from "./prompt-builder.ts";
 
 export function getAdapter(): ExecutionAdapter {

@@ -1,5 +1,5 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import type { ExecutionAdapter, ExecutionMessage } from "./types.ts";
+import type { ExecutionAdapter, ExecutionMessage, FileReference } from "./types.ts";
 import { buildEnrichedPrompt, extractJsonResult, filterFlowEnvVars } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { createContainer } from "../docker.ts";
@@ -13,8 +13,9 @@ export class ClaudeCodeAdapter implements ExecutionAdapter {
     timeout: number,
     outputSchema?: JSONSchemaObject,
     flowPackage?: Buffer,
+    files?: FileReference[],
   ): AsyncGenerator<ExecutionMessage> {
-    const prompt = buildEnrichedPrompt(envVars, outputSchema);
+    const prompt = buildEnrichedPrompt(envVars, outputSchema, files);
     const model = envVars.LLM_MODEL || "claude-sonnet-4-5-20250929";
 
     // Auth via CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, uses Claude subscription)
@@ -85,11 +86,24 @@ function parseStreamJsonLine(line: string): ExecutionMessage | null {
     if (obj.type === "result") {
       const resultText = typeof obj.result === "string" ? obj.result : JSON.stringify(obj.result);
       const jsonResult = extractJsonResult(resultText);
+
+      // Extract token usage from result event
+      let usage: import("./types.ts").TokenUsage | undefined;
+      if (obj.usage) {
+        usage = {
+          input_tokens: obj.usage.input_tokens ?? 0,
+          output_tokens: obj.usage.output_tokens ?? 0,
+          cache_creation_input_tokens: obj.usage.cache_creation_input_tokens,
+          cache_read_input_tokens: obj.usage.cache_read_input_tokens,
+          cost_usd: typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : undefined,
+        };
+      }
+
       if (jsonResult) {
-        return { type: "result", data: jsonResult };
+        return { type: "result", data: jsonResult, usage };
       }
       // If no JSON block found, wrap the text as summary
-      return { type: "result", data: { summary: resultText } };
+      return { type: "result", data: { summary: resultText }, usage };
     }
 
     // system message or other → ignore

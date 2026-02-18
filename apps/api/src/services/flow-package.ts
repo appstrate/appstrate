@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { zipSync, unzipSync, type Zippable } from "fflate";
-import { supabase } from "../lib/supabase.ts";
+import { supabase, ensureBucket } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
 import { FLOWS_DIR } from "./flow-service.ts";
@@ -13,17 +13,7 @@ const ZIP_COMPRESSION_LEVEL = 6;
 const builtInPackageCache = new Map<string, Buffer>();
 
 /** Ensure the flow-packages Storage bucket exists. Call once at boot. */
-export async function ensureStorageBucket(): Promise<void> {
-  const { data } = await supabase.storage.getBucket(BUCKET);
-  if (!data) {
-    const { error } = await supabase.storage.createBucket(BUCKET, { public: false });
-    if (error) {
-      logger.error("Failed to create storage bucket", { bucket: BUCKET, error: error.message });
-      throw error;
-    }
-    logger.info("Created storage bucket", { bucket: BUCKET });
-  }
-}
+export const ensureStorageBucket = () => ensureBucket(BUCKET);
 
 /** Upload a flow package ZIP to Storage. */
 export async function uploadFlowPackage(

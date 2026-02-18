@@ -1,4 +1,5 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { FileReference } from "./types.ts";
 
 /** Copy TOKEN_*, CONFIG_*, INPUT_*, and FLOW_STATE entries from source into target. */
 export function filterFlowEnvVars(
@@ -17,9 +18,16 @@ export function filterFlowEnvVars(
   }
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 export function buildEnrichedPrompt(
   envVars: Record<string, string>,
   outputSchema?: JSONSchemaObject,
+  files?: FileReference[],
 ): string {
   const flowPrompt = envVars.FLOW_PROMPT || "";
 
@@ -77,6 +85,17 @@ export function buildEnrichedPrompt(
       sections.push(`- **${name}**: ${value}`);
     }
     sections.push("");
+  }
+
+  // Uploaded documents
+  if (files && files.length > 0) {
+    sections.push("## Documents\n");
+    sections.push("The following documents have been uploaded and are available for download:\n");
+    for (const file of files) {
+      sections.push(`- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)})`);
+      sections.push(`  Download: \`curl -sL -o "${file.name}" "${file.url}"\``);
+    }
+    sections.push("\nDownload each document using curl before processing it.\n");
   }
 
   // Config

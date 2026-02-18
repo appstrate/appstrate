@@ -1,0 +1,159 @@
+import { useState, useCallback, useMemo } from "react";
+import { useParams } from "react-router-dom";
+import { useFlowDetail } from "../hooks/use-flows";
+import { useExecutionRealtime } from "../hooks/use-realtime";
+import { InputFields } from "../components/input-fields";
+import { initInputValues, buildInputPayload } from "../components/input-utils";
+import { ResultRenderer } from "../components/result-renderer";
+import { Spinner } from "../components/spinner";
+import { api, uploadFormData } from "../api";
+
+type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
+
+export function ShareableRunPage() {
+  const { flowId } = useParams<{ flowId: string }>();
+  const { data: flow, isLoading, error } = useFlowDetail(flowId);
+
+  const [executionId, setExecutionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<PageStatus>("idle");
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [execError, setExecError] = useState<string | null>(null);
+
+  const schema = flow?.input?.schema;
+  const hasInput = !!schema?.properties && Object.keys(schema.properties).length > 0;
+
+  const initialInputValues = useMemo(() => (schema ? initInputValues(schema) : {}), [schema]);
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const mergedInputValues = useMemo(
+    () => ({ ...initialInputValues, ...inputValues }),
+    [initialInputValues, inputValues],
+  );
+  const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
+
+  const handleStatusChange = useCallback((payload: Record<string, unknown>) => {
+    const newStatus = payload.status as string;
+    if (newStatus === "success" || newStatus === "failed" || newStatus === "timeout") {
+      setStatus(newStatus as PageStatus);
+      if (newStatus === "success" && payload.result) {
+        setResult(payload.result as Record<string, unknown>);
+      } else if (newStatus === "failed") {
+        setExecError((payload.error as string) || "L'execution a echoue.");
+      } else if (newStatus === "timeout") {
+        setExecError("L'execution a expire (timeout).");
+      }
+    }
+  }, []);
+
+  useExecutionRealtime(executionId, handleStatusChange);
+
+  const handleRun = async () => {
+    if (!flowId) return;
+    setStatus("running");
+    setResult(null);
+    setExecError(null);
+
+    try {
+      const input = schema ? buildInputPayload(schema, mergedInputValues) : undefined;
+      const hasFiles = Object.values(fileValues).some((f) => f.length > 0);
+
+      let data: { executionId: string };
+      if (hasFiles) {
+        const fd = new FormData();
+        if (input && Object.keys(input).length > 0) {
+          fd.append("input", JSON.stringify(input));
+        }
+        for (const [key, files] of Object.entries(fileValues)) {
+          for (const file of files) {
+            fd.append(key, file);
+          }
+        }
+        data = await uploadFormData<{ executionId: string }>(`/flows/${flowId}/run`, fd);
+      } else {
+        data = await api<{ executionId: string }>(`/flows/${flowId}/run`, {
+          method: "POST",
+          body: JSON.stringify(input ? { input } : {}),
+        });
+      }
+      setExecutionId(data.executionId);
+    } catch (err) {
+      setStatus("failed");
+      setExecError(err instanceof Error ? err.message : "Erreur inconnue");
+    }
+  };
+
+  const handleRestart = () => {
+    setExecutionId(null);
+    setStatus("idle");
+    setResult(null);
+    setExecError(null);
+    setFileValues({});
+  };
+
+  if (isLoading) {
+    return (
+      <div className="shareable-run">
+        <div className="shareable-run-card">
+          <div className="empty-state">
+            <Spinner />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !flow) {
+    return (
+      <div className="shareable-run">
+        <div className="shareable-run-card">
+          <div className="exec-error">{error?.message || "Flow introuvable."}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shareable-run">
+      <div className="shareable-run-card">
+        <div className="shareable-run-header">
+          <h2>{flow.displayName}</h2>
+          {flow.description && <p className="description">{flow.description}</p>}
+        </div>
+
+        {status === "idle" && (
+          <div className="shareable-run-form">
+            {hasInput && (
+              <InputFields
+                schema={schema!}
+                values={mergedInputValues}
+                onChange={(key, value) => setInputValues((prev) => ({ ...prev, [key]: value }))}
+                fileValues={fileValues}
+                onFileChange={(key, files) => setFileValues((prev) => ({ ...prev, [key]: files }))}
+                idPrefix="shareable-input"
+              />
+            )}
+            <button className="primary shareable-run-btn" onClick={handleRun}>
+              Executer
+            </button>
+          </div>
+        )}
+
+        {status === "running" && (
+          <div className="shareable-run-status">
+            <Spinner />
+            <span>Execution en cours...</span>
+          </div>
+        )}
+
+        {(status === "success" || status === "failed" || status === "timeout") && (
+          <div className="shareable-run-result">
+            {execError && <div className="exec-error">{execError}</div>}
+            {result && <ResultRenderer data={result} outputSchema={flow.output?.schema} />}
+            <button className="shareable-run-btn" onClick={handleRestart}>
+              Relancer
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

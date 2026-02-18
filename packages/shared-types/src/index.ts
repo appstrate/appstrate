@@ -29,6 +29,10 @@ export interface JSONSchemaProperty {
   enum?: unknown[];
   format?: string;
   placeholder?: string; // custom extension
+  accept?: string; // file fields: allowed extensions e.g. ".pdf,.csv,.txt"
+  maxSize?: number; // file fields: max size per file in bytes
+  multiple?: boolean; // file fields: allow multiple files
+  maxFiles?: number; // file fields: max number of files (when multiple)
 }
 
 export interface JSONSchemaObject {

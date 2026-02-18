@@ -8,6 +8,7 @@ import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
+import { ensureFilesBucket } from "./services/file-storage.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
@@ -64,11 +65,18 @@ logger.info("Loading flows...");
 await initFlowService();
 logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
 
-// Ensure Supabase Storage bucket for flow packages
+// Ensure Supabase Storage buckets
 try {
   await ensureStorageBucket();
 } catch (err) {
   logger.warn("Could not ensure storage bucket", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+try {
+  await ensureFilesBucket();
+} catch (err) {
+  logger.warn("Could not ensure execution-files bucket", {
     error: err instanceof Error ? err.message : String(err),
   });
 }

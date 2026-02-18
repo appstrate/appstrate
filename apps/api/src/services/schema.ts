@@ -1,12 +1,13 @@
 import { z } from "zod";
 import Ajv from "ajv";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
+import type { UploadedFile } from "./adapters/types.ts";
 
 // --- Section A: Static manifest schema ---
 
 export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-const flowFieldTypeEnum = z.enum(["string", "number", "boolean", "array", "object"]);
+const flowFieldTypeEnum = z.enum(["string", "number", "boolean", "array", "object", "file"]);
 
 const jsonSchemaPropertySchema = z.object({
   type: flowFieldTypeEnum,
@@ -15,6 +16,10 @@ const jsonSchemaPropertySchema = z.object({
   enum: z.array(z.unknown()).optional(),
   format: z.string().optional(),
   placeholder: z.string().optional(),
+  accept: z.string().optional(),
+  maxSize: z.number().positive().optional(),
+  multiple: z.boolean().optional(),
+  maxFiles: z.number().int().positive().optional(),
 });
 
 const jsonSchemaObjectSchema = z.object({
@@ -157,7 +162,85 @@ export function validateInput(
   if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [], data: input ?? {} };
   }
-  return validateWithAjv(input ?? {}, schema);
+  // Exclude file fields from AJV validation (they're validated separately)
+  const nonFileProps: Record<string, JSONSchemaProperty> = {};
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    if (prop.type !== "file") nonFileProps[key] = prop;
+  }
+  if (Object.keys(nonFileProps).length === 0) {
+    return { valid: true, errors: [], data: input ?? {} };
+  }
+  const nonFileRequired = schema.required?.filter((k) => nonFileProps[k]) ?? [];
+  const nonFileSchema: JSONSchemaObject = {
+    type: "object",
+    properties: nonFileProps,
+    ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
+  };
+  return validateWithAjv(input ?? {}, nonFileSchema);
+}
+
+export function validateFileInputs(
+  files: UploadedFile[],
+  schema: JSONSchemaObject,
+): ValidationResult {
+  const errors: { field: string; message: string }[] = [];
+
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    if (prop.type !== "file") continue;
+
+    const fieldFiles = files.filter((f) => f.fieldName === key);
+    const isRequired = schema.required?.includes(key);
+
+    if (isRequired && fieldFiles.length === 0) {
+      errors.push({ field: key, message: `Le fichier '${key}' est requis` });
+      continue;
+    }
+
+    if (!prop.multiple && fieldFiles.length > 1) {
+      errors.push({ field: key, message: `Le champ '${key}' n'accepte qu'un seul fichier` });
+    }
+
+    if (prop.maxFiles && fieldFiles.length > prop.maxFiles) {
+      errors.push({
+        field: key,
+        message: `Le champ '${key}' accepte au maximum ${prop.maxFiles} fichiers`,
+      });
+    }
+
+    // Validate each file
+    const allowedExts = prop.accept
+      ?.split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    for (const file of fieldFiles) {
+      if (prop.maxSize && file.size > prop.maxSize) {
+        const maxMB = (prop.maxSize / (1024 * 1024)).toFixed(1);
+        errors.push({
+          field: key,
+          message: `Le fichier '${file.name}' depasse la taille max (${maxMB} MB)`,
+        });
+      }
+
+      if (allowedExts && allowedExts.length > 0) {
+        const ext = file.name.includes(".") ? `.${file.name.split(".").pop()!.toLowerCase()}` : "";
+        if (!allowedExts.some((a) => a === ext)) {
+          errors.push({
+            field: key,
+            message: `Le fichier '${file.name}' a une extension non autorisee (accepte: ${prop.accept})`,
+          });
+        }
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/** Check if a schema has any file fields */
+export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
+  if (!schema?.properties) return false;
+  return Object.values(schema.properties).some((p) => p.type === "file");
 }
 
 export function validateOutput(

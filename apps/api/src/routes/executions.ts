@@ -18,15 +18,36 @@ import {
   TimeoutError,
   buildRetryPrompt,
 } from "../services/adapters/index.ts";
+import type { TokenUsage, FileReference } from "../services/adapters/index.ts";
+import type { UploadedFile } from "../services/adapters/types.ts";
+import { uploadExecutionFiles, cleanupExecutionFiles } from "../services/file-storage.ts";
 import { buildContainerEnv } from "../services/env-builder.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
-import { validateConfig, validateInput, validateOutput } from "../services/schema.ts";
+import {
+  validateConfig,
+  validateInput,
+  validateOutput,
+  validateFileInputs,
+  schemaHasFileFields,
+} from "../services/schema.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow } from "../middleware/guards.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
+
+function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
+  total.input_tokens += addition.input_tokens;
+  total.output_tokens += addition.output_tokens;
+  total.cache_creation_input_tokens =
+    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
+  total.cache_read_input_tokens =
+    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+  if (addition.cost_usd != null) {
+    total.cost_usd = (total.cost_usd ?? 0) + addition.cost_usd;
+  }
+}
 
 // --- Background execution (decoupled from client) ---
 
@@ -38,6 +59,7 @@ export async function executeFlowInBackground(
   envVars: Record<string, string>,
   tokens: Record<string, string>,
   flowPackage?: Buffer | null,
+  files?: FileReference[],
 ) {
   const startTime = Date.now();
   trackExecution(executionId);
@@ -70,6 +92,7 @@ export async function executeFlowInBackground(
 
     const timeout = flow.manifest.execution?.timeout ?? 300;
     let result: Record<string, unknown> | null = null;
+    const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
     try {
       for await (const msg of adapter.execute(
@@ -78,7 +101,9 @@ export async function executeFlowInBackground(
         timeout,
         flow.manifest.output?.schema,
         flowPackage ?? undefined,
+        files,
       )) {
+        if (msg.usage) accumulateUsage(accumulated, msg.usage);
         if (msg.type === "progress") {
           await appendExecutionLog(
             executionId,
@@ -88,18 +113,26 @@ export async function executeFlowInBackground(
             msg.message ?? null,
             null,
           );
-        } else if (msg.type === "result") {
-          result = msg.data ?? null;
+        } else if (msg.type === "result" && msg.data) {
+          result = msg.data;
         }
       }
     } catch (err) {
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
+        const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
         await updateExecution(executionId, {
           status: "timeout",
           error: `Execution timed out after ${timeout}s`,
           completed_at: new Date().toISOString(),
           duration,
+          ...(totalTokens > 0
+            ? {
+                tokens_used: totalTokens,
+                token_usage: { ...accumulated } as Record<string, unknown>,
+                cost_usd: accumulated.cost_usd,
+              }
+            : {}),
         });
         await appendExecutionLog(executionId, userId, "error", "execution_completed", null, {
           executionId,
@@ -141,6 +174,7 @@ export async function executeFlowInBackground(
               Math.min(60, Math.floor(remaining / 1000)),
               outputSchema,
             )) {
+              if (msg.usage) accumulateUsage(accumulated, msg.usage);
               if (msg.type === "progress") {
                 await appendExecutionLog(
                   executionId,
@@ -176,12 +210,24 @@ export async function executeFlowInBackground(
       }
 
       const duration = Date.now() - startTime;
+      const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
       await updateExecution(executionId, {
         status: "success",
         result,
         completed_at: new Date().toISOString(),
         duration,
-        tokens_used: typeof result.tokensUsed === "number" ? result.tokensUsed : undefined,
+        tokens_used:
+          totalTokens > 0
+            ? totalTokens
+            : typeof result.tokensUsed === "number"
+              ? result.tokensUsed
+              : undefined,
+        ...(totalTokens > 0
+          ? {
+              token_usage: { ...accumulated } as Record<string, unknown>,
+              cost_usd: accumulated.cost_usd,
+            }
+          : {}),
       });
 
       // Update flow state if result includes state
@@ -224,6 +270,14 @@ export async function executeFlowInBackground(
     });
   } finally {
     untrackExecution(executionId);
+    if (files?.length) {
+      cleanupExecutionFiles(executionId).catch((err) => {
+        logger.warn("Failed to cleanup execution files", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   }
 }
 
@@ -299,15 +353,82 @@ export function createExecutionsRouter() {
       );
     }
 
+    const inputSchema = flow.manifest.input?.schema;
+    const hasFileFields = schemaHasFileFields(inputSchema);
+
     let body: { input?: Record<string, unknown> };
-    try {
-      body = await c.req.json<{ input?: Record<string, unknown> }>();
-    } catch {
-      body = {};
+    let uploadedFiles: UploadedFile[] | undefined;
+
+    if (hasFileFields) {
+      // FormData mode: "input" is a JSON string, files are named by schema key
+      try {
+        const formData = await c.req.formData();
+        const inputRaw = formData.get("input");
+        const parsedInput = typeof inputRaw === "string" && inputRaw ? JSON.parse(inputRaw) : {};
+        body = { input: parsedInput };
+
+        // Collect uploaded files
+        uploadedFiles = [];
+        const nameCounts = new Map<string, number>();
+        for (const [key, prop] of Object.entries(inputSchema!.properties)) {
+          if (prop.type !== "file") continue;
+          const entries = formData.getAll(key);
+          for (const entry of entries) {
+            if (!(entry instanceof File)) continue;
+            // Deduplicate file names
+            let fileName = entry.name;
+            const count = nameCounts.get(fileName) ?? 0;
+            if (count > 0) {
+              const dotIdx = fileName.lastIndexOf(".");
+              if (dotIdx > 0) {
+                fileName = `${fileName.substring(0, dotIdx)}_${count}${fileName.substring(dotIdx)}`;
+              } else {
+                fileName = `${fileName}_${count}`;
+              }
+            }
+            nameCounts.set(entry.name, count + 1);
+
+            const buffer = Buffer.from(await entry.arrayBuffer());
+            uploadedFiles.push({
+              fieldName: key,
+              name: fileName,
+              type: entry.type,
+              size: entry.size,
+              buffer,
+            });
+          }
+        }
+      } catch (err) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: `Erreur de parsing FormData: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          400,
+        );
+      }
+
+      // Validate file constraints
+      if (uploadedFiles.length > 0) {
+        const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
+        if (!fileValidation.valid) {
+          const first = fileValidation.errors[0]!;
+          return c.json(
+            { error: "VALIDATION_ERROR", message: first.message, field: first.field },
+            400,
+          );
+        }
+      }
+    } else {
+      // JSON mode (existing behavior)
+      try {
+        body = await c.req.json<{ input?: Record<string, unknown> }>();
+      } catch {
+        body = {};
+      }
     }
 
-    // Validate required input fields
-    const inputSchema = flow.manifest.input?.schema;
+    // Validate required input fields (non-file fields)
     if (inputSchema) {
       const inputValidation = validateInput(body.input, inputSchema);
       if (!inputValidation.valid) {
@@ -317,6 +438,22 @@ export function createExecutionsRouter() {
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
+
+    // Upload files to Supabase Storage and get signed URLs
+    let fileRefs: FileReference[] | undefined;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      try {
+        fileRefs = await uploadExecutionFiles(executionId, uploadedFiles);
+      } catch (err) {
+        return c.json(
+          {
+            error: "FILE_UPLOAD_FAILED",
+            message: `Echec de l'upload des fichiers: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          500,
+        );
+      }
+    }
 
     // Get state and tokens (resolve based on connectionMode)
     const state = await getFlowState(user.id, flowId);
@@ -363,14 +500,21 @@ export function createExecutionsRouter() {
     );
 
     // Fire-and-forget background execution
-    executeFlowInBackground(executionId, flowId, user.id, flow, envVars, tokens, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in background execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      flowId,
+      user.id,
+      flow,
+      envVars,
+      tokens,
+      flowPackage,
+      fileRefs,
+    ).catch((err) => {
+      logger.error("Unhandled error in background execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return c.json({ executionId });
   });

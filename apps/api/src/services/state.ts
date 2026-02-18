@@ -100,12 +100,18 @@ export async function updateExecution(
     tokens_used?: number;
     completed_at?: string;
     duration?: number;
+    token_usage?: Record<string, unknown>;
+    cost_usd?: number;
   },
 ): Promise<void> {
-  const { result, ...rest } = updates;
+  const { result, token_usage, ...rest } = updates;
   const { error } = await supabase
     .from("executions")
-    .update({ ...rest, ...(result !== undefined ? { result: result as Json } : {}) })
+    .update({
+      ...rest,
+      ...(result !== undefined ? { result: result as Json } : {}),
+      ...(token_usage !== undefined ? { token_usage: token_usage as Json } : {}),
+    })
     .eq("id", id);
   if (error) {
     logger.error("Failed to update execution", { executionId: id, error: error.message });

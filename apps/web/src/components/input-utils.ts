@@ -7,6 +7,7 @@ export function initInputValues(
   const values: Record<string, string> = {};
   if (schema?.properties) {
     for (const [key, prop] of Object.entries(schema.properties)) {
+      if (prop.type === "file") continue;
       values[key] = String(existing?.[key] ?? prop.default ?? "");
     }
   }
@@ -20,6 +21,7 @@ export function buildInputPayload(
   const payload: Record<string, unknown> = {};
   if (schema?.properties) {
     for (const [key, prop] of Object.entries(schema.properties)) {
+      if (prop.type === "file") continue;
       let value: unknown = values[key];
       if (prop.type === "number" && value) value = Number(value);
       payload[key] = value || null;
