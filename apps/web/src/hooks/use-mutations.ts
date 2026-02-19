@@ -173,7 +173,12 @@ export function useCreateFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (body: { manifest: Record<string, unknown>; prompt: string }) => {
+    mutationFn: async (body: {
+      manifest: Record<string, unknown>;
+      prompt: string;
+      skillIds?: string[];
+      extensionIds?: string[];
+    }) => {
       return api<{ flowId: string }>("/flows", {
         method: "POST",
         body: JSON.stringify(body),
@@ -195,6 +200,8 @@ export function useUpdateFlow(flowId: string) {
       manifest: Record<string, unknown>;
       prompt: string;
       updatedAt: string;
+      skillIds?: string[];
+      extensionIds?: string[];
     }) => {
       return api<{ flowId: string; updatedAt: string }>(`/flows/${flowId}`, {
         method: "PUT",
@@ -237,65 +244,6 @@ export async function downloadPackage(flowId: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-
-export function useAddSkill(flowId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("updatedAt", updatedAt);
-      return uploadFormData<{ flowId: string; updatedAt: string }>(`/flows/${flowId}/skills`, fd);
-    },
-    onSuccess: () => invalidateFlowQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useRemoveSkill(flowId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ skillId, updatedAt }: { skillId: string; updatedAt: string }) => {
-      return api<{ flowId: string; updatedAt: string }>(
-        `/flows/${flowId}/skills/${skillId}?updatedAt=${encodeURIComponent(updatedAt)}`,
-        { method: "DELETE" },
-      );
-    },
-    onSuccess: () => invalidateFlowQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useAddExtension(flowId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("updatedAt", updatedAt);
-      return uploadFormData<{ flowId: string; updatedAt: string }>(
-        `/flows/${flowId}/extensions`,
-        fd,
-      );
-    },
-    onSuccess: () => invalidateFlowQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useRemoveExtension(flowId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ extId, updatedAt }: { extId: string; updatedAt: string }) => {
-      return api<{ flowId: string; updatedAt: string }>(
-        `/flows/${flowId}/extensions/${extId}?updatedAt=${encodeURIComponent(updatedAt)}`,
-        { method: "DELETE" },
-      );
-    },
-    onSuccess: () => invalidateFlowQueries(qc),
-    onError: onMutationError,
-  });
 }
 
 export function useCancelExecution() {

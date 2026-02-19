@@ -3,7 +3,15 @@ import { validateManifest } from "./schema.ts";
 import { insertUserFlow } from "./user-flows.ts";
 import { createVersionAndUpload } from "./flow-versions.ts";
 import { extractSkillMeta } from "./skill-utils.ts";
+import {
+  upsertOrgSkill,
+  upsertOrgExtension,
+  setFlowSkills,
+  setFlowExtensions,
+  uploadLibraryPackage,
+} from "./library.ts";
 import { logger } from "../lib/logger.ts";
+import { supabase } from "../lib/supabase.ts";
 import type { SkillMeta } from "../types/index.ts";
 
 const MAX_ZIP_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -11,6 +19,10 @@ const MAX_ZIP_SIZE = 10 * 1024 * 1024; // 10 MB
 export interface ImportResult {
   flowId: string;
   displayName: string;
+  skillsCreated: number;
+  skillsMatched: number;
+  extensionsCreated: number;
+  extensionsMatched: number;
 }
 
 export class FlowImportError extends Error {
@@ -57,6 +69,7 @@ function getFileText(files: Record<string, Uint8Array>, path: string): string | 
 export interface ParsedFlowZip {
   manifest: Record<string, unknown>;
   prompt: string;
+  files: Record<string, Uint8Array>;
 }
 
 /** Parse a flow ZIP buffer and extract manifest, prompt, skills metadata, and extensions metadata. */
@@ -159,7 +172,138 @@ export function parseFlowZip(zipBuffer: Buffer): ParsedFlowZip {
   // Write merged extensions back into manifest.requires.extensions
   (manifest.requires as Record<string, unknown>).extensions = [...manifestExtMap.values()];
 
-  return { manifest, prompt };
+  return { manifest, prompt, files };
+}
+
+/**
+ * Extract skills and extensions from pre-decompressed ZIP files, upsert them into the org library,
+ * and create flow_skills/flow_extensions references.
+ * Accepts the `files` map already produced by `parseFlowZip` to avoid decompressing twice.
+ */
+export async function upsertSkillsAndExtensionsFromFiles(
+  files: Record<string, Uint8Array>,
+  flowId: string,
+  orgId: string,
+  userId: string,
+): Promise<{
+  skillsCreated: number;
+  skillsMatched: number;
+  extensionsCreated: number;
+  extensionsMatched: number;
+}> {
+  const root = findRoot(files);
+  let skillsCreated = 0;
+  let skillsMatched = 0;
+  let extensionsCreated = 0;
+  let extensionsMatched = 0;
+
+  // Process skills — group all files per skill directory
+  const skillPrefix = root + "skills/";
+  const skillIds: string[] = [];
+  const skillFilesMap = new Map<string, Record<string, Uint8Array>>();
+
+  for (const [path, data] of Object.entries(files)) {
+    if (!path.startsWith(skillPrefix) || path.endsWith("/")) continue;
+
+    const relative = path.slice(skillPrefix.length);
+    const slashIdx = relative.indexOf("/");
+    if (slashIdx === -1) continue; // must be inside a skill subdirectory
+
+    const skillId = relative.slice(0, slashIdx);
+    const filePath = relative.slice(slashIdx + 1);
+
+    if (!skillFilesMap.has(skillId)) {
+      skillFilesMap.set(skillId, {});
+    }
+    skillFilesMap.get(skillId)![filePath] = data;
+  }
+
+  for (const [skillId, skillFiles] of skillFilesMap) {
+    const skillMdContent = skillFiles["SKILL.md"];
+    if (!skillMdContent) continue; // skip skills without SKILL.md
+
+    const content = new TextDecoder().decode(skillMdContent);
+    const { name, description } = extractSkillMeta(content);
+
+    // Check if skill already exists in org
+    const { data: existing } = await supabase
+      .from("org_skills")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("id", skillId)
+      .single();
+
+    if (existing) {
+      // Reuse existing — don't overwrite content
+      skillsMatched++;
+    } else {
+      // Create new in library (DB metadata + Storage full package)
+      await upsertOrgSkill(orgId, {
+        id: skillId,
+        name: name || undefined,
+        description: description || undefined,
+        content,
+        createdBy: userId,
+      });
+      await uploadLibraryPackage("skills", orgId, skillId, skillFiles);
+      skillsCreated++;
+    }
+
+    skillIds.push(skillId);
+  }
+
+  // Process extensions — collect all extension files
+  const extPrefix = root + "extensions/";
+  const extIds: string[] = [];
+  const extFilesMap = new Map<string, Record<string, Uint8Array>>();
+
+  for (const [path, data] of Object.entries(files)) {
+    if (!path.startsWith(extPrefix) || path.endsWith("/")) continue;
+    if (!path.endsWith(".ts")) continue;
+
+    const filename = path.slice(extPrefix.length);
+    if (filename.includes("/")) continue;
+
+    const extId = filename.replace(/\.ts$/, "");
+    extFilesMap.set(extId, { [filename]: data });
+  }
+
+  for (const [extId, extFiles] of extFilesMap) {
+    const tsFilename = Object.keys(extFiles)[0]!;
+    const content = new TextDecoder().decode(extFiles[tsFilename]!);
+
+    // Check if extension already exists in org
+    const { data: existing } = await supabase
+      .from("org_extensions")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("id", extId)
+      .single();
+
+    if (existing) {
+      extensionsMatched++;
+    } else {
+      await upsertOrgExtension(orgId, {
+        id: extId,
+        content,
+        createdBy: userId,
+      });
+      await uploadLibraryPackage("extensions", orgId, extId, extFiles);
+      extensionsCreated++;
+    }
+
+    extIds.push(extId);
+  }
+
+  // Create flow references
+  if (skillIds.length > 0) {
+    await setFlowSkills(flowId, orgId, skillIds);
+  }
+  if (extIds.length > 0) {
+    await setFlowExtensions(flowId, orgId, extIds);
+  }
+
+  return { skillsCreated, skillsMatched, extensionsCreated, extensionsMatched };
 }
 
 export async function importFlowFromZip(
@@ -168,15 +312,9 @@ export async function importFlowFromZip(
   userId: string,
   orgId: string,
 ): Promise<ImportResult> {
-  const { manifest, prompt } = parseFlowZip(zipBuffer);
+  const { manifest, prompt, files } = parseFlowZip(zipBuffer);
 
   const metadata = manifest.metadata as { name: string; displayName: string };
-  const requires = (manifest.requires ?? {}) as {
-    skills?: { id: string }[];
-    extensions?: { id: string }[];
-  };
-  const skills = requires.skills ?? [];
-  const extensions = requires.extensions ?? [];
   const flowId = metadata.name;
   logger.info("importFlowFromZip: parsed manifest", { flowId, displayName: metadata.displayName });
 
@@ -188,15 +326,7 @@ export async function importFlowFromZip(
     );
   }
 
-  logger.info("importFlowFromZip: metadata extracted", {
-    flowId,
-    skillCount: skills.length,
-    skills: skills.map((s) => s.id),
-    extensionCount: extensions.length,
-    extensions: extensions.map((e) => e.id),
-  });
-
-  // Persist metadata to DB (skills + extensions are inside manifest.requires)
+  // Persist metadata to DB
   logger.info("importFlowFromZip: inserting into DB", { flowId });
   try {
     await insertUserFlow(flowId, orgId, manifest, prompt);
@@ -210,7 +340,14 @@ export async function importFlowFromZip(
   }
   logger.info("importFlowFromZip: DB insert success", { flowId });
 
-  // Create version snapshot and upload ZIP to Storage (non-blocking — import succeeds even if Storage fails)
+  // Upsert skills/extensions from ZIP into org library + create references
+  const libResult = await upsertSkillsAndExtensionsFromFiles(files, flowId, orgId, userId);
+  logger.info("importFlowFromZip: library upsert done", {
+    flowId,
+    ...libResult,
+  });
+
+  // Create version snapshot and upload ZIP to Storage (non-blocking)
   try {
     logger.info("importFlowFromZip: creating version + uploading ZIP", { flowId, userId });
     await createVersionAndUpload(flowId, userId, zipBuffer);
@@ -223,5 +360,9 @@ export async function importFlowFromZip(
     });
   }
 
-  return { flowId, displayName: metadata.displayName };
+  return {
+    flowId,
+    displayName: metadata.displayName,
+    ...libResult,
+  };
 }

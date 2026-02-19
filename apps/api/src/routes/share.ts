@@ -197,7 +197,7 @@ export function createShareRouter() {
     });
 
     // Get flow package
-    const flowPackage = await getFlowPackage(flow);
+    const flowPackage = await getFlowPackage(flow, orgId);
 
     // Get flow version ID
     const flowVersionId =

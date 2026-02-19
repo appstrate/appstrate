@@ -229,6 +229,42 @@ export type Database = {
           },
         ]
       }
+      flow_extensions: {
+        Row: {
+          created_at: string | null
+          extension_id: string
+          flow_id: string
+          org_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          extension_id: string
+          flow_id: string
+          org_id: string
+        }
+        Update: {
+          created_at?: string | null
+          extension_id?: string
+          flow_id?: string
+          org_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_extensions_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_extensions_org_id_extension_id_fkey"
+            columns: ["org_id", "extension_id"]
+            isOneToOne: false
+            referencedRelation: "org_extensions"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       flow_schedules: {
         Row: {
           created_at: string | null
@@ -285,6 +321,42 @@ export type Database = {
           },
         ]
       }
+      flow_skills: {
+        Row: {
+          created_at: string | null
+          flow_id: string
+          org_id: string
+          skill_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          flow_id: string
+          org_id: string
+          skill_id: string
+        }
+        Update: {
+          created_at?: string | null
+          flow_id?: string
+          org_id?: string
+          skill_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_skills_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_skills_org_id_skill_id_fkey"
+            columns: ["org_id", "skill_id"]
+            isOneToOne: false
+            referencedRelation: "org_skills"
+            referencedColumns: ["org_id", "id"]
+          },
+        ]
+      }
       flow_versions: {
         Row: {
           created_at: string | null
@@ -337,6 +409,88 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "flows_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_extensions: {
+        Row: {
+          content: string
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          name: string | null
+          org_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id: string
+          name?: string | null
+          org_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name?: string | null
+          org_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_extensions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_skills: {
+        Row: {
+          content: string
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          name: string | null
+          org_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id: string
+          name?: string | null
+          org_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name?: string | null
+          org_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_skills_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"

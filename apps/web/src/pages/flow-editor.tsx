@@ -1,14 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useFlowDetail } from "../hooks/use-flows";
-import {
-  useCreateFlow,
-  useUpdateFlow,
-  useAddSkill,
-  useRemoveSkill,
-  useAddExtension,
-  useRemoveExtension,
-} from "../hooks/use-mutations";
+import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { MetadataSection } from "../components/flow-editor/metadata-section";
@@ -48,11 +41,6 @@ function FlowEditorForm({
   const navigate = useNavigate();
   const createFlow = useCreateFlow();
   const updateFlow = useUpdateFlow(flowId || "");
-
-  const addSkill = useAddSkill(flowId || "");
-  const removeSkill = useRemoveSkill(flowId || "");
-  const addExtension = useAddExtension(flowId || "");
-  const removeExtension = useRemoveExtension(flowId || "");
 
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
@@ -111,8 +99,6 @@ function FlowEditorForm({
     setForm(newState);
     setActiveTab("general");
   };
-
-  const updatedAt = detail?.updatedAt ?? undefined;
 
   return (
     <div className="flow-editor">
@@ -197,33 +183,21 @@ function FlowEditorForm({
 
       {activeTab === "skills" && (
         <ResourceSection
+          type="skills"
           title="Skills"
-          emptyLabel="Aucun skill."
-          items={form.skills}
-          onChange={(skills) => setForm((s) => ({ ...s, skills }))}
-          canEdit={canEdit}
-          addMutation={addSkill}
-          removeMutation={{
-            mutate: (args) => removeSkill.mutate({ skillId: args.id, updatedAt: args.updatedAt }),
-            isPending: removeSkill.isPending,
-          }}
-          updatedAt={updatedAt}
+          emptyLabel="Aucun skill dans la bibliotheque. Ajoutez-en depuis la page Bibliotheque."
+          selectedIds={form.skills.map((s) => s.id)}
+          onChange={(ids) => setForm((s) => ({ ...s, skills: ids.map((id) => ({ id })) }))}
         />
       )}
 
       {activeTab === "extensions" && (
         <ResourceSection
+          type="extensions"
           title="Extensions"
-          emptyLabel="Aucune extension."
-          items={form.extensions}
-          onChange={(extensions) => setForm((s) => ({ ...s, extensions }))}
-          canEdit={canEdit}
-          addMutation={addExtension}
-          removeMutation={{
-            mutate: (args) => removeExtension.mutate({ extId: args.id, updatedAt: args.updatedAt }),
-            isPending: removeExtension.isPending,
-          }}
-          updatedAt={updatedAt}
+          emptyLabel="Aucune extension dans la bibliotheque. Ajoutez-en depuis la page Bibliotheque."
+          selectedIds={form.extensions.map((e) => e.id)}
+          onChange={(ids) => setForm((s) => ({ ...s, extensions: ids.map((id) => ({ id })) }))}
         />
       )}
 

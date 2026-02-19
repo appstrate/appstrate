@@ -60,18 +60,6 @@ export async function downloadFlowPackage(
   return Buffer.from(await data.arrayBuffer());
 }
 
-/** Delete all versions of a flow package from Storage. */
-export async function deleteFlowPackage(flowId: string): Promise<void> {
-  const { data: files } = await supabase.storage.from(BUCKET).list(flowId);
-  if (!files || files.length === 0) return;
-
-  const paths = files.map((f) => `${flowId}/${f.name}`);
-  const { error } = await supabase.storage.from(BUCKET).remove(paths);
-  if (error) {
-    logger.warn("Failed to delete flow package files", { flowId, error: error.message });
-  }
-}
-
 /** Package a built-in flow directory into a ZIP buffer (cached in memory). */
 async function getBuiltInFlowPackage(flowId: string): Promise<Buffer> {
   const cached = builtInPackageCache.get(flowId);
@@ -86,60 +74,46 @@ async function getBuiltInFlowPackage(flowId: string): Promise<Buffer> {
 }
 
 /** Get the flow package for any flow (built-in or user). */
-export async function getFlowPackage(flow: LoadedFlow): Promise<Buffer | null> {
+export async function getFlowPackage(flow: LoadedFlow, orgId?: string): Promise<Buffer | null> {
   if (flow.source === "built-in") {
     return getBuiltInFlowPackage(flow.id);
   }
 
-  // User flow: download from Storage
+  // User flow: build ZIP on-the-fly from org library
+  if (orgId) {
+    return buildUserFlowPackage(flow, orgId);
+  }
+
+  // Fallback: download from Storage (legacy)
   return downloadFlowPackage(flow.id);
 }
 
-/**
- * Download the current ZIP, unzip (skipping directory entries), apply a transform, and rezip.
- * If `allowMissing` is true, starts from an empty Zippable when no ZIP exists in Storage.
- */
-async function modifyPackage(
-  flowId: string,
-  transform: (entries: Zippable) => void,
-  allowMissing = false,
-): Promise<Buffer> {
-  const existingZip = await downloadFlowPackage(flowId);
+/** Build a user flow package ZIP on-the-fly from org library content. */
+async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Buffer> {
+  const { getFlowSkillFiles, getFlowExtensionFiles } = await import("./library.ts");
 
-  const entries: Zippable = {};
+  const entries: Zippable = {
+    "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
+    "prompt.md": new TextEncoder().encode(flow.prompt),
+  };
 
-  if (existingZip) {
-    const files = unzipSync(new Uint8Array(existingZip));
-    for (const [path, data] of Object.entries(files)) {
-      if (path.endsWith("/")) continue;
-      entries[path] = data;
+  // Fetch all skill files (including assets) and add to ZIP under skills/{id}/...
+  const skillFiles = await getFlowSkillFiles(flow.id, orgId);
+  for (const [skillId, files] of skillFiles) {
+    for (const [filePath, content] of Object.entries(files)) {
+      entries[`skills/${skillId}/${filePath}`] = content;
     }
-  } else if (!allowMissing) {
-    throw new Error(`No package ZIP found in Storage for flow '${flowId}'`);
   }
 
-  transform(entries);
+  // Fetch all extension files and add to ZIP under extensions/...
+  const extFiles = await getFlowExtensionFiles(flow.id, orgId);
+  for (const [, files] of extFiles) {
+    for (const [filePath, content] of Object.entries(files)) {
+      entries[`extensions/${filePath}`] = content;
+    }
+  }
 
   return Buffer.from(zipSync(entries, { level: ZIP_COMPRESSION_LEVEL }));
-}
-
-/**
- * Download the current ZIP for a user flow from Storage, replace manifest.json + prompt.md,
- * and return the new ZIP buffer. If no ZIP exists in Storage, builds a minimal ZIP.
- */
-export async function rebuildPackageWithNewManifestAndPrompt(
-  flowId: string,
-  manifest: Record<string, unknown>,
-  prompt: string,
-): Promise<Buffer> {
-  return modifyPackage(
-    flowId,
-    (entries) => {
-      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
-      entries["prompt.md"] = new TextEncoder().encode(prompt);
-    },
-    true,
-  );
 }
 
 /** Build a minimal ZIP with just manifest.json + prompt.md. */
@@ -179,48 +153,12 @@ export function stripZipDirectoryWrapper(
 }
 
 /**
- * Download the current ZIP for a user flow, extract the uploaded ZIP contents,
- * and merge them under a target prefix. Throws if no package ZIP exists in Storage.
- * Automatically strips a single-directory wrapper from the uploaded ZIP.
+ * Unzip a buffer and normalize (strip __MACOSX, directory wrappers).
+ * Returns a map of path → content as Uint8Array.
  */
-export async function addExtractedZipToPackage(
-  flowId: string,
-  targetPrefix: string,
-  uploadedZip: Buffer,
-): Promise<Buffer> {
-  return modifyPackage(flowId, (entries) => {
-    const rawFiles = unzipSync(new Uint8Array(uploadedZip));
-    const normalizedFiles = stripZipDirectoryWrapper(rawFiles);
-    for (const [path, data] of Object.entries(normalizedFiles)) {
-      entries[`${targetPrefix}${path}`] = data;
-    }
-  });
-}
-
-/**
- * Download the current ZIP for a user flow, add/replace a single file at the given path,
- * and return the new ZIP buffer. Throws if no ZIP exists in Storage.
- */
-export async function addFileToPackage(
-  flowId: string,
-  filePath: string,
-  fileContent: Uint8Array,
-): Promise<Buffer> {
-  return modifyPackage(flowId, (entries) => {
-    entries[filePath] = fileContent;
-  });
-}
-
-/**
- * Download the current ZIP for a user flow, remove all files matching a path prefix,
- * and return the new ZIP buffer. Throws if no ZIP exists in Storage.
- */
-export async function removeFilesFromPackage(flowId: string, pathPrefix: string): Promise<Buffer> {
-  return modifyPackage(flowId, (entries) => {
-    for (const path of Object.keys(entries)) {
-      if (path.startsWith(pathPrefix)) delete entries[path];
-    }
-  });
+export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
+  const rawFiles = unzipSync(new Uint8Array(zipBuffer));
+  return stripZipDirectoryWrapper(rawFiles);
 }
 
 /** Recursively read a directory into an fflate Zippable structure. */

@@ -119,6 +119,40 @@ export interface FlowDetail {
   executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
 }
 
+// --- Organization Library Types ---
+
+export interface OrgSkill {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  createdBy?: string | null;
+  createdByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  usedByFlows?: number;
+}
+
+export interface OrgSkillDetail extends OrgSkill {
+  content: string;
+  flows: { id: string; displayName: string }[];
+}
+
+export interface OrgExtension {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  createdBy?: string | null;
+  createdByName?: string;
+  createdAt: string;
+  updatedAt: string;
+  usedByFlows?: number;
+}
+
+export interface OrgExtensionDetail extends OrgExtension {
+  content: string;
+  flows: { id: string; displayName: string }[];
+}
+
 // --- Integration Types ---
 
 export interface Integration {

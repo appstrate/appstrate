@@ -73,10 +73,42 @@ export async function initFlowService(): Promise<void> {
   builtInFlows = flows;
 }
 
-function dbRowToLoadedFlow(row: { id: string; manifest: unknown; prompt: string }): LoadedFlow {
+interface DbFlowRow {
+  id: string;
+  manifest: unknown;
+  prompt: string;
+  flow_skills?: {
+    skill_id: string;
+    org_skills: { id: string; name: string | null; description: string | null } | null;
+  }[];
+  flow_extensions?: {
+    extension_id: string;
+    org_extensions: { id: string; name: string | null; description: string | null } | null;
+  }[];
+}
+
+function dbRowToLoadedFlow(row: DbFlowRow): LoadedFlow {
   const manifest = row.manifest as unknown as FlowManifest;
-  const skills = manifest.requires.skills ?? [];
-  const extensions = manifest.requires.extensions ?? [];
+
+  // Prefer join table data over manifest for user flows
+  let skills = manifest.requires.skills ?? [];
+  let extensions = manifest.requires.extensions ?? [];
+
+  if (row.flow_skills && row.flow_skills.length > 0) {
+    skills = row.flow_skills.map((fs) => ({
+      id: fs.skill_id,
+      name: fs.org_skills?.name ?? undefined,
+      description: fs.org_skills?.description ?? undefined,
+    }));
+  }
+
+  if (row.flow_extensions && row.flow_extensions.length > 0) {
+    extensions = row.flow_extensions.map((fe) => ({
+      id: fe.extension_id,
+      name: fe.org_extensions?.name ?? undefined,
+      description: fe.org_extensions?.description ?? undefined,
+    }));
+  }
 
   return {
     id: row.id,
@@ -94,8 +126,15 @@ export async function getFlow(id: string, orgId?: string): Promise<LoadedFlow | 
   const builtIn = builtInFlows.get(id);
   if (builtIn) return builtIn;
 
-  // User flows are scoped by org
-  let query = supabase.from("flows").select("id, manifest, prompt").eq("id", id);
+  // User flows are scoped by org — include skill/extension joins
+  let query = supabase
+    .from("flows")
+    .select(
+      `id, manifest, prompt,
+       flow_skills(skill_id, org_skills(id, name, description)),
+       flow_extensions(extension_id, org_extensions(id, name, description))`,
+    )
+    .eq("id", id);
 
   if (orgId) {
     query = query.eq("org_id", orgId);
@@ -104,7 +143,7 @@ export async function getFlow(id: string, orgId?: string): Promise<LoadedFlow | 
   const { data } = await query.single();
   if (!data) return null;
 
-  return dbRowToLoadedFlow(data);
+  return dbRowToLoadedFlow(data as DbFlowRow);
 }
 
 /** List all flows: built-in (from cache) + user flows (from DB, scoped by org). */

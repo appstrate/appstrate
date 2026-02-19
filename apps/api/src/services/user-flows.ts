@@ -1,5 +1,4 @@
 import { supabase } from "../lib/supabase.ts";
-import { deleteFlowPackage } from "./flow-package.ts";
 import type { FlowRow, Json } from "@appstrate/shared-types";
 
 export type { FlowRow };
@@ -59,6 +58,7 @@ export async function updateUserFlow(
 }
 
 export async function deleteUserFlow(id: string): Promise<void> {
+  // flow_skills and flow_extensions cascade-deleted via flows FK
   // execution_logs cascade-deleted via executions FK
   await supabase.from("executions").delete().eq("flow_id", id);
   await supabase.from("flow_schedules").delete().eq("flow_id", id);
@@ -66,7 +66,4 @@ export async function deleteUserFlow(id: string): Promise<void> {
   await supabase.from("flow_versions").delete().eq("flow_id", id);
   await supabase.from("flow_admin_connections").delete().eq("flow_id", id);
   await supabase.from("flows").delete().eq("id", id);
-
-  // Remove flow package from Storage
-  await deleteFlowPackage(id);
 }

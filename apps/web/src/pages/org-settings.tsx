@@ -209,7 +209,11 @@ export function OrgSettingsPage() {
                         fontFamily: "inherit",
                       }}
                     />
-                    <button className="primary" type="submit" disabled={updateNameMutation.isPending}>
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={updateNameMutation.isPending}
+                    >
                       {updateNameMutation.isPending ? "..." : "Enregistrer"}
                     </button>
                     <button type="button" onClick={() => setEditingName(false)}>

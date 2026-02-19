@@ -2039,3 +2039,236 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ─── Library ─── */
+
+.library-page {
+  max-width: 900px;
+}
+
+.library-upload {
+  margin-bottom: 1rem;
+}
+
+.library-table-wrap {
+  overflow-x: auto;
+}
+
+.library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.library-table th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.library-table tbody tr {
+  transition: background 0.12s;
+}
+
+.library-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.library-table .cell-id code {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.72rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  white-space: nowrap;
+}
+
+.library-table .cell-meta {
+  min-width: 160px;
+}
+
+.library-table .cell-name {
+  font-weight: 500;
+}
+
+.library-table .cell-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.library-table .cell-count {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-table .cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.btn-sm {
+  font-size: 0.7rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.btn-sm:hover {
+  background: var(--surface-hover);
+  border-color: var(--text-muted);
+}
+
+.btn-sm.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-sm.btn-danger:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-sm + .btn-sm {
+  margin-left: 0.35rem;
+}
+
+/* Library item detail modal */
+
+.library-item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.detail-id {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.72rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+}
+
+.detail-creator::before,
+.detail-date::before {
+  content: "·";
+  margin-right: 0.6rem;
+}
+
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.detail-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.detail-flows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.detail-flow-badge {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Resource section checkboxes (flow editor) */
+
+.library-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.library-checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.library-checkbox-item:hover {
+  border-color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.library-checkbox-item.checked {
+  border-color: var(--primary);
+}
+
+.library-checkbox-item input[type="checkbox"] {
+  margin-top: 0.15rem;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.library-checkbox-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.library-checkbox-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.library-checkbox-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
