@@ -17,6 +17,7 @@ export interface ContainerLifecycleOptions {
   timeout: number;
   flowPackage?: Buffer;
   extraData?: Record<string, unknown>;
+  signal?: AbortSignal;
   processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
 }
 
@@ -28,7 +29,8 @@ export interface ContainerLifecycleOptions {
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
 ): AsyncGenerator<ExecutionMessage> {
-  const { containerId, adapterName, executionId, timeout, flowPackage, extraData } = options;
+  const { containerId, adapterName, executionId, timeout, flowPackage, extraData, signal } =
+    options;
 
   // Inject flow package ZIP before starting
   if (flowPackage) {
@@ -54,9 +56,14 @@ export async function* runContainerLifecycle(
   let hasResult = false;
 
   try {
-    for await (const msg of options.processLogs(streamLogs(containerId))) {
+    for await (const msg of options.processLogs(streamLogs(containerId, signal))) {
       if (msg.type === "result") hasResult = true;
       yield msg;
+    }
+
+    // Skip waitForExit if cancelled — container will be killed by stopContainer
+    if (signal?.aborted) {
+      throw new Error("Execution cancelled");
     }
 
     const exitCode = await waitForExit(containerId);

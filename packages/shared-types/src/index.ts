@@ -3,7 +3,7 @@ import type { Tables } from "./database.ts";
 
 // --- Execution Types (derived from DB) ---
 
-export type ExecutionStatus = "pending" | "running" | "success" | "failed" | "timeout";
+export type ExecutionStatus = "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
 
 export type Execution = Tables<"executions">;
 export type ExecutionLog = Tables<"execution_logs">;

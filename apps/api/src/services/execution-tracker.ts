@@ -1,13 +1,20 @@
-// Tracks in-flight executions for graceful shutdown.
+// Tracks in-flight executions for graceful shutdown and cancellation.
 
-const inFlight = new Set<string>();
+const inFlight = new Map<string, AbortController>();
 
-export function trackExecution(executionId: string): void {
-  inFlight.add(executionId);
+export function trackExecution(executionId: string): AbortController {
+  const controller = new AbortController();
+  inFlight.set(executionId, controller);
+  return controller;
 }
 
 export function untrackExecution(executionId: string): void {
   inFlight.delete(executionId);
+}
+
+export function abortExecution(executionId: string): void {
+  const controller = inFlight.get(executionId);
+  if (controller) controller.abort();
 }
 
 export function getInFlightCount(): number {

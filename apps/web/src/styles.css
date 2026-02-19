@@ -112,6 +112,19 @@ header h1 span {
   background: rgba(245, 158, 11, 0.15);
   color: var(--warning);
 }
+.badge-cancelled {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: white;
+}
+button.danger:hover {
+  opacity: 0.9;
+}
 
 .tag {
   font-size: 0.7rem;
@@ -413,6 +426,10 @@ button:disabled {
 .exec-detail-header .exec-meta {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.exec-detail-header button {
+  margin-left: auto;
 }
 
 .live-indicator {

@@ -52,6 +52,7 @@ export interface ExecutionAdapter {
     ctx: PromptContext,
     timeout: number,
     flowPackage?: Buffer,
+    signal?: AbortSignal,
   ): AsyncGenerator<ExecutionMessage>;
 }
 

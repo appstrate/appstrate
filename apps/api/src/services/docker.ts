@@ -62,7 +62,12 @@ export async function startContainer(containerId: string): Promise<void> {
   }
 }
 
-export async function* streamLogs(containerId: string): AsyncGenerator<string> {
+export async function* streamLogs(
+  containerId: string,
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  // Do NOT pass `signal` to dockerFetch — Bun's unix-socket fetch does not
+  // handle AbortSignal reliably. We use Promise.race below instead.
   const res = await dockerFetch(
     `/containers/${containerId}/logs?follow=true&stdout=true&stderr=true&timestamps=false`,
     { method: "GET" },
@@ -79,10 +84,24 @@ export async function* streamLogs(containerId: string): AsyncGenerator<string> {
   const decoder = new TextDecoder();
   let buffer = "";
 
+  // Race each reader.read() against an abort promise so the loop exits
+  // immediately on cancellation (Bun's reader.cancel() hangs on unix sockets).
+  type ReadResult = ReturnType<typeof reader.read> extends Promise<infer R> ? R : never;
+  const done = { done: true as const, value: undefined } as ReadResult;
+  const abortPromise = signal
+    ? new Promise<ReadResult>((resolve) => {
+        if (signal.aborted) return resolve(done);
+        signal.addEventListener("abort", () => resolve(done), { once: true });
+      })
+    : null;
+
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const { done: eof, value } = abortPromise
+        ? await Promise.race([reader.read(), abortPromise])
+        : await reader.read();
+
+      if (eof) break;
 
       // Docker multiplexed stream format:
       // Each frame has an 8-byte header: [stream_type(1), 0, 0, 0, size(4)]
@@ -124,7 +143,9 @@ export async function* streamLogs(containerId: string): AsyncGenerator<string> {
     // Yield remaining buffer
     if (buffer.trim()) yield buffer;
   } finally {
-    reader.releaseLock();
+    // On abort a reader.read() may still be in-flight — skip releaseLock
+    // (it throws if a read is pending). The reader/body will be GC'd.
+    if (!signal?.aborted) reader.releaseLock();
   }
 }
 
