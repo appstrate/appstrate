@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutions } from "../hooks/use-executions";
 import {
@@ -17,7 +16,6 @@ import {
   useBindAdminService,
   useUnbindAdminService,
 } from "../hooks/use-mutations";
-import { useFlowExecutionRealtime } from "../hooks/use-realtime";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
 import { InputModal } from "../components/input-modal";
@@ -29,6 +27,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { truncate, formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { Spinner } from "../components/spinner";
 import type { Schedule } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
@@ -54,7 +53,6 @@ export function FlowDetailPage() {
   const { flowId } = useParams<{ flowId: string }>();
   const { user } = useAuth();
   const { isOrgAdmin } = useOrg();
-  const qc = useQueryClient();
 
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
   const { data: executions } = useExecutions(flowId);
@@ -79,11 +77,6 @@ export function FlowDetailPage() {
     id: string;
     bindAfter?: boolean;
   } | null>(null);
-
-  useFlowExecutionRealtime(flowId, () => {
-    qc.invalidateQueries({ queryKey: ["executions"] });
-    qc.invalidateQueries({ queryKey: ["flow"] });
-  });
 
   if (isLoading) return <LoadingState />;
 
@@ -229,7 +222,7 @@ export function FlowDetailPage() {
                 : "Lancer le flow"
           }
         >
-          Lancer
+          {runFlow.isPending && <Spinner />} Lancer
         </button>
         <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
         {isOrgAdmin && (

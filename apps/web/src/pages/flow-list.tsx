@@ -1,22 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { useFlows } from "../hooks/use-flows";
-import { useAllExecutionsRealtime } from "../hooks/use-realtime";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState } from "../components/page-states";
 
 export function FlowList() {
-  const qc = useQueryClient();
   const { data: flows, isLoading, error } = useFlows();
   const { isOrgAdmin } = useOrg();
   const [importOpen, setImportOpen] = useState(false);
-
-  useAllExecutionsRealtime(() => {
-    qc.invalidateQueries({ queryKey: ["flows"] });
-  });
 
   if (isLoading) return <LoadingState />;
 

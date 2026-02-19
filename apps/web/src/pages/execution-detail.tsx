@@ -116,16 +116,14 @@ export function ExecutionDetailPage() {
     return () => clearInterval(id);
   }, [isRunning, execution?.started_at]);
 
-  // Subscribe to Supabase Realtime for instant status updates
+  // Subscribe to Supabase Realtime for instant local status feedback
   useExecutionRealtime(
     isRunning ? execId : null,
     useCallback(
       (payload: Record<string, unknown>) => {
         const newStatus = payload.status as ExecutionStatus;
         setLiveStatus(newStatus);
-        // Refresh execution data
-        qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
-        // Final refetch of logs when execution reaches terminal status (ensures completeness)
+        // Safety net: final refetch of logs on terminal status (ensures completeness)
         const terminal =
           newStatus === "success" || newStatus === "failed" || newStatus === "timeout";
         if (terminal) {

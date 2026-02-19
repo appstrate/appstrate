@@ -16,6 +16,7 @@ import { OrgSwitcher } from "./components/org-switcher";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
+import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { Spinner } from "./components/spinner";
 
 function UserMenu({
@@ -124,6 +125,11 @@ function MainLayout() {
   );
 }
 
+function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
+  useGlobalExecutionSync();
+  return <>{children}</>;
+}
+
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
@@ -194,21 +200,23 @@ export function App() {
   return (
     <ErrorBoundary>
       <OrgGate>
-        <Routes>
-          <Route path="/create-org" element={<CreateOrgPage />} />
-          <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
-          <Route element={<MainLayout />}>
-            <Route path="/" element={<FlowList />} />
-            <Route path="/flows/new" element={<FlowEditorPage />} />
-            <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
-            <Route path="/flows/:flowId" element={<FlowDetailPage />} />
-            <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
-            <Route path="/schedules" element={<SchedulesListPage />} />
-            <Route path="/services" element={<ServicesListPage />} />
-            <Route path="/org-settings" element={<OrgSettingsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
+        <GlobalRealtimeSync>
+          <Routes>
+            <Route path="/create-org" element={<CreateOrgPage />} />
+            <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
+            <Route element={<MainLayout />}>
+              <Route path="/" element={<FlowList />} />
+              <Route path="/flows/new" element={<FlowEditorPage />} />
+              <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
+              <Route path="/flows/:flowId" element={<FlowDetailPage />} />
+              <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
+              <Route path="/schedules" element={<SchedulesListPage />} />
+              <Route path="/services" element={<ServicesListPage />} />
+              <Route path="/org-settings" element={<OrgSettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </GlobalRealtimeSync>
       </OrgGate>
     </ErrorBoundary>
   );
