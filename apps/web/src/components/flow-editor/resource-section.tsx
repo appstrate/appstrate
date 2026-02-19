@@ -46,9 +46,10 @@ export function ResourceSection({
 
     try {
       const result = await upload.mutateAsync(file);
-      const newId = type === "skills"
-        ? (result as { skill: { id: string } }).skill.id
-        : (result as { extension: { id: string } }).extension.id;
+      const newId =
+        type === "skills"
+          ? (result as { skill: { id: string } }).skill.id
+          : (result as { extension: { id: string } }).extension.id;
 
       if (!selectedIds.includes(newId)) {
         onChange([...selectedIds, newId]);
@@ -62,11 +63,21 @@ export function ResourceSection({
 
   return (
     <div className="editor-section">
-      <div className="editor-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        className="editor-section-header"
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+      >
         {title}
         <label className="btn-upload btn-upload-sm">
           {upload.isPending ? <Spinner /> : "Importer (.zip)"}
-          <input type="file" accept=".zip" ref={fileInputRef} onChange={handleUpload} style={{ display: "none" }} disabled={upload.isPending} />
+          <input
+            type="file"
+            accept=".zip"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            style={{ display: "none" }}
+            disabled={upload.isPending}
+          />
         </label>
       </div>
       <div className="editor-section-body">
