@@ -11,6 +11,7 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
+  const [tab, setTab] = useState<"general" | "members">("general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -160,204 +161,233 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      {/* Organisation info */}
-      <div className="section-title">Organisation</div>
-      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
-        <div className="service-card-header">
-          <div className="service-info">
-            {editingName ? (
-              <form
-                onSubmit={handleSaveName}
-                style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
-              >
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder={currentOrg.name}
-                  autoFocus
-                  style={{
-                    padding: "0.375rem 0.5rem",
-                    fontSize: "0.875rem",
-                    background: "var(--bg)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "6px",
-                    color: "var(--text)",
-                    outline: "none",
-                    fontFamily: "inherit",
-                  }}
-                />
-                <button className="primary" type="submit" disabled={updateNameMutation.isPending}>
-                  {updateNameMutation.isPending ? "..." : "Enregistrer"}
-                </button>
-                <button type="button" onClick={() => setEditingName(false)}>
-                  Annuler
-                </button>
-              </form>
-            ) : (
-              <>
-                <h3>{currentOrg.name}</h3>
-                <span className="service-provider">{currentOrg.slug}</span>
-              </>
-            )}
-          </div>
-          {isOrgOwner && !editingName && (
-            <button
-              onClick={() => {
-                setNewName(currentOrg.name);
-                setEditingName(true);
-              }}
-            >
-              Modifier
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Members */}
-      <div className="section-header">
-        <span className="section-title">Membres</span>
-      </div>
-
-      {/* Add member form */}
-      <form
-        onSubmit={handleInvite}
-        style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", alignItems: "flex-start" }}
-      >
-        <div style={{ flex: 1 }}>
-          <input
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => {
-              setInviteEmail(e.target.value);
-              setInviteError(null);
-            }}
-            placeholder="email@example.com"
-            required
-            style={{
-              width: "100%",
-              padding: "0.5rem 0.75rem",
-              fontSize: "0.875rem",
-              fontFamily: "inherit",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: "6px",
-              color: "var(--text)",
-              outline: "none",
-            }}
-          />
-          {inviteError && (
-            <p className="form-error" style={{ marginTop: "0.25rem" }}>
-              {inviteError}
-            </p>
-          )}
-        </div>
-        <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
-          {addMemberMutation.isPending ? "..." : "Ajouter"}
+      <div className="exec-tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === "general"}
+          className={`tab ${tab === "general" ? "active" : ""}`}
+          onClick={() => setTab("general")}
+        >
+          Général
         </button>
-      </form>
+        <button
+          role="tab"
+          aria-selected={tab === "members"}
+          className={`tab ${tab === "members" ? "active" : ""}`}
+          onClick={() => setTab("members")}
+        >
+          Membres ({members.length})
+        </button>
+      </div>
 
-      {/* Member list */}
-      <div className="services-grid">
-        {members.map((member) => {
-          const label = member.displayName || member.email || member.userId;
-          const isOwner = member.role === "owner";
-
-          return (
-            <div key={member.userId} className="service-card">
-              <div className="service-card-header" style={{ marginBottom: 0 }}>
-                <div className="service-info">
-                  <h3 style={{ fontSize: "0.875rem" }}>{label}</h3>
-                  {member.email && member.displayName && (
-                    <span className="service-provider">{member.email}</span>
-                  )}
-                </div>
-                <span
-                  className={`badge ${isOwner ? "badge-running" : member.role === "admin" ? "badge-success" : "badge-pending"}`}
-                >
-                  {roleLabel[member.role]}
-                </span>
-              </div>
-              {isOrgAdmin && !isOwner && (
-                <div
-                  className="service-card-actions"
-                  style={{
-                    marginTop: "0.75rem",
-                    paddingTop: "0.75rem",
-                    borderTop: "1px solid var(--border)",
-                  }}
-                >
-                  {isOrgOwner && (
-                    <select
-                      value={member.role}
-                      onChange={(e) => handleRoleChange(member.userId, e.target.value as OrgRole)}
-                      disabled={changeRoleMutation.isPending}
+      {tab === "general" && (
+        <>
+          {/* Organisation info */}
+          <div className="section-title">Organisation</div>
+          <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+            <div className="service-card-header">
+              <div className="service-info">
+                {editingName ? (
+                  <form
+                    onSubmit={handleSaveName}
+                    style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
+                  >
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder={currentOrg.name}
+                      autoFocus
                       style={{
                         padding: "0.375rem 0.5rem",
-                        fontSize: "0.8rem",
-                        fontFamily: "inherit",
+                        fontSize: "0.875rem",
                         background: "var(--bg)",
                         border: "1px solid var(--border)",
                         borderRadius: "6px",
                         color: "var(--text)",
                         outline: "none",
-                        cursor: "pointer",
+                        fontFamily: "inherit",
                       }}
-                    >
-                      <option value="member">Membre</option>
-                      <option value="admin">Admin</option>
-                      <option value="owner">Proprietaire</option>
-                    </select>
-                  )}
-                  <button
-                    onClick={() => handleRemove(member)}
-                    disabled={removeMemberMutation.isPending}
-                    style={{ marginLeft: "auto" }}
-                  >
-                    Retirer
-                  </button>
-                </div>
+                    />
+                    <button className="primary" type="submit" disabled={updateNameMutation.isPending}>
+                      {updateNameMutation.isPending ? "..." : "Enregistrer"}
+                    </button>
+                    <button type="button" onClick={() => setEditingName(false)}>
+                      Annuler
+                    </button>
+                  </form>
+                ) : (
+                  <>
+                    <h3>{currentOrg.name}</h3>
+                    <span className="service-provider">{currentOrg.slug}</span>
+                  </>
+                )}
+              </div>
+              {isOrgOwner && !editingName && (
+                <button
+                  onClick={() => {
+                    setNewName(currentOrg.name);
+                    setEditingName(true);
+                  }}
+                >
+                  Modifier
+                </button>
               )}
             </div>
-          );
-        })}
-      </div>
+          </div>
 
-      {members.length === 0 && (
-        <EmptyState message="Aucun membre." hint="Ajoutez des membres par email." compact />
+          {/* Danger zone */}
+          {isOrgOwner && (
+            <>
+              <div className="section-title" style={{ marginTop: "2rem" }}>
+                Zone de danger
+              </div>
+              <div className="service-card" style={{ borderColor: "var(--danger, #e53e3e)" }}>
+                <div className="service-card-header" style={{ marginBottom: 0 }}>
+                  <div className="service-info">
+                    <h3 style={{ fontSize: "0.875rem" }}>Supprimer l'organisation</h3>
+                    <span className="service-provider">
+                      Tous les flows, executions, planifications et configurations seront supprimes.
+                    </span>
+                  </div>
+                  <button
+                    className="btn-danger"
+                    disabled={deleteOrgMutation.isPending}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `Supprimer l'organisation "${currentOrg.name}" ? Toutes les donnees seront perdues. Cette action est irreversible.`,
+                        )
+                      ) {
+                        deleteOrgMutation.mutate();
+                      }
+                    }}
+                  >
+                    {deleteOrgMutation.isPending ? "Suppression..." : "Supprimer"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </>
       )}
 
-      {/* Danger zone */}
-      {isOrgOwner && (
+      {tab === "members" && (
         <>
-          <div className="section-title" style={{ marginTop: "2rem" }}>
-            Zone de danger
-          </div>
-          <div className="service-card" style={{ borderColor: "var(--danger, #e53e3e)" }}>
-            <div className="service-card-header" style={{ marginBottom: 0 }}>
-              <div className="service-info">
-                <h3 style={{ fontSize: "0.875rem" }}>Supprimer l'organisation</h3>
-                <span className="service-provider">
-                  Tous les flows, executions, planifications et configurations seront supprimes.
-                </span>
-              </div>
-              <button
-                className="btn-danger"
-                disabled={deleteOrgMutation.isPending}
-                onClick={() => {
-                  if (
-                    confirm(
-                      `Supprimer l'organisation "${currentOrg.name}" ? Toutes les donnees seront perdues. Cette action est irreversible.`,
-                    )
-                  ) {
-                    deleteOrgMutation.mutate();
-                  }
+          {/* Add member form */}
+          <form
+            onSubmit={handleInvite}
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              marginBottom: "1rem",
+              alignItems: "flex-start",
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => {
+                  setInviteEmail(e.target.value);
+                  setInviteError(null);
                 }}
-              >
-                {deleteOrgMutation.isPending ? "Suppression..." : "Supprimer"}
-              </button>
+                placeholder="email@example.com"
+                required
+                style={{
+                  width: "100%",
+                  padding: "0.5rem 0.75rem",
+                  fontSize: "0.875rem",
+                  fontFamily: "inherit",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "6px",
+                  color: "var(--text)",
+                  outline: "none",
+                }}
+              />
+              {inviteError && (
+                <p className="form-error" style={{ marginTop: "0.25rem" }}>
+                  {inviteError}
+                </p>
+              )}
             </div>
+            <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
+              {addMemberMutation.isPending ? "..." : "Ajouter"}
+            </button>
+          </form>
+
+          {/* Member list */}
+          <div className="services-grid">
+            {members.map((member) => {
+              const label = member.displayName || member.email || member.userId;
+              const isOwner = member.role === "owner";
+
+              return (
+                <div key={member.userId} className="service-card">
+                  <div className="service-card-header" style={{ marginBottom: 0 }}>
+                    <div className="service-info">
+                      <h3 style={{ fontSize: "0.875rem" }}>{label}</h3>
+                      {member.email && member.displayName && (
+                        <span className="service-provider">{member.email}</span>
+                      )}
+                    </div>
+                    <span
+                      className={`badge ${isOwner ? "badge-running" : member.role === "admin" ? "badge-success" : "badge-pending"}`}
+                    >
+                      {roleLabel[member.role]}
+                    </span>
+                  </div>
+                  {isOrgAdmin && !isOwner && (
+                    <div
+                      className="service-card-actions"
+                      style={{
+                        marginTop: "0.75rem",
+                        paddingTop: "0.75rem",
+                        borderTop: "1px solid var(--border)",
+                      }}
+                    >
+                      {isOrgOwner && (
+                        <select
+                          value={member.role}
+                          onChange={(e) =>
+                            handleRoleChange(member.userId, e.target.value as OrgRole)
+                          }
+                          disabled={changeRoleMutation.isPending}
+                          style={{
+                            padding: "0.375rem 0.5rem",
+                            fontSize: "0.8rem",
+                            fontFamily: "inherit",
+                            background: "var(--bg)",
+                            border: "1px solid var(--border)",
+                            borderRadius: "6px",
+                            color: "var(--text)",
+                            outline: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="member">Membre</option>
+                          <option value="admin">Admin</option>
+                          <option value="owner">Proprietaire</option>
+                        </select>
+                      )}
+                      <button
+                        onClick={() => handleRemove(member)}
+                        disabled={removeMemberMutation.isPending}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        Retirer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+
+          {members.length === 0 && (
+            <EmptyState message="Aucun membre." hint="Ajoutez des membres par email." compact />
+          )}
         </>
       )}
     </>
