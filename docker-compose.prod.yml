@@ -9,12 +9,21 @@ services:
       POSTGRES_DB: appstrate
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-nango-db.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appstrate}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  nango-db-init:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      appstrate-postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "psql -h appstrate-postgres -U ${POSTGRES_USER:-appstrate} -tc \"SELECT 1 FROM pg_database WHERE datname='nango'\" | grep -q 1 || psql -h appstrate-postgres -U ${POSTGRES_USER:-appstrate} -c 'CREATE DATABASE nango;'"]
 
   appstrate-redis:
     image: redis:7.2-alpine
@@ -49,8 +58,8 @@ services:
       - SERVER_PORT=8080
       - FLAG_AUTH_ENABLED=false
     depends_on:
-      appstrate-postgres:
-        condition: service_healthy
+      nango-db-init:
+        condition: service_completed_successfully
       appstrate-redis:
         condition: service_healthy
 

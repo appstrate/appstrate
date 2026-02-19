@@ -26,9 +26,10 @@ healthRouter.get("/health", async (c) => {
     status: getBuiltInFlowCount() > 0 ? "healthy" : "degraded",
   };
 
+  const hasUnhealthy = Object.values(checks).some((c) => c.status === "unhealthy");
   const allHealthy = Object.values(checks).every((c) => c.status === "healthy");
-  const status = allHealthy ? "healthy" : "degraded";
-  const httpStatus = status === "healthy" ? 200 : 503;
+  const status = hasUnhealthy ? "unhealthy" : allHealthy ? "healthy" : "degraded";
+  const httpStatus = hasUnhealthy ? 503 : 200;
 
   return c.json(
     {
