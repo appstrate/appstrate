@@ -166,8 +166,9 @@ export function createFlowsRouter() {
   // GET /api/flows/:id/package — download the flow ZIP
   router.get("/:id/package", requireFlow(), async (c) => {
     const flow = c.get("flow");
+    const orgId = c.get("orgId");
 
-    const zipBuffer = await getFlowPackage(flow);
+    const zipBuffer = await getFlowPackage(flow, orgId);
     if (!zipBuffer) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Package introuvable" }, 404);
     }

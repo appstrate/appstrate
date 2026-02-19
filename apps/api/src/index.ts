@@ -8,6 +8,7 @@ import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
+import { ensureLibraryBucket } from "./services/library.ts";
 import { ensureFilesBucket } from "./services/file-storage.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
@@ -15,6 +16,7 @@ import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
+import { createLibraryRouter } from "./routes/library.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
@@ -88,6 +90,13 @@ try {
   await ensureStorageBucket();
 } catch (err) {
   logger.warn("Could not ensure storage bucket", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+try {
+  await ensureLibraryBucket();
+} catch (err) {
+  logger.warn("Could not ensure library bucket", {
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -177,6 +186,7 @@ app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/
 app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
+app.route("/api/library", createLibraryRouter());
 app.route("/auth", authRouter);
 
 // Public share routes (no JWT required — path doesn't start with /api/ or /auth/)

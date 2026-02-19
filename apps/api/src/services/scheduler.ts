@@ -257,7 +257,7 @@ async function triggerScheduledExecution(
     });
 
     // Get flow package (ZIP) for injection into container
-    const flowPackage = await getFlowPackage(flow);
+    const flowPackage = await getFlowPackage(flow, orgId);
 
     // Get flow version ID for user flows
     const flowVersionId =

@@ -8,6 +8,7 @@ import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
 import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
+import { LibraryPage } from "./pages/library";
 import { CreateOrgPage } from "./pages/create-org";
 import { OrgSettingsPage } from "./pages/org-settings";
 import { LoginPage } from "./pages/login";
@@ -108,6 +109,9 @@ function MainLayout() {
             to="/schedules"
           >
             Planifications
+          </Link>
+          <Link className={`nav-tab ${currentPath === "/library" ? "active" : ""}`} to="/library">
+            Bibliotheque
           </Link>
           <Link className={`nav-tab ${currentPath === "/services" ? "active" : ""}`} to="/services">
             Services
@@ -211,6 +215,7 @@ export function App() {
               <Route path="/flows/:flowId" element={<FlowDetailPage />} />
               <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
+              <Route path="/library" element={<LibraryPage />} />
               <Route path="/services" element={<ServicesListPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

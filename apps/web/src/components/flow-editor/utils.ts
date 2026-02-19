@@ -167,7 +167,12 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
     outputRetries: state.execution.outputRetries,
   };
 
-  return { manifest, prompt: state.prompt };
+  return {
+    manifest,
+    prompt: state.prompt,
+    skillIds: state.skills.map((s) => s.id).filter(Boolean),
+    extensionIds: state.extensions.map((e) => e.id).filter(Boolean),
+  };
 }
 
 export function payloadToFormState(payload: {
