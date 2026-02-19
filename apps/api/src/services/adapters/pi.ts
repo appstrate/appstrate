@@ -15,6 +15,7 @@ export class PiAdapter implements ExecutionAdapter {
     ctx: PromptContext,
     timeout: number,
     flowPackage?: Buffer,
+    signal?: AbortSignal,
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
@@ -65,6 +66,7 @@ export class PiAdapter implements ExecutionAdapter {
       timeout,
       flowPackage,
       extraData: { provider, model: modelId },
+      signal,
       processLogs: async function* (logs) {
         // Buffer text_delta tokens into larger chunks before yielding.
         // Code blocks (``` ... ```) are suppressed (the JSON result is

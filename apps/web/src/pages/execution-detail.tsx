@@ -3,7 +3,8 @@ import { useParams, Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
-import { useRunFlow } from "../hooks/use-mutations";
+import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
+import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Badge } from "../components/badge";
@@ -68,6 +69,7 @@ export function ExecutionDetailPage() {
   );
 
   const runFlow = useRunFlow(flowId!);
+  const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
   const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
 
@@ -125,7 +127,10 @@ export function ExecutionDetailPage() {
         setLiveStatus(newStatus);
         // Safety net: final refetch of logs on terminal status (ensures completeness)
         const terminal =
-          newStatus === "success" || newStatus === "failed" || newStatus === "timeout";
+          newStatus === "success" ||
+          newStatus === "failed" ||
+          newStatus === "timeout" ||
+          newStatus === "cancelled";
         if (terminal) {
           qc.invalidateQueries({ queryKey: ["execution-logs", orgId, execId] });
         }
@@ -164,6 +169,15 @@ export function ExecutionDetailPage() {
           <span className="exec-meta">
             ${Number((execution as Record<string, unknown>).cost_usd).toFixed(4)}
           </span>
+        )}
+        {isRunning && (
+          <button
+            className="danger"
+            onClick={() => cancelExecution.mutate(execId!)}
+            disabled={cancelExecution.isPending}
+          >
+            {cancelExecution.isPending && <Spinner />} Annuler
+          </button>
         )}
         {!isRunning && flow && (
           <button

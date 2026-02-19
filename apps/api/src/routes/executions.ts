@@ -8,6 +8,7 @@ import {
   updateExecution,
   appendExecutionLog,
   getAdminConnections,
+  getExecution,
 } from "../services/state.ts";
 import { listConnections, getAccessToken, getConnectionStatus } from "../services/nango.ts";
 import {
@@ -30,9 +31,10 @@ import {
   parseFormDataFiles,
 } from "../services/schema.ts";
 import { getLatestVersionId } from "../services/flow-versions.ts";
-import { trackExecution, untrackExecution } from "../services/execution-tracker.ts";
+import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow } from "../middleware/guards.ts";
+import { stopContainer } from "../services/docker.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -60,7 +62,8 @@ export async function executeFlowInBackground(
   flowPackage?: Buffer | null,
 ) {
   const startTime = Date.now();
-  trackExecution(executionId);
+  const controller = trackExecution(executionId);
+  const { signal } = controller;
 
   try {
     // Emit execution_started
@@ -98,6 +101,7 @@ export async function executeFlowInBackground(
         promptContext,
         timeout,
         flowPackage ?? undefined,
+        signal,
       )) {
         if (msg.usage) accumulateUsage(accumulated, msg.usage);
         if (msg.type === "progress") {
@@ -115,6 +119,10 @@ export async function executeFlowInBackground(
         }
       }
     } catch (err) {
+      if (signal.aborted) {
+        // Cancelled by user — cancel route already wrote DB status
+        return;
+      }
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
@@ -230,6 +238,9 @@ export async function executeFlowInBackground(
         }
       }
 
+      // Guard: don't overwrite "cancelled" status written by the cancel route
+      if (signal.aborted) return;
+
       const duration = Date.now() - startTime;
       const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
       const resultState =
@@ -262,6 +273,9 @@ export async function executeFlowInBackground(
         status: "success",
       });
     } else {
+      // Guard: don't overwrite "cancelled" status written by the cancel route
+      if (signal.aborted) return;
+
       const duration = Date.now() - startTime;
       await updateExecution(executionId, {
         status: "failed",
@@ -276,6 +290,9 @@ export async function executeFlowInBackground(
       });
     }
   } catch (err) {
+    // If aborted (cancelled), the cancel route already wrote DB status
+    if (signal.aborted) return;
+
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
     await updateExecution(executionId, {
@@ -500,6 +517,51 @@ export function createExecutionsRouter() {
     });
 
     return c.json({ executionId });
+  });
+
+  // POST /api/executions/:id/cancel — cancel a running/pending execution
+  router.post("/executions/:id/cancel", async (c) => {
+    const execId = c.req.param("id");
+    const user = c.get("user");
+    const orgId = c.get("orgId");
+
+    const execution = await getExecution(execId);
+    if (!execution) {
+      return c.json({ error: "EXECUTION_NOT_FOUND", message: "Execution introuvable" }, 404);
+    }
+
+    // Verify ownership (same org)
+    if (execution.org_id !== orgId) {
+      return c.json({ error: "UNAUTHORIZED", message: "Non autorise" }, 403);
+    }
+
+    // Verify cancellable
+    if (execution.status !== "pending" && execution.status !== "running") {
+      return c.json(
+        { error: "NOT_CANCELLABLE", message: "Cette execution ne peut pas etre annulee" },
+        409,
+      );
+    }
+
+    // Update DB
+    const now = new Date().toISOString();
+    await updateExecution(execId, {
+      status: "cancelled",
+      error: "Cancelled by user",
+      completed_at: now,
+    });
+
+    // Log the cancellation
+    await appendExecutionLog(execId, user.id, orgId, "system", "execution_completed", null, {
+      executionId: execId,
+      status: "cancelled",
+    });
+
+    // Abort in-flight fetch calls immediately, then stop the container as backup
+    abortExecution(execId);
+    stopContainer(`appstrate-pi-${execId}`).catch(() => {});
+
+    return c.json({ ok: true });
   });
 
   return router;

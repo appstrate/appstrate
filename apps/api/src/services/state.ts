@@ -282,6 +282,15 @@ export async function deleteAdminConnectionsForFlow(orgId: string, flowId: strin
   await supabase.from("flow_admin_connections").delete().eq("org_id", orgId).eq("flow_id", flowId);
 }
 
+export async function getExecution(id: string) {
+  const { data } = await supabase
+    .from("executions")
+    .select("id, status, user_id, org_id, flow_id")
+    .eq("id", id)
+    .single();
+  return data;
+}
+
 export async function markOrphanExecutionsFailed(): Promise<number> {
   const { data } = await supabase
     .from("executions")

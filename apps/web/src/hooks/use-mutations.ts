@@ -298,6 +298,20 @@ export function useRemoveExtension(flowId: string) {
   });
 }
 
+export function useCancelExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (execId: string) => {
+      return api(`/executions/${execId}/cancel`, { method: "POST" });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["execution"] });
+      qc.invalidateQueries({ queryKey: ["executions"] });
+    },
+    onError: onMutationError,
+  });
+}
+
 export function useDeleteFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();

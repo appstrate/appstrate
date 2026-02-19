@@ -6,6 +6,7 @@ const badgeClassMap: Record<string, string> = {
   running: "badge-running",
   pending: "badge-pending",
   timeout: "badge-timeout",
+  cancelled: "badge-cancelled",
 };
 
 export function Badge({ status }: { status: string }) {
