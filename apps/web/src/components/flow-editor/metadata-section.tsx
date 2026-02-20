@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
+import { toSlug } from "../../lib/strings";
 
 interface MetadataState {
   name: string;
@@ -17,6 +19,15 @@ interface MetadataSectionProps {
 export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
+  const [nameEdited, setNameEdited] = useState(isEdit);
+
+  const handleDisplayNameChange = (v: string) => {
+    if (nameEdited) {
+      update({ displayName: v });
+    } else {
+      update({ displayName: v, name: toSlug(v) });
+    }
+  };
 
   const handleTagInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
@@ -39,23 +50,26 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
       <div className="editor-section-header">{t("editor.metadata")}</div>
       <div className="editor-section-body">
         <FormField
-          id="meta-name"
-          label={t("editor.metaName")}
-          required
-          value={value.name}
-          onChange={(v) => update({ name: v.toLowerCase().replace(/[^a-z0-9-]/g, "-") })}
-          placeholder={t("editor.metaNamePlaceholder")}
-          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
-        />
-        {isEdit && <input type="hidden" value={value.name} />}
-        <FormField
           id="meta-displayName"
           label={t("editor.metaDisplayName")}
           required
           value={value.displayName}
-          onChange={(v) => update({ displayName: v })}
+          onChange={handleDisplayNameChange}
           placeholder={t("editor.metaDisplayNamePlaceholder")}
         />
+        <FormField
+          id="meta-name"
+          label={t("editor.metaName")}
+          required
+          value={value.name}
+          onChange={(v) => {
+            setNameEdited(true);
+            update({ name: toSlug(v) });
+          }}
+          placeholder={t("editor.metaNamePlaceholder")}
+          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
+        />
+        {isEdit && <input type="hidden" value={value.name} />}
         <div className="form-group">
           <label htmlFor="meta-description">{t("editor.metaDescription")}</label>
           <textarea
