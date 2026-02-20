@@ -68,7 +68,7 @@ function FlowEditorForm({
   const handleSubmit = () => {
     setError(null);
 
-    if (!form.metadata.name || !form.metadata.displayName || !form.metadata.description) {
+    if (!form.metadata.name || !form.metadata.displayName) {
       setError(t("editor.errorRequired"));
       setActiveTab("general");
       return;
