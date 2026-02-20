@@ -36,6 +36,7 @@ const serviceRequirementSchema = z.object({
   connectionMode: z.enum(["user", "admin"]).optional().default("user"),
   schema: jsonSchemaObjectSchema.optional(),
   authorized_uris: z.array(z.string()).optional(),
+  allow_all_uris: z.boolean().optional(),
 });
 
 const skillRequirementSchema = z.object({

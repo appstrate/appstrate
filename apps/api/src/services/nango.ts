@@ -256,6 +256,7 @@ export async function resolveServiceStatuses(
               adminDisplayName: adminProfile?.display_name ?? undefined,
               schema: svc.schema,
               authorizedUris: svc.authorized_uris,
+              allowAllUris: svc.allow_all_uris,
             };
           }
           return {
@@ -267,6 +268,7 @@ export async function resolveServiceStatuses(
             adminProvided: false,
             schema: svc.schema,
             authorizedUris: svc.authorized_uris,
+            allowAllUris: svc.allow_all_uris,
           };
         }
 
@@ -280,6 +282,7 @@ export async function resolveServiceStatuses(
           connectionMode: "user" as const,
           schema: svc.schema,
           authorizedUris: svc.authorized_uris,
+          allowAllUris: svc.allow_all_uris,
         };
       }
 
@@ -304,6 +307,7 @@ export async function resolveServiceStatuses(
             adminUserId,
             adminDisplayName: adminProfile?.display_name ?? undefined,
             authorizedUris: svc.authorized_uris,
+            allowAllUris: svc.allow_all_uris,
           };
         }
         return {
@@ -315,6 +319,7 @@ export async function resolveServiceStatuses(
           connectionMode: "admin" as const,
           adminProvided: false,
           authorizedUris: svc.authorized_uris,
+          allowAllUris: svc.allow_all_uris,
         };
       }
 
@@ -329,6 +334,7 @@ export async function resolveServiceStatuses(
         authMode,
         connectionMode: "user" as const,
         authorizedUris: svc.authorized_uris,
+        allowAllUris: svc.allow_all_uris,
       };
     }),
   );

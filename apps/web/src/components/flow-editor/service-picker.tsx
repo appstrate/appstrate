@@ -35,6 +35,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
         connectionMode: "user",
         credentialSchema: [],
         authorizedUris: "",
+        allowAllUris: false,
       },
     ]);
   };
@@ -50,6 +51,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
         connectionMode: "user",
         credentialSchema: [],
         authorizedUris: "",
+        allowAllUris: false,
       },
     ]);
   };
@@ -106,14 +108,29 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                   onChange={(fields: SchemaField[]) => update(i, { credentialSchema: fields })}
                 />
                 <div className="service-picker-uris">
-                  <label className="field-label">{t("editor.authorizedUris")}</label>
-                  <textarea
-                    rows={3}
-                    placeholder={t("editor.authorizedUrisPlaceholder")}
-                    value={svc.authorizedUris}
-                    onChange={(e) => update(i, { authorizedUris: e.target.value })}
-                  />
-                  <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                  <label className="field-label field-label-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={svc.allowAllUris}
+                      onChange={(e) => update(i, { allowAllUris: e.target.checked })}
+                    />
+                    {t("editor.allowAllUris")}
+                  </label>
+                  <span className="field-hint">{t("editor.allowAllUrisHint")}</span>
+                  {!svc.allowAllUris && (
+                    <>
+                      <label className="field-label" style={{ marginTop: "0.5rem" }}>
+                        {t("editor.authorizedUris")}
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder={t("editor.authorizedUrisPlaceholder")}
+                        value={svc.authorizedUris}
+                        onChange={(e) => update(i, { authorizedUris: e.target.value })}
+                      />
+                      <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
@@ -158,14 +175,29 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                   </select>
                 </div>
                 <div className="service-picker-uris">
-                  <label className="field-label">{t("editor.authorizedUris")}</label>
-                  <textarea
-                    rows={2}
-                    placeholder={t("editor.authorizedUrisPlaceholder")}
-                    value={svc.authorizedUris}
-                    onChange={(e) => update(i, { authorizedUris: e.target.value })}
-                  />
-                  <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                  <label className="field-label field-label-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={svc.allowAllUris}
+                      onChange={(e) => update(i, { allowAllUris: e.target.checked })}
+                    />
+                    {t("editor.allowAllUris")}
+                  </label>
+                  <span className="field-hint">{t("editor.allowAllUrisHint")}</span>
+                  {!svc.allowAllUris && (
+                    <>
+                      <label className="field-label" style={{ marginTop: "0.5rem" }}>
+                        {t("editor.authorizedUris")}
+                      </label>
+                      <textarea
+                        rows={2}
+                        placeholder={t("editor.authorizedUrisPlaceholder")}
+                        value={svc.authorizedUris}
+                        onChange={(e) => update(i, { authorizedUris: e.target.value })}
+                      />
+                      <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                    </>
+                  )}
                 </div>
               </div>
             ),
