@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 
 interface ApiKeyModalProps {
@@ -16,6 +17,7 @@ export function ApiKeyModal({
   isPending,
   onSubmit,
 }: ApiKeyModalProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const [apiKey, setApiKey] = useState("");
 
   const handleClose = () => {
@@ -30,24 +32,24 @@ export function ApiKeyModal({
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title={`Connexion — ${providerName}`}>
+    <Modal open={open} onClose={handleClose} title={t("apiKey.title", { name: providerName })}>
       <div className="form-group">
-        <label htmlFor="api-key-input">Cle API</label>
+        <label htmlFor="api-key-input">{t("apiKey.label")}</label>
         <input
           id="api-key-input"
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={`Cle API ${providerName}`}
+          placeholder={t("apiKey.placeholder", { name: providerName })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && apiKey.trim() && !isPending) handleSubmit();
           }}
         />
       </div>
       <div className="modal-actions">
-        <button onClick={handleClose}>Annuler</button>
+        <button onClick={handleClose}>{t("btn.cancel")}</button>
         <button className="primary" onClick={handleSubmit} disabled={!apiKey.trim() || isPending}>
-          Connecter
+          {t("btn.connect")}
         </button>
       </div>
     </Modal>

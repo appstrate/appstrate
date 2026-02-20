@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useServices } from "../hooks/use-services";
 import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
 import { ApiKeyModal } from "../components/api-key-modal";
@@ -6,6 +7,7 @@ import { formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ServicesListPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const { data: integrations, isLoading, error } = useServices();
   const connectMutation = useConnect();
   const disconnectMutation = useDisconnect();
@@ -23,8 +25,8 @@ export function ServicesListPage() {
   if (!integrations || integrations.length === 0) {
     return (
       <div className="empty-state">
-        <p>Aucun service configure.</p>
-        <p className="empty-hint">Configurez des integrations dans Nango pour les voir ici.</p>
+        <p>{t("services.empty")}</p>
+        <p className="empty-hint">{t("services.emptyHint")}</p>
       </div>
     );
   }
@@ -39,7 +41,7 @@ export function ServicesListPage() {
 
   return (
     <>
-      <div className="section-title">Services</div>
+      <div className="section-title">{t("services.title")}</div>
       <div className="services-grid">
         {integrations.map((svc) => {
           const isConnected = svc.status === "connected";
@@ -57,7 +59,7 @@ export function ServicesListPage() {
               <div className="service-card-status">
                 <span className={`status-dot ${isConnected ? "connected" : "disconnected"}`} />
                 <span className={`badge ${isConnected ? "badge-success" : "badge-failed"}`}>
-                  {isConnected ? "Connecte" : "Non connecte"}
+                  {isConnected ? t("services.connected") : t("services.notConnected")}
                 </span>
                 {connDate && <span className="service-date">{connDate}</span>}
               </div>
@@ -66,19 +68,19 @@ export function ServicesListPage() {
                   <>
                     <button
                       onClick={() => {
-                        if (confirm(`Deconnecter le service "${svc.uniqueKey}" ?`)) {
+                        if (confirm(t("services.disconnectConfirm", { name: svc.uniqueKey }))) {
                           disconnectMutation.mutate(svc.uniqueKey);
                         }
                       }}
                       disabled={disconnectMutation.isPending}
                     >
-                      Deconnecter
+                      {t("btn.disconnect")}
                     </button>
                     <button
                       onClick={() => handleConnect(svc)}
                       disabled={connectMutation.isPending || apiKeyMutation.isPending}
                     >
-                      Reconnecter
+                      {t("btn.reconnect")}
                     </button>
                   </>
                 ) : (
@@ -87,7 +89,7 @@ export function ServicesListPage() {
                     onClick={() => handleConnect(svc)}
                     disabled={connectMutation.isPending || apiKeyMutation.isPending}
                   >
-                    Connecter
+                    {t("btn.connect")}
                   </button>
                 )}
               </div>

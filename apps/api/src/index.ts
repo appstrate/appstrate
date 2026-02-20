@@ -21,6 +21,7 @@ import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
+import profileRouter from "./routes/profile.ts";
 import type { AppEnv } from "./types/index.ts";
 
 const app = new Hono<AppEnv>();
@@ -187,6 +188,7 @@ app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
+app.route("/api", profileRouter);
 app.route("/auth", authRouter);
 
 // Public share routes (no JWT required — path doesn't start with /api/ or /auth/)

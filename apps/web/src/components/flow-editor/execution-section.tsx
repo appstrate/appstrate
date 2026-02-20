@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
 
 export interface ExecutionSettings {
@@ -12,35 +13,36 @@ interface ExecutionSectionProps {
 }
 
 export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const update = (patch: Partial<ExecutionSettings>) => onChange({ ...value, ...patch });
 
   return (
     <div className="editor-section">
-      <div className="editor-section-header">Execution</div>
+      <div className="editor-section-header">{t("editor.execution")}</div>
       <div className="editor-section-body">
         <FormField
           id="exec-timeout"
-          label="Timeout"
+          label={t("editor.execTimeout")}
           type="number"
           value={String(value.timeout)}
           onChange={(v) => update({ timeout: parseInt(v) || 300 })}
-          description="En secondes (defaut: 300)"
+          description={t("editor.execTimeoutDesc")}
         />
         <FormField
           id="exec-maxTokens"
-          label="Max tokens"
+          label={t("editor.execMaxTokens")}
           type="number"
           value={String(value.maxTokens)}
           onChange={(v) => update({ maxTokens: parseInt(v) || 8192 })}
-          description="Defaut: 8192"
+          description={t("editor.execMaxTokensDesc")}
         />
         <FormField
           id="exec-outputRetries"
-          label="Retries de validation output"
+          label={t("editor.execRetries")}
           type="number"
           value={String(value.outputRetries)}
           onChange={(v) => update({ outputRetries: Math.min(5, Math.max(0, parseInt(v) || 0)) })}
-          description="0-5 (defaut: 2)"
+          description={t("editor.execRetriesDesc")}
         />
       </div>
     </div>

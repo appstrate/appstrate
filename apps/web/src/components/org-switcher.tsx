@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "./spinner";
 
 export function OrgSwitcher() {
+  const { t } = useTranslation();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -50,7 +52,7 @@ export function OrgSwitcher() {
           overflow: "hidden",
           textOverflow: "ellipsis",
         }}
-        aria-label="Changer d'organisation"
+        aria-label={t("orgSwitcher.ariaLabel")}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
@@ -89,7 +91,7 @@ export function OrgSwitcher() {
         <div
           className="user-menu-dropdown"
           role="listbox"
-          aria-label="Organisations"
+          aria-label={t("orgSwitcher.ariaLabelList")}
           style={{ minWidth: "220px" }}
         >
           {orgs.map((org) => {
@@ -171,7 +173,7 @@ export function OrgSwitcher() {
                 (e.currentTarget as HTMLElement).style.background = "none";
               }}
             >
-              Parametres de l'organisation
+              {t("orgSwitcher.settings")}
             </Link>
             <Link
               to="/create-org"
@@ -191,7 +193,7 @@ export function OrgSwitcher() {
                 (e.currentTarget as HTMLElement).style.background = "none";
               }}
             >
-              + Nouvelle organisation
+              {t("orgSwitcher.create")}
             </Link>
           </div>
         </div>

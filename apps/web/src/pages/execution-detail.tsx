@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
@@ -14,6 +15,7 @@ import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
+import type { TFunction } from "i18next";
 
 function formatToolArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -26,19 +28,20 @@ function formatToolArgs(args: Record<string, unknown>): string {
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
 }
 
-function formatEvent(event: string, data: Record<string, unknown>): string {
-  if (event === "execution_started") return `Execution demarree (${data?.executionId || ""})`;
+function formatEvent(event: string, data: Record<string, unknown>, t: TFunction): string {
+  if (event === "execution_started") return t("exec.started", { id: data?.executionId || "" });
   if (event === "dependency_check") {
     const checks = Object.entries((data?.services as Record<string, string>) || {})
       .map(([k, v]) => `${k}: ${v}`)
       .join(", ");
-    return `Dependances verifiees — ${checks}`;
+    return t("exec.depsChecked", { checks });
   }
-  if (event === "adapter_started") return `Adapter ${data?.adapter || "unknown"} demarre`;
+  if (event === "adapter_started") return t("exec.adapterStarted", { adapter: data?.adapter || "unknown" });
   return "";
 }
 
 export function ExecutionDetailPage() {
+  const { t } = useTranslation(["flows", "common"]);
   const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
   const orgId = useCurrentOrgId();
   const { data: flow } = useFlowDetail(flowId);
@@ -87,7 +90,7 @@ export function ExecutionDetailPage() {
         } else {
           const logData = (log.data ?? {}) as Record<string, unknown>;
           const message =
-            (logData.message as string) || log.message || formatEvent(log.event || "", logData);
+            (logData.message as string) || log.message || formatEvent(log.event || "", logData, t);
           if (message) {
             const args = logData.args as Record<string, unknown> | undefined;
             const detail = args ? formatToolArgs(args) : undefined;
@@ -98,7 +101,7 @@ export function ExecutionDetailPage() {
     }
 
     return { historicalLogs: entries, historicalResult: result };
-  }, [logs]);
+  }, [logs, t]);
 
   // Use result from logs or execution object
   const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
@@ -151,7 +154,7 @@ export function ExecutionDetailPage() {
   return (
     <>
       <nav className="breadcrumb">
-        <Link to="/">Flows</Link>
+        <Link to="/">{t("detail.breadcrumb")}</Link>
         <span className="separator">/</span>
         <Link to={`/flows/${flowId}`}>{flow?.displayName || flowId}</Link>
         <span className="separator">/</span>
@@ -176,7 +179,7 @@ export function ExecutionDetailPage() {
             onClick={() => cancelExecution.mutate(execId!)}
             disabled={cancelExecution.isPending}
           >
-            {cancelExecution.isPending && <Spinner />} Annuler
+            {cancelExecution.isPending && <Spinner />} {t("btn.cancel")}
           </button>
         )}
         {!isRunning && flow && (
@@ -192,7 +195,7 @@ export function ExecutionDetailPage() {
             }}
             disabled={runFlow.isPending}
           >
-            Relancer
+            {t("exec.rerun")}
           </button>
         )}
       </div>
@@ -217,7 +220,7 @@ export function ExecutionDetailPage() {
           className={`tab ${activeTab === "logs" ? "active" : ""}`}
           onClick={() => setUserTab("logs")}
         >
-          Logs <span>{allLogs.length} events</span>
+          {t("exec.tabLogs")} <span>{t("exec.tabLogEvents", { count: allLogs.length })}</span>
         </button>
         <button
           role="tab"
@@ -225,7 +228,7 @@ export function ExecutionDetailPage() {
           className={`tab ${activeTab === "result" ? "active" : ""}`}
           onClick={() => setUserTab("result")}
         >
-          Resultat
+          {t("exec.tabResult")}
         </button>
       </div>
 
@@ -239,7 +242,7 @@ export function ExecutionDetailPage() {
         (resultData ? (
           <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
-          <EmptyState message="Aucun resultat" compact />
+          <EmptyState message={t("exec.emptyResult")} compact />
         ))}
     </>
   );

@@ -1,11 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import i18n from "../i18n";
 import { api, apiFetch, uploadFormData, apiBlob } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 function onMutationError(err: Error) {
-  alert(`Erreur : ${err.message}`);
+  alert(i18n.t("error.prefix", { message: err.message }));
 }
 
 function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
@@ -84,12 +85,12 @@ export function useConnect() {
       });
       const popup = window.open(session.connectLink, "oauth", "width=600,height=700");
       if (!popup) {
-        throw new Error("Popup bloque par le navigateur. Autorisez les popups pour ce site.");
+        throw new Error(i18n.t("error.popupBlocked"));
       }
       return new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           clearInterval(interval);
-          reject(new Error("Timeout de connexion OAuth"));
+          reject(new Error(i18n.t("error.oauthTimeout")));
         }, OAUTH_TIMEOUT_MS);
         const interval = setInterval(() => {
           if (popup.closed) {

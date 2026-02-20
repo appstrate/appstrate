@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import Editor, { type OnMount } from "@monaco-editor/react";
 
 interface PromptEditorProps {
@@ -7,6 +8,7 @@ interface PromptEditorProps {
 }
 
 export function PromptEditor({ value, onChange }: PromptEditorProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
   }, []);
@@ -33,8 +35,7 @@ export function PromptEditor({ value, onChange }: PromptEditorProps) {
         }}
       />
       <div className="hint" style={{ marginTop: "0.5rem" }}>
-        Le prompt est envoyé tel quel à l'agent. Les inputs, la config et le state sont injectés
-        automatiquement dans des sections structurées avant le prompt.
+        {t("editor.promptHint")}
       </div>
     </div>
   );

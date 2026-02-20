@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { escapeHtml, convertMarkdown, truncate, formatDateField } from "../lib/markdown";
 
@@ -7,17 +8,15 @@ interface ResultRendererProps {
   outputSchema?: JSONSchemaObject;
 }
 
-function renderMetadata(data: Record<string, unknown>): string {
+function renderMetadata(data: Record<string, unknown>, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const parts: string[] = [];
-  if (data.emails_processed !== undefined) parts.push(`${data.emails_processed} mails traites`);
-  if (data.emails_scanned !== undefined) parts.push(`${data.emails_scanned} mails scannes`);
-  if (data.newsletters_found !== undefined)
-    parts.push(`${data.newsletters_found} newsletters trouvees`);
-  if (data.meetings_found !== undefined) parts.push(`${data.meetings_found} reunions trouvees`);
-  if (data.meetings_prepped !== undefined)
-    parts.push(`${data.meetings_prepped} reunions preparees`);
-  if (data.meetings_skipped !== undefined) parts.push(`${data.meetings_skipped} ignorees`);
-  if (data.ignored_count) parts.push(`${data.ignored_count} ignores`);
+  if (data.emails_processed !== undefined) parts.push(t("result.emailsProcessed", { count: data.emails_processed }));
+  if (data.emails_scanned !== undefined) parts.push(t("result.emailsScanned", { count: data.emails_scanned }));
+  if (data.newsletters_found !== undefined) parts.push(t("result.newslettersFound", { count: data.newsletters_found }));
+  if (data.meetings_found !== undefined) parts.push(t("result.meetingsFound", { count: data.meetings_found }));
+  if (data.meetings_prepped !== undefined) parts.push(t("result.meetingsPrepped", { count: data.meetings_prepped }));
+  if (data.meetings_skipped !== undefined) parts.push(t("result.meetingsSkipped", { count: data.meetings_skipped }));
+  if (data.ignored_count) parts.push(t("result.ignoredCount", { count: data.ignored_count }));
   if (parts.length === 0) return "";
   return `<p class="result-metadata">${parts.join(" — ")}</p>`;
 }
@@ -150,7 +149,12 @@ function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]
   return html;
 }
 
-function renderSchemaField(key: string, prop: JSONSchemaProperty, value: unknown): string {
+function renderSchemaField(
+  key: string,
+  prop: JSONSchemaProperty,
+  value: unknown,
+  t: (key: string) => string,
+): string {
   const desc = prop.description || key;
   if (value === undefined || value === null) {
     return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>—</em></div>`;
@@ -169,13 +173,13 @@ function renderSchemaField(key: string, prop: JSONSchemaProperty, value: unknown
   }
 
   if (prop.type === "boolean") {
-    const label = value ? "Oui" : "Non";
+    const label = value ? t("result.boolYes") : t("result.boolNo");
     return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <span class="relevance-badge ${value ? "high" : "low"}">${label}</span></div>`;
   }
 
   if (prop.type === "array" && Array.isArray(value)) {
     if (value.length === 0) {
-      return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>Aucun</em></div>`;
+      return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>${t("result.emptyArray")}</em></div>`;
     }
     if (typeof value[0] === "object" && value[0] !== null) {
       return renderGenericCards(key, value as Record<string, unknown>[]);
@@ -190,20 +194,24 @@ function renderSchemaField(key: string, prop: JSONSchemaProperty, value: unknown
   return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
 }
 
-function buildSchemaResultHtml(data: Record<string, unknown>, schema: JSONSchemaObject): string {
-  let html = `<h4>Resultat</h4>`;
+function buildSchemaResultHtml(
+  data: Record<string, unknown>,
+  schema: JSONSchemaObject,
+  t: (key: string) => string,
+): string {
+  let html = `<h4>${t("result.title")}</h4>`;
 
   // Render summary first if present in schema
   if (schema.properties.summary && data.summary) {
     html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
   }
 
-  html += renderMetadata(data);
+  html += renderMetadata(data, t);
 
   // Render schema fields in declared order (skip summary already rendered above)
   for (const [key, prop] of Object.entries(schema.properties)) {
     if (key === "summary") continue;
-    html += renderSchemaField(key, prop, data[key]);
+    html += renderSchemaField(key, prop, data[key], t);
   }
 
   // Render extra fields not in schema (except internal fields)
@@ -239,17 +247,17 @@ function buildSchemaResultHtml(data: Record<string, unknown>, schema: JSONSchema
   return html;
 }
 
-function buildResultHtml(data: Record<string, unknown>): string {
-  let html = `<h4>Resultat</h4>`;
+function buildResultHtml(data: Record<string, unknown>, t: (key: string) => string): string {
+  let html = `<h4>${t("result.title")}</h4>`;
 
   if (data.summary) {
     html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
   }
 
-  html += renderMetadata(data);
+  html += renderMetadata(data, t);
 
   if (Array.isArray(data.tickets_created) && data.tickets_created.length > 0) {
-    html += `<h4>Tickets crees</h4><ul class="ticket-list">`;
+    html += `<h4>${t("result.ticketsCreated")}</h4><ul class="ticket-list">`;
     for (const ticket of data.tickets_created as Record<string, string>[]) {
       html += `<li>
         ${ticket.url ? `<a href="${escapeHtml(ticket.url)}" target="_blank">${escapeHtml(ticket.title)}</a>` : escapeHtml(ticket.title)}
@@ -260,7 +268,7 @@ function buildResultHtml(data: Record<string, unknown>): string {
   }
 
   if (Array.isArray(data.informational) && data.informational.length > 0) {
-    html += `<h4 style="margin-top: 0.75rem">Mails informatifs</h4><ul class="ticket-list">`;
+    html += `<h4 style="margin-top: 0.75rem">${t("result.informational")}</h4><ul class="ticket-list">`;
     for (const info of data.informational as Record<string, string>[]) {
       html += `<li><strong>${escapeHtml(info.from)}</strong>: ${escapeHtml(info.summary || info.subject)}</li>`;
     }
@@ -298,14 +306,15 @@ function buildResultHtml(data: Record<string, unknown>): string {
 }
 
 export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
 
   const html = useMemo(
     () =>
       outputSchema?.properties && Object.keys(outputSchema.properties).length > 0
-        ? buildSchemaResultHtml(data, outputSchema)
-        : buildResultHtml(data),
-    [data, outputSchema],
+        ? buildSchemaResultHtml(data, outputSchema, t)
+        : buildResultHtml(data, t),
+    [data, outputSchema, t],
   );
 
   const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
@@ -317,13 +326,13 @@ export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
           className={`result-toggle-btn ${viewMode === "formatted" ? "active" : ""}`}
           onClick={() => setViewMode("formatted")}
         >
-          Formaté
+          {t("result.formatted")}
         </button>
         <button
           className={`result-toggle-btn ${viewMode === "json" ? "active" : ""}`}
           onClick={() => setViewMode("json")}
         >
-          JSON
+          {t("result.json")}
         </button>
       </div>
       {viewMode === "formatted" ? (

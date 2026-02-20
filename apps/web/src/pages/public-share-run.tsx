@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { JSONSchemaObject, ServiceStatus } from "@appstrate/shared-types";
 import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
@@ -24,7 +26,10 @@ interface FlowInfo {
 
 const POLL_INTERVAL_MS = 2000;
 
-function resolveExecutionStatus(status: string): {
+function resolveExecutionStatus(
+  status: string,
+  t: TFunction,
+): {
   pageStatus: PageStatus;
   error: string | null;
 } {
@@ -32,15 +37,16 @@ function resolveExecutionStatus(status: string): {
     case "success":
       return { pageStatus: "success", error: null };
     case "failed":
-      return { pageStatus: "failed", error: "L'execution a echoue." };
+      return { pageStatus: "failed", error: t("shareable.errorFailed") };
     case "timeout":
-      return { pageStatus: "timeout", error: "L'execution a expire (timeout)." };
+      return { pageStatus: "timeout", error: t("shareable.errorTimeout") };
     default:
       return { pageStatus: "running", error: null };
   }
 }
 
 export function PublicShareRunPage() {
+  const { t } = useTranslation(["flows", "common"]);
   const { token } = useParams<{ token: string }>();
   const [pageStatus, setPageStatus] = useState<PageStatus>("loading");
   const [flowInfo, setFlowInfo] = useState<FlowInfo | null>(null);
@@ -73,7 +79,7 @@ export function PublicShareRunPage() {
         setFlowInfo(data);
 
         if (data.consumed && data.execution) {
-          const resolved = resolveExecutionStatus(data.execution.status);
+          const resolved = resolveExecutionStatus(data.execution.status, t);
           setPageStatus(resolved.pageStatus);
           if (resolved.error) setExecError(data.execution.error || resolved.error);
           if (data.execution.result) setResult(data.execution.result);
@@ -85,7 +91,7 @@ export function PublicShareRunPage() {
         }
       })
       .catch(() => setPageStatus("invalid"));
-  }, [token]);
+  }, [token, t]);
 
   // Polling for execution status
   const stopPolling = useCallback(() => {
@@ -102,7 +108,7 @@ export function PublicShareRunPage() {
       if (!res.ok) return;
       const data = await res.json();
 
-      const resolved = resolveExecutionStatus(data.status as string);
+      const resolved = resolveExecutionStatus(data.status as string, t);
       if (resolved.pageStatus !== "running") {
         setPageStatus(resolved.pageStatus);
         if (resolved.error) setExecError(data.error || resolved.error);
@@ -112,7 +118,7 @@ export function PublicShareRunPage() {
     } catch {
       // Ignore polling errors
     }
-  }, [token, stopPolling]);
+  }, [token, stopPolling, t]);
 
   const startPolling = useCallback(() => {
     stopPolling();
@@ -164,14 +170,14 @@ export function PublicShareRunPage() {
           setPageStatus("invalid");
           return;
         }
-        throw new Error(err.message || `Erreur ${res.status}`);
+        throw new Error(err.message || `Error ${res.status}`);
       }
 
       await res.json();
       // Polling will start via the useEffect on pageStatus === "running"
     } catch (err) {
       setPageStatus("failed");
-      setExecError(err instanceof Error ? err.message : "Erreur inconnue");
+      setExecError(err instanceof Error ? err.message : t("error.unknown"));
     }
   };
 
@@ -192,10 +198,10 @@ export function PublicShareRunPage() {
       <div className="shareable-run">
         <div className="shareable-run-card">
           <div className="shareable-run-header">
-            <h2>Lien invalide</h2>
+            <h2>{t("public.invalidTitle")}</h2>
           </div>
           <div className="exec-error">
-            Ce lien n'est plus valide. Il a peut-etre deja ete utilise ou a expire.
+            {t("public.invalidMessage")}
           </div>
         </div>
       </div>
@@ -206,7 +212,7 @@ export function PublicShareRunPage() {
     return (
       <div className="shareable-run">
         <div className="shareable-run-card">
-          <div className="exec-error">Flow introuvable.</div>
+          <div className="exec-error">{t("public.notFound")}</div>
         </div>
       </div>
     );
@@ -229,7 +235,7 @@ export function PublicShareRunPage() {
                   <div key={svc.id} className="service admin-provided" title={svc.description}>
                     <span className="status-dot connected" />
                     {svc.id}
-                    <span className="admin-service-badge">{svc.adminDisplayName ?? "admin"}</span>
+                    <span className="admin-service-badge">{svc.adminDisplayName ?? t("admin")}</span>
                   </div>
                 );
               }
@@ -238,7 +244,7 @@ export function PublicShareRunPage() {
                   <div key={svc.id} className="service admin-pending" title={svc.description}>
                     <span className="status-dot disconnected" />
                     {svc.id}
-                    <span className="admin-service-badge pending">en attente</span>
+                    <span className="admin-service-badge pending">{t("detail.pending")}</span>
                   </div>
                 );
               }
@@ -265,7 +271,7 @@ export function PublicShareRunPage() {
               />
             )}
             <button className="primary shareable-run-btn" onClick={handleRun}>
-              Executer
+              {t("shareable.execute")}
             </button>
           </div>
         )}
@@ -273,7 +279,7 @@ export function PublicShareRunPage() {
         {pageStatus === "running" && (
           <div className="shareable-run-status">
             <Spinner />
-            <span>Execution en cours...</span>
+            <span>{t("shareable.running")}</span>
           </div>
         )}
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { InputFields } from "./input-fields";
 import { Spinner } from "./spinner";
@@ -22,6 +23,8 @@ export function InputModal({
   isPending,
   initialValues,
 }: InputModalProps) {
+  const { t } = useTranslation(["flows", "common"]);
+
   const guardedClose = () => {
     if (!isPending) onClose();
   };
@@ -30,7 +33,7 @@ export function InputModal({
     <Modal
       open={open}
       onClose={guardedClose}
-      title={`${flow.displayName} — Parametres`}
+      title={t("input.title", { name: flow.displayName })}
       actions={null}
     >
       {open && (
@@ -59,6 +62,7 @@ function InputModalForm({
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
 }) {
+  const { t } = useTranslation(["flows", "common"]);
   const schema = flow.input?.schema || { type: "object" as const, properties: {} };
 
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -74,7 +78,7 @@ function InputModalForm({
       const prop = schema.properties[key]!;
       if (prop.type === "file") continue;
       if (schema.required?.includes(key) && (!input[key] || input[key] === "")) {
-        alert(`Le champ "${key}" est requis`);
+        alert(t("input.fieldRequired", { field: key }));
         return;
       }
     }
@@ -84,7 +88,7 @@ function InputModalForm({
       const prop = schema.properties[key]!;
       if (prop.type !== "file") continue;
       if (schema.required?.includes(key) && (!fileValues[key] || fileValues[key]!.length === 0)) {
-        alert(`Le fichier "${key}" est requis`);
+        alert(t("input.fileRequired", { field: key }));
         return;
       }
     }
@@ -105,10 +109,10 @@ function InputModalForm({
       />
       <div className="modal-actions">
         <button onClick={onClose} disabled={isPending}>
-          Annuler
+          {t("btn.cancel")}
         </button>
         <button className="primary" onClick={handleSubmit} disabled={isPending}>
-          {isPending ? <Spinner /> : "Lancer"}
+          {isPending ? <Spinner /> : t("input.run")}
         </button>
       </div>
     </>

@@ -1,14 +1,6 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { EditorTab } from "./types";
-
-const TABS: { id: EditorTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "prompt", label: "Prompt" },
-  { id: "services", label: "Services" },
-  { id: "schema", label: "Schemas" },
-  { id: "skills", label: "Skills" },
-  { id: "extensions", label: "Extensions" },
-  { id: "json", label: "JSON" },
-];
 
 interface EditorTabsProps {
   activeTab: EditorTab;
@@ -16,9 +8,24 @@ interface EditorTabsProps {
 }
 
 export function EditorTabs({ activeTab, onTabChange }: EditorTabsProps) {
+  const { t } = useTranslation(["flows", "common"]);
+
+  const tabs = useMemo(
+    () => [
+      { id: "general" as EditorTab, label: t("editor.tabGeneral") },
+      { id: "prompt" as EditorTab, label: t("editor.tabPrompt") },
+      { id: "services" as EditorTab, label: t("editor.tabServices") },
+      { id: "schema" as EditorTab, label: t("editor.tabSchema") },
+      { id: "skills" as EditorTab, label: t("editor.tabSkills") },
+      { id: "extensions" as EditorTab, label: t("editor.tabExtensions") },
+      { id: "json" as EditorTab, label: t("editor.tabJson") },
+    ],
+    [t],
+  );
+
   return (
     <div className="exec-tabs">
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"

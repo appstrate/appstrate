@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
@@ -38,6 +39,7 @@ function FlowEditorForm({
   isEdit: boolean;
   userEmail: string;
 }) {
+  const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
   const createFlow = useCreateFlow();
   const updateFlow = useUpdateFlow(flowId || "");
@@ -67,13 +69,13 @@ function FlowEditorForm({
     setError(null);
 
     if (!form.metadata.name || !form.metadata.displayName || !form.metadata.description) {
-      setError("Les champs identifiant, nom d'affichage et description sont requis.");
+      setError(t("editor.errorRequired"));
       setActiveTab("general");
       return;
     }
 
     if (!form.prompt.trim()) {
-      setError("Le prompt est requis.");
+      setError(t("editor.errorPrompt"));
       setActiveTab("prompt");
       return;
     }
@@ -103,16 +105,16 @@ function FlowEditorForm({
   return (
     <div className="flow-editor">
       <nav className="breadcrumb">
-        <Link to="/">Flows</Link>
+        <Link to="/">{t("detail.breadcrumb")}</Link>
         <span className="separator">/</span>
         {isEdit && detail ? (
           <>
             <Link to={`/flows/${flowId}`}>{detail.displayName}</Link>
             <span className="separator">/</span>
-            <span className="current">Modifier</span>
+            <span className="current">{t("editor.breadcrumbEdit")}</span>
           </>
         ) : (
-          <span className="current">Nouveau flow</span>
+          <span className="current">{t("editor.breadcrumbNew")}</span>
         )}
       </nav>
 
@@ -161,19 +163,19 @@ function FlowEditorForm({
       {activeTab === "schema" && (
         <>
           <SchemaSection
-            title="Entrees (input)"
+            title={t("editor.inputTitle")}
             mode="input"
             fields={form.inputSchema}
             onChange={(inputSchema) => setForm((s) => ({ ...s, inputSchema }))}
           />
           <SchemaSection
-            title="Sorties (output)"
+            title={t("editor.outputTitle")}
             mode="output"
             fields={form.outputSchema}
             onChange={(outputSchema) => setForm((s) => ({ ...s, outputSchema }))}
           />
           <SchemaSection
-            title="Configuration"
+            title={t("editor.configTitle")}
             mode="config"
             fields={form.configSchema}
             onChange={(configSchema) => setForm((s) => ({ ...s, configSchema }))}
@@ -184,8 +186,8 @@ function FlowEditorForm({
       {activeTab === "skills" && (
         <ResourceSection
           type="skills"
-          title="Skills"
-          emptyLabel="Aucun skill dans la bibliotheque. Ajoutez-en depuis la page Bibliotheque."
+          title={t("editor.tabSkills")}
+          emptyLabel={t("editor.skillsEmpty")}
           selectedIds={form.skills.map((s) => s.id)}
           onChange={(ids) => setForm((s) => ({ ...s, skills: ids.map((id) => ({ id })) }))}
         />
@@ -194,8 +196,8 @@ function FlowEditorForm({
       {activeTab === "extensions" && (
         <ResourceSection
           type="extensions"
-          title="Extensions"
-          emptyLabel="Aucune extension dans la bibliotheque. Ajoutez-en depuis la page Bibliotheque."
+          title={t("editor.tabExtensions")}
+          emptyLabel={t("editor.extensionsEmpty")}
           selectedIds={form.extensions.map((e) => e.id)}
           onChange={(ids) => setForm((s) => ({ ...s, extensions: ids.map((id) => ({ id })) }))}
         />
@@ -208,10 +210,10 @@ function FlowEditorForm({
       {activeTab !== "json" && (
         <div className="editor-actions">
           <button type="button" onClick={() => navigate(isEdit ? `/flows/${flowId}` : "/")}>
-            Annuler
+            {t("btn.cancel")}
           </button>
           <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
-            {isPending ? <Spinner /> : isEdit ? "Enregistrer" : "Creer"}
+            {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
           </button>
         </div>
       )}
@@ -222,6 +224,7 @@ function FlowEditorForm({
 // --- Outer wrapper: handles loading, auth, and routing ---
 
 export function FlowEditorPage() {
+  const { t } = useTranslation(["flows", "common"]);
   const { flowId } = useParams<{ flowId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -233,7 +236,7 @@ export function FlowEditorPage() {
   if (!isOrgAdmin) {
     return (
       <div className="empty-state">
-        <p>Acces reserve aux administrateurs.</p>
+        <p>{t("editor.adminOnly")}</p>
       </div>
     );
   }
@@ -249,7 +252,7 @@ export function FlowEditorPage() {
   if (isEdit && !detail) {
     return (
       <div className="empty-state">
-        <p>Flow introuvable.</p>
+        <p>{t("editor.notFound")}</p>
       </div>
     );
   }

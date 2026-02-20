@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
 
 interface MetadataState {
@@ -14,6 +15,7 @@ interface MetadataSectionProps {
 }
 
 export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
 
   const handleTagInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -34,39 +36,37 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
 
   return (
     <div className="editor-section">
-      <div className="editor-section-header">Metadata</div>
+      <div className="editor-section-header">{t("editor.metadata")}</div>
       <div className="editor-section-body">
         <FormField
           id="meta-name"
-          label="Identifiant (slug)"
+          label={t("editor.metaName")}
           required
           value={value.name}
           onChange={(v) => update({ name: v.toLowerCase().replace(/[^a-z0-9-]/g, "-") })}
-          placeholder="mon-flow"
-          description={
-            isEdit ? "Non modifiable apres creation" : "Identifiant unique du flow (kebab-case)"
-          }
+          placeholder={t("editor.metaNamePlaceholder")}
+          description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
         />
         {isEdit && <input type="hidden" value={value.name} />}
         <FormField
           id="meta-displayName"
-          label="Nom d'affichage"
+          label={t("editor.metaDisplayName")}
           required
           value={value.displayName}
           onChange={(v) => update({ displayName: v })}
-          placeholder="Mon Flow"
+          placeholder={t("editor.metaDisplayNamePlaceholder")}
         />
         <div className="form-group">
-          <label htmlFor="meta-description">Description *</label>
+          <label htmlFor="meta-description">{t("editor.metaDescription")}</label>
           <textarea
             id="meta-description"
             value={value.description}
             onChange={(e) => update({ description: e.target.value })}
-            placeholder="Description du flow..."
+            placeholder={t("editor.metaDescPlaceholder")}
           />
         </div>
         <div className="form-group">
-          <label>Tags</label>
+          <label>{t("editor.metaTags")}</label>
           <div className="tag-chips">
             {value.tags.map((tag) => (
               <span key={tag} className="tag-chip">
@@ -79,7 +79,7 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           </div>
           <input
             type="text"
-            placeholder="Ajouter un tag (Entree ou virgule)"
+            placeholder={t("editor.metaTagPlaceholder")}
             onKeyDown={handleTagInput}
           />
         </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import Editor from "@monaco-editor/react";
 import type { FlowFormState } from "./types";
 import { assemblePayload, payloadToFormState } from "./utils";
@@ -10,6 +11,8 @@ interface JsonEditorProps {
 }
 
 export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
+  const { t } = useTranslation(["flows", "common"]);
+
   const initialJson = useMemo(
     () => JSON.stringify(assemblePayload(form, userEmail), null, 2),
     // Only compute once on mount
@@ -24,7 +27,7 @@ export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
     try {
       const parsed = JSON.parse(jsonValue);
       if (!parsed.manifest || typeof parsed.prompt !== "string") {
-        setParseError('Le JSON doit contenir "manifest" (objet) et "prompt" (string).');
+        setParseError(t("editor.jsonErrorStructure"));
         return;
       }
       const newState = payloadToFormState({
@@ -34,7 +37,7 @@ export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
       setParseError(null);
       onApply(newState);
     } catch {
-      setParseError("JSON invalide : verifiez la syntaxe.");
+      setParseError(t("editor.jsonInvalid"));
     }
   };
 
@@ -62,7 +65,7 @@ export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
       {parseError && <div className="json-editor-error">{parseError}</div>}
       <div className="json-editor-actions">
         <button type="button" className="primary" onClick={handleApply}>
-          Appliquer au formulaire
+          {t("editor.jsonApply")}
         </button>
       </div>
     </div>

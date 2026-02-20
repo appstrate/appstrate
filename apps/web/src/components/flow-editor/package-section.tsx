@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { FlowDetail } from "@appstrate/shared-types";
 import { useUploadPackage, downloadPackage } from "../../hooks/use-mutations";
 import { Spinner } from "../spinner";
@@ -16,6 +17,7 @@ export function PackageSection({
   canEdit,
   onPackageUploaded,
 }: PackageSectionProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const zipFileRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadPackage(flowId || "");
 
@@ -28,7 +30,7 @@ export function PackageSection({
     try {
       await downloadPackage(flowId);
     } catch (err) {
-      alert(`Erreur: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`${t("error.prefix", { message: err instanceof Error ? err.message : String(err) })}`);
     } finally {
       setDownloading(false);
     }
@@ -53,18 +55,18 @@ export function PackageSection({
 
   return (
     <div className="editor-section">
-      <div className="editor-section-header">Package ZIP</div>
+      <div className="editor-section-header">{t("editor.packageTitle")}</div>
       <div className="editor-section-body">
         <div className="package-actions">
           {flowId && (
             <button type="button" onClick={handleDownload} disabled={downloading}>
-              {downloading ? <Spinner /> : "Telecharger le ZIP"}
+              {downloading ? <Spinner /> : t("editor.downloadZip")}
             </button>
           )}
 
           {canEdit && (
             <label className="btn-upload">
-              {uploadMutation.isPending ? <Spinner /> : "Uploader un ZIP"}
+              {uploadMutation.isPending ? <Spinner /> : t("editor.uploadZip")}
               <input
                 ref={zipFileRef}
                 type="file"
@@ -77,7 +79,7 @@ export function PackageSection({
           )}
         </div>
 
-        {uploadSuccess && <p className="editor-success">Package mis a jour avec succes.</p>}
+        {uploadSuccess && <p className="editor-success">{t("editor.packageSuccess")}</p>}
       </div>
     </div>
   );
