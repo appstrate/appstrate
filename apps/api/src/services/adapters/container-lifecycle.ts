@@ -18,6 +18,8 @@ export interface ContainerLifecycleOptions {
   flowPackage?: Buffer;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Extra container IDs to stop on timeout (e.g. sidecar). */
+  stopOnTimeout?: string[];
   processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
 }
 
@@ -51,6 +53,9 @@ export async function* runContainerLifecycle(
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
     stopContainer(containerId).catch(() => {});
+    for (const id of options.stopOnTimeout ?? []) {
+      stopContainer(id).catch(() => {});
+    }
   }, timeoutMs);
 
   let hasResult = false;

@@ -65,7 +65,7 @@ const manifestSchema = z.looseObject({
       .min(1)
       .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
     displayName: z.string().min(1),
-    description: z.string().min(1),
+    description: z.string().optional(),
     author: z.string(),
     license: z.string().optional(),
     tags: z.array(z.string()).optional(),

@@ -8,23 +8,38 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function curlExample(serviceId: string, targetUrl: string, authHeader: string): string[] {
+  return [
+    "  Example:",
+    "  ```bash",
+    `  curl -s "$SIDECAR_URL/proxy" \\`,
+    `    -H "X-Service: ${serviceId}" \\`,
+    `    -H "X-Target: ${targetUrl}" \\`,
+    `    -H "${authHeader}"`,
+    "  ```",
+  ];
+}
+
 export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
 
-  // API access instructions — variable substitution, credentials never in the container
+  // API access instructions — sidecar proxy with curl
   const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
   if (connectedServices.length > 0) {
     sections.push("## API Access\n");
+    sections.push("Make authenticated API requests via the proxy at `$SIDECAR_URL/proxy`.");
     sections.push(
-      "Use the `api_request` tool to make authenticated requests to connected services.",
+      "Add `X-Service` and `X-Target` headers — all other headers and the body are forwarded as-is.",
     );
     sections.push(
-      "Use `{{variable}}` placeholders in path, headers, and body — the platform substitutes them with real credential values. You never see the actual secrets.\n",
+      "Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials.",
+    );
+    sections.push(
+      "Add `X-Substitute-Body: true` if the request body also contains `{{variable}}` placeholders.\n",
     );
 
     for (const svc of connectedServices) {
       if (svc.provider === "custom") {
-        // Custom service — list variables from schema properties
         const props = svc.schema?.properties ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
@@ -38,43 +53,54 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         if (svc.authorized_uris && svc.authorized_uris.length > 0) {
           sections.push(`  Allowed URLs: ${svc.authorized_uris.join(", ")}`);
         }
-        // Generate example based on first authorized URI or generic URL
         const exampleUrl =
           svc.authorized_uris?.[0]?.replace("/*", "/v1/data") ?? "https://api.example.com/v1/data";
         const firstVar = varNames[0];
         if (firstVar) {
-          sections.push(
-            `  Example: \`api_request(service="${svc.id}", path="${exampleUrl}", headers={"Authorization": "{{${firstVar}}}"})\``,
-          );
+          sections.push(...curlExample(svc.id, exampleUrl, `Authorization: {{${firstVar}}}`));
         }
       } else {
-        // Nango service — derive variable name from auth type
         const { name: fieldName, description: fieldDesc } = getNangoCredentialField(svc.id);
         const authorizedUris =
           svc.authorized_uris ?? getDefaultAuthorizedUris(svc.id, svc.provider);
 
         sections.push(`- **${svc.id}** (${svc.description}):`);
-        sections.push(`  Credentials: \`{{${fieldName}}}\` — ${fieldDesc}`);
+        sections.push(`  Credential: \`{{${fieldName}}}\` — ${fieldDesc}`);
         if (authorizedUris && authorizedUris.length > 0) {
           sections.push(`  Allowed URLs: ${authorizedUris.join(", ")}`);
         }
 
-        // Provider-specific examples with full URLs and variable placeholders
         if (svc.provider === "gmail" || svc.id === "gmail") {
           sections.push(
-            `  Example: \`api_request(service="gmail", path="https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20", headers={"Authorization": "Bearer {{${fieldName}}}"})\``,
+            ...curlExample(
+              "gmail",
+              "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20",
+              `Authorization: Bearer {{${fieldName}}}`,
+            ),
           );
         } else if (svc.provider === "clickup" || svc.id === "clickup") {
           sections.push(
-            `  Example: \`api_request(service="clickup", path="https://api.clickup.com/api/v2/team", headers={"Authorization": "{{${fieldName}}}"})\``,
+            ...curlExample(
+              "clickup",
+              "https://api.clickup.com/api/v2/team",
+              `Authorization: {{${fieldName}}}`,
+            ),
           );
         } else if (svc.provider === "brevo" || svc.id === "brevo") {
           sections.push(
-            `  Example: \`api_request(service="brevo", path="https://api.brevo.com/v3/contacts", headers={"api-key": "{{${fieldName}}}"})\``,
+            ...curlExample(
+              "brevo",
+              "https://api.brevo.com/v3/contacts",
+              `api-key: {{${fieldName}}}`,
+            ),
           );
         } else if (svc.provider === "facebook" || svc.id === "facebook") {
           sections.push(
-            `  Example: \`api_request(service="facebook", path="https://graph.facebook.com/v21.0/me/accounts", headers={"Authorization": "Bearer {{${fieldName}}}"})\``,
+            ...curlExample(
+              "facebook",
+              "https://graph.facebook.com/v21.0/me/accounts",
+              `Authorization: Bearer {{${fieldName}}}`,
+            ),
           );
           sections.push(
             `  Note: Use the Page Access Token from /me/accounts when posting to a Page.`,
@@ -154,15 +180,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("```\n");
   }
 
-  // Execution History API (on-demand access to historical executions)
+  // Execution History API (on-demand access to historical executions via sidecar)
   if (ctx.executionApi) {
     sections.push("## Execution History API\n");
-    sections.push(
-      "You can fetch historical execution data on demand using the platform's internal API.\n",
-    );
+    sections.push("You can fetch historical execution data on demand via the sidecar proxy.\n");
     sections.push("```bash");
-    sections.push('curl -s -H "Authorization: Bearer $EXECUTION_TOKEN" \\');
-    sections.push('  "$PLATFORM_API_URL/internal/execution-history?limit=10&fields=state"');
+    sections.push('curl -s "$SIDECAR_URL/execution-history?limit=10&fields=state"');
     sections.push("```\n");
     sections.push("Query parameters:");
     sections.push("- `limit` (1-50, default 10): Number of past executions to return");
