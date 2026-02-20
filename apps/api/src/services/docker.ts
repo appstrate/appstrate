@@ -8,14 +8,33 @@ async function dockerFetch(path: string, options: RequestInit = {}): Promise<Res
   });
 }
 
+export interface CreateContainerOptions {
+  image: string;
+  adapterName: string;
+  memory?: number;
+  nanoCpus?: number;
+  networkId?: string;
+  networkAlias?: string;
+  extraHosts?: string[];
+}
+
 export async function createContainer(
   executionId: string,
   envVars: Record<string, string>,
-  options: { image: string; adapterName: string; memory?: number; nanoCpus?: number },
+  options: CreateContainerOptions,
 ): Promise<string> {
   const containerName = `appstrate-${options.adapterName}-${executionId}`;
 
   const env = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
+
+  const networkingConfig: Record<string, unknown> = {};
+  if (options.networkId && options.networkAlias) {
+    networkingConfig[options.networkId] = {
+      Aliases: [options.networkAlias],
+    };
+  } else if (options.networkId) {
+    networkingConfig[options.networkId] = {};
+  }
 
   const body = {
     Image: options.image,
@@ -25,8 +44,11 @@ export async function createContainer(
       Memory: options.memory ?? 1024 * 1024 * 1024,
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
       AutoRemove: false,
-      NetworkMode: "bridge",
-      ExtraHosts: ["host.docker.internal:host-gateway"],
+      NetworkMode: options.networkId ?? "bridge",
+      ExtraHosts: options.extraHosts ?? [],
+    },
+    NetworkingConfig: {
+      EndpointsConfig: Object.keys(networkingConfig).length > 0 ? networkingConfig : undefined,
     },
     Labels: {
       "appstrate.execution": executionId,
@@ -258,5 +280,46 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
   if (!res.ok && res.status !== 304 && res.status !== 404) {
     const error = await res.text();
     throw new Error(`Failed to stop container: ${res.status} ${error}`);
+  }
+}
+
+// --- Docker Network operations ---
+
+export async function createNetwork(name: string): Promise<string> {
+  const res = await dockerFetch("/networks/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Name: name, CheckDuplicate: true }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to create network ${name}: ${res.status} ${error}`);
+  }
+
+  const data = (await res.json()) as { Id: string };
+  return data.Id;
+}
+
+export async function getContainerIp(
+  containerId: string,
+  networkName: string,
+): Promise<string | null> {
+  const res = await dockerFetch(`/containers/${containerId}/json`);
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    NetworkSettings: { Networks: Record<string, { IPAddress: string }> };
+  };
+  return data.NetworkSettings?.Networks?.[networkName]?.IPAddress ?? null;
+}
+
+export async function removeNetwork(networkId: string): Promise<void> {
+  const res = await dockerFetch(`/networks/${networkId}`, {
+    method: "DELETE",
+  });
+
+  if (!res.ok && res.status !== 404) {
+    const error = await res.text();
+    throw new Error(`Failed to remove network: ${res.status} ${error}`);
   }
 }

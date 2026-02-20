@@ -70,6 +70,13 @@ services:
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
 
+  appstrate-sidecar:
+    build:
+      context: ./runtime-pi/sidecar
+    image: appstrate-sidecar:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
+
   appstrate:
     build:
       context: .
@@ -97,6 +104,8 @@ services:
       nango:
         condition: service_started
       appstrate-pi:
+        condition: service_completed_successfully
+      appstrate-sidecar:
         condition: service_completed_successfully
 
 volumes:

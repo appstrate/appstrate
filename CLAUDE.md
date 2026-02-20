@@ -14,8 +14,9 @@ bunx supabase start           # Runs migrations automatically from supabase/migr
 # 3. Setup Nango integrations (optional — creates OAuth + API key integrations)
 bun run setup-nango           # Idempotent: safe to run multiple times
 
-# 4. Build runtime image
+# 4. Build runtime images
 bun run build-runtime         # docker build -t appstrate-pi ./runtime-pi
+bun run build-sidecar         # docker build -t appstrate-sidecar ./runtime-pi/sidecar
 
 # 5. Configure .env (copy .env.example, set Pi adapter keys + Supabase keys)
 
@@ -53,7 +54,7 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
 - **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is. Only the latest execution's state is injected in the prompt (lightweight). Historical executions are available on demand via the internal API.
-- **Credential brokering + variable substitution**: Credentials are **never** passed to containers. The `api-request.ts` Pi extension calls `GET /internal/credentials/:serviceId` at runtime, which returns a unified `{ credentials: Record<string, string>, authorizedUris: string[] | null }` format — for both Nango (OAuth/API key) and custom services. The agent uses `{{variable}}` placeholders in path, headers, and body; the extension substitutes them with real values before making the request. The extension supports 4 body modes: JSON/text, raw binary (`filePath` + `fileContentType`), multipart/related (`filePath` + `body` + `fileContentType`, for Google Drive), and multipart/form-data (`formData` fields, for Slack, SendGrid, most REST APIs). `authorized_uris` restrict which URLs can be called per service (prefix match with `*` wildcard). For Nango services, default `authorizedUris` are derived from `PROVIDER_BASE_URLS` in `adapters/provider-urls.ts`. Custom service credentials are stored in the `custom_service_credentials` table.
+- **Credential isolation via sidecar proxy**: Credentials **never enter the agent container**. Each execution launches a sidecar proxy (`appstrate-sidecar`) on an isolated Docker network. The agent calls the sidecar via `curl` with `X-Service` and `X-Target` headers. The sidecar fetches credentials from `GET /internal/credentials/:serviceId`, substitutes `{{variable}}` placeholders in headers and URL, validates the URL against `authorizedUris`, and forwards the full HTTP request (any method, any body) to the target. The agent has no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, and no route to the host — only `SIDECAR_URL=http://sidecar:8080`. The sidecar also proxies execution history requests. `authorized_uris` restrict which URLs can be called per service (prefix match with `*` wildcard). For Nango services, default `authorizedUris` are derived from `PROVIDER_BASE_URLS` in `adapters/provider-urls.ts`. Custom service credentials are stored in the `custom_service_credentials` table.
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
@@ -115,11 +116,21 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3000)
      |-- #/schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
      |-- #/services (Services List) -->|-- GET /auth/integrations (with authMode)
      |                                |
-     |            Ephemeral Container (Pi Coding Agent)
-     |            - Receives: FLOW_PROMPT, TOKEN_*, LLM_MODEL, adapter-specific auth
-     |            - Flow package ZIP mounted + extracted (skills, extensions)
-     |            - Agent executes the prompt with access to bash/tools
-     |            - Outputs JSON lines on stdout (parsed by adapter)
+     |            Docker network: appstrate-exec-{execId} (isolated bridge)
+     |            ┌─────────────────────────────────────────────┐
+     |            │  Sidecar Container (alias: "sidecar")       │
+     |            │  - EXECUTION_TOKEN, PLATFORM_API_URL        │
+     |            │  - Proxies /proxy → credential injection    │
+     |            │  - Proxies /execution-history               │
+     |            │  - ExtraHosts → host.docker.internal        │
+     |            ├─────────────────────────────────────────────┤
+     |            │  Agent Container (Pi Coding Agent)          │
+     |            │  - FLOW_PROMPT, LLM_*, SIDECAR_URL          │
+     |            │  - NO EXECUTION_TOKEN, NO PLATFORM_API_URL  │
+     |            │  - NO ExtraHosts (cannot reach host)        │
+     |            │  - Calls sidecar via curl for API access    │
+     |            │  - Outputs JSON lines on stdout             │
+     |            └─────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -163,13 +174,13 @@ appstrate/
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
-│   │       │   ├── docker.ts         # dockerFetch(), createContainer (generic), streamLogs, etc.
+│   │       │   ├── docker.ts         # dockerFetch(), createContainer, streamLogs, network ops (createNetwork, connectToNetwork, removeNetwork)
 │   │       │   ├── adapters/
 │   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, PromptContext, TimeoutError
 │   │       │   │   ├── index.ts      # getAdapter() factory, re-exports
 │   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, extractJsonResult, buildRetryPrompt
 │   │       │   │   ├── provider-urls.ts # Provider base URLs, auth config, URI matching, credential field resolution
-│   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
+│   │       │   │   └── pi.ts         # PiAdapter: sidecar orchestration (network + sidecar + agent), stream parsing
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, executions (with state), execution_logs tables
 │   │       │   ├── flow-service.ts   # FlowService: built-in cache (ReadonlyMap) + DB reads for user flows (replaces flow-loader.ts)
@@ -256,10 +267,13 @@ appstrate/
 │   ├── Dockerfile
 │   ├── package.json
 │   ├── entrypoint.ts                 # SDK session → JSON line stdout
-│   └── extensions/                   # Built-in extensions shipped with image
-│       ├── api-request.ts            # Authenticated API requests: JSON/text, raw binary, multipart/related, multipart/form-data — with {{variable}} substitution and URI validation
-│       ├── web-fetch.ts              # Fetch URL content
-│       └── web-search.ts             # DuckDuckGo web search
+│   ├── extensions/                   # Built-in extensions shipped with image
+│   │   ├── web-fetch.ts              # Fetch URL content
+│   │   └── web-search.ts             # DuckDuckGo web search
+│   └── sidecar/                      # Credential-isolating sidecar proxy
+│       ├── Dockerfile                # oven/bun:1-slim + hono
+│       ├── package.json
+│       └── server.ts                 # Transparent HTTP proxy: credential injection, URL validation, body streaming
 │
 └── scripts/
     └── setup-nango.ts                # Creates Nango integrations (OAuth + API key) and pre-connects API key services
@@ -411,11 +425,19 @@ Flows can include agent skills in `skills/{skill-id}/SKILL.md`. The SKILL.md fil
 
 The Pi runtime container streams JSON line events on stdout. The `PiAdapter` (`apps/api/src/services/adapters/pi.ts`) parses these events into `ExecutionMessage` types (progress, result, etc.).
 
-The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access with `{{variable}}` placeholders, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives `FLOW_PROMPT`, `LLM_PROVIDER`, `LLM_MODEL_ID`, `EXECUTION_TOKEN`, `PLATFORM_API_URL`, `CONNECTED_SERVICES` (comma-separated service IDs, no secrets), and provider API keys. **No credentials are passed to the container.** The `api-request.ts` extension fetches credentials on-demand from `GET /internal/credentials/:serviceId` (returns `{ credentials, authorizedUris }` for both Nango and custom services), substitutes `{{variable}}` placeholders with real values, validates URLs against `authorizedUris`, then makes the HTTP request. Supports 4 body modes: JSON/text, raw binary, multipart/related (Google Drive), and multipart/form-data (Slack, SendGrid, etc.). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
+The adapter orchestrates a **sidecar proxy pattern** for credential isolation:
+1. Creates an isolated Docker network (`appstrate-exec-{execId}`)
+2. Starts the sidecar container on both the default bridge (for host access) and the custom network (alias `sidecar`)
+3. Starts the agent container on the custom network only — **no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, no `ExtraHosts`**
+4. The agent calls `curl $SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers for authenticated API requests
+5. The sidecar fetches credentials, substitutes `{{variable}}` placeholders, validates URLs, and forwards the request
+6. Both containers and the network are cleaned up in the `finally` block
+
+The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access with curl proxy examples, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The agent container receives `FLOW_PROMPT`, `LLM_PROVIDER`, `LLM_MODEL_ID`, `SIDECAR_URL`, `CONNECTED_SERVICES` (comma-separated service IDs, no secrets), and provider API keys. For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
-If `result.state` is present, the platform persists it to the `state` column of the execution record. The latest execution's state is injected into the next run as `## Previous State`. The agent can also fetch historical executions on demand via `GET /internal/execution-history` (authenticated with `$EXECUTION_TOKEN`).
+If `result.state` is present, the platform persists it to the `state` column of the execution record. The latest execution's state is injected into the next run as `## Previous State`. The agent can also fetch historical executions on demand via `$SIDECAR_URL/execution-history`.
 
 ## Environment Variables
 
@@ -487,7 +509,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 - Flow versioning: create/update creates snapshot, executions tagged with `flow_version_id`
 - Custom services (`provider: "custom"`) with credential schema, stored in `custom_service_credentials` table
 - `authorized_uris` URL restriction on all services (custom and Nango) with pattern matching
-- Variable substitution (`{{field}}`) in `api-request.ts` extension for credentials injection
+- Sidecar proxy for credential isolation — agent cannot access `EXECUTION_TOKEN` or `/internal/credentials`
+- Variable substitution (`{{variable}}`) in sidecar proxy for credentials injection
 - Unified `/internal/credentials` response format for both Nango and custom services
 
 ## Detailed Specs

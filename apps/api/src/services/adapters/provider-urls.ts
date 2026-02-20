@@ -12,34 +12,12 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
   facebook: "https://graph.facebook.com",
 };
 
-export const PROVIDER_AUTH_CONFIG: Record<
+const PROVIDER_AUTH_CONFIG: Record<
   string,
   { authType: "bearer" | "api-key"; authHeader?: string }
 > = {
   brevo: { authType: "api-key", authHeader: "api-key" },
 };
-
-/** Get auth config for a provider (defaults to bearer token). */
-export function getProviderAuth(providerId: string): {
-  authType: "bearer" | "api-key";
-  authHeader: string;
-} {
-  const config = PROVIDER_AUTH_CONFIG[providerId];
-  return {
-    authType: config?.authType ?? "bearer",
-    authHeader: config?.authHeader ?? "Authorization",
-  };
-}
-
-/** URI matching: '*' at end = prefix match, otherwise exact match */
-export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    if (pattern.endsWith("*")) {
-      return url.startsWith(pattern.slice(0, -1));
-    }
-    return url === pattern;
-  });
-}
 
 /** Get default authorized_uris for a Nango provider (based on PROVIDER_BASE_URLS) */
 export function getDefaultAuthorizedUris(serviceId: string, provider: string): string[] | null {
