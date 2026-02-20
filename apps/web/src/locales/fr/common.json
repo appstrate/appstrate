@@ -2,7 +2,7 @@
   "nav.flows": "Flows",
   "nav.schedules": "Planifications",
   "nav.library": "Bibliothèque",
-  "nav.services": "Services",
+  "nav.services": "Connecteurs",
   "userMenu.ariaLabel": "Menu utilisateur",
   "userMenu.logout": "Déconnexion",
   "userMenu.preferences": "Préférences",

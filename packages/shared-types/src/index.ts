@@ -63,6 +63,16 @@ export interface JSONSchemaObject {
   type: "object";
   properties: Record<string, JSONSchemaProperty>;
   required?: string[];
+  propertyOrder?: string[];
+}
+
+/** Return schema property keys respecting propertyOrder, with unlisted keys appended. */
+export function getOrderedKeys(schema: JSONSchemaObject): string[] {
+  const allKeys = Object.keys(schema.properties);
+  if (!schema.propertyOrder?.length) return allKeys;
+  const ordered = schema.propertyOrder.filter((k) => k in schema.properties);
+  const rest = allKeys.filter((k) => !schema.propertyOrder!.includes(k));
+  return rest.length ? [...ordered, ...rest] : ordered;
 }
 
 export interface ServiceStatus {

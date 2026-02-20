@@ -348,7 +348,7 @@ export function createExecutionsRouter() {
             return c.json(
               {
                 error: "DEPENDENCY_NOT_SATISFIED",
-                message: `Le service '${svc.id}' n'est pas lie par un administrateur`,
+                message: `Le connecteur '${svc.id}' n'est pas lie par un administrateur`,
               },
               400,
             );
@@ -369,7 +369,7 @@ export function createExecutionsRouter() {
             return c.json(
               {
                 error: "DEPENDENCY_NOT_SATISFIED",
-                message: `Le service '${svc.id}' n'est pas configure`,
+                message: `Le connecteur '${svc.id}' n'est pas configure`,
               },
               400,
             );
@@ -381,7 +381,7 @@ export function createExecutionsRouter() {
           return c.json(
             {
               error: "DEPENDENCY_NOT_SATISFIED",
-              message: `Le service '${svc.id}' n'est pas lie par un administrateur`,
+              message: `Le connecteur '${svc.id}' n'est pas lie par un administrateur`,
             },
             400,
           );
@@ -401,7 +401,7 @@ export function createExecutionsRouter() {
           return c.json(
             {
               error: "DEPENDENCY_NOT_SATISFIED",
-              message: `Le service '${svc.id}' n'est pas connecte`,
+              message: `Le connecteur '${svc.id}' n'est pas connecte`,
               connectUrl: `/auth/connect/${svc.provider}`,
             },
             400,

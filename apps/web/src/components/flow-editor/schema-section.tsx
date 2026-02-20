@@ -1,6 +1,23 @@
 import { useTranslation } from "react-i18next";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 export interface SchemaField {
+  _id: string;
   key: string;
   type: string;
   description: string;
@@ -29,6 +46,7 @@ const INPUT_TYPE_OPTIONS = [...TYPE_OPTIONS, "file"];
 
 function emptyField(mode: SchemaMode): SchemaField {
   return {
+    _id: crypto.randomUUID(),
     key: "",
     type: "string",
     description: "",
@@ -40,6 +58,135 @@ function emptyField(mode: SchemaMode): SchemaField {
 
 function hasDetailsRow(mode: SchemaMode): boolean {
   return mode === "input" || mode === "config";
+}
+
+function SortableFieldCard({
+  field,
+  index,
+  mode,
+  onUpdate,
+  onRemove,
+}: {
+  field: SchemaField;
+  index: number;
+  mode: SchemaMode;
+  onUpdate: (index: number, patch: Partial<SchemaField>) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { t } = useTranslation(["flows", "common"]);
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: field._id,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  const isFile = mode === "input" && field.type === "file";
+  const typeOptions = mode === "input" ? INPUT_TYPE_OPTIONS : TYPE_OPTIONS;
+  const showDetails = hasDetailsRow(mode);
+
+  return (
+    <div ref={setNodeRef} style={style} className="field-card">
+      <div className="field-row-main">
+        <span className="drag-handle" {...attributes} {...listeners}>
+          ⠿
+        </span>
+        <input
+          type="text"
+          placeholder={t("editor.fieldKey")}
+          value={field.key}
+          onChange={(e) => onUpdate(index, { key: e.target.value })}
+          className="field-key"
+        />
+        <select value={field.type} onChange={(e) => onUpdate(index, { type: e.target.value })}>
+          {typeOptions.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder={t("editor.fieldDesc")}
+          value={field.description}
+          onChange={(e) => onUpdate(index, { description: e.target.value })}
+          className="field-row-grow"
+        />
+        <label className="field-checkbox">
+          <input
+            type="checkbox"
+            checked={field.required}
+            onChange={(e) => onUpdate(index, { required: e.target.checked })}
+          />
+          {t("editor.fieldReq")}
+        </label>
+        <button type="button" className="btn-remove" onClick={() => onRemove(index)}>
+          &times;
+        </button>
+      </div>
+      {showDetails && (
+        <div className="field-row-details">
+          {isFile ? (
+            <>
+              <input
+                type="text"
+                placeholder={t("editor.fieldAccept")}
+                value={field.accept ?? ""}
+                onChange={(e) => onUpdate(index, { accept: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder={t("editor.fieldMaxSize")}
+                value={field.maxSize ?? ""}
+                onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
+              />
+              <label className="field-checkbox">
+                <input
+                  type="checkbox"
+                  checked={field.multiple ?? false}
+                  onChange={(e) => onUpdate(index, { multiple: e.target.checked })}
+                />
+                {t("editor.fieldMultiple")}
+              </label>
+              {field.multiple && (
+                <input
+                  type="text"
+                  placeholder={t("editor.fieldMaxFiles")}
+                  value={field.maxFiles ?? ""}
+                  onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              {(mode === "input" || mode === "config") && (
+                <input
+                  type="text"
+                  placeholder={t("editor.fieldDefault")}
+                  value={field.default ?? ""}
+                  onChange={(e) => onUpdate(index, { default: e.target.value })}
+                />
+              )}
+              {mode === "input" && (
+                <input
+                  type="text"
+                  placeholder={t("editor.fieldPlaceholder")}
+                  value={field.placeholder ?? ""}
+                  onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
+                />
+              )}
+              {mode === "config" && (
+                <input
+                  type="text"
+                  placeholder={t("editor.fieldEnum")}
+                  value={field.enumValues ?? ""}
+                  onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionProps) {
@@ -55,116 +202,38 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
     onChange(fields.filter((_, i) => i !== index));
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = fields.findIndex((f) => f._id === active.id);
+      const newIndex = fields.findIndex((f) => f._id === over.id);
+      onChange(arrayMove(fields, oldIndex, newIndex));
+    }
+  }
+
   return (
     <div className="editor-section">
       <div className="editor-section-header">{title}</div>
       <div className="editor-section-body">
-        {fields.map((field, i) => {
-          const isFile = mode === "input" && field.type === "file";
-          const typeOptions = mode === "input" ? INPUT_TYPE_OPTIONS : TYPE_OPTIONS;
-          const showDetails = hasDetailsRow(mode);
-          return (
-            <div key={i} className="field-card">
-              <div className="field-row-main">
-                <input
-                  type="text"
-                  placeholder={t("editor.fieldKey")}
-                  value={field.key}
-                  onChange={(e) => update(i, { key: e.target.value })}
-                  className="field-key"
-                />
-                <select value={field.type} onChange={(e) => update(i, { type: e.target.value })}>
-                  {typeOptions.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  placeholder={t("editor.fieldDesc")}
-                  value={field.description}
-                  onChange={(e) => update(i, { description: e.target.value })}
-                  className="field-row-grow"
-                />
-                <label className="field-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={field.required}
-                    onChange={(e) => update(i, { required: e.target.checked })}
-                  />
-                  {t("editor.fieldReq")}
-                </label>
-                <button type="button" className="btn-remove" onClick={() => remove(i)}>
-                  &times;
-                </button>
-              </div>
-              {showDetails && (
-                <div className="field-row-details">
-                  {isFile ? (
-                    <>
-                      <input
-                        type="text"
-                        placeholder={t("editor.fieldAccept")}
-                        value={field.accept ?? ""}
-                        onChange={(e) => update(i, { accept: e.target.value })}
-                      />
-                      <input
-                        type="text"
-                        placeholder={t("editor.fieldMaxSize")}
-                        value={field.maxSize ?? ""}
-                        onChange={(e) => update(i, { maxSize: e.target.value })}
-                      />
-                      <label className="field-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={field.multiple ?? false}
-                          onChange={(e) => update(i, { multiple: e.target.checked })}
-                        />
-                        {t("editor.fieldMultiple")}
-                      </label>
-                      {field.multiple && (
-                        <input
-                          type="text"
-                          placeholder={t("editor.fieldMaxFiles")}
-                          value={field.maxFiles ?? ""}
-                          onChange={(e) => update(i, { maxFiles: e.target.value })}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {(mode === "input" || mode === "config") && (
-                        <input
-                          type="text"
-                          placeholder={t("editor.fieldDefault")}
-                          value={field.default ?? ""}
-                          onChange={(e) => update(i, { default: e.target.value })}
-                        />
-                      )}
-                      {mode === "input" && (
-                        <input
-                          type="text"
-                          placeholder={t("editor.fieldPlaceholder")}
-                          value={field.placeholder ?? ""}
-                          onChange={(e) => update(i, { placeholder: e.target.value })}
-                        />
-                      )}
-                      {mode === "config" && (
-                        <input
-                          type="text"
-                          placeholder={t("editor.fieldEnum")}
-                          value={field.enumValues ?? ""}
-                          onChange={(e) => update(i, { enumValues: e.target.value })}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
+            {fields.map((field, i) => (
+              <SortableFieldCard
+                key={field._id}
+                field={field}
+                index={i}
+                mode={mode}
+                onUpdate={update}
+                onRemove={remove}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
         <button type="button" className="add-field-btn" onClick={add}>
           {t("editor.addField")}
         </button>

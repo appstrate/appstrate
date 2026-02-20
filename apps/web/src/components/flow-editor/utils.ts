@@ -1,6 +1,7 @@
 import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
+import { getOrderedKeys } from "@appstrate/shared-types";
 
 export function toResourceEntry(r: {
   id: string;
@@ -40,32 +41,37 @@ export function schemaToFields(
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  return Object.entries(schema.properties).map(([key, prop]) => ({
-    key,
-    type: prop.type || "string",
-    description: prop.description || "",
-    required: requiredSet.has(key),
-    ...(mode === "input" && prop.type === "file"
-      ? {
-          accept: prop.accept || "",
-          maxSize: prop.maxSize != null ? String(prop.maxSize) : "",
-          multiple: prop.multiple ?? false,
-          maxFiles: prop.maxFiles != null ? String(prop.maxFiles) : "",
-        }
-      : {}),
-    ...(mode === "input" && prop.type !== "file"
-      ? {
-          placeholder: prop.placeholder || "",
-          default: prop.default != null ? String(prop.default) : "",
-        }
-      : {}),
-    ...(mode === "config"
-      ? {
-          default: prop.default != null ? String(prop.default) : "",
-          enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
-        }
-      : {}),
-  }));
+  const keys = getOrderedKeys(schema);
+  return keys.map((key) => {
+    const prop = schema.properties[key];
+    return {
+      _id: crypto.randomUUID(),
+      key,
+      type: prop.type || "string",
+      description: prop.description || "",
+      required: requiredSet.has(key),
+      ...(mode === "input" && prop.type === "file"
+        ? {
+            accept: prop.accept || "",
+            maxSize: prop.maxSize != null ? String(prop.maxSize) : "",
+            multiple: prop.multiple ?? false,
+            maxFiles: prop.maxFiles != null ? String(prop.maxFiles) : "",
+          }
+        : {}),
+      ...(mode === "input" && prop.type !== "file"
+        ? {
+            placeholder: prop.placeholder || "",
+            default: prop.default != null ? String(prop.default) : "",
+          }
+        : {}),
+      ...(mode === "config"
+        ? {
+            default: prop.default != null ? String(prop.default) : "",
+            enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
+          }
+        : {}),
+    };
+  });
 }
 
 export function fieldsToSchema(
@@ -107,7 +113,12 @@ export function fieldsToSchema(
     if (f.required) required.push(f.key.trim());
     properties[f.key.trim()] = prop;
   }
-  return { type: "object", properties, ...(required.length > 0 ? { required } : {}) };
+  return {
+    type: "object",
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+    propertyOrder: filtered.map((f) => f.key.trim()),
+  };
 }
 
 export function detailToFormState(detail: FlowDetail): FlowFormState {

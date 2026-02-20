@@ -11,7 +11,7 @@ function onMutationError(err: Error) {
 
 function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["flows"] });
-  qc.invalidateQueries({ queryKey: ["flow"] });
+  return qc.invalidateQueries({ queryKey: ["flow"] });
 }
 
 export function useSaveConfig(flowId: string) {
@@ -185,8 +185,8 @@ export function useCreateFlow() {
         body: JSON.stringify(body),
       });
     },
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+    onSuccess: async (data) => {
+      await invalidateFlowQueries(qc);
       navigate(`/flows/${data.flowId}`);
     },
     onError: onMutationError,
@@ -209,8 +209,8 @@ export function useUpdateFlow(flowId: string) {
         body: JSON.stringify(body),
       });
     },
-    onSuccess: () => {
-      invalidateFlowQueries(qc);
+    onSuccess: async () => {
+      await invalidateFlowQueries(qc);
       navigate(`/flows/${flowId}`);
     },
     onError: onMutationError,

@@ -26,6 +26,7 @@ const jsonSchemaObjectSchema = z.object({
   type: z.literal("object"),
   properties: z.record(z.string(), jsonSchemaPropertySchema),
   required: z.array(z.string()).optional(),
+  propertyOrder: z.array(z.string()).optional(),
 });
 
 const serviceRequirementSchema = z.object({
