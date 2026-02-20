@@ -517,8 +517,9 @@ button:disabled {
 }
 
 .log-entry.progress::before {
-  content: "\2192 ";
+  content: "\2192";
   color: var(--primary);
+  margin-right: 0.5rem;
 }
 
 .log-entry.system {
