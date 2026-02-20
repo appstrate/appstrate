@@ -5,7 +5,7 @@ import { runContainerLifecycle } from "./container-lifecycle.ts";
 import {
   createContainer,
   createNetwork,
-  getContainerIp,
+  execInContainer,
   startContainer,
   stopContainer,
   removeContainer,
@@ -14,24 +14,18 @@ import {
 
 const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
 const SIDECAR_IMAGE = "appstrate-sidecar:latest";
-const SIDECAR_HEALTH_RETRIES = 3;
+const SIDECAR_HEALTH_RETRIES = 5;
 const SIDECAR_HEALTH_DELAY_MS = 500;
 
-async function waitForSidecarHealth(
-  sidecarContainerId: string,
-  networkName: string,
-): Promise<void> {
-  const ip = await getContainerIp(sidecarContainerId, networkName);
-  if (!ip) {
-    throw new Error("Sidecar has no IP on the execution network");
-  }
-
+async function waitForSidecarHealth(sidecarContainerId: string): Promise<void> {
   for (let attempt = 1; attempt <= SIDECAR_HEALTH_RETRIES; attempt++) {
     try {
-      const res = await fetch(`http://${ip}:8080/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (res.ok) return;
+      const exitCode = await execInContainer(sidecarContainerId, [
+        "bun",
+        "-e",
+        "const r = await fetch('http://localhost:8080/health'); process.exit(r.ok ? 0 : 1)",
+      ]);
+      if (exitCode === 0) return;
     } catch {
       // Retry
     }
@@ -82,7 +76,7 @@ export class PiAdapter implements ExecutionAdapter {
 
       // 3. Start sidecar and wait for health
       await startContainer(sidecarContainerId);
-      await waitForSidecarHealth(sidecarContainerId, networkName);
+      await waitForSidecarHealth(sidecarContainerId);
 
       // 4. Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
