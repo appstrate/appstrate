@@ -59,7 +59,9 @@ export function FlowList() {
             <div className="flow-card-header">
               <h2>{flow.displayName}</h2>
               <div className="flow-card-badges">
-                {flow.source === "user" && <span className="source-badge">{t("list.badgeUser")}</span>}
+                {flow.source === "user" && (
+                  <span className="source-badge">{t("list.badgeUser")}</span>
+                )}
                 {flow.runningExecutions > 0 && (
                   <span className="running-badge">
                     <Spinner /> {t("list.running", { count: flow.runningExecutions })}

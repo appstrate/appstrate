@@ -8,14 +8,23 @@ interface ResultRendererProps {
   outputSchema?: JSONSchemaObject;
 }
 
-function renderMetadata(data: Record<string, unknown>, t: (key: string, opts?: Record<string, unknown>) => string): string {
+function renderMetadata(
+  data: Record<string, unknown>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
   const parts: string[] = [];
-  if (data.emails_processed !== undefined) parts.push(t("result.emailsProcessed", { count: data.emails_processed }));
-  if (data.emails_scanned !== undefined) parts.push(t("result.emailsScanned", { count: data.emails_scanned }));
-  if (data.newsletters_found !== undefined) parts.push(t("result.newslettersFound", { count: data.newsletters_found }));
-  if (data.meetings_found !== undefined) parts.push(t("result.meetingsFound", { count: data.meetings_found }));
-  if (data.meetings_prepped !== undefined) parts.push(t("result.meetingsPrepped", { count: data.meetings_prepped }));
-  if (data.meetings_skipped !== undefined) parts.push(t("result.meetingsSkipped", { count: data.meetings_skipped }));
+  if (data.emails_processed !== undefined)
+    parts.push(t("result.emailsProcessed", { count: data.emails_processed }));
+  if (data.emails_scanned !== undefined)
+    parts.push(t("result.emailsScanned", { count: data.emails_scanned }));
+  if (data.newsletters_found !== undefined)
+    parts.push(t("result.newslettersFound", { count: data.newsletters_found }));
+  if (data.meetings_found !== undefined)
+    parts.push(t("result.meetingsFound", { count: data.meetings_found }));
+  if (data.meetings_prepped !== undefined)
+    parts.push(t("result.meetingsPrepped", { count: data.meetings_prepped }));
+  if (data.meetings_skipped !== undefined)
+    parts.push(t("result.meetingsSkipped", { count: data.meetings_skipped }));
   if (data.ignored_count) parts.push(t("result.ignoredCount", { count: data.ignored_count }));
   if (parts.length === 0) return "";
   return `<p class="result-metadata">${parts.join(" — ")}</p>`;

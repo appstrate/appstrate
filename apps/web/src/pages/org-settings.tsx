@@ -253,19 +253,13 @@ export function OrgSettingsPage() {
                 <div className="service-card-header" style={{ marginBottom: 0 }}>
                   <div className="service-info">
                     <h3 style={{ fontSize: "0.875rem" }}>{t("orgSettings.deleteOrg")}</h3>
-                    <span className="service-provider">
-                      {t("orgSettings.deleteOrgDesc")}
-                    </span>
+                    <span className="service-provider">{t("orgSettings.deleteOrgDesc")}</span>
                   </div>
                   <button
                     className="btn-danger"
                     disabled={deleteOrgMutation.isPending}
                     onClick={() => {
-                      if (
-                        confirm(
-                          t("orgSettings.deleteConfirm", { name: currentOrg.name }),
-                        )
-                      ) {
+                      if (confirm(t("orgSettings.deleteConfirm", { name: currentOrg.name }))) {
                         deleteOrgMutation.mutate();
                       }
                     }}
@@ -393,7 +387,11 @@ export function OrgSettingsPage() {
           </div>
 
           {members.length === 0 && (
-            <EmptyState message={t("orgSettings.noMembers")} hint={t("orgSettings.noMembersHint")} compact />
+            <EmptyState
+              message={t("orgSettings.noMembers")}
+              hint={t("orgSettings.noMembersHint")}
+              compact
+            />
           )}
         </>
       )}

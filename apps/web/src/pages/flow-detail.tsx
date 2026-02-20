@@ -154,7 +154,9 @@ export function FlowDetailPage() {
                   <span className="status-dot connected" />
                   {svc.id}
                   {!isSelf && (
-                    <span className="admin-service-badge">{svc.adminDisplayName ?? t("admin")}</span>
+                    <span className="admin-service-badge">
+                      {svc.adminDisplayName ?? t("admin")}
+                    </span>
                   )}
                   {isOrgAdmin && (
                     <button
@@ -233,7 +235,9 @@ export function FlowDetailPage() {
         <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
         {isOrgAdmin && (
           <div className="actions-admin">
-            {hasConfigSchema && <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>}
+            {hasConfigSchema && (
+              <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>
+            )}
             {detail.source === "user" && (
               <Link to={`/flows/${flowId}/edit`}>
                 <button>{t("btn.edit")}</button>
@@ -249,11 +253,7 @@ export function FlowDetailPage() {
                     : t("detail.titleDelete")
                 }
                 onClick={() => {
-                  if (
-                    confirm(
-                      t("detail.deleteConfirm", { name: detail.displayName }),
-                    )
-                  ) {
+                  if (confirm(t("detail.deleteConfirm", { name: detail.displayName }))) {
                     deleteFlow.mutate(detail.id);
                   }
                 }}
@@ -280,7 +280,8 @@ export function FlowDetailPage() {
           className={`tab ${tab === "schedules" ? "active" : ""}`}
           onClick={() => setTab("schedules")}
         >
-          {t("detail.tabSchedules")}{schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
+          {t("detail.tabSchedules")}
+          {schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
         </button>
       </div>
 
@@ -304,7 +305,9 @@ export function FlowDetailPage() {
                     to={`/flows/${flowId}/executions/${exec.id}`}
                   >
                     <Badge status={exec.status} />
-                    {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
+                    {userName && (
+                      <span className="exec-user">{t("exec.user", { name: userName })}</span>
+                    )}
                     <span className="exec-date">{date}</span>
                     {duration && <span className="exec-duration">{duration}</span>}
                     {exec.tokens_used != null && (

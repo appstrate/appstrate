@@ -37,7 +37,8 @@ function formatEvent(event: string, data: Record<string, unknown>, t: TFunction)
       .join(", ");
     return t("exec.depsChecked", { checks });
   }
-  if (event === "adapter_started") return t("exec.adapterStarted", { adapter: data?.adapter || "unknown" });
+  if (event === "adapter_started")
+    return t("exec.adapterStarted", { adapter: data?.adapter || "unknown" });
   return "";
 }
 
