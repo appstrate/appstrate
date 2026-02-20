@@ -214,7 +214,7 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
         404,
       );
     }
@@ -222,7 +222,7 @@ export function createFlowsRouter() {
       return c.json(
         {
           error: "INVALID_CONNECTION_MODE",
-          message: `Le service '${serviceId}' n'est pas en mode admin`,
+          message: `Le connecteur '${serviceId}' n'est pas en mode admin`,
         },
         400,
       );
@@ -268,7 +268,7 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
         404,
       );
     }
@@ -287,7 +287,7 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
         404,
       );
     }
@@ -295,7 +295,7 @@ export function createFlowsRouter() {
       return c.json(
         {
           error: "INVALID_PROVIDER",
-          message: `Le service '${serviceId}' n'est pas un service custom`,
+          message: `Le connecteur '${serviceId}' n'est pas un connecteur custom`,
         },
         400,
       );
@@ -323,7 +323,7 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
         404,
       );
     }
@@ -361,7 +361,8 @@ export function createFlowsRouter() {
           return c.json(
             {
               error: "SHARE_NOT_READY",
-              message: "Tous les services admin doivent etre lies avant de generer un lien public.",
+              message:
+                "Tous les connecteurs admin doivent etre lies avant de generer un lien public.",
             },
             400,
           );

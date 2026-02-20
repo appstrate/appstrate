@@ -92,7 +92,6 @@ export function FlowDetailPage() {
   } | null>(null);
   const [customCredService, setCustomCredService] = useState<{
     id: string;
-    schema: import("@appstrate/shared-types").JSONSchemaObject;
     bindAfter?: boolean;
   } | null>(null);
 
@@ -100,6 +99,9 @@ export function FlowDetailPage() {
 
   if (error || !detail) return <ErrorState message={error?.message} />;
 
+  const customCredSchema = customCredService
+    ? detail.requires.services.find((s) => s.id === customCredService.id)?.schema
+    : undefined;
   const allConnected = detail.requires.services.every((s) => s.status === "connected");
   const hasRequiredConfig = checkRequiredConfig(detail);
   const hasInputSchema =
@@ -141,7 +143,7 @@ export function FlowDetailPage() {
               if (isCustom) {
                 // For custom services, open credentials modal first if not connected
                 if (svc.schema) {
-                  setCustomCredService({ id: svc.id, schema: svc.schema, bindAfter: true });
+                  setCustomCredService({ id: svc.id, bindAfter: true });
                 }
                 return;
               }
@@ -218,7 +220,7 @@ export function FlowDetailPage() {
             // Custom service — open credentials modal
             const handleCustomConnect = () => {
               if (svc.schema) {
-                setCustomCredService({ id: svc.id, schema: svc.schema });
+                setCustomCredService({ id: svc.id });
               }
             };
             if (isConnected) {
@@ -492,11 +494,11 @@ export function FlowDetailPage() {
           }
         }}
       />
-      {customCredService && (
+      {customCredService && customCredSchema && (
         <CustomCredentialsModal
-          open={!!customCredService}
+          open
           onClose={() => setCustomCredService(null)}
-          schema={customCredService.schema}
+          schema={customCredSchema}
           serviceId={customCredService.id}
           isPending={saveCustomCreds.isPending}
           onSubmit={(credentials) => {
