@@ -218,9 +218,7 @@ function ScheduleForm({
                 <button className="btn-danger" onClick={onDelete}>
                   {t("btn.confirm")}
                 </button>
-                <button onClick={() => setConfirmDelete(false)}>
-                  {t("btn.cancel")}
-                </button>
+                <button onClick={() => setConfirmDelete(false)}>{t("btn.cancel")}</button>
               </>
             ) : (
               <button className="btn-danger" onClick={() => setConfirmDelete(true)}>

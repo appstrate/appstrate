@@ -127,7 +127,9 @@ export function FileField({
         >
           {t("file.dragDrop")}
           {accept && <div className="drop-zone-hint">{t("file.formats", { formats: accept })}</div>}
-          {maxSize && <div className="drop-zone-hint">{t("file.maxSize", { size: formatSize(maxSize) })}</div>}
+          {maxSize && (
+            <div className="drop-zone-hint">{t("file.maxSize", { size: formatSize(maxSize) })}</div>
+          )}
         </div>
       ) : (
         <>

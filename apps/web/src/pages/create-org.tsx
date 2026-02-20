@@ -103,9 +103,7 @@ export function CreateOrgPage() {
               placeholder={t("createOrg.slugPlaceholder")}
               required
             />
-            <div className="hint">
-              {t("createOrg.slugHint")}
-            </div>
+            <div className="hint">{t("createOrg.slugHint")}</div>
           </div>
           {error && <p className="form-error">{error}</p>}
           <button className="primary login-btn" type="submit" disabled={createMutation.isPending}>

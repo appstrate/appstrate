@@ -55,9 +55,7 @@ export function SchedulesListPage() {
       {!schedules || schedules.length === 0 ? (
         <div className="empty-state">
           <p>{t("schedules.empty")}</p>
-          <p className="empty-hint">
-            {t("schedules.emptyHint")}
-          </p>
+          <p className="empty-hint">{t("schedules.emptyHint")}</p>
         </div>
       ) : (
         <div className="schedule-list">
