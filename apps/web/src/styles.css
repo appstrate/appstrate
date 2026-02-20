@@ -405,6 +405,10 @@ button:disabled {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
+.exec-row .exec-user {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
 .exec-row .exec-input-preview {
   color: var(--text-muted);
   font-size: 0.7rem;
@@ -424,6 +428,11 @@ button:disabled {
 }
 
 .exec-detail-header .exec-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.exec-detail-header .exec-user {
   font-size: 0.8rem;
   color: var(--text-muted);
 }

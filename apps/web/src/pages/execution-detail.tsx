@@ -13,6 +13,7 @@ import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { useProfiles } from "../hooks/use-profiles";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import type { TFunction } from "i18next";
@@ -46,6 +47,7 @@ export function ExecutionDetailPage() {
   const orgId = useCurrentOrgId();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
+  const profileMap = useProfiles(execution?.user_id ? [execution.user_id] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
 
   const status = liveStatus || execution?.status;
@@ -150,6 +152,7 @@ export function ExecutionDetailPage() {
   const date = execution.started_at ? formatDateField(execution.started_at) : "";
   const time = execution.duration ?? elapsed;
   const duration = isRunning ? `${(time / 1000).toFixed(1)}s` : "";
+  const userName = execution.user_id ? profileMap.get(execution.user_id) : undefined;
 
   return (
     <>
@@ -163,6 +166,7 @@ export function ExecutionDetailPage() {
 
       <div className="exec-detail-header">
         <Badge status={displayStatus} />
+        {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
         <span className="exec-meta">{date}</span>
         {duration && <span className="exec-meta">{duration}</span>}
         {!isRunning && execution.tokens_used != null && (
