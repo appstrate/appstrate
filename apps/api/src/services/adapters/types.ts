@@ -42,7 +42,13 @@ export interface PromptContext {
     config?: import("@appstrate/shared-types").JSONSchemaObject;
     output?: import("@appstrate/shared-types").JSONSchemaObject;
   };
-  services: Array<{ id: string; provider: string; description: string }>;
+  services: Array<{
+    id: string;
+    provider: string;
+    description: string;
+    schema?: import("@appstrate/shared-types").JSONSchemaObject;
+    authorized_uris?: string[];
+  }>;
   llmModel: string;
 }
 

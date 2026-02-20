@@ -1,5 +1,6 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { PromptContext } from "./types.ts";
+import { getDefaultAuthorizedUris, getNangoCredentialField } from "./provider-urls.ts";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -7,57 +8,78 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/**
- * Build TOKEN_* env vars from a tokens map.
- * Only these are needed in the container (read by entrypoints for curl).
- */
-export function buildContainerTokenEnv(tokens: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [svcId, token] of Object.entries(tokens)) {
-    env[`TOKEN_${svcId.toUpperCase().replace(/-/g, "_")}`] = token;
-  }
-  return env;
-}
-
 export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
 
-  // API access instructions — use ctx.services + ctx.tokens
+  // API access instructions — variable substitution, credentials never in the container
   const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
   if (connectedServices.length > 0) {
     sections.push("## API Access\n");
     sections.push(
-      "You have OAuth tokens available as environment variables. Use them with curl via Bash.\n",
+      "Use the `api_request` tool to make authenticated requests to connected services.",
+    );
+    sections.push(
+      "Use `{{variable}}` placeholders in path, headers, and body — the platform substitutes them with real credential values. You never see the actual secrets.\n",
     );
 
     for (const svc of connectedServices) {
-      const envKey = `TOKEN_${svc.id.toUpperCase().replace(/-/g, "_")}`;
-      sections.push(`- **${svc.id}** (${svc.description}): \`$${envKey}\``);
+      if (svc.provider === "custom") {
+        // Custom service — list variables from schema properties
+        const props = svc.schema?.properties ?? {};
+        const varNames = Object.keys(props);
+        const varDescriptions = varNames.map((name) => {
+          const desc = props[name]?.description ?? name;
+          return `\`{{${name}}}\` — ${desc}`;
+        });
+        sections.push(`- **${svc.id}** (${svc.description}):`);
+        if (varDescriptions.length > 0) {
+          sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
+        }
+        if (svc.authorized_uris && svc.authorized_uris.length > 0) {
+          sections.push(`  Allowed URLs: ${svc.authorized_uris.join(", ")}`);
+        }
+        // Generate example based on first authorized URI or generic URL
+        const exampleUrl =
+          svc.authorized_uris?.[0]?.replace("/*", "/v1/data") ?? "https://api.example.com/v1/data";
+        const firstVar = varNames[0];
+        if (firstVar) {
+          sections.push(
+            `  Example: \`api_request(service="${svc.id}", path="${exampleUrl}", headers={"Authorization": "{{${firstVar}}}"})\``,
+          );
+        }
+      } else {
+        // Nango service — derive variable name from auth type
+        const { name: fieldName, description: fieldDesc } = getNangoCredentialField(svc.id);
+        const authorizedUris =
+          svc.authorized_uris ?? getDefaultAuthorizedUris(svc.id, svc.provider);
 
-      if (svc.provider === "gmail" || svc.id === "gmail") {
-        sections.push(
-          `  Example: \`curl -s -H "Authorization: Bearer $${envKey}" "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20"\``,
-        );
-        sections.push(
-          `  Get message: \`curl -s -H "Authorization: Bearer $${envKey}" "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}?format=full"\``,
-        );
-      } else if (svc.provider === "clickup" || svc.id === "clickup") {
-        sections.push(
-          `  Example: \`curl -s -H "Authorization: Bearer $${envKey}" "https://api.clickup.com/api/v2/team"\``,
-        );
-        sections.push(
-          `  Create task: \`curl -s -X POST -H "Authorization: Bearer $${envKey}" -H "Content-Type: application/json" -d '{"name":"...","description":"..."}' "https://api.clickup.com/api/v2/list/{list_id}/task"\``,
-        );
-      } else if (svc.provider === "facebook" || svc.id === "facebook") {
-        sections.push(
-          `  List Pages: \`curl -s -H "Authorization: Bearer $${envKey}" "https://graph.facebook.com/v21.0/me/accounts"\``,
-        );
-        sections.push(
-          `  Post to Page: \`curl -s -X POST "https://graph.facebook.com/v21.0/{page_id}/feed" -H "Content-Type: application/json" -d '{"message":"...","access_token":"PAGE_ACCESS_TOKEN"}'\``,
-        );
-        sections.push(
-          `  Note: Use the Page Access Token from /me/accounts (not $${envKey}) when posting to a Page.`,
-        );
+        sections.push(`- **${svc.id}** (${svc.description}):`);
+        sections.push(`  Credentials: \`{{${fieldName}}}\` — ${fieldDesc}`);
+        if (authorizedUris && authorizedUris.length > 0) {
+          sections.push(`  Allowed URLs: ${authorizedUris.join(", ")}`);
+        }
+
+        // Provider-specific examples with full URLs and variable placeholders
+        if (svc.provider === "gmail" || svc.id === "gmail") {
+          sections.push(
+            `  Example: \`api_request(service="gmail", path="https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20", headers={"Authorization": "Bearer {{${fieldName}}}"})\``,
+          );
+        } else if (svc.provider === "clickup" || svc.id === "clickup") {
+          sections.push(
+            `  Example: \`api_request(service="clickup", path="https://api.clickup.com/api/v2/team", headers={"Authorization": "{{${fieldName}}}"})\``,
+          );
+        } else if (svc.provider === "brevo" || svc.id === "brevo") {
+          sections.push(
+            `  Example: \`api_request(service="brevo", path="https://api.brevo.com/v3/contacts", headers={"api-key": "{{${fieldName}}}"})\``,
+          );
+        } else if (svc.provider === "facebook" || svc.id === "facebook") {
+          sections.push(
+            `  Example: \`api_request(service="facebook", path="https://graph.facebook.com/v21.0/me/accounts", headers={"Authorization": "Bearer {{${fieldName}}}"})\``,
+          );
+          sections.push(
+            `  Note: Use the Page Access Token from /me/accounts when posting to a Page.`,
+          );
+        }
       }
     }
     sections.push("");

@@ -53,7 +53,7 @@ bun run dev                   # turbo dev → Hono on :3000
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
 - **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is. Only the latest execution's state is injected in the prompt (lightweight). Historical executions are available on demand via the internal API.
-- **Credential injection**: OAuth/API key tokens passed as env vars (`TOKEN_GMAIL`, `TOKEN_BREVO_API_KEY`) to the container. Built by `buildContainerTokenEnv()` in `prompt-builder.ts`.
+- **Credential brokering + variable substitution**: Credentials are **never** passed to containers. The `api-request.ts` Pi extension calls `GET /internal/credentials/:serviceId` at runtime, which returns a unified `{ credentials: Record<string, string>, authorizedUris: string[] | null }` format — for both Nango (OAuth/API key) and custom services. The agent uses `{{variable}}` placeholders in path, headers, and body; the extension substitutes them with real values before making the request. The extension supports 4 body modes: JSON/text, raw binary (`filePath` + `fileContentType`), multipart/related (`filePath` + `body` + `fileContentType`, for Google Drive), and multipart/form-data (`formData` fields, for Slack, SendGrid, most REST APIs). `authorized_uris` restrict which URLs can be called per service (prefix match with `*` wildcard). For Nango services, default `authorizedUris` are derived from `PROVIDER_BASE_URLS` in `adapters/provider-urls.ts`. Custom service credentials are stored in the `custom_service_credentials` table.
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
@@ -159,7 +159,7 @@ appstrate/
 │   │       │   ├── user-flows.ts     # POST /api/flows/import (rate-limited), POST/PUT/DELETE /api/flows/:id (admin, user flows only)
 │   │       │   ├── health.ts         # GET /health (no auth) — DB + flows checks → healthy/degraded
 │   │       │   ├── auth.ts           # Nango routes: GET /auth/connections, POST /auth/connect/:provider, GET /auth/integrations, DELETE /auth/connections/:provider
-│   │       │   ├── internal.ts      # GET /internal/execution-history (container-to-host, auth via execution token)
+│   │       │   ├── internal.ts      # GET /internal/execution-history, GET /internal/credentials/:serviceId (container-to-host, auth via execution token)
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
@@ -167,7 +167,8 @@ appstrate/
 │   │       │   ├── adapters/
 │   │       │   │   ├── types.ts      # ExecutionAdapter interface, ExecutionMessage type, PromptContext, TimeoutError
 │   │       │   │   ├── index.ts      # getAdapter() factory, re-exports
-│   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, buildContainerTokenEnv, extractJsonResult, buildRetryPrompt
+│   │       │   │   ├── prompt-builder.ts # Shared: buildEnrichedPrompt, extractJsonResult, buildRetryPrompt
+│   │       │   │   ├── provider-urls.ts # Provider base URLs, auth config, URI matching, credential field resolution
 │   │       │   │   └── pi.ts         # PiAdapter (stream parsing for Pi agent JSON line events)
 │   │       │   ├── nango.ts          # Nango SDK wrapper: getAccessToken, createConnectSession, createApiKeyConnection, getProviderAuthMode, getIntegrationsWithStatus
 │   │       │   ├── state.ts          # Supabase CRUD for flow_configs, executions (with state), execution_logs tables
@@ -218,6 +219,7 @@ appstrate/
 │               ├── input-modal.tsx   # Input form before run
 │               ├── import-modal.tsx  # ZIP file upload for flow import
 │               ├── api-key-modal.tsx # API key input for non-OAuth integrations (Brevo, etc.)
+│               ├── custom-credentials-modal.tsx # Dynamic credential form for custom services (based on schema)
 │               ├── schedule-modal.tsx # Create/edit cron schedule form
 │               ├── schedule-row.tsx  # Schedule row with enable/disable/delete
 │               ├── form-field.tsx    # Reusable labeled form field component
@@ -255,6 +257,7 @@ appstrate/
 │   ├── package.json
 │   ├── entrypoint.ts                 # SDK session → JSON line stdout
 │   └── extensions/                   # Built-in extensions shipped with image
+│       ├── api-request.ts            # Authenticated API requests: JSON/text, raw binary, multipart/related, multipart/form-data — with {{variable}} substitution and URI validation
 │       ├── web-fetch.ts              # Fetch URL content
 │       └── web-search.ts             # DuckDuckGo web search
 │
@@ -274,6 +277,8 @@ appstrate/
 | `POST`   | `/api/flows/import`           | JWT+Admin | Import flow from ZIP file (multipart/form-data)                                 |
 | `GET`    | `/api/flows/:id/versions`     | JWT       | List version history for a user flow (newest first)                             |
 | `DELETE` | `/api/flows/:id`              | JWT+Admin | Delete a user-imported flow (built-in flows cannot be deleted)                  |
+| `POST`   | `/api/flows/:id/services/:svcId/credentials` | JWT | Save custom service credentials (body: `{ credentials }`)          |
+| `DELETE`  | `/api/flows/:id/services/:svcId/credentials` | JWT | Delete custom service credentials                                  |
 
 ### Executions
 
@@ -311,6 +316,7 @@ appstrate/
 | Method | Path                            | Auth              | Description                                                                 |
 | ------ | ------------------------------- | ----------------- | --------------------------------------------------------------------------- |
 | `GET`  | `/internal/execution-history`   | Bearer execId     | Fetch historical executions for the current flow (fields: state, result)    |
+| `GET`  | `/internal/credentials/:serviceId` | Bearer execId  | Fetch credentials for a service — returns `{ credentials, authorizedUris }` (Nango or custom) |
 
 ### Other
 
@@ -376,6 +382,11 @@ flow_versions (id SERIAL PK, flow_id, version_number, manifest JSONB, prompt TEX
 schedule_runs (id PK, schedule_id FK→flow_schedules ON DELETE CASCADE, fire_time TIMESTAMPTZ, execution_id FK→executions, instance_id, created_at)
   -- UNIQUE(schedule_id, fire_time)
   -- RPC: try_acquire_schedule_lock() uses advisory lock + unique insert
+
+-- Custom service credentials (stored in Supabase, not Nango)
+custom_service_credentials (org_id UUID FK→organizations, user_id UUID FK→auth.users, flow_id TEXT, service_id TEXT, credentials JSONB, created_at, updated_at)
+  -- PK: (org_id, user_id, flow_id, service_id)
+  -- RLS: own data + org admin reads all
 ```
 
 Supabase Realtime publishes `executions` and `execution_logs` tables.
@@ -385,7 +396,7 @@ Supabase Realtime publishes `executions` and `execution_logs` tables.
 Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `flows/email-to-tickets/manifest.json` for the reference implementation. Key sections:
 
 - **metadata**: name (kebab-case ID), displayName, description, author, tags
-- **requires.services[]**: Services needed — `{id, provider, description, scopes?}` (scopes optional, omit for API key integrations)
+- **requires.services[]**: Services needed — `{id, provider, description, scopes?, schema?, authorized_uris?, connectionMode?}`. For custom services: `provider: "custom"`, `schema` defines credential fields (JSON Schema), `authorized_uris` restricts allowed URLs (applies to all service types). `connectionMode` can be `"user"` (default) or `"admin"`.
 - **requires.tools[]**: Platform tools — `{id, type: "static"|"custom", description}`
 - **input.schema**: Per-execution user input — `{type, description, required, default, placeholder}`
 - **output.schema**: Expected result fields — `{type, description, required}`. Enables Zod validation + retry loop.
@@ -400,7 +411,7 @@ Flows can include agent skills in `skills/{skill-id}/SKILL.md`. The SKILL.md fil
 
 The Pi runtime container streams JSON line events on stdout. The `PiAdapter` (`apps/api/src/services/adapters/pi.ts`) parses these events into `ExecutionMessage` types (progress, result, etc.).
 
-The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives `FLOW_PROMPT`, `TOKEN_*`, `LLM_MODEL`, and Pi-specific auth vars (`LLM_PROVIDER`, `LLM_MODEL_ID`, provider API keys). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
+The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access with `{{variable}}` placeholders, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The container receives `FLOW_PROMPT`, `LLM_PROVIDER`, `LLM_MODEL_ID`, `EXECUTION_TOKEN`, `PLATFORM_API_URL`, `CONNECTED_SERVICES` (comma-separated service IDs, no secrets), and provider API keys. **No credentials are passed to the container.** The `api-request.ts` extension fetches credentials on-demand from `GET /internal/credentials/:serviceId` (returns `{ credentials, authorizedUris }` for both Nango and custom services), substitutes `{{variable}}` placeholders with real values, validates URLs against `authorizedUris`, then makes the HTTP request. Supports 4 body modes: JSON/text, raw binary, multipart/related (Google Drive), and multipart/form-data (Slack, SendGrid, etc.). For user flows, the ZIP package from Supabase Storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
@@ -474,6 +485,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 - Structured JSON logging on all API logs (no `console.*`)
 - Rate limiting on execution and flow creation endpoints
 - Flow versioning: create/update creates snapshot, executions tagged with `flow_version_id`
+- Custom services (`provider: "custom"`) with credential schema, stored in `custom_service_credentials` table
+- `authorized_uris` URL restriction on all services (custom and Nango) with pattern matching
+- Variable substitution (`{{field}}`) in `api-request.ts` extension for credentials injection
+- Unified `/internal/credentials` response format for both Nango and custom services
 
 ## Detailed Specs
 

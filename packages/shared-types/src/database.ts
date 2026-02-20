@@ -39,6 +39,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      custom_service_credentials: {
+        Row: {
+          created_at: string | null
+          credentials: Json
+          flow_id: string
+          org_id: string
+          service_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          credentials?: Json
+          flow_id: string
+          org_id: string
+          service_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          credentials?: Json
+          flow_id?: string
+          org_id?: string
+          service_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_service_credentials_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       execution_logs: {
         Row: {
           created_at: string | null

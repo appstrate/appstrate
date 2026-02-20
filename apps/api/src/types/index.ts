@@ -57,6 +57,8 @@ export interface FlowServiceRequirement {
   scopes: string[];
   description: string;
   connectionMode?: "user" | "admin";
+  schema?: import("@appstrate/shared-types").JSONSchemaObject;
+  authorized_uris?: string[];
 }
 
 export interface FlowInputSpec {

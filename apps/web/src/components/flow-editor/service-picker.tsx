@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useServices } from "../../hooks/use-services";
+import { SchemaSection } from "./schema-section";
+import type { SchemaField } from "./schema-section";
 import type { ServiceEntry } from "./types";
 
 interface ServicePickerProps {
@@ -25,7 +27,30 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
     if (alreadySelected) return;
     onChange([
       ...value,
-      { id: uniqueKey, provider, description: "", scopes: "", connectionMode: "user" },
+      {
+        id: uniqueKey,
+        provider,
+        description: "",
+        scopes: "",
+        connectionMode: "user",
+        credentialSchema: [],
+        authorizedUris: "",
+      },
+    ]);
+  };
+
+  const addCustomService = () => {
+    onChange([
+      ...value,
+      {
+        id: "",
+        provider: "custom",
+        description: "",
+        scopes: "",
+        connectionMode: "user",
+        credentialSchema: [],
+        authorizedUris: "",
+      },
     ]);
   };
 
@@ -39,49 +64,112 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
           <div className="section-title" style={{ marginBottom: "0.5rem" }}>
             {t("editor.selectedServices", { count: value.length })}
           </div>
-          {value.map((svc, i) => (
-            <div key={i} className="service-picker-selected-card">
-              <div className="service-picker-selected-header">
-                {integrations?.find((ig) => ig.uniqueKey === svc.id)?.logo && (
-                  <img
-                    src={integrations.find((ig) => ig.uniqueKey === svc.id)!.logo}
-                    alt=""
-                    className="service-logo"
-                  />
-                )}
-                <div className="service-picker-selected-info">
-                  <strong>{svc.id}</strong>
-                  <span className="service-provider">{svc.provider}</span>
+          {value.map((svc, i) =>
+            svc.provider === "custom" ? (
+              <div key={i} className="service-picker-selected-card">
+                <div className="service-picker-selected-header">
+                  <div className="service-picker-selected-info">
+                    <strong>{svc.id || t("editor.addCustomService")}</strong>
+                    <span className="service-provider">custom</span>
+                  </div>
+                  <button type="button" className="btn-remove" onClick={() => remove(i)}>
+                    &times;
+                  </button>
                 </div>
-                <button type="button" className="btn-remove" onClick={() => remove(i)}>
-                  &times;
-                </button>
-              </div>
-              <div className="service-picker-selected-fields">
-                <input
-                  type="text"
-                  placeholder={t("editor.scopeDesc")}
-                  value={svc.description}
-                  onChange={(e) => update(i, { description: e.target.value })}
+                <div className="service-picker-selected-fields">
+                  <input
+                    type="text"
+                    placeholder={t("editor.customServiceIdPlaceholder")}
+                    value={svc.id}
+                    onChange={(e) => update(i, { id: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    placeholder={t("editor.scopeDesc")}
+                    value={svc.description}
+                    onChange={(e) => update(i, { description: e.target.value })}
+                  />
+                  <select
+                    value={svc.connectionMode}
+                    onChange={(e) =>
+                      update(i, { connectionMode: e.target.value as "user" | "admin" })
+                    }
+                  >
+                    <option value="user">{t("editor.modeUser")}</option>
+                    <option value="admin">{t("editor.modeAdmin")}</option>
+                  </select>
+                </div>
+                <SchemaSection
+                  mode="credentials"
+                  title={t("editor.credentialSchema")}
+                  fields={svc.credentialSchema}
+                  onChange={(fields: SchemaField[]) => update(i, { credentialSchema: fields })}
                 />
-                <input
-                  type="text"
-                  placeholder={t("editor.scopePlaceholder")}
-                  value={svc.scopes}
-                  onChange={(e) => update(i, { scopes: e.target.value })}
-                />
-                <select
-                  value={svc.connectionMode}
-                  onChange={(e) =>
-                    update(i, { connectionMode: e.target.value as "user" | "admin" })
-                  }
-                >
-                  <option value="user">{t("editor.modeUser")}</option>
-                  <option value="admin">{t("editor.modeAdmin")}</option>
-                </select>
+                <div className="service-picker-uris">
+                  <label className="field-label">{t("editor.authorizedUris")}</label>
+                  <textarea
+                    rows={3}
+                    placeholder={t("editor.authorizedUrisPlaceholder")}
+                    value={svc.authorizedUris}
+                    onChange={(e) => update(i, { authorizedUris: e.target.value })}
+                  />
+                  <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={i} className="service-picker-selected-card">
+                <div className="service-picker-selected-header">
+                  {integrations?.find((ig) => ig.uniqueKey === svc.id)?.logo && (
+                    <img
+                      src={integrations.find((ig) => ig.uniqueKey === svc.id)!.logo}
+                      alt=""
+                      className="service-logo"
+                    />
+                  )}
+                  <div className="service-picker-selected-info">
+                    <strong>{svc.id}</strong>
+                    <span className="service-provider">{svc.provider}</span>
+                  </div>
+                  <button type="button" className="btn-remove" onClick={() => remove(i)}>
+                    &times;
+                  </button>
+                </div>
+                <div className="service-picker-selected-fields">
+                  <input
+                    type="text"
+                    placeholder={t("editor.scopeDesc")}
+                    value={svc.description}
+                    onChange={(e) => update(i, { description: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    placeholder={t("editor.scopePlaceholder")}
+                    value={svc.scopes}
+                    onChange={(e) => update(i, { scopes: e.target.value })}
+                  />
+                  <select
+                    value={svc.connectionMode}
+                    onChange={(e) =>
+                      update(i, { connectionMode: e.target.value as "user" | "admin" })
+                    }
+                  >
+                    <option value="user">{t("editor.modeUser")}</option>
+                    <option value="admin">{t("editor.modeAdmin")}</option>
+                  </select>
+                </div>
+                <div className="service-picker-uris">
+                  <label className="field-label">{t("editor.authorizedUris")}</label>
+                  <textarea
+                    rows={2}
+                    placeholder={t("editor.authorizedUrisPlaceholder")}
+                    value={svc.authorizedUris}
+                    onChange={(e) => update(i, { authorizedUris: e.target.value })}
+                  />
+                  <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
+                </div>
+              </div>
+            ),
+          )}
         </div>
       )}
 
@@ -117,6 +205,16 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
           })}
         </div>
       )}
+
+      {/* Add custom service button */}
+      <button
+        type="button"
+        className="add-field-btn"
+        style={{ marginTop: "0.75rem" }}
+        onClick={addCustomService}
+      >
+        {t("editor.addCustomService")}
+      </button>
     </div>
   );
 }

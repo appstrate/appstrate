@@ -1,9 +1,5 @@
 import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.ts";
-import {
-  buildEnrichedPrompt,
-  extractJsonResult,
-  buildContainerTokenEnv,
-} from "./prompt-builder.ts";
+import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { createContainer } from "../docker.ts";
 
@@ -23,18 +19,23 @@ export class PiAdapter implements ExecutionAdapter {
     const provider = process.env.LLM_PROVIDER || "anthropic";
     const modelId = process.env.LLM_MODEL_ID || ctx.llmModel;
 
-    // Build container environment variables
+    // Build container environment variables — NO tokens injected (security: tokens are fetched on-demand via /internal/credentials)
     const containerEnv: Record<string, string> = {
       FLOW_PROMPT: prompt,
       LLM_PROVIDER: provider,
       LLM_MODEL_ID: modelId,
-      ...buildContainerTokenEnv(ctx.tokens),
     };
 
     // Inject execution API credentials for container-to-host calls
     if (ctx.executionApi) {
       containerEnv.EXECUTION_TOKEN = ctx.executionApi.token;
       containerEnv.PLATFORM_API_URL = ctx.executionApi.url;
+    }
+
+    // Pass connected service IDs as metadata (no tokens — just IDs for tool description)
+    const connectedServiceIds = ctx.services.filter((s) => ctx.tokens[s.id]).map((s) => s.id);
+    if (connectedServiceIds.length > 0) {
+      containerEnv.CONNECTED_SERVICES = connectedServiceIds.join(",");
     }
 
     // Forward provider API keys from host environment

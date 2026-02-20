@@ -53,6 +53,8 @@ export function createShareRouter() {
       flow.manifest.requires.services,
       adminConns,
       orgId,
+      undefined,
+      flow.id,
     );
 
     const result: Record<string, unknown> = {
@@ -178,10 +180,14 @@ export function createShareRouter() {
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
-      const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
-      if (tokenUserId) {
-        const accessToken = await getAccessToken(svc.provider, orgId, tokenUserId);
-        if (accessToken) tokens[svc.id] = accessToken;
+      if (svc.provider === "custom") {
+        tokens[svc.id] = "custom";
+      } else {
+        const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
+        if (tokenUserId) {
+          const accessToken = await getAccessToken(svc.provider, orgId, tokenUserId);
+          if (accessToken) tokens[svc.id] = accessToken;
+        }
       }
     }
 

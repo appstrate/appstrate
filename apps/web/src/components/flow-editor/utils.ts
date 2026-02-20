@@ -36,7 +36,7 @@ function convertDefaultValue(value: string, type: string): unknown {
 
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
-  mode: "input" | "output" | "config",
+  mode: "input" | "output" | "config" | "credentials",
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
@@ -45,7 +45,15 @@ export function schemaToFields(
     type: prop.type || "string",
     description: prop.description || "",
     required: requiredSet.has(key),
-    ...(mode === "input"
+    ...(mode === "input" && prop.type === "file"
+      ? {
+          accept: prop.accept || "",
+          maxSize: prop.maxSize != null ? String(prop.maxSize) : "",
+          multiple: prop.multiple ?? false,
+          maxFiles: prop.maxFiles != null ? String(prop.maxFiles) : "",
+        }
+      : {}),
+    ...(mode === "input" && prop.type !== "file"
       ? {
           placeholder: prop.placeholder || "",
           default: prop.default != null ? String(prop.default) : "",
@@ -62,7 +70,7 @@ export function schemaToFields(
 
 export function fieldsToSchema(
   fields: SchemaField[],
-  mode: "input" | "output" | "config",
+  mode: "input" | "output" | "config" | "credentials",
 ): JSONSchemaObject | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -71,11 +79,24 @@ export function fieldsToSchema(
   for (const f of filtered) {
     const prop: JSONSchemaProperty = { type: f.type };
     if (f.description) prop.description = f.description;
-    if (mode === "input" || mode === "config") {
-      const def = convertDefaultValue(f.default || "", f.type);
-      if (def !== undefined) prop.default = def;
+    if (mode === "input" && f.type === "file") {
+      if (f.accept) prop.accept = f.accept;
+      if (f.maxSize) {
+        const n = Number(f.maxSize);
+        if (!isNaN(n)) prop.maxSize = n;
+      }
+      if (f.multiple) prop.multiple = true;
+      if (f.multiple && f.maxFiles) {
+        const n = Number(f.maxFiles);
+        if (!isNaN(n)) prop.maxFiles = n;
+      }
+    } else {
+      if (mode === "input" || mode === "config") {
+        const def = convertDefaultValue(f.default || "", f.type);
+        if (def !== undefined) prop.default = def;
+      }
+      if (mode === "input" && f.placeholder) prop.placeholder = f.placeholder;
     }
-    if (mode === "input" && f.placeholder) prop.placeholder = f.placeholder;
     if (mode === "config") {
       const enumVals = f.enumValues
         ?.split(",")
@@ -96,6 +117,8 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     description: s.description,
     scopes: "",
     connectionMode: s.connectionMode === "admin" ? "admin" : "user",
+    credentialSchema: s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [],
+    authorizedUris: s.authorizedUris?.join("\n") ?? "",
   }));
 
   return {
@@ -145,6 +168,15 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
             .filter(Boolean);
           if (scopes.length > 0) svc.scopes = scopes;
           svc.connectionMode = s.connectionMode || "user";
+          if (s.provider === "custom") {
+            const schema = fieldsToSchema(s.credentialSchema, "credentials");
+            if (schema) svc.schema = schema;
+          }
+          const uris = s.authorizedUris
+            .split(/[,\n]/)
+            .map((u) => u.trim())
+            .filter(Boolean);
+          if (uris.length > 0) svc.authorized_uris = uris;
           return svc;
         }),
       skills: state.skills,
@@ -185,13 +217,23 @@ export function payloadToFormState(payload: {
   const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
   const execution = (manifest.execution as Record<string, unknown>) || {};
 
-  const services: ServiceEntry[] = rawServices.map((s) => ({
-    id: (s.id as string) || "",
-    provider: (s.provider as string) || "",
-    description: (s.description as string) || "",
-    scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
-    connectionMode: (s.connectionMode as "user" | "admin") || "user",
-  }));
+  const services: ServiceEntry[] = rawServices.map((s) => {
+    const provider = (s.provider as string) || "";
+    return {
+      id: (s.id as string) || "",
+      provider,
+      description: (s.description as string) || "",
+      scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
+      connectionMode: (s.connectionMode as "user" | "admin") || "user",
+      credentialSchema:
+        provider === "custom"
+          ? schemaToFields(s.schema as JSONSchemaObject | undefined, "credentials")
+          : [],
+      authorizedUris: Array.isArray(s.authorized_uris)
+        ? (s.authorized_uris as string[]).join("\n")
+        : "",
+    };
+  });
 
   const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
   const skills = rawSkills.map((s) =>

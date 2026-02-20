@@ -34,6 +34,8 @@ const serviceRequirementSchema = z.object({
   scopes: z.array(z.string()).optional().default([]),
   description: z.string(),
   connectionMode: z.enum(["user", "admin"]).optional().default("user"),
+  schema: jsonSchemaObjectSchema.optional(),
+  authorized_uris: z.array(z.string()).optional(),
 });
 
 const skillRequirementSchema = z.object({
