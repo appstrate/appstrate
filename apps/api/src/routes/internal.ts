@@ -179,6 +179,7 @@ export function createInternalRouter() {
         return c.json({
           credentials: creds,
           authorizedUris: service.authorized_uris ?? null,
+          allowAllUris: service.allow_all_uris ?? false,
         });
       }
 
@@ -209,6 +210,7 @@ export function createInternalRouter() {
       return c.json({
         credentials: { [fieldName]: token },
         authorizedUris,
+        allowAllUris: service.allow_all_uris ?? false,
       });
     } catch (err) {
       logger.error("Failed to resolve credentials", {

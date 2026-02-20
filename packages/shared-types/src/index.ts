@@ -78,6 +78,7 @@ export interface ServiceStatus {
   adminDisplayName?: string;
   schema?: JSONSchemaObject;
   authorizedUris?: string[];
+  allowAllUris?: boolean;
 }
 
 export interface FlowListItem {

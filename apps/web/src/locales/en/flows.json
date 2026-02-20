@@ -164,6 +164,8 @@
   "editor.customServiceId": "Service identifier",
   "editor.customServiceIdPlaceholder": "key",
   "editor.credentialSchema": "Credential schema",
+  "editor.allowAllUris": "Allow all URLs",
+  "editor.allowAllUrisHint": "Allow credentials to be used with any public URL (SSRF protection still applies)",
   "editor.authorizedUris": "Authorized URLs",
   "editor.authorizedUrisPlaceholder": "https://api.example.com/*",
   "editor.authorizedUrisHint": "One URL per line. Trailing * = prefix match.",

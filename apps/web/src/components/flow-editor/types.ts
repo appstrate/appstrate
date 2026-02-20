@@ -18,6 +18,7 @@ export interface ServiceEntry {
   connectionMode: "user" | "admin";
   credentialSchema: SchemaField[];
   authorizedUris: string;
+  allowAllUris: boolean;
 }
 
 export interface ResourceEntry {

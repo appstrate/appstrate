@@ -119,6 +119,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     connectionMode: s.connectionMode === "admin" ? "admin" : "user",
     credentialSchema: s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [],
     authorizedUris: s.authorizedUris?.join("\n") ?? "",
+    allowAllUris: s.allowAllUris ?? false,
   }));
 
   return {
@@ -177,6 +178,7 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
             .map((u) => u.trim())
             .filter(Boolean);
           if (uris.length > 0) svc.authorized_uris = uris;
+          if (s.allowAllUris) svc.allow_all_uris = true;
           return svc;
         }),
       skills: state.skills,
@@ -232,6 +234,7 @@ export function payloadToFormState(payload: {
       authorizedUris: Array.isArray(s.authorized_uris)
         ? (s.authorized_uris as string[]).join("\n")
         : "",
+      allowAllUris: (s.allow_all_uris as boolean) ?? false,
     };
   });
 

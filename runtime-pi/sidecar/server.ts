@@ -13,6 +13,7 @@ const app = new Hono();
 interface CredentialsResponse {
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
+  allowAllUris: boolean;
 }
 
 async function fetchCredentials(serviceId: string): Promise<CredentialsResponse> {
@@ -149,7 +150,15 @@ app.all("/proxy", async (c) => {
   const resolvedUrl = substituteVars(targetUrl, creds.credentials);
 
   // 4. Validate URL against authorizedUris (or block internal targets)
-  if (creds.authorizedUris && creds.authorizedUris.length > 0) {
+  if (creds.allowAllUris) {
+    // Allow all URLs but still block internal/private networks
+    if (isBlockedUrl(resolvedUrl)) {
+      return c.json(
+        { error: "URL targets a blocked network range" },
+        403,
+      );
+    }
+  } else if (creds.authorizedUris && creds.authorizedUris.length > 0) {
     if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
       return c.json(
         {
