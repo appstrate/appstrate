@@ -64,7 +64,13 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           value={value.name}
           onChange={(v) => {
             setNameEdited(true);
-            update({ name: toSlug(v) });
+            update({
+              name: v
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9-]/g, "-"),
+            });
           }}
           placeholder={t("editor.metaNamePlaceholder")}
           description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
