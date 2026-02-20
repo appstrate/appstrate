@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutions } from "../hooks/use-executions";
+import { useProfiles } from "../hooks/use-profiles";
 import {
   useSchedules,
   useCreateSchedule,
@@ -59,6 +60,9 @@ export function FlowDetailPage() {
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
   const { data: executions } = useExecutions(flowId);
   const { data: schedules } = useSchedules(flowId);
+  const profileMap = useProfiles(
+    (executions ?? []).map((e) => e.user_id).filter((id): id is string => !!id),
+  );
   const runFlow = useRunFlow(flowId!);
   const deleteFlow = useDeleteFlow();
   const connectMutation = useConnect();
@@ -291,6 +295,8 @@ export function FlowDetailPage() {
                 const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
                 const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
 
+                const userName = exec.user_id ? profileMap.get(exec.user_id) : undefined;
+
                 return (
                   <Link
                     key={exec.id}
@@ -298,6 +304,7 @@ export function FlowDetailPage() {
                     to={`/flows/${flowId}/executions/${exec.id}`}
                   >
                     <Badge status={exec.status} />
+                    {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
                     <span className="exec-date">{date}</span>
                     {duration && <span className="exec-duration">{duration}</span>}
                     {exec.tokens_used != null && (

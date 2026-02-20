@@ -30,6 +30,7 @@
   "exec.started": "Execution started ({{id}})",
   "exec.depsChecked": "Dependencies checked — {{checks}}",
   "exec.adapterStarted": "Adapter {{adapter}} started",
+  "exec.user": "by {{name}}",
   "import.title": "Import flow",
   "import.dropText": "Drop a ZIP file here",
   "import.dropHint": "or click to browse",
