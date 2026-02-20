@@ -6,6 +6,9 @@ const MAX_RESPONSE_SIZE = 50_000;
 const OUTBOUND_TIMEOUT_MS = 30_000;
 const SERVICE_ID_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
+// In-memory cookie jar keyed by serviceId. Ephemeral — lives only for this execution.
+const cookieJar = new Map<string, string[]>();
+
 const app = new Hono();
 
 // --- Helpers ---
@@ -195,6 +198,16 @@ app.all("/proxy", async (c) => {
     forwardedHeaders[key] = substituteVars(value, creds.credentials);
   }
 
+  // 5b. Inject stored cookies from cookie jar
+  const storedCookies = cookieJar.get(serviceId);
+  if (storedCookies && storedCookies.length > 0) {
+    const existing = forwardedHeaders["cookie"] || "";
+    const merged = existing
+      ? `${existing}; ${storedCookies.join("; ")}`
+      : storedCookies.join("; ");
+    forwardedHeaders["cookie"] = merged;
+  }
+
   // 6. Handle body
   const method = c.req.method;
   let body: BodyInit | undefined;
@@ -230,7 +243,26 @@ app.all("/proxy", async (c) => {
     );
   }
 
-  // 8. Return response as JSON envelope
+  // 8. Capture Set-Cookie headers into cookie jar
+  const setCookieHeaders = targetRes.headers.getSetCookie();
+  if (setCookieHeaders.length > 0) {
+    // Extract cookie name=value pairs (strip attributes like Path, Expires, etc.)
+    const cookieValues = setCookieHeaders.map((h) => h.split(";")[0]!.trim());
+    // Merge with existing jar: update by cookie name, keep others
+    const existing = cookieJar.get(serviceId) ?? [];
+    const byName = new Map<string, string>();
+    for (const c of existing) {
+      const name = c.split("=")[0]!;
+      byName.set(name, c);
+    }
+    for (const c of cookieValues) {
+      const name = c.split("=")[0]!;
+      byName.set(name, c);
+    }
+    cookieJar.set(serviceId, [...byName.values()]);
+  }
+
+  // 9. Return response as JSON envelope
   const responseText = await targetRes.text();
   const truncated = responseText.length > MAX_RESPONSE_SIZE;
   const responseBody = truncated ? responseText.slice(0, MAX_RESPONSE_SIZE) : responseText;
