@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   children: ReactNode;
@@ -7,6 +8,19 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+}
+
+function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="empty-state">
+      <p>{t("error.unexpected")}</p>
+      <p className="empty-hint">{error?.message || t("error.unknown")}</p>
+      <button className="error-retry" onClick={onRetry}>
+        {t("btn.retry")}
+      </button>
+    </div>
+  );
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -23,16 +37,10 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="empty-state">
-          <p>Une erreur inattendue est survenue.</p>
-          <p className="empty-hint">{this.state.error?.message || "Erreur inconnue"}</p>
-          <button
-            className="error-retry"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Reessayer
-          </button>
-        </div>
+        <ErrorFallback
+          error={this.state.error}
+          onRetry={() => this.setState({ hasError: false, error: null })}
+        />
       );
     }
     return this.props.children;

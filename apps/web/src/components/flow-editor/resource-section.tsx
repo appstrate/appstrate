@@ -1,4 +1,5 @@
 import { type ChangeEvent, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   useOrgSkills,
   useOrgExtensions,
@@ -22,6 +23,7 @@ export function ResourceSection({
   selectedIds,
   onChange,
 }: ResourceSectionProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skillsQuery = useOrgSkills();
   const extensionsQuery = useOrgExtensions();
@@ -55,7 +57,7 @@ export function ResourceSection({
         onChange([...selectedIds, newId]);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Upload failed");
+      alert(err instanceof Error ? err.message : t("error.unknown"));
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -69,7 +71,7 @@ export function ResourceSection({
       >
         {title}
         <label className="btn-upload btn-upload-sm">
-          {upload.isPending ? <Spinner /> : "Importer (.zip)"}
+          {upload.isPending ? <Spinner /> : t("editor.importZip")}
           <input
             type="file"
             accept=".zip"

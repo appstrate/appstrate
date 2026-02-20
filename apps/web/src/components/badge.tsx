@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 
 const badgeClassMap: Record<string, string> = {
@@ -10,12 +11,13 @@ const badgeClassMap: Record<string, string> = {
 };
 
 export function Badge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const cls = badgeClassMap[status] || "badge-pending";
   const isRunning = status === "running" || status === "pending";
   return (
     <span className={`badge ${cls}`}>
       {isRunning && <Spinner />}
-      {status}
+      {t(`status.${status}`, status)}
     </span>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   useOrgSkills,
   useOrgExtensions,
@@ -11,45 +12,41 @@ import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
 import { Modal } from "../components/modal";
 import { LibraryItemDetail } from "../components/library-item-detail";
+import { formatDateShort } from "../lib/markdown";
 import type { OrgSkill, OrgExtension } from "@appstrate/shared-types";
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
 
 type LibraryType = "skills" | "extensions";
 
-const TAB_CONFIG = {
-  skills: {
-    useList: useOrgSkills,
-    useUpload: useUploadSkill,
-    useDelete: useDeleteSkill,
-    uploadLabel: "Uploader un skill (.zip)",
-    emptyLabel: "Aucun skill dans la bibliotheque.",
-    detailType: "skill" as const,
-    detailPrefix: "Skill",
-    deleteConfirm: (item: OrgSkill | OrgExtension) =>
-      `Supprimer le skill "${item.name || item.id}" ?`,
-  },
-  extensions: {
-    useList: useOrgExtensions,
-    useUpload: useUploadExtension,
-    useDelete: useDeleteExtension,
-    uploadLabel: "Uploader une extension (.zip)",
-    emptyLabel: "Aucune extension dans la bibliotheque.",
-    detailType: "extension" as const,
-    detailPrefix: "Extension",
-    deleteConfirm: (item: OrgSkill | OrgExtension) =>
-      `Supprimer l'extension "${item.name || item.id}" ?`,
-  },
-};
+function getTabConfig(t: (key: string, opts?: Record<string, unknown>) => string) {
+  return {
+    skills: {
+      useList: useOrgSkills,
+      useUpload: useUploadSkill,
+      useDelete: useDeleteSkill,
+      uploadLabel: t("library.uploadSkill"),
+      emptyLabel: t("library.emptySkill"),
+      detailType: "skill" as const,
+      detailPrefix: "Skill",
+      deleteConfirm: (item: OrgSkill | OrgExtension) =>
+        t("library.deleteSkill", { name: item.name || item.id }),
+    },
+    extensions: {
+      useList: useOrgExtensions,
+      useUpload: useUploadExtension,
+      useDelete: useDeleteExtension,
+      uploadLabel: t("library.uploadExtension"),
+      emptyLabel: t("library.emptyExtension"),
+      detailType: "extension" as const,
+      detailPrefix: "Extension",
+      deleteConfirm: (item: OrgSkill | OrgExtension) =>
+        t("library.deleteExtension", { name: item.name || item.id }),
+    },
+  };
+}
 
 function LibraryTab({ type }: { type: LibraryType }) {
-  const config = TAB_CONFIG[type];
+  const { t } = useTranslation(["settings", "common"]);
+  const config = getTabConfig(t)[type];
   const { data: items, isLoading } = config.useList();
   const upload = config.useUpload();
   const remove = config.useDelete();
@@ -64,14 +61,14 @@ function LibraryTab({ type }: { type: LibraryType }) {
       onSuccess: () => {
         if (fileRef.current) fileRef.current.value = "";
       },
-      onError: (err) => alert(`Erreur : ${err.message}`),
+      onError: (err) => alert(t("error.prefix", { message: err.message })),
     });
   };
 
   const handleDelete = (item: OrgSkill | OrgExtension) => {
     if (!confirm(config.deleteConfirm(item))) return;
     remove.mutate(item.id, {
-      onError: (err: Error) => alert(`Erreur : ${err.message}`),
+      onError: (err: Error) => alert(t("error.prefix", { message: err.message })),
     });
   };
 
@@ -110,11 +107,11 @@ function LibraryTab({ type }: { type: LibraryType }) {
           <table className="library-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Nom</th>
-                <th>Uploade par</th>
-                <th>Date</th>
-                <th>Flows</th>
+                <th>{t("library.colId")}</th>
+                <th>{t("library.colName")}</th>
+                <th>{t("library.colUploader")}</th>
+                <th>{t("library.colDate")}</th>
+                <th>{t("library.colFlows")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -129,11 +126,11 @@ function LibraryTab({ type }: { type: LibraryType }) {
                     {item.description && <div className="cell-desc">{item.description}</div>}
                   </td>
                   <td>{item.createdByName || "-"}</td>
-                  <td>{formatDate(item.createdAt)}</td>
+                  <td>{formatDateShort(item.createdAt)}</td>
                   <td className="cell-count">{item.usedByFlows ?? 0}</td>
                   <td className="cell-actions">
                     <button type="button" className="btn-sm" onClick={() => setSelectedId(item.id)}>
-                      Voir
+                      {t("btn.view")}
                     </button>
                     {isOrgAdmin && (
                       <button
@@ -143,11 +140,11 @@ function LibraryTab({ type }: { type: LibraryType }) {
                         disabled={remove.isPending || (item.usedByFlows ?? 0) > 0}
                         title={
                           (item.usedByFlows ?? 0) > 0
-                            ? `Utilise par ${item.usedByFlows} flow(s)`
-                            : "Supprimer"
+                            ? t("library.usedBy", { count: item.usedByFlows })
+                            : t("btn.delete")
                         }
                       >
-                        Supprimer
+                        {t("btn.delete")}
                       </button>
                     )}
                   </td>
@@ -161,7 +158,11 @@ function LibraryTab({ type }: { type: LibraryType }) {
       <Modal
         open={!!selectedId}
         onClose={() => setSelectedId(null)}
-        title={`${config.detailPrefix} : ${selectedId ?? ""}`}
+        title={
+          type === "skills"
+            ? t("library.detailSkill", { id: selectedId ?? "" })
+            : t("library.detailExtension", { id: selectedId ?? "" })
+        }
       >
         {selectedId && <LibraryItemDetail type={config.detailType} itemId={selectedId} />}
       </Modal>
@@ -170,12 +171,13 @@ function LibraryTab({ type }: { type: LibraryType }) {
 }
 
 export function LibraryPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const [tab, setTab] = useState<LibraryType>("skills");
 
   return (
     <div className="library-page">
       <div className="page-header">
-        <h2>Bibliotheque</h2>
+        <h2>{t("library.title")}</h2>
       </div>
 
       <div className="exec-tabs">
@@ -183,13 +185,13 @@ export function LibraryPage() {
           className={`tab ${tab === "skills" ? "active" : ""}`}
           onClick={() => setTab("skills")}
         >
-          Skills
+          {t("library.tabSkills")}
         </button>
         <button
           className={`tab ${tab === "extensions" ? "active" : ""}`}
           onClick={() => setTab("extensions")}
         >
-          Extensions
+          {t("library.tabExtensions")}
         </button>
       </div>
 

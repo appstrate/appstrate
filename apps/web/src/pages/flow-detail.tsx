@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutions } from "../hooks/use-executions";
 import {
@@ -50,6 +51,7 @@ function checkRequiredConfig(detail: {
 type Tab = "executions" | "schedules";
 
 export function FlowDetailPage() {
+  const { t } = useTranslation(["flows", "common"]);
   const { flowId } = useParams<{ flowId: string }>();
   const { user } = useAuth();
   const { isOrgAdmin } = useOrg();
@@ -100,7 +102,7 @@ export function FlowDetailPage() {
   return (
     <>
       <nav className="breadcrumb">
-        <Link to="/">Flows</Link>
+        <Link to="/">{t("detail.breadcrumb")}</Link>
         <span className="separator">/</span>
         <span className="current">{detail.displayName}</span>
       </nav>
@@ -123,7 +125,7 @@ export function FlowDetailPage() {
               } catch (err) {
                 const msg = err instanceof Error ? err.message : "";
                 if (!msg.includes("connexion active")) {
-                  alert(`Erreur : ${msg}`);
+                  alert(t("error.prefix", { message: msg }));
                   return;
                 }
                 // Admin not connected to the provider — open connect flow then retry
@@ -136,7 +138,7 @@ export function FlowDetailPage() {
                   await bindAdmin.mutateAsync(svc.id);
                 } catch (retryErr) {
                   const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-                  alert(`Erreur : ${retryMsg}`);
+                  alert(t("error.prefix", { message: retryMsg }));
                 }
               }
             };
@@ -148,7 +150,7 @@ export function FlowDetailPage() {
                   <span className="status-dot connected" />
                   {svc.id}
                   {!isSelf && (
-                    <span className="admin-service-badge">{svc.adminDisplayName ?? "admin"}</span>
+                    <span className="admin-service-badge">{svc.adminDisplayName ?? t("admin")}</span>
                   )}
                   {isOrgAdmin && (
                     <button
@@ -157,7 +159,7 @@ export function FlowDetailPage() {
                       onClick={() => unbindAdmin.mutate(svc.id)}
                       disabled={unbindAdmin.isPending}
                     >
-                      Delier
+                      {t("detail.unbind")}
                     </button>
                   )}
                 </div>
@@ -175,10 +177,10 @@ export function FlowDetailPage() {
                     onClick={handleBind}
                     disabled={bindAdmin.isPending || connectMutation.isPending}
                   >
-                    Lier mon compte
+                    {t("detail.bindAccount")}
                   </button>
                 ) : (
-                  <span className="admin-service-badge pending">en attente</span>
+                  <span className="admin-service-badge pending">{t("detail.pending")}</span>
                 )}
               </div>
             );
@@ -203,7 +205,7 @@ export function FlowDetailPage() {
             >
               <span className={`status-dot ${isConnected ? "connected" : "disconnected"}`} />
               {svc.id}
-              {!isConnected && " (connecter)"}
+              {!isConnected && ` (${t("detail.connect")})`}
             </button>
           );
         })}
@@ -216,21 +218,21 @@ export function FlowDetailPage() {
           disabled={!allConnected || !hasRequiredConfig || runFlow.isPending}
           title={
             !allConnected
-              ? "Connectez tous les services d'abord"
+              ? t("detail.titleConnect")
               : !hasRequiredConfig
-                ? "Configurez les champs obligatoires"
-                : "Lancer le flow"
+                ? t("detail.titleConfig")
+                : t("detail.titleRun")
           }
         >
-          {runFlow.isPending && <Spinner />} Lancer
+          {runFlow.isPending && <Spinner />} {t("detail.run")}
         </button>
         <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
         {isOrgAdmin && (
           <div className="actions-admin">
-            {hasConfigSchema && <button onClick={() => setConfigOpen(true)}>Configurer</button>}
+            {hasConfigSchema && <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>}
             {detail.source === "user" && (
               <Link to={`/flows/${flowId}/edit`}>
-                <button>Modifier</button>
+                <button>{t("btn.edit")}</button>
               </Link>
             )}
             {detail.source === "user" && (
@@ -239,20 +241,20 @@ export function FlowDetailPage() {
                 disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
                 title={
                   detail.runningExecutions > 0
-                    ? "Impossible de supprimer pendant une execution"
-                    : "Supprimer ce flow"
+                    ? t("detail.titleDeleteRunning")
+                    : t("detail.titleDelete")
                 }
                 onClick={() => {
                   if (
                     confirm(
-                      `Supprimer le flow "${detail.displayName}" ? Cette action est irreversible.`,
+                      t("detail.deleteConfirm", { name: detail.displayName }),
                     )
                   ) {
                     deleteFlow.mutate(detail.id);
                   }
                 }}
               >
-                Supprimer
+                {t("btn.delete")}
               </button>
             )}
           </div>
@@ -266,7 +268,7 @@ export function FlowDetailPage() {
           className={`tab ${tab === "executions" ? "active" : ""}`}
           onClick={() => setTab("executions")}
         >
-          Executions
+          {t("detail.tabExecutions")}
         </button>
         <button
           role="tab"
@@ -274,14 +276,14 @@ export function FlowDetailPage() {
           className={`tab ${tab === "schedules" ? "active" : ""}`}
           onClick={() => setTab("schedules")}
         >
-          Planifications{schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
+          {t("detail.tabSchedules")}{schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
         </button>
       </div>
 
       {tab === "executions" && (
         <>
           {!executions || executions.length === 0 ? (
-            <EmptyState message="Aucune execution" compact />
+            <EmptyState message={t("detail.emptyExec")} compact />
           ) : (
             <div className="exec-list">
               {executions.map((exec) => {
@@ -321,11 +323,11 @@ export function FlowDetailPage() {
                 setScheduleOpen(true);
               }}
             >
-              Ajouter
+              {t("btn.add")}
             </button>
           </div>
           {!schedules || schedules.length === 0 ? (
-            <EmptyState message="Aucune planification" compact />
+            <EmptyState message={t("detail.emptySchedule")} compact />
           ) : (
             <div className="schedule-list">
               {schedules.map((sched) => (

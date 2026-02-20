@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 
 export function LoadingState() {
@@ -9,9 +10,10 @@ export function LoadingState() {
 }
 
 export function ErrorState({ message }: { message?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="empty-state">
-      <p>Une erreur est survenue.</p>
+      <p>{t("error.generic")}</p>
       {message && <p className="empty-hint">{message}</p>}
     </div>
   );

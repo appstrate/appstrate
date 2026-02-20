@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -14,6 +15,7 @@ function toSlug(value: string): string {
 }
 
 export function CreateOrgPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { switchOrg } = useOrg();
@@ -55,15 +57,15 @@ export function CreateOrgPage() {
     const trimmedSlug = slug.trim();
 
     if (!trimmedName) {
-      setError("Le nom de l'organisation est requis.");
+      setError(t("createOrg.errorName"));
       return;
     }
     if (!trimmedSlug) {
-      setError("Le slug est requis.");
+      setError(t("createOrg.errorSlug"));
       return;
     }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(trimmedSlug)) {
-      setError("Le slug ne doit contenir que des lettres minuscules, chiffres et tirets.");
+      setError(t("createOrg.errorSlugFormat"));
       return;
     }
 
@@ -73,23 +75,23 @@ export function CreateOrgPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1 className="login-title">Nouvelle organisation</h1>
+        <h1 className="login-title">{t("createOrg.title")}</h1>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="org-name">Nom</label>
+            <label htmlFor="org-name">{t("createOrg.name")}</label>
             <input
               id="org-name"
               type="text"
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
-              placeholder="Mon organisation"
+              placeholder={t("createOrg.namePlaceholder")}
               required
               autoFocus
               autoComplete="organization"
             />
           </div>
           <div className="form-group">
-            <label htmlFor="org-slug">Slug</label>
+            <label htmlFor="org-slug">{t("createOrg.slug")}</label>
             <input
               id="org-slug"
               type="text"
@@ -98,21 +100,21 @@ export function CreateOrgPage() {
                 setSlug(e.target.value);
                 setSlugEdited(true);
               }}
-              placeholder="mon-organisation"
+              placeholder={t("createOrg.slugPlaceholder")}
               required
             />
             <div className="hint">
-              Identifiant unique en minuscules (lettres, chiffres, tirets).
+              {t("createOrg.slugHint")}
             </div>
           </div>
           {error && <p className="form-error">{error}</p>}
           <button className="primary login-btn" type="submit" disabled={createMutation.isPending}>
-            {createMutation.isPending ? "Creation..." : "Creer l'organisation"}
+            {createMutation.isPending ? t("createOrg.creating") : t("createOrg.submit")}
           </button>
         </form>
         <p className="login-switch">
           <button type="button" className="link-btn" onClick={() => navigate("/")}>
-            Retour
+            {t("btn.back")}
           </button>
         </p>
       </div>

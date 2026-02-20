@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { FlowList } from "./pages/flow-list";
 import { FlowDetailPage } from "./pages/flow-detail";
 import { FlowEditorPage } from "./pages/flow-editor";
@@ -11,6 +12,7 @@ import { SchedulesListPage } from "./pages/schedules-list";
 import { LibraryPage } from "./pages/library";
 import { CreateOrgPage } from "./pages/create-org";
 import { OrgSettingsPage } from "./pages/org-settings";
+import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
@@ -29,6 +31,7 @@ function UserMenu({
   isAdmin?: boolean;
   onLogout: () => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -46,7 +49,7 @@ function UserMenu({
       <button
         className="user-menu-trigger"
         onClick={() => setOpen(!open)}
-        aria-label="Menu utilisateur"
+        aria-label={t("userMenu.ariaLabel")}
       >
         <svg
           width="18"
@@ -66,10 +69,21 @@ function UserMenu({
         <div className="user-menu-dropdown">
           <div className="user-menu-info">
             <span className="user-menu-name">{displayName}</span>
-            {isAdmin && <span className="admin-badge">admin</span>}
+            {isAdmin && <span className="admin-badge">{t("admin")}</span>}
           </div>
+          <Link
+            to="/preferences"
+            className="user-menu-item"
+            onClick={() => setOpen(false)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            {t("userMenu.preferences")}
+          </Link>
           <button className="user-menu-logout" onClick={onLogout}>
-            Deconnexion
+            {t("userMenu.logout")}
           </button>
         </div>
       )}
@@ -78,6 +92,7 @@ function UserMenu({
 }
 
 function MainLayout() {
+  const { t } = useTranslation();
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user, profile, logout } = useAuth();
@@ -102,19 +117,19 @@ function MainLayout() {
             className={`nav-tab ${currentPath === "/" || currentPath.startsWith("/flows") ? "active" : ""}`}
             to="/"
           >
-            Flows
+            {t("nav.flows")}
           </Link>
           <Link
             className={`nav-tab ${currentPath === "/schedules" ? "active" : ""}`}
             to="/schedules"
           >
-            Planifications
+            {t("nav.schedules")}
           </Link>
           <Link className={`nav-tab ${currentPath === "/library" ? "active" : ""}`} to="/library">
-            Bibliotheque
+            {t("nav.library")}
           </Link>
           <Link className={`nav-tab ${currentPath === "/services" ? "active" : ""}`} to="/services">
-            Services
+            {t("nav.services")}
           </Link>
         </nav>
         <OrgSwitcher />
@@ -217,6 +232,7 @@ export function App() {
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/services" element={<ServicesListPage />} />
+              <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

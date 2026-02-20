@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 
 interface FileFieldProps {
   label: string;
@@ -29,6 +30,7 @@ export function FileField({
   onChange,
   description,
 }: FileFieldProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function FileField({
         for (const f of incoming) {
           const ext = f.name.includes(".") ? `.${f.name.split(".").pop()!.toLowerCase()}` : "";
           if (!allowed.some((a) => a === ext)) {
-            setError(`Extension non autorisee pour "${f.name}" (accepte: ${accept})`);
+            setError(t("file.extError", { name: f.name, accept }));
             return;
           }
         }
@@ -56,7 +58,7 @@ export function FileField({
       if (maxSize) {
         for (const f of incoming) {
           if (f.size > maxSize) {
-            setError(`"${f.name}" depasse la taille max (${formatSize(maxSize)})`);
+            setError(t("file.sizeError", { name: f.name, size: formatSize(maxSize) }));
             return;
           }
         }
@@ -66,7 +68,7 @@ export function FileField({
       if (multiple) {
         next = [...files, ...incoming];
         if (maxFiles && next.length > maxFiles) {
-          setError(`Maximum ${maxFiles} fichiers`);
+          setError(t("file.maxFiles", { count: maxFiles }));
           return;
         }
       } else {
@@ -75,7 +77,7 @@ export function FileField({
 
       onChange(next);
     },
-    [accept, maxSize, multiple, maxFiles, files, onChange],
+    [accept, maxSize, multiple, maxFiles, files, onChange, t],
   );
 
   const handleDrop = useCallback(
@@ -123,9 +125,9 @@ export function FileField({
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
         >
-          Glisser-deposer ou cliquer pour selectionner
-          {accept && <div className="drop-zone-hint">Formats : {accept}</div>}
-          {maxSize && <div className="drop-zone-hint">Max : {formatSize(maxSize)}</div>}
+          {t("file.dragDrop")}
+          {accept && <div className="drop-zone-hint">{t("file.formats", { formats: accept })}</div>}
+          {maxSize && <div className="drop-zone-hint">{t("file.maxSize", { size: formatSize(maxSize) })}</div>}
         </div>
       ) : (
         <>
@@ -146,7 +148,7 @@ export function FileField({
               className="add-field-btn"
               onClick={() => inputRef.current?.click()}
             >
-              + Ajouter un fichier
+              {t("file.addFile")}
             </button>
           )}
         </>

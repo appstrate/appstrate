@@ -1,20 +1,15 @@
+import { useTranslation } from "react-i18next";
 import { useOrgSkillDetail, useOrgExtensionDetail } from "../hooks/use-library";
 import { Spinner } from "./spinner";
+import { formatDateLong } from "../lib/markdown";
 
 interface LibraryItemDetailProps {
   type: "skill" | "extension";
   itemId: string;
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
-
 export function LibraryItemDetail({ type, itemId }: LibraryItemDetailProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const skillQuery = useOrgSkillDetail(type === "skill" ? itemId : undefined);
   const extQuery = useOrgExtensionDetail(type === "extension" ? itemId : undefined);
 
@@ -32,7 +27,7 @@ export function LibraryItemDetail({ type, itemId }: LibraryItemDetailProps) {
   if (!detail) {
     return (
       <div className="empty-state">
-        <p>Element introuvable.</p>
+        <p>{t("library.detailNotFound")}</p>
       </div>
     );
   }
@@ -42,20 +37,20 @@ export function LibraryItemDetail({ type, itemId }: LibraryItemDetailProps) {
       <div className="detail-meta">
         <code className="detail-id">{detail.id}</code>
         {detail.createdByName && <span className="detail-creator">{detail.createdByName}</span>}
-        <span className="detail-date">{formatDate(detail.createdAt)}</span>
+        <span className="detail-date">{formatDateLong(detail.createdAt)}</span>
       </div>
 
       {detail.description && (
         <div className="detail-section">
-          <div className="detail-label">Description</div>
+          <div className="detail-label">{t("library.detailDescription")}</div>
           <p>{detail.description}</p>
         </div>
       )}
 
       <div className="detail-section">
-        <div className="detail-label">Flows utilisant cette ressource</div>
+        <div className="detail-label">{t("library.detailFlows")}</div>
         {detail.flows.length === 0 ? (
-          <span className="detail-empty">Aucun</span>
+          <span className="detail-empty">{t("library.detailNone")}</span>
         ) : (
           <div className="detail-flows">
             {detail.flows.map((f) => (
@@ -68,7 +63,7 @@ export function LibraryItemDetail({ type, itemId }: LibraryItemDetailProps) {
       </div>
 
       <div className="detail-section">
-        <div className="detail-label">Contenu</div>
+        <div className="detail-label">{t("library.detailContent")}</div>
         <pre className="state-json">{detail.content}</pre>
       </div>
     </div>

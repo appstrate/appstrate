@@ -1,16 +1,19 @@
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { InputFields } from "./input-fields";
 import { initInputValues, buildInputPayload } from "./input-utils";
 import type { JSONSchemaObject, Schedule } from "@appstrate/shared-types";
 
-const CRON_PRESETS = [
-  { label: "Toutes les 30 min", cron: "*/30 * * * *" },
-  { label: "Toutes les heures", cron: "0 * * * *" },
-  { label: "Tous les jours a 9h", cron: "0 9 * * *" },
-  { label: "Lundi-Vendredi 9h", cron: "0 9 * * 1-5" },
-  { label: "Tous les lundis 9h", cron: "0 9 * * 1" },
-] as const;
+function getCronPresets(t: (key: string) => string) {
+  return [
+    { label: t("schedule.preset30min"), cron: "*/30 * * * *" },
+    { label: t("schedule.presetHourly"), cron: "0 * * * *" },
+    { label: t("schedule.presetDaily9"), cron: "0 9 * * *" },
+    { label: t("schedule.presetWeekday9"), cron: "0 9 * * 1-5" },
+    { label: t("schedule.presetMonday9"), cron: "0 9 * * 1" },
+  ];
+}
 
 const TIMEZONES = [
   "UTC",
@@ -52,6 +55,7 @@ export function ScheduleModal({
   isPending,
   flowPicker,
 }: ScheduleModalProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const isEdit = !!schedule;
   const schemaKeys = inputSchema?.properties ? Object.keys(inputSchema.properties).join(",") : "";
 
@@ -59,7 +63,7 @@ export function ScheduleModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? "Modifier la planification" : "Nouvelle planification"}
+      title={isEdit ? t("schedule.titleEdit") : t("schedule.titleNew")}
       actions={null}
     >
       {open && (
@@ -95,6 +99,9 @@ function ScheduleForm({
   onDelete?: () => void;
   isPending?: boolean;
 }) {
+  const { t } = useTranslation(["flows", "common"]);
+  const cronPresets = getCronPresets(t);
+
   const [name, setName] = useState(schedule?.name ?? "");
   const [cronExpression, setCronExpression] = useState(schedule?.cron_expression ?? "0 9 * * *");
   const [timezone, setTimezone] = useState(schedule?.timezone ?? "UTC");
@@ -110,7 +117,7 @@ function ScheduleForm({
 
   const handleSubmit = () => {
     if (!cronExpression.trim()) {
-      alert("L'expression cron est requise");
+      alert(t("schedule.cronRequired"));
       return;
     }
 
@@ -129,20 +136,20 @@ function ScheduleForm({
   return (
     <>
       <div className="form-group">
-        <label htmlFor="sched-name">Nom (optionnel)</label>
+        <label htmlFor="sched-name">{t("schedule.name")}</label>
         <input
           id="sched-name"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Ex: Execution quotidienne"
+          placeholder={t("schedule.namePlaceholder")}
         />
       </div>
 
       <div className="form-group">
-        <label>Frequence</label>
+        <label>{t("schedule.frequency")}</label>
         <div className="cron-presets">
-          {CRON_PRESETS.map((p) => (
+          {cronPresets.map((p) => (
             <button
               key={p.cron}
               type="button"
@@ -156,7 +163,7 @@ function ScheduleForm({
       </div>
 
       <div className="form-group">
-        <label htmlFor="sched-cron">Expression cron</label>
+        <label htmlFor="sched-cron">{t("schedule.cronLabel")}</label>
         <input
           id="sched-cron"
           type="text"
@@ -164,11 +171,11 @@ function ScheduleForm({
           onChange={(e) => setCronExpression(e.target.value)}
           placeholder="*/30 * * * *"
         />
-        <div className="hint">Format: minute heure jour mois jour-semaine</div>
+        <div className="hint">{t("schedule.cronHint")}</div>
       </div>
 
       <div className="form-group">
-        <label htmlFor="sched-tz">Fuseau horaire</label>
+        <label htmlFor="sched-tz">{t("schedule.timezone")}</label>
         <select id="sched-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
           {TIMEZONES.map((tz) => (
             <option key={tz} value={tz}>
@@ -186,14 +193,14 @@ function ScheduleForm({
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-            Active
+            {t("schedule.enabled")}
           </label>
         </div>
       )}
 
       {hasInputSchema && (
         <>
-          <div className="schedule-input-title">Parametres d'entree</div>
+          <div className="schedule-input-title">{t("schedule.inputTitle")}</div>
           <InputFields
             schema={schema}
             values={inputValues}
@@ -209,20 +216,22 @@ function ScheduleForm({
             {confirmDelete ? (
               <>
                 <button className="btn-danger" onClick={onDelete}>
-                  Confirmer
+                  {t("btn.confirm")}
                 </button>
-                <button onClick={() => setConfirmDelete(false)}>Annuler</button>
+                <button onClick={() => setConfirmDelete(false)}>
+                  {t("btn.cancel")}
+                </button>
               </>
             ) : (
               <button className="btn-danger" onClick={() => setConfirmDelete(true)}>
-                Supprimer
+                {t("btn.delete")}
               </button>
             )}
           </div>
         )}
-        <button onClick={onClose}>Annuler</button>
+        <button onClick={onClose}>{t("btn.cancel")}</button>
         <button className="primary" onClick={handleSubmit} disabled={isPending}>
-          {schedule ? "Enregistrer" : "Creer"}
+          {schedule ? t("btn.save") : t("btn.create")}
         </button>
       </div>
     </>

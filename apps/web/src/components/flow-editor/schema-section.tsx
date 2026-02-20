@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 export interface SchemaField {
   key: string;
   type: string;
@@ -32,6 +34,7 @@ function emptyField(mode: SchemaMode): SchemaField {
 }
 
 export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const add = () => onChange([...fields, emptyField(mode)]);
 
   const update = (index: number, patch: Partial<SchemaField>) => {
@@ -51,7 +54,7 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
           <div key={i} className="field-row">
             <input
               type="text"
-              placeholder="cle"
+              placeholder={t("editor.fieldKey")}
               value={field.key}
               onChange={(e) => update(i, { key: e.target.value })}
               className="field-key"
@@ -65,7 +68,7 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
             </select>
             <input
               type="text"
-              placeholder="description"
+              placeholder={t("editor.fieldDesc")}
               value={field.description}
               onChange={(e) => update(i, { description: e.target.value })}
               className="field-row-grow"
@@ -76,12 +79,12 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
                 checked={field.required}
                 onChange={(e) => update(i, { required: e.target.checked })}
               />
-              req
+              {t("editor.fieldReq")}
             </label>
             {(mode === "input" || mode === "config") && (
               <input
                 type="text"
-                placeholder="defaut"
+                placeholder={t("editor.fieldDefault")}
                 value={field.default ?? ""}
                 onChange={(e) => update(i, { default: e.target.value })}
               />
@@ -89,7 +92,7 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
             {mode === "input" && (
               <input
                 type="text"
-                placeholder="placeholder"
+                placeholder={t("editor.fieldPlaceholder")}
                 value={field.placeholder ?? ""}
                 onChange={(e) => update(i, { placeholder: e.target.value })}
               />
@@ -97,7 +100,7 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
             {mode === "config" && (
               <input
                 type="text"
-                placeholder="enum (virgule)"
+                placeholder={t("editor.fieldEnum")}
                 value={field.enumValues ?? ""}
                 onChange={(e) => update(i, { enumValues: e.target.value })}
               />
@@ -108,7 +111,7 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
           </div>
         ))}
         <button type="button" className="add-field-btn" onClick={add}>
-          + Ajouter un champ
+          {t("editor.addField")}
         </button>
       </div>
     </div>

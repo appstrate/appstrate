@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useServices } from "../../hooks/use-services";
 import type { ServiceEntry } from "./types";
 
@@ -7,6 +8,7 @@ interface ServicePickerProps {
 }
 
 export function ServicePicker({ value, onChange }: ServicePickerProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const { data: integrations, isLoading } = useServices();
 
   const update = (index: number, patch: Partial<ServiceEntry>) => {
@@ -35,7 +37,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
       {value.length > 0 && (
         <div className="service-picker-selected">
           <div className="section-title" style={{ marginBottom: "0.5rem" }}>
-            Services selectionnes ({value.length})
+            {t("editor.selectedServices", { count: value.length })}
           </div>
           {value.map((svc, i) => (
             <div key={i} className="service-picker-selected-card">
@@ -58,13 +60,13 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
               <div className="service-picker-selected-fields">
                 <input
                   type="text"
-                  placeholder="description"
+                  placeholder={t("editor.scopeDesc")}
                   value={svc.description}
                   onChange={(e) => update(i, { description: e.target.value })}
                 />
                 <input
                   type="text"
-                  placeholder="scopes (virgule)"
+                  placeholder={t("editor.scopePlaceholder")}
                   value={svc.scopes}
                   onChange={(e) => update(i, { scopes: e.target.value })}
                 />
@@ -74,8 +76,8 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                     update(i, { connectionMode: e.target.value as "user" | "admin" })
                   }
                 >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
+                  <option value="user">{t("editor.modeUser")}</option>
+                  <option value="admin">{t("editor.modeAdmin")}</option>
                 </select>
               </div>
             </div>
@@ -85,12 +87,12 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
 
       {/* Available integrations from Nango */}
       <div className="section-title" style={{ marginTop: value.length > 0 ? "1rem" : 0 }}>
-        Integrations disponibles
+        {t("editor.availableIntegrations")}
       </div>
       {isLoading ? (
-        <div className="empty-state empty-state-compact">Chargement...</div>
+        <div className="empty-state empty-state-compact">{t("loading")}</div>
       ) : !integrations || integrations.length === 0 ? (
-        <div className="empty-state empty-state-compact">Aucune integration configuree</div>
+        <div className="empty-state empty-state-compact">{t("editor.noIntegration")}</div>
       ) : (
         <div className="service-picker-grid">
           {integrations.map((ig) => {

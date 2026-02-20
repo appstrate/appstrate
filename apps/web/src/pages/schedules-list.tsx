@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFlows, useFlowDetail } from "../hooks/use-flows";
 import {
   useAllSchedules,
@@ -13,6 +14,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const { data: schedules, isLoading, error } = useAllSchedules();
   const { data: flows } = useFlows();
   const updateSchedule = useUpdateSchedule();
@@ -44,17 +46,17 @@ export function SchedulesListPage() {
   return (
     <>
       <div className="section-header">
-        <div className="section-title">Planifications</div>
+        <div className="section-title">{t("schedules.title")}</div>
         <button onClick={openCreate} disabled={!flows || flows.length === 0}>
-          Ajouter
+          {t("btn.add")}
         </button>
       </div>
 
       {!schedules || schedules.length === 0 ? (
         <div className="empty-state">
-          <p>Aucune planification.</p>
+          <p>{t("schedules.empty")}</p>
           <p className="empty-hint">
-            Ajoutez une planification pour executer un flow automatiquement.
+            {t("schedules.emptyHint")}
           </p>
         </div>
       ) : (
@@ -89,7 +91,7 @@ export function SchedulesListPage() {
                 flowPicker={
                   flows && flows.length > 1 ? (
                     <div className="form-group">
-                      <label htmlFor="sched-flow">Flow</label>
+                      <label htmlFor="sched-flow">{t("schedules.flowLabel")}</label>
                       <select
                         id="sched-flow"
                         value={createFlowId}

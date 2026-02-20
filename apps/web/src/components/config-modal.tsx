@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { FormField } from "./form-field";
 import { useSaveConfig } from "../hooks/use-mutations";
@@ -11,11 +12,13 @@ interface ConfigModalProps {
 }
 
 export function ConfigModal({ open, onClose, flow }: ConfigModalProps) {
+  const { t } = useTranslation(["flows", "common"]);
+
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={`Configuration — ${flow.displayName}`}
+      title={t("config.title", { name: flow.displayName })}
       actions={null}
     >
       {open && <ConfigModalForm flow={flow} onClose={onClose} />}
@@ -24,6 +27,7 @@ export function ConfigModal({ open, onClose, flow }: ConfigModalProps) {
 }
 
 function ConfigModalForm({ flow, onClose }: { flow: FlowDetail; onClose: () => void }) {
+  const { t } = useTranslation(["flows", "common"]);
   const schema = flow.config?.schema;
   const current = flow.config?.current || {};
   const mutation = useSaveConfig(flow.id);
@@ -68,9 +72,9 @@ function ConfigModalForm({ flow, onClose }: { flow: FlowDetail; onClose: () => v
           />
         ))}
       <div className="modal-actions">
-        <button onClick={onClose}>Annuler</button>
+        <button onClick={onClose}>{t("btn.cancel")}</button>
         <button className="primary" onClick={handleSave} disabled={mutation.isPending}>
-          Enregistrer
+          {t("btn.save")}
         </button>
       </div>
     </>

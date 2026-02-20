@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { Spinner } from "../components/spinner";
 import type { OrganizationMember, OrgRole } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
@@ -48,7 +51,7 @@ export function OrgSettingsPage() {
       setEditingName(false);
     },
     onError: (err: Error) => {
-      alert(`Erreur : ${err.message}`);
+      alert(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -79,7 +82,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(`Erreur : ${err.message}`);
+      alert(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -94,7 +97,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(`Erreur : ${err.message}`);
+      alert(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -109,18 +112,18 @@ export function OrgSettingsPage() {
       window.location.reload();
     },
     onError: (err: Error) => {
-      alert(`Erreur : ${err.message}`);
+      alert(t("error.prefix", { message: err.message }));
     },
   });
 
   // --- Guards ---
 
   if (!currentOrg) {
-    return <EmptyState message="Aucune organisation selectionnee." />;
+    return <EmptyState message={t("orgSettings.noOrg")} />;
   }
 
   if (!isOrgAdmin) {
-    return <EmptyState message="Acces reserve aux administrateurs de l'organisation." />;
+    return <EmptyState message={t("orgSettings.adminOnly")} />;
   }
 
   if (isLoading) return <LoadingState />;
@@ -145,7 +148,7 @@ export function OrgSettingsPage() {
 
   const handleRemove = (member: OrganizationMember) => {
     const label = member.displayName || member.email || member.userId;
-    if (!confirm(`Retirer ${label} de l'organisation ?`)) return;
+    if (!confirm(t("orgSettings.removeMember", { name: label }))) return;
     removeMemberMutation.mutate(member.userId);
   };
 
@@ -154,9 +157,9 @@ export function OrgSettingsPage() {
   };
 
   const roleLabel: Record<OrgRole, string> = {
-    owner: "Proprietaire",
-    admin: "Admin",
-    member: "Membre",
+    owner: t("orgSettings.roleOwner"),
+    admin: t("orgSettings.roleAdmin"),
+    member: t("orgSettings.roleMember"),
   };
 
   return (
@@ -168,7 +171,7 @@ export function OrgSettingsPage() {
           className={`tab ${tab === "general" ? "active" : ""}`}
           onClick={() => setTab("general")}
         >
-          Général
+          {t("orgSettings.tabGeneral")}
         </button>
         <button
           role="tab"
@@ -176,14 +179,14 @@ export function OrgSettingsPage() {
           className={`tab ${tab === "members" ? "active" : ""}`}
           onClick={() => setTab("members")}
         >
-          Membres ({members.length})
+          {t("orgSettings.tabMembers", { count: members.length })}
         </button>
       </div>
 
       {tab === "general" && (
         <>
           {/* Organisation info */}
-          <div className="section-title">Organisation</div>
+          <div className="section-title">{t("orgSettings.orgTitle")}</div>
           <div className="service-card" style={{ marginBottom: "1.5rem" }}>
             <div className="service-card-header">
               <div className="service-info">
@@ -214,10 +217,10 @@ export function OrgSettingsPage() {
                       type="submit"
                       disabled={updateNameMutation.isPending}
                     >
-                      {updateNameMutation.isPending ? "..." : "Enregistrer"}
+                      {updateNameMutation.isPending ? <Spinner /> : t("btn.save")}
                     </button>
                     <button type="button" onClick={() => setEditingName(false)}>
-                      Annuler
+                      {t("btn.cancel")}
                     </button>
                   </form>
                 ) : (
@@ -234,7 +237,7 @@ export function OrgSettingsPage() {
                     setEditingName(true);
                   }}
                 >
-                  Modifier
+                  {t("btn.edit")}
                 </button>
               )}
             </div>
@@ -244,14 +247,14 @@ export function OrgSettingsPage() {
           {isOrgOwner && (
             <>
               <div className="section-title" style={{ marginTop: "2rem" }}>
-                Zone de danger
+                {t("orgSettings.dangerZone")}
               </div>
               <div className="service-card" style={{ borderColor: "var(--danger, #e53e3e)" }}>
                 <div className="service-card-header" style={{ marginBottom: 0 }}>
                   <div className="service-info">
-                    <h3 style={{ fontSize: "0.875rem" }}>Supprimer l'organisation</h3>
+                    <h3 style={{ fontSize: "0.875rem" }}>{t("orgSettings.deleteOrg")}</h3>
                     <span className="service-provider">
-                      Tous les flows, executions, planifications et configurations seront supprimes.
+                      {t("orgSettings.deleteOrgDesc")}
                     </span>
                   </div>
                   <button
@@ -260,14 +263,14 @@ export function OrgSettingsPage() {
                     onClick={() => {
                       if (
                         confirm(
-                          `Supprimer l'organisation "${currentOrg.name}" ? Toutes les donnees seront perdues. Cette action est irreversible.`,
+                          t("orgSettings.deleteConfirm", { name: currentOrg.name }),
                         )
                       ) {
                         deleteOrgMutation.mutate();
                       }
                     }}
                   >
-                    {deleteOrgMutation.isPending ? "Suppression..." : "Supprimer"}
+                    {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
                   </button>
                 </div>
               </div>
@@ -317,7 +320,7 @@ export function OrgSettingsPage() {
               )}
             </div>
             <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
-              {addMemberMutation.isPending ? "..." : "Ajouter"}
+              {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
             </button>
           </form>
 
@@ -370,9 +373,9 @@ export function OrgSettingsPage() {
                             cursor: "pointer",
                           }}
                         >
-                          <option value="member">Membre</option>
-                          <option value="admin">Admin</option>
-                          <option value="owner">Proprietaire</option>
+                          <option value="member">{t("orgSettings.roleMember")}</option>
+                          <option value="admin">{t("orgSettings.roleAdmin")}</option>
+                          <option value="owner">{t("orgSettings.roleOwner")}</option>
                         </select>
                       )}
                       <button
@@ -380,7 +383,7 @@ export function OrgSettingsPage() {
                         disabled={removeMemberMutation.isPending}
                         style={{ marginLeft: "auto" }}
                       >
-                        Retirer
+                        {t("btn.remove")}
                       </button>
                     </div>
                   )}
@@ -390,7 +393,7 @@ export function OrgSettingsPage() {
           </div>
 
           {members.length === 0 && (
-            <EmptyState message="Aucun membre." hint="Ajoutez des membres par email." compact />
+            <EmptyState message={t("orgSettings.noMembers")} hint={t("orgSettings.noMembersHint")} compact />
           )}
         </>
       )}

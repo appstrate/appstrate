@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { useImportFlow } from "../hooks/use-mutations";
 
@@ -10,17 +11,21 @@ interface ImportModalProps {
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 export function ImportModal({ open, onClose }: ImportModalProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const importFlow = useImportFlow();
 
-  const validateFile = useCallback((f: File): string => {
-    if (!f.name.endsWith(".zip")) return "Seuls les fichiers .zip sont acceptes";
-    if (f.size > MAX_SIZE) return "Le fichier depasse 10 MB";
-    return "";
-  }, []);
+  const validateFile = useCallback(
+    (f: File): string => {
+      if (!f.name.endsWith(".zip")) return t("import.errZip");
+      if (f.size > MAX_SIZE) return t("import.errSize");
+      return "";
+    },
+    [t],
+  );
 
   const handleFile = useCallback(
     (f: File) => {
@@ -68,18 +73,18 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     <Modal
       open={open}
       onClose={handleClose}
-      title="Importer un flow"
+      title={t("import.title")}
       actions={
         <>
           <button onClick={handleClose} disabled={importFlow.isPending}>
-            Annuler
+            {t("btn.cancel")}
           </button>
           <button
             className="primary"
             onClick={handleSubmit}
             disabled={!file || importFlow.isPending}
           >
-            {importFlow.isPending ? "Import en cours..." : "Importer"}
+            {importFlow.isPending ? t("import.importing") : t("import.submit")}
           </button>
         </>
       }
@@ -108,8 +113,8 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           <p className="drop-zone-file">{file.name}</p>
         ) : (
           <>
-            <p>Glissez un fichier ZIP ici</p>
-            <p className="drop-zone-hint">ou cliquez pour parcourir</p>
+            <p>{t("import.dropText")}</p>
+            <p className="drop-zone-hint">{t("import.dropHint")}</p>
           </>
         )}
       </div>

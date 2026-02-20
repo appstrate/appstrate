@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useCallback } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import i18n from "../i18n";
 import type { Profile } from "@appstrate/shared-types";
 
 interface AuthState {
@@ -43,6 +44,9 @@ async function resolveSession(session: Session | null) {
       return;
     }
     profile = data ?? null;
+    if (profile?.language && profile.language !== i18n.language) {
+      i18n.changeLanguage(profile.language);
+    }
   }
   setState({ session, user: session?.user ?? null, profile, loading: false });
 }

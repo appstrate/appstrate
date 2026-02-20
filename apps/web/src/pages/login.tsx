@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 
 export function LoginPage() {
+  const { t } = useTranslation(["settings", "common"]);
   const { login, signup } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +23,7 @@ export function LoginPage() {
         await signup(email, password, displayName || undefined);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Une erreur est survenue");
+      setError(err instanceof Error ? err.message : t("login.error"));
     } finally {
       setLoading(false);
     }
@@ -36,19 +38,19 @@ export function LoginPage() {
         <form onSubmit={handleSubmit}>
           {mode === "signup" && (
             <div className="form-group">
-              <label htmlFor="displayName">Nom</label>
+              <label htmlFor="displayName">{t("login.name")}</label>
               <input
                 id="displayName"
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Votre nom"
+                placeholder={t("login.namePlaceholder")}
                 autoComplete="name"
               />
             </div>
           )}
           <div className="form-group">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">{t("login.email")}</label>
             <input
               id="email"
               type="email"
@@ -60,7 +62,7 @@ export function LoginPage() {
             />
           </div>
           <div className="form-group">
-            <label htmlFor="password">Mot de passe</label>
+            <label htmlFor="password">{t("login.password")}</label>
             <input
               id="password"
               type="password"
@@ -74,22 +76,22 @@ export function LoginPage() {
           </div>
           {error && <p className="form-error">{error}</p>}
           <button className="primary login-btn" type="submit" disabled={loading}>
-            {loading ? "Chargement..." : mode === "login" ? "Se connecter" : "Creer un compte"}
+            {loading ? t("loading") : mode === "login" ? t("login.login") : t("login.signup")}
           </button>
         </form>
         <p className="login-switch">
           {mode === "login" ? (
             <>
-              Pas encore de compte ?{" "}
+              {t("login.noAccount")}{" "}
               <button type="button" className="link-btn" onClick={() => setMode("signup")}>
-                Creer un compte
+                {t("login.signup")}
               </button>
             </>
           ) : (
             <>
-              Deja un compte ?{" "}
+              {t("login.hasAccount")}{" "}
               <button type="button" className="link-btn" onClick={() => setMode("login")}>
-                Se connecter
+                {t("login.login")}
               </button>
             </>
           )}

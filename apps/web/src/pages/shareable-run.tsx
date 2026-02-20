@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useExecutionRealtime } from "../hooks/use-realtime";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
@@ -13,6 +14,7 @@ import { api, uploadFormData } from "../api";
 type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
 
 export function ShareableRunPage() {
+  const { t } = useTranslation(["flows", "common"]);
   const { flowId } = useParams<{ flowId: string }>();
   const { data: flow, isLoading, error } = useFlowDetail(flowId);
   const connectMutation = useConnect();
@@ -45,11 +47,12 @@ export function ShareableRunPage() {
       if (newStatus === "success" && payload.result) {
         setResult(payload.result as Record<string, unknown>);
       } else if (newStatus === "failed") {
-        setExecError((payload.error as string) || "L'execution a echoue.");
+        setExecError((payload.error as string) || t("shareable.errorFailed"));
       } else if (newStatus === "timeout") {
-        setExecError("L'execution a expire (timeout).");
+        setExecError(t("shareable.errorTimeout"));
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useExecutionRealtime(executionId, handleStatusChange);
@@ -88,7 +91,7 @@ export function ShareableRunPage() {
       setExecutionId(data.executionId);
     } catch (err) {
       setStatus("failed");
-      setExecError(err instanceof Error ? err.message : "Erreur inconnue");
+      setExecError(err instanceof Error ? err.message : t("error.unknown"));
     }
   };
 
@@ -116,7 +119,7 @@ export function ShareableRunPage() {
     return (
       <div className="shareable-run">
         <div className="shareable-run-card">
-          <div className="exec-error">{error?.message || "Flow introuvable."}</div>
+          <div className="exec-error">{error?.message || t("shareable.notFound")}</div>
         </div>
       </div>
     );
@@ -151,7 +154,7 @@ export function ShareableRunPage() {
                       <span className="admin-service-badge">{svc.adminDisplayName}</span>
                     )}
                     {!(svc.adminProvided && isConnected) && (
-                      <span className="admin-service-badge pending">en attente</span>
+                      <span className="admin-service-badge pending">{t("detail.pending")}</span>
                     )}
                   </div>
                 );
@@ -184,7 +187,7 @@ export function ShareableRunPage() {
                   title={svc.description}
                 >
                   <span className="status-dot disconnected" />
-                  {svc.id} (connecter)
+                  {svc.id} ({t("detail.connect")})
                 </button>
               );
             })}
@@ -207,9 +210,9 @@ export function ShareableRunPage() {
               className="primary shareable-run-btn"
               onClick={handleRun}
               disabled={!allConnected}
-              title={!allConnected ? "Connectez tous les services d'abord" : "Lancer le flow"}
+              title={!allConnected ? t("shareable.connectFirst") : t("shareable.titleRun")}
             >
-              Executer
+              {t("shareable.execute")}
             </button>
           </div>
         )}
@@ -217,7 +220,7 @@ export function ShareableRunPage() {
         {status === "running" && (
           <div className="shareable-run-status">
             <Spinner />
-            <span>Execution en cours...</span>
+            <span>{t("shareable.running")}</span>
           </div>
         )}
 
@@ -226,7 +229,7 @@ export function ShareableRunPage() {
             {execError && <div className="exec-error">{execError}</div>}
             {result && <ResultRenderer data={result} outputSchema={flow.output?.schema} />}
             <button className="shareable-run-btn" onClick={handleRestart}>
-              Relancer
+              {t("shareable.rerun")}
             </button>
           </div>
         )}

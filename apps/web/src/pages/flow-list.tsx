@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useFlows } from "../hooks/use-flows";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
@@ -7,6 +8,7 @@ import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState } from "../components/page-states";
 
 export function FlowList() {
+  const { t } = useTranslation(["flows", "common"]);
   const { data: flows, isLoading, error } = useFlows();
   const { isOrgAdmin } = useOrg();
   const [importOpen, setImportOpen] = useState(false);
@@ -23,17 +25,15 @@ export function FlowList() {
           <div className="flow-list-actions">
             {isOrgAdmin && (
               <Link to="/flows/new">
-                <button>Creer un flow</button>
+                <button>{t("list.create")}</button>
               </Link>
             )}
-            <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+            <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>
           </div>
         </div>
         <div className="empty-state">
-          <p>Aucun flow disponible.</p>
-          <p className="empty-hint">
-            Ajoutez un flow dans le repertoire <code>flows/</code> ou importez un ZIP
-          </p>
+          <p>{t("list.empty")}</p>
+          <p className="empty-hint">{t("list.emptyHint")}</p>
         </div>
         <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       </>
@@ -47,10 +47,10 @@ export function FlowList() {
         <div className="flow-list-actions">
           {isOrgAdmin && (
             <Link to="/flows/new">
-              <button>Creer un flow</button>
+              <button>{t("list.create")}</button>
             </Link>
           )}
-          <button onClick={() => setImportOpen(true)}>Importer un flow</button>
+          <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>
         </div>
       </div>
       <div className="flow-grid">
@@ -59,19 +59,19 @@ export function FlowList() {
             <div className="flow-card-header">
               <h2>{flow.displayName}</h2>
               <div className="flow-card-badges">
-                {flow.source === "user" && <span className="source-badge">Utilisateur</span>}
+                {flow.source === "user" && <span className="source-badge">{t("list.badgeUser")}</span>}
                 {flow.runningExecutions > 0 && (
                   <span className="running-badge">
-                    <Spinner /> {flow.runningExecutions} en cours
+                    <Spinner /> {t("list.running", { count: flow.runningExecutions })}
                   </span>
                 )}
               </div>
             </div>
             <p className="description">{flow.description}</p>
             <div className="tags">
-              {(flow.tags || []).map((t) => (
-                <span key={t} className="tag">
-                  {t}
+              {(flow.tags || []).map((tag) => (
+                <span key={tag} className="tag">
+                  {tag}
                 </span>
               ))}
             </div>

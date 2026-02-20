@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
 
 interface ServiceStatus {
@@ -15,6 +16,7 @@ interface ShareDropdownProps {
 }
 
 export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps) {
+  const { t } = useTranslation(["flows", "common"]);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -61,7 +63,7 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
       setTimeout(() => setCopied(false), 2000);
       setOpen(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Erreur lors de la generation du lien");
+      alert(err instanceof Error ? err.message : t("share.errorGenerate"));
     } finally {
       setGenerating(false);
     }
@@ -70,8 +72,8 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
   // Non-admin: simple button
   if (!isAdmin) {
     return (
-      <button onClick={copyLink} title="Copier le lien de partage">
-        {copied ? "Copie !" : "Partager"}
+      <button onClick={copyLink} title={t("share.copyLinkTitle")}>
+        {copied ? t("share.copied") : t("share.share")}
       </button>
     );
   }
@@ -79,13 +81,13 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
   // Admin: dropdown with two options
   return (
     <div className="share-dropdown" ref={ref}>
-      <button onClick={() => setOpen(!open)} title="Options de partage">
-        {copied ? "Copie !" : "Partager"}
+      <button onClick={() => setOpen(!open)} title={t("share.optionsTitle")}>
+        {copied ? t("share.copied") : t("share.share")}
       </button>
       {open && (
         <div className="share-dropdown-menu">
           <button className="share-dropdown-item" onClick={copyLink}>
-            Copier le lien
+            {t("share.copyLink")}
           </button>
           <button
             className="share-dropdown-item"
@@ -93,13 +95,13 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
             disabled={!canSharePublic || generating}
             title={
               hasUserModeServices
-                ? "Impossible : ce flow a des services en mode utilisateur"
+                ? t("share.cantShareUserMode")
                 : !canSharePublic
-                  ? "Tous les services admin doivent etre lies"
-                  : "Generer un lien public a usage unique"
+                  ? t("share.cantShareNotConnected")
+                  : t("share.generatePublicLink")
             }
           >
-            {generating ? "Generation..." : "Lien unique (public)"}
+            {generating ? t("share.generating") : t("share.publicLink")}
           </button>
         </div>
       )}
