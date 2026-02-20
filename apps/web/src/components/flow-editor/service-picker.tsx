@@ -174,31 +174,6 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                     <option value="admin">{t("editor.modeAdmin")}</option>
                   </select>
                 </div>
-                <div className="service-picker-uris">
-                  <label className="field-label field-label-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={svc.allowAllUris}
-                      onChange={(e) => update(i, { allowAllUris: e.target.checked })}
-                    />
-                    {t("editor.allowAllUris")}
-                  </label>
-                  <span className="field-hint">{t("editor.allowAllUrisHint")}</span>
-                  {!svc.allowAllUris && (
-                    <>
-                      <label className="field-label" style={{ marginTop: "0.5rem" }}>
-                        {t("editor.authorizedUris")}
-                      </label>
-                      <textarea
-                        rows={2}
-                        placeholder={t("editor.authorizedUrisPlaceholder")}
-                        value={svc.authorizedUris}
-                        onChange={(e) => update(i, { authorizedUris: e.target.value })}
-                      />
-                      <span className="field-hint">{t("editor.authorizedUrisHint")}</span>
-                    </>
-                  )}
-                </div>
               </div>
             ),
           )}
