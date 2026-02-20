@@ -3,8 +3,10 @@ import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.
 import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import {
+  connectContainerToNetwork,
   createContainer,
   createNetwork,
+  detectPlatformNetwork,
   execInContainer,
   startContainer,
   stopContainer,
@@ -58,10 +60,17 @@ export class PiAdapter implements ExecutionAdapter {
       networkId = await createNetwork(networkName);
 
       // 2. Create sidecar directly on custom network with host access
+      const platformNetwork = await detectPlatformNetwork();
+
       const sidecarEnv: Record<string, string> = { PORT: "8080" };
       if (ctx.executionApi) {
         sidecarEnv.EXECUTION_TOKEN = ctx.executionApi.token;
-        sidecarEnv.PLATFORM_API_URL = ctx.executionApi.url;
+        if (platformNetwork) {
+          // Platform is inside Docker — use its internal network hostname
+          sidecarEnv.PLATFORM_API_URL = `http://${platformNetwork.hostname}:${process.env.PORT || "3000"}`;
+        } else {
+          sidecarEnv.PLATFORM_API_URL = ctx.executionApi.url;
+        }
       }
 
       sidecarContainerId = await createContainer(executionId, sidecarEnv, {
@@ -71,8 +80,13 @@ export class PiAdapter implements ExecutionAdapter {
         nanoCpus: 500_000_000,
         networkId,
         networkAlias: "sidecar",
-        extraHosts: ["host.docker.internal:host-gateway"],
+        extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
       });
+
+      // 2b. Connect sidecar to platform network (for containerized deployments)
+      if (platformNetwork) {
+        await connectContainerToNetwork(platformNetwork.networkId, sidecarContainerId);
+      }
 
       // 3. Start sidecar and wait for health
       await startContainer(sidecarContainerId);

@@ -1,3 +1,6 @@
+import { hostname } from "node:os";
+import { logger } from "../lib/logger.ts";
+
 const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
 
 // Bun supports fetch() with unix: option for Unix sockets
@@ -359,6 +362,22 @@ export async function execInContainer(containerId: string, cmd: string[]): Promi
   return -1; // Polling timeout
 }
 
+export async function connectContainerToNetwork(
+  networkId: string,
+  containerId: string,
+): Promise<void> {
+  const res = await dockerFetch(`/networks/${networkId}/connect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Container: containerId }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to connect container to network: ${res.status} ${error}`);
+  }
+}
+
 export async function removeNetwork(networkId: string): Promise<void> {
   const res = await dockerFetch(`/networks/${networkId}`, {
     method: "DELETE",
@@ -367,5 +386,73 @@ export async function removeNetwork(networkId: string): Promise<void> {
   if (!res.ok && res.status !== 404) {
     const error = await res.text();
     throw new Error(`Failed to remove network: ${res.status} ${error}`);
+  }
+}
+
+// --- Platform network auto-detection ---
+
+let platformNetworkCache: { networkId: string; hostname: string } | null | undefined;
+
+/**
+ * Detect the Docker network the platform container is connected to.
+ * Uses os.hostname() (Docker sets hostname = container ID prefix) to inspect
+ * ourselves and find the first non-default-bridge network.
+ * Returns null when running outside Docker (local dev).
+ * Result is cached after the first call.
+ */
+export async function detectPlatformNetwork(): Promise<{
+  networkId: string;
+  hostname: string;
+} | null> {
+  if (platformNetworkCache !== undefined) return platformNetworkCache;
+
+  try {
+    const containerName = hostname();
+    const res = await dockerFetch(`/containers/${containerName}/json`);
+
+    if (!res.ok) {
+      // 404 = not running in Docker (local dev)
+      platformNetworkCache = null;
+      return null;
+    }
+
+    const data = (await res.json()) as {
+      Config?: { Hostname?: string };
+      NetworkSettings?: {
+        Networks?: Record<
+          string,
+          { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string }
+        >;
+      };
+    };
+
+    const networks = data.NetworkSettings?.Networks;
+    if (!networks) {
+      platformNetworkCache = null;
+      return null;
+    }
+
+    // Find the first non-default network (skip "bridge" and "host")
+    const DEFAULT_NETWORKS = new Set(["bridge", "host", "none"]);
+    for (const [name, info] of Object.entries(networks)) {
+      if (DEFAULT_NETWORKS.has(name) || !info.NetworkID) continue;
+
+      // Use the first alias or fall back to the container hostname
+      const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
+
+      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
+      logger.info("Detected platform Docker network", {
+        network: name,
+        networkId: info.NetworkID,
+        hostname: dnsName,
+      });
+      return platformNetworkCache;
+    }
+
+    platformNetworkCache = null;
+    return null;
+  } catch {
+    platformNetworkCache = null;
+    return null;
   }
 }
