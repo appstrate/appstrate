@@ -70,6 +70,7 @@
   "apiKey.title": "Connexion — {{name}}",
   "apiKey.label": "Clé API",
   "apiKey.placeholder": "Clé API {{name}}",
+  "customCreds.title": "Identifiants — {{name}}",
   "preferences.title": "Préférences",
   "preferences.language": "Langue",
   "preferences.langFr": "Français",

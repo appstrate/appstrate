@@ -261,6 +261,39 @@ export function useCancelExecution() {
   });
 }
 
+export function useSaveCustomCredentials(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      serviceId,
+      credentials,
+    }: {
+      serviceId: string;
+      credentials: Record<string, string>;
+    }) => {
+      return api(`/flows/${flowId}/services/${serviceId}/credentials`, {
+        method: "POST",
+        body: JSON.stringify({ credentials }),
+      });
+    },
+    onSuccess: () => invalidateServiceRelated(qc),
+    onError: onMutationError,
+  });
+}
+
+export function useDeleteCustomCredentials(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (serviceId: string) => {
+      return api(`/flows/${flowId}/services/${serviceId}/credentials`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => invalidateServiceRelated(qc),
+    onError: onMutationError,
+  });
+}
+
 export function useDeleteFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();

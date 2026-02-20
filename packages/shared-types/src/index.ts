@@ -76,6 +76,8 @@ export interface ServiceStatus {
   adminProvided?: boolean;
   adminUserId?: string;
   adminDisplayName?: string;
+  schema?: JSONSchemaObject;
+  authorizedUris?: string[];
 }
 
 export interface FlowListItem {

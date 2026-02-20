@@ -9,6 +9,9 @@ import {
   getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
+  setCustomCredentials,
+  deleteCustomCredentials,
+  hasCustomCredentials,
 } from "../services/state.ts";
 import { getConnectionStatus, resolveServiceStatuses } from "../services/nango.ts";
 import { validateConfig } from "../services/schema.ts";
@@ -63,6 +66,7 @@ export function createFlowsRouter() {
       adminConns,
       orgId,
       user.id,
+      flow.id,
     );
 
     // Get config (global), last execution (per-user), running count (per-user)
@@ -226,15 +230,30 @@ export function createFlowsRouter() {
 
     // Verify admin has a connection for this provider
     const orgId = c.get("orgId");
-    const conn = await getConnectionStatus(svc.provider, orgId, user.id);
-    if (conn.status !== "connected") {
-      return c.json(
-        {
-          error: "ADMIN_NOT_CONNECTED",
-          message: `Vous n'avez pas de connexion active pour '${svc.provider}'`,
-        },
-        400,
-      );
+
+    if (svc.provider === "custom") {
+      // For custom services, check that admin has saved credentials
+      const hasCreds = await hasCustomCredentials(orgId, user.id, flow.id, serviceId);
+      if (!hasCreds) {
+        return c.json(
+          {
+            error: "ADMIN_NOT_CONNECTED",
+            message: `Vous n'avez pas de credentials pour '${serviceId}'`,
+          },
+          400,
+        );
+      }
+    } else {
+      const conn = await getConnectionStatus(svc.provider, orgId, user.id);
+      if (conn.status !== "connected") {
+        return c.json(
+          {
+            error: "ADMIN_NOT_CONNECTED",
+            message: `Vous n'avez pas de connexion active pour '${svc.provider}'`,
+          },
+          400,
+        );
+      }
     }
 
     await bindAdminConnection(orgId, flow.id, serviceId, user.id);
@@ -256,6 +275,61 @@ export function createFlowsRouter() {
 
     await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
     return c.json({ unbound: true });
+  });
+
+  // POST /api/flows/:id/services/:serviceId/credentials — save custom service credentials
+  router.post("/:id/services/:serviceId/credentials", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const orgId = c.get("orgId");
+    const serviceId = c.req.param("serviceId");
+
+    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+    if (!svc) {
+      return c.json(
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        404,
+      );
+    }
+    if (svc.provider !== "custom") {
+      return c.json(
+        {
+          error: "INVALID_PROVIDER",
+          message: `Le service '${serviceId}' n'est pas un service custom`,
+        },
+        400,
+      );
+    }
+
+    const body = await c.req.json<{ credentials: Record<string, string> }>();
+    if (!body.credentials || typeof body.credentials !== "object") {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Le champ 'credentials' est requis" },
+        400,
+      );
+    }
+
+    await setCustomCredentials(orgId, user.id, flow.id, serviceId, body.credentials);
+    return c.json({ saved: true });
+  });
+
+  // DELETE /api/flows/:id/services/:serviceId/credentials — delete custom service credentials
+  router.delete("/:id/services/:serviceId/credentials", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const orgId = c.get("orgId");
+    const serviceId = c.req.param("serviceId");
+
+    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+    if (!svc) {
+      return c.json(
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' introuvable` },
+        404,
+      );
+    }
+
+    await deleteCustomCredentials(orgId, user.id, flow.id, serviceId);
+    return c.json({ deleted: true });
   });
 
   // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)

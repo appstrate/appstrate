@@ -40,6 +40,8 @@ export function buildPromptContext(params: {
       id: s.id,
       provider: s.provider,
       description: s.description,
+      schema: s.schema,
+      authorized_uris: s.authorized_uris,
     })),
     llmModel: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
   };

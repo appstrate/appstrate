@@ -1,6 +1,7 @@
 import { Nango } from "@nangohq/node";
 import { logger } from "../lib/logger.ts";
 import { getUserProfile } from "../lib/supabase.ts";
+import { hasCustomCredentials } from "./state.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 import type { ServiceStatus } from "@appstrate/shared-types";
 
@@ -229,10 +230,60 @@ export async function resolveServiceStatuses(
   adminConns: Record<string, string>,
   orgId: string,
   userId?: string,
+  flowId?: string,
 ): Promise<ServiceStatus[]> {
   return Promise.all(
     services.map(async (svc) => {
       const mode = svc.connectionMode ?? "user";
+
+      // Custom service — check custom_service_credentials instead of Nango
+      if (svc.provider === "custom") {
+        if (mode === "admin") {
+          const adminUserId = adminConns[svc.id];
+          if (adminUserId && flowId) {
+            const [hasCreds, adminProfile] = await Promise.all([
+              hasCustomCredentials(orgId, adminUserId, flowId, svc.id),
+              getUserProfile(adminUserId),
+            ]);
+            return {
+              id: svc.id,
+              provider: svc.provider,
+              description: svc.description,
+              status: hasCreds ? ("connected" as const) : ("not_connected" as const),
+              connectionMode: "admin" as const,
+              adminProvided: true,
+              adminUserId,
+              adminDisplayName: adminProfile?.display_name ?? undefined,
+              schema: svc.schema,
+              authorizedUris: svc.authorized_uris,
+            };
+          }
+          return {
+            id: svc.id,
+            provider: svc.provider,
+            description: svc.description,
+            status: "not_connected" as const,
+            connectionMode: "admin" as const,
+            adminProvided: false,
+            schema: svc.schema,
+            authorizedUris: svc.authorized_uris,
+          };
+        }
+
+        const connected =
+          userId && flowId ? await hasCustomCredentials(orgId, userId, flowId, svc.id) : false;
+        return {
+          id: svc.id,
+          provider: svc.provider,
+          description: svc.description,
+          status: connected ? ("connected" as const) : ("not_connected" as const),
+          connectionMode: "user" as const,
+          schema: svc.schema,
+          authorizedUris: svc.authorized_uris,
+        };
+      }
+
+      // Nango service
       const authMode = await getProviderAuthMode(svc.provider);
 
       if (mode === "admin") {
@@ -252,6 +303,7 @@ export async function resolveServiceStatuses(
             adminProvided: true,
             adminUserId,
             adminDisplayName: adminProfile?.display_name ?? undefined,
+            authorizedUris: svc.authorized_uris,
           };
         }
         return {
@@ -262,6 +314,7 @@ export async function resolveServiceStatuses(
           authMode,
           connectionMode: "admin" as const,
           adminProvided: false,
+          authorizedUris: svc.authorized_uris,
         };
       }
 
@@ -275,6 +328,7 @@ export async function resolveServiceStatuses(
         status: conn.status,
         authMode,
         connectionMode: "user" as const,
+        authorizedUris: svc.authorized_uris,
       };
     }),
   );

@@ -16,6 +16,8 @@ export interface ServiceEntry {
   description: string;
   scopes: string;
   connectionMode: "user" | "admin";
+  credentialSchema: SchemaField[];
+  authorizedUris: string;
 }
 
 export interface ResourceEntry {

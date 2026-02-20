@@ -9,6 +9,7 @@ import {
   appendExecutionLog,
   getAdminConnections,
   getExecution,
+  hasCustomCredentials,
 } from "../services/state.ts";
 import { listConnections, getAccessToken, getConnectionStatus } from "../services/nango.ts";
 import {
@@ -338,7 +339,43 @@ export function createExecutionsRouter() {
 
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
-      if (mode === "admin") {
+
+      if (svc.provider === "custom") {
+        // Custom service — check custom_service_credentials
+        if (mode === "admin") {
+          const adminUserId = adminConns[svc.id];
+          if (!adminUserId) {
+            return c.json(
+              {
+                error: "DEPENDENCY_NOT_SATISFIED",
+                message: `Le service '${svc.id}' n'est pas lie par un administrateur`,
+              },
+              400,
+            );
+          }
+          const hasCreds = await hasCustomCredentials(orgId, adminUserId, flowId, svc.id);
+          if (!hasCreds) {
+            return c.json(
+              {
+                error: "DEPENDENCY_NOT_SATISFIED",
+                message: `Les credentials admin pour '${svc.id}' ne sont plus disponibles`,
+              },
+              400,
+            );
+          }
+        } else {
+          const hasCreds = await hasCustomCredentials(orgId, user.id, flowId, svc.id);
+          if (!hasCreds) {
+            return c.json(
+              {
+                error: "DEPENDENCY_NOT_SATISFIED",
+                message: `Le service '${svc.id}' n'est pas configure`,
+              },
+              400,
+            );
+          }
+        }
+      } else if (mode === "admin") {
         const adminUserId = adminConns[svc.id];
         if (!adminUserId) {
           return c.json(
@@ -464,10 +501,15 @@ export function createExecutionsRouter() {
     const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
-      const tokenUserId = mode === "admin" ? adminConns[svc.id] : user.id;
-      if (tokenUserId) {
-        const token = await getAccessToken(svc.provider, orgId, tokenUserId);
-        if (token) tokens[svc.id] = token;
+      if (svc.provider === "custom") {
+        // For custom services, tokens is a boolean marker — actual credentials resolved at runtime
+        tokens[svc.id] = "custom";
+      } else {
+        const tokenUserId = mode === "admin" ? adminConns[svc.id] : user.id;
+        if (tokenUserId) {
+          const token = await getAccessToken(svc.provider, orgId, tokenUserId);
+          if (token) tokens[svc.id] = token;
+        }
       }
     }
 
