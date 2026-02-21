@@ -39,6 +39,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
 
     for (const svc of connectedServices) {
+      const svcLabel = svc.name || svc.id;
       if (svc.provider === "custom") {
         const props = svc.schema?.properties ?? {};
         const varNames = Object.keys(props);
@@ -46,11 +47,13 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
           const desc = props[name]?.description ?? name;
           return `\`{{${name}}}\` — ${desc}`;
         });
-        sections.push(`- **${svc.id}** (${svc.description}):`);
+        sections.push(`- **${svcLabel}** [${svc.id}] (${svc.description}):`);
         if (varDescriptions.length > 0) {
           sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
         }
-        if (svc.authorized_uris && svc.authorized_uris.length > 0) {
+        if (svc.allow_all_uris) {
+          sections.push(`  Allowed URLs: all public URLs (SSRF protection active)`);
+        } else if (svc.authorized_uris && svc.authorized_uris.length > 0) {
           sections.push(`  Allowed URLs: ${svc.authorized_uris.join(", ")}`);
         }
         const exampleUrl =
@@ -64,9 +67,11 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         const authorizedUris =
           svc.authorized_uris ?? getDefaultAuthorizedUris(svc.id, svc.provider);
 
-        sections.push(`- **${svc.id}** (${svc.description}):`);
+        sections.push(`- **${svcLabel}** [${svc.id}] (${svc.description}):`);
         sections.push(`  Credential: \`{{${fieldName}}}\` — ${fieldDesc}`);
-        if (authorizedUris && authorizedUris.length > 0) {
+        if (svc.allow_all_uris) {
+          sections.push(`  Allowed URLs: all public URLs (SSRF protection active)`);
+        } else if (authorizedUris && authorizedUris.length > 0) {
           sections.push(`  Allowed URLs: ${authorizedUris.join(", ")}`);
         }
 

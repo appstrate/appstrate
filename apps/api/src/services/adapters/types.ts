@@ -44,10 +44,12 @@ export interface PromptContext {
   };
   services: Array<{
     id: string;
+    name?: string;
     provider: string;
     description: string;
     schema?: import("@appstrate/shared-types").JSONSchemaObject;
     authorized_uris?: string[];
+    allow_all_uris?: boolean;
   }>;
   llmModel: string;
 }
