@@ -2,6 +2,7 @@ import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { getOrderedKeys } from "@appstrate/shared-types";
+import { detectPreset } from "./credential-presets";
 
 export function toResourceEntry(r: {
   id: string;
@@ -122,16 +123,21 @@ export function fieldsToSchema(
 }
 
 export function detailToFormState(detail: FlowDetail): FlowFormState {
-  const services: ServiceEntry[] = detail.requires.services.map((s) => ({
-    id: s.id,
-    provider: s.provider,
-    description: s.description,
-    scopes: "",
-    connectionMode: s.connectionMode === "admin" ? "admin" : "user",
-    credentialSchema: s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [],
-    authorizedUris: s.authorizedUris?.join("\n") ?? "",
-    allowAllUris: s.allowAllUris ?? false,
-  }));
+  const services: ServiceEntry[] = detail.requires.services.map((s) => {
+    const credentialSchema = s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [];
+    return {
+      id: s.id,
+      name: s.name ?? "",
+      provider: s.provider,
+      description: s.description,
+      scopes: "",
+      connectionMode: s.connectionMode === "admin" ? "admin" : "user",
+      credentialSchema,
+      authorizedUris: s.authorizedUris?.join("\n") ?? "",
+      allowAllUris: s.allowAllUris ?? false,
+      schemaPreset: s.provider === "custom" ? detectPreset(credentialSchema) : "custom",
+    };
+  });
 
   return {
     metadata: {
@@ -174,6 +180,7 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
             provider: s.provider,
             description: s.description,
           };
+          if (s.name) svc.name = s.name;
           const scopes = s.scopes
             .split(",")
             .map((v) => v.trim())
@@ -232,20 +239,23 @@ export function payloadToFormState(payload: {
 
   const services: ServiceEntry[] = rawServices.map((s) => {
     const provider = (s.provider as string) || "";
+    const credentialSchema =
+      provider === "custom"
+        ? schemaToFields(s.schema as JSONSchemaObject | undefined, "credentials")
+        : [];
     return {
       id: (s.id as string) || "",
+      name: (s.name as string) || "",
       provider,
       description: (s.description as string) || "",
       scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
       connectionMode: (s.connectionMode as "user" | "admin") || "user",
-      credentialSchema:
-        provider === "custom"
-          ? schemaToFields(s.schema as JSONSchemaObject | undefined, "credentials")
-          : [],
+      credentialSchema,
       authorizedUris: Array.isArray(s.authorized_uris)
         ? (s.authorized_uris as string[]).join("\n")
         : "",
       allowAllUris: (s.allow_all_uris as boolean) ?? false,
+      schemaPreset: provider === "custom" ? detectPreset(credentialSchema) : "custom",
     };
   });
 

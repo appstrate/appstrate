@@ -30,7 +30,11 @@ const jsonSchemaObjectSchema = z.object({
 });
 
 const serviceRequirementSchema = z.object({
-  id: z.string(),
+  id: z
+    .string()
+    .min(1)
+    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+  name: z.string().optional(),
   provider: z.string(),
   scopes: z.array(z.string()).optional().default([]),
   description: z.string(),

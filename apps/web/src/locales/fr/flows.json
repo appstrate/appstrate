@@ -169,5 +169,17 @@
   "editor.authorizedUris": "URLs autorisées",
   "editor.authorizedUrisPlaceholder": "https://api.example.com/*",
   "editor.authorizedUrisHint": "Une URL par ligne. * en fin = préfixe.",
-  "editor.promptHint": "Le prompt est envoyé tel quel à l'agent. Les inputs, la config et le state sont injectés automatiquement dans des sections structurées avant le prompt."
+  "editor.promptHint": "Le prompt est envoyé tel quel à l'agent. Les inputs, la config et le state sont injectés automatiquement dans des sections structurées avant le prompt.",
+  "editor.presetApiKey": "Clé API",
+  "editor.presetBearerToken": "Bearer Token",
+  "editor.presetCredentialsUsername": "Identifiants (nom d'utilisateur / mot de passe)",
+  "editor.presetCredentialsEmail": "Identifiants (email / mot de passe)",
+  "editor.presetCustom": "Schéma personnalisé",
+  "editor.credentialPreset": "Type de credentials",
+  "editor.customServiceName": "Nom",
+  "editor.customServiceNamePlaceholder": "Mon API Notion",
+  "editor.customServiceIdentifier": "Identifiant",
+  "editor.customServiceIdentifierPlaceholder": "mon-api-notion",
+  "editor.customServiceIdentifierDesc": "Auto-généré (kebab-case)",
+  "editor.customServiceIdentifierInvalid": "Doit être en kebab-case (a-z, 0-9, tirets)"
 }

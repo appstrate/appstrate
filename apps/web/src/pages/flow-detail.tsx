@@ -92,6 +92,7 @@ export function FlowDetailPage() {
   } | null>(null);
   const [customCredService, setCustomCredService] = useState<{
     id: string;
+    name?: string;
     bindAfter?: boolean;
   } | null>(null);
 
@@ -143,7 +144,7 @@ export function FlowDetailPage() {
               if (isCustom) {
                 // For custom services, open credentials modal first if not connected
                 if (svc.schema) {
-                  setCustomCredService({ id: svc.id, bindAfter: true });
+                  setCustomCredService({ id: svc.id, name: svc.name, bindAfter: true });
                 }
                 return;
               }
@@ -175,7 +176,7 @@ export function FlowDetailPage() {
               return (
                 <div key={svc.id} className="service admin-provided" title={svc.description}>
                   <span className="status-dot connected" />
-                  {svc.id}
+                  {svc.name || svc.id}
                   {!isSelf && (
                     <span className="admin-service-badge">
                       {svc.adminDisplayName ?? t("admin")}
@@ -198,7 +199,7 @@ export function FlowDetailPage() {
             return (
               <div key={svc.id} className="service admin-pending" title={svc.description}>
                 <span className="status-dot disconnected" />
-                {svc.id}
+                {svc.name || svc.id}
                 {isOrgAdmin ? (
                   <button
                     type="button"
@@ -220,19 +221,19 @@ export function FlowDetailPage() {
             // Custom service — open credentials modal
             const handleCustomConnect = () => {
               if (svc.schema) {
-                setCustomCredService({ id: svc.id });
+                setCustomCredService({ id: svc.id, name: svc.name });
               }
             };
             if (isConnected) {
               return (
                 <div key={svc.id} className="service" title={svc.description}>
                   <span className="status-dot connected" />
-                  {svc.id}
+                  {svc.name || svc.id}
                   <button
                     type="button"
                     className="btn-unbind"
                     onClick={() => {
-                      if (confirm(t("detail.disconnectConfirm", { name: svc.id }))) {
+                      if (confirm(t("detail.disconnectConfirm", { name: svc.name || svc.id }))) {
                         deleteCustomCreds.mutate(svc.id);
                       }
                     }}
@@ -252,7 +253,7 @@ export function FlowDetailPage() {
                 title={svc.description}
               >
                 <span className="status-dot disconnected" />
-                {svc.id}
+                {svc.name || svc.id}
                 {` (${t("detail.connect")})`}
               </button>
             );
@@ -268,12 +269,12 @@ export function FlowDetailPage() {
             return (
               <div key={svc.id} className="service" title={svc.description}>
                 <span className="status-dot connected" />
-                {svc.id}
+                {svc.name || svc.id}
                 <button
                   type="button"
                   className="btn-unbind"
                   onClick={() => {
-                    if (confirm(t("detail.disconnectConfirm", { name: svc.id }))) {
+                    if (confirm(t("detail.disconnectConfirm", { name: svc.name || svc.id }))) {
                       disconnectMutation.mutate(svc.provider);
                     }
                   }}
@@ -293,7 +294,7 @@ export function FlowDetailPage() {
               title={svc.description}
             >
               <span className="status-dot disconnected" />
-              {svc.id}
+              {svc.name || svc.id}
               {` (${t("detail.connect")})`}
             </button>
           );
@@ -500,6 +501,7 @@ export function FlowDetailPage() {
           onClose={() => setCustomCredService(null)}
           schema={customCredSchema}
           serviceId={customCredService.id}
+          serviceName={customCredService.name}
           isPending={saveCustomCreds.isPending}
           onSubmit={(credentials) => {
             const { id: serviceId, bindAfter } = customCredService;
