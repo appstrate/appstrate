@@ -38,10 +38,12 @@ export function buildPromptContext(params: {
     },
     services: params.flow.manifest.requires.services.map((s) => ({
       id: s.id,
+      name: s.name,
       provider: s.provider,
       description: s.description,
       schema: s.schema,
       authorized_uris: s.authorized_uris,
+      allow_all_uris: s.allow_all_uris,
     })),
     llmModel: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
   };
