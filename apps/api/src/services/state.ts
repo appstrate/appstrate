@@ -364,6 +364,18 @@ export async function getExecution(id: string) {
   return data;
 }
 
+export async function deleteFlowExecutions(flowId: string, orgId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("executions")
+    .delete({ count: "exact" })
+    .eq("flow_id", flowId)
+    .eq("org_id", orgId);
+  if (error) {
+    throw new Error(`Failed to delete executions for flow ${flowId}: ${error.message}`);
+  }
+  return count ?? 0;
+}
+
 export async function markOrphanExecutionsFailed(): Promise<number> {
   const { data } = await supabase
     .from("executions")

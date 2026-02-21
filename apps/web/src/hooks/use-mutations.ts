@@ -294,6 +294,21 @@ export function useDeleteCustomCredentials(flowId: string) {
   });
 }
 
+export function useDeleteFlowExecutions(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return api<{ deleted: number }>(`/flows/${flowId}/executions`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["executions"] });
+      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+    },
+    onError: onMutationError,
+  });
+}
+
 export function useDeleteFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();

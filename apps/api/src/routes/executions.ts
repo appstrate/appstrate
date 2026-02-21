@@ -10,6 +10,8 @@ import {
   getAdminConnections,
   getExecution,
   hasCustomCredentials,
+  getRunningExecutionsForFlow,
+  deleteFlowExecutions,
 } from "../services/state.ts";
 import { listConnections, getAccessToken, getConnectionStatus } from "../services/nango.ts";
 import {
@@ -34,7 +36,7 @@ import {
 import { getLatestVersionId } from "../services/flow-versions.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireFlow } from "../middleware/guards.ts";
+import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { stopContainer } from "../services/docker.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
@@ -604,6 +606,23 @@ export function createExecutionsRouter() {
     stopContainer(`appstrate-pi-${execId}`).catch(() => {});
 
     return c.json({ ok: true });
+  });
+
+  // DELETE /api/flows/:id/executions — delete all executions for a flow (admin only)
+  router.delete("/flows/:id/executions", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+
+    const running = await getRunningExecutionsForFlow(flow.id);
+    if (running > 0) {
+      return c.json(
+        { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) en cours` },
+        409,
+      );
+    }
+
+    const deleted = await deleteFlowExecutions(flow.id, orgId);
+    return c.json({ deleted });
   });
 
   return router;
