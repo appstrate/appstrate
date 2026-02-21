@@ -157,6 +157,7 @@ function FlowEditorForm({
         <ServicePicker
           value={form.services}
           onChange={(services) => setForm((s) => ({ ...s, services }))}
+          isEdit={isEdit}
         />
       )}
 

@@ -53,6 +53,7 @@ export interface FlowRequirements {
 
 export interface FlowServiceRequirement {
   id: string;
+  name?: string;
   provider: string;
   scopes: string[];
   description: string;

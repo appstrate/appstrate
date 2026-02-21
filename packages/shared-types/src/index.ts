@@ -77,6 +77,7 @@ export function getOrderedKeys(schema: JSONSchemaObject): string[] {
 
 export interface ServiceStatus {
   id: string;
+  name?: string;
   provider: string;
   description: string;
   status: "connected" | "not_connected";

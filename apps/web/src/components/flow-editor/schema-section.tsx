@@ -39,6 +39,7 @@ interface SchemaSectionProps {
   mode: SchemaMode;
   fields: SchemaField[];
   onChange: (fields: SchemaField[]) => void;
+  readOnly?: boolean;
 }
 
 const TYPE_OPTIONS = ["string", "number", "boolean", "array", "object"];
@@ -64,18 +65,21 @@ function SortableFieldCard({
   field,
   index,
   mode,
+  readOnly,
   onUpdate,
   onRemove,
 }: {
   field: SchemaField;
   index: number;
   mode: SchemaMode;
+  readOnly?: boolean;
   onUpdate: (index: number, patch: Partial<SchemaField>) => void;
   onRemove: (index: number) => void;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: field._id,
+    disabled: readOnly,
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -86,17 +90,24 @@ function SortableFieldCard({
   return (
     <div ref={setNodeRef} style={style} className="field-card">
       <div className="field-row-main">
-        <span className="drag-handle" {...attributes} {...listeners}>
-          ⠿
-        </span>
+        {!readOnly && (
+          <span className="drag-handle" {...attributes} {...listeners}>
+            ⠿
+          </span>
+        )}
         <input
           type="text"
           placeholder={t("editor.fieldKey")}
           value={field.key}
           onChange={(e) => onUpdate(index, { key: e.target.value })}
           className="field-key"
+          disabled={readOnly}
         />
-        <select value={field.type} onChange={(e) => onUpdate(index, { type: e.target.value })}>
+        <select
+          value={field.type}
+          onChange={(e) => onUpdate(index, { type: e.target.value })}
+          disabled={readOnly}
+        >
           {typeOptions.map((t) => (
             <option key={t} value={t}>
               {t}
@@ -109,18 +120,22 @@ function SortableFieldCard({
           value={field.description}
           onChange={(e) => onUpdate(index, { description: e.target.value })}
           className="field-row-grow"
+          disabled={readOnly}
         />
         <label className="field-checkbox">
           <input
             type="checkbox"
             checked={field.required}
             onChange={(e) => onUpdate(index, { required: e.target.checked })}
+            disabled={readOnly}
           />
           {t("editor.fieldReq")}
         </label>
-        <button type="button" className="btn-remove" onClick={() => onRemove(index)}>
-          &times;
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn-remove" onClick={() => onRemove(index)}>
+            &times;
+          </button>
+        )}
       </div>
       {showDetails && (
         <div className="field-row-details">
@@ -189,7 +204,7 @@ function SortableFieldCard({
   );
 }
 
-export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionProps) {
+export function SchemaSection({ title, mode, fields, onChange, readOnly }: SchemaSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
   const add = () => onChange([...fields, emptyField(mode)]);
 
@@ -228,15 +243,18 @@ export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionPr
                 field={field}
                 index={i}
                 mode={mode}
+                readOnly={readOnly}
                 onUpdate={update}
                 onRemove={remove}
               />
             ))}
           </SortableContext>
         </DndContext>
-        <button type="button" className="add-field-btn" onClick={add}>
-          {t("editor.addField")}
-        </button>
+        {!readOnly && (
+          <button type="button" className="add-field-btn" onClick={add}>
+            {t("editor.addField")}
+          </button>
+        )}
       </div>
     </div>
   );

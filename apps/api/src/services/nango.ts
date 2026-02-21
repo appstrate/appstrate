@@ -236,6 +236,8 @@ export async function resolveServiceStatuses(
     services.map(async (svc) => {
       const mode = svc.connectionMode ?? "user";
 
+      const nameSpread = svc.name ? { name: svc.name } : {};
+
       // Custom service — check custom_service_credentials instead of Nango
       if (svc.provider === "custom") {
         if (mode === "admin") {
@@ -247,6 +249,7 @@ export async function resolveServiceStatuses(
             ]);
             return {
               id: svc.id,
+              ...nameSpread,
               provider: svc.provider,
               description: svc.description,
               status: hasCreds ? ("connected" as const) : ("not_connected" as const),
@@ -261,6 +264,7 @@ export async function resolveServiceStatuses(
           }
           return {
             id: svc.id,
+            ...nameSpread,
             provider: svc.provider,
             description: svc.description,
             status: "not_connected" as const,
@@ -276,6 +280,7 @@ export async function resolveServiceStatuses(
           userId && flowId ? await hasCustomCredentials(orgId, userId, flowId, svc.id) : false;
         return {
           id: svc.id,
+          ...nameSpread,
           provider: svc.provider,
           description: svc.description,
           status: connected ? ("connected" as const) : ("not_connected" as const),
@@ -298,6 +303,7 @@ export async function resolveServiceStatuses(
           ]);
           return {
             id: svc.id,
+            ...nameSpread,
             provider: svc.provider,
             description: svc.description,
             status: conn.status,
@@ -312,6 +318,7 @@ export async function resolveServiceStatuses(
         }
         return {
           id: svc.id,
+          ...nameSpread,
           provider: svc.provider,
           description: svc.description,
           status: "not_connected" as const,
@@ -328,6 +335,7 @@ export async function resolveServiceStatuses(
         : { status: "not_connected" as const };
       return {
         id: svc.id,
+        ...nameSpread,
         provider: svc.provider,
         description: svc.description,
         status: conn.status,
