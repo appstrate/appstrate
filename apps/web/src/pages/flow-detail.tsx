@@ -14,6 +14,7 @@ import {
   useRunFlow,
   useConnect,
   useDeleteFlow,
+  useDeleteFlowExecutions,
   useConnectApiKey,
   useBindAdminService,
   useUnbindAdminService,
@@ -69,6 +70,7 @@ export function FlowDetailPage() {
   );
   const runFlow = useRunFlow(flowId!);
   const deleteFlow = useDeleteFlow();
+  const deleteExecutions = useDeleteFlowExecutions(flowId!);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
   const bindAdmin = useBindAdminService(flowId!);
@@ -371,6 +373,27 @@ export function FlowDetailPage() {
 
       {tab === "executions" && (
         <>
+          {isOrgAdmin && executions && executions.length > 0 && (
+            <div className="section-header">
+              <div />
+              <button
+                className="btn-danger"
+                disabled={detail.runningExecutions > 0 || deleteExecutions.isPending}
+                title={
+                  detail.runningExecutions > 0
+                    ? t("detail.clearExecRunning")
+                    : t("detail.clearExec")
+                }
+                onClick={() => {
+                  if (confirm(t("detail.clearExecConfirm"))) {
+                    deleteExecutions.mutate();
+                  }
+                }}
+              >
+                {t("detail.clearExec")}
+              </button>
+            </div>
+          )}
           {!executions || executions.length === 0 ? (
             <EmptyState message={t("detail.emptyExec")} compact />
           ) : (
