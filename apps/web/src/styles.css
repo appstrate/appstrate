@@ -2135,7 +2135,8 @@ button:disabled {
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.service-picker-uris .field-label-checkbox {
+.field-label-checkbox,
+.form-group .field-label-checkbox {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -2146,7 +2147,7 @@ button:disabled {
   letter-spacing: normal;
   cursor: pointer;
 }
-.service-picker-uris .field-label-checkbox input[type="checkbox"] {
+.field-label-checkbox input[type="checkbox"] {
   width: auto;
   margin: 0;
   accent-color: var(--primary);
