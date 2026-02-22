@@ -141,6 +141,7 @@ export interface OrgSkill {
   id: string;
   name?: string | null;
   description?: string | null;
+  source?: "built-in" | "user";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;
@@ -157,6 +158,7 @@ export interface OrgExtension {
   id: string;
   name?: string | null;
   description?: string | null;
+  source?: "built-in" | "user";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;

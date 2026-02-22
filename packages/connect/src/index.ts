@@ -17,6 +17,7 @@ export { validateScopes } from "./scopes.ts";
 
 // Registry
 export {
+  initBuiltInProviders,
   getProvider,
   getProviderOrThrow,
   getProviderOAuthCredentials,

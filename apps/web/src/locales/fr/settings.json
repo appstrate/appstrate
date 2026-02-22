@@ -64,6 +64,7 @@
   "library.detailFlows": "Flows utilisant cette ressource",
   "library.detailNone": "Aucun",
   "library.detailContent": "Contenu",
+  "library.builtIn": "intégré",
   "schedules.title": "Planifications",
   "schedules.empty": "Aucune planification.",
   "schedules.emptyHint": "Ajoutez une planification pour exécuter un flow automatiquement.",
