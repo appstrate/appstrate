@@ -165,7 +165,7 @@
   "editor.jsonApply": "Apply to form",
   "editor.scopeDesc": "description",
   "editor.scopePlaceholder": "scopes (comma)",
-  "editor.customScopePlaceholder": "Add custom scope...",
+  "editor.customScopePlaceholder": "Select a scope...",
   "editor.addScope": "Add",
   "editor.addCustomService": "+ Custom connector",
   "editor.customServiceId": "Connector identifier",

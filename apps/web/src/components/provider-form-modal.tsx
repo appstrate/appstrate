@@ -416,7 +416,7 @@ function ProviderFormBody({
                   {t("providers.form.availableScopesHint")}
                 </div>
                 {availableScopes.map((scope, idx) => (
-                  <div key={idx} className="field-card" style={{ marginBottom: "0.375rem" }}>
+                  <div key={idx} className="field-card">
                     <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
                       <input
                         type="text"
@@ -450,17 +450,6 @@ function ProviderFormBody({
                         &times;
                       </button>
                     </div>
-                    <input
-                      type="text"
-                      placeholder={t("providers.form.scopeDescription")}
-                      value={scope.description ?? ""}
-                      onChange={(e) => {
-                        const next = [...availableScopes];
-                        next[idx] = { ...next[idx], description: e.target.value || undefined };
-                        setAvailableScopes(next);
-                      }}
-                      style={{ marginTop: "0.25rem", width: "100%" }}
-                    />
                   </div>
                 ))}
                 <button

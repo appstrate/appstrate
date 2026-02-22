@@ -37,7 +37,6 @@ const createProviderSchema = z.object({
       z.object({
         value: z.string(),
         label: z.string(),
-        description: z.string().optional(),
       }),
     )
     .optional(),

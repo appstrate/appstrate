@@ -188,7 +188,6 @@ export interface Integration {
 export interface AvailableScope {
   value: string;
   label: string;
-  description?: string;
 }
 
 // --- Provider Config Types ---
