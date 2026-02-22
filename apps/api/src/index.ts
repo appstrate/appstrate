@@ -17,6 +17,7 @@ import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
 import { createLibraryRouter } from "./routes/library.ts";
+import { createProvidersRouter } from "./routes/providers.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
@@ -58,10 +59,12 @@ async function verifyUser(authHeader: string | undefined) {
 app.use("*", async (c, next) => {
   const path = c.req.path;
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  // OAuth callback is a redirect from the provider — no JWT
+  if (path === "/auth/callback") return next();
 
   const user = await verifyUser(c.req.header("Authorization"));
   if (!user) {
-    return c.json({ error: "UNAUTHORIZED", message: "Token invalide ou manquant" }, 401);
+    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing token" }, 401);
   }
   c.set("user", user);
   return next();
@@ -74,6 +77,7 @@ app.use("*", async (c, next) => {
 
   // Skip org context for routes that don't need it
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  if (path === "/auth/callback") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
   // Allow /api/orgs/:orgId/* routes (they handle their own auth)
   if (path.startsWith("/api/orgs/")) return next();
@@ -126,6 +130,15 @@ try {
   await initScheduler();
 } catch (err) {
   logger.warn("Could not initialize scheduler", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Clean up expired OAuth states
+try {
+  await supabase.rpc("cleanup_expired_oauth_states");
+} catch (err) {
+  logger.warn("Could not clean up expired OAuth states", {
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -188,6 +201,7 @@ app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
+app.route("/api/providers", createProvidersRouter());
 app.route("/api", profileRouter);
 app.route("/auth", authRouter);
 

@@ -1,6 +1,5 @@
 import type { SchemaField } from "./schema-section";
 import type { ExecutionSettings } from "./execution-section";
-import type { CredentialPresetId } from "./credential-presets";
 
 export type EditorTab =
   | "general"
@@ -13,15 +12,9 @@ export type EditorTab =
 
 export interface ServiceEntry {
   id: string;
-  name: string;
   provider: string;
-  description: string;
   scopes: string;
   connectionMode: "user" | "admin";
-  credentialSchema: SchemaField[];
-  authorizedUris: string;
-  allowAllUris: boolean;
-  schemaPreset: CredentialPresetId;
 }
 
 export interface ResourceEntry {

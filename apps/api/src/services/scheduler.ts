@@ -3,18 +3,11 @@ import { Cron } from "croner";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, Json } from "@appstrate/shared-types";
-import {
-  getFlowConfig,
-  getLastExecutionState,
-  createExecution,
-  getAdminConnections,
-} from "./state.ts";
-import { getConnectionStatus, getAccessToken } from "./nango.ts";
+import { createExecution, getAdminConnections } from "./state.ts";
+import { getConnectionStatus } from "./connection-manager.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import { buildPromptContext, buildExecutionApi } from "./env-builder.ts";
-import { getFlowPackage } from "./flow-package.ts";
+import { buildExecutionContext } from "./env-builder.ts";
 import { getFlow, flowExists } from "./flow-service.ts";
-import { getLatestVersionId } from "./flow-versions.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -125,7 +118,7 @@ export async function updateSchedule(
   // Restart or stop the cron job
   stopCronJob(id);
   if (schedule.enabled) {
-    const orgId = scheduleOrgCache.get(id) ?? (existing as unknown as { org_id: string }).org_id;
+    const orgId = scheduleOrgCache.get(id) ?? existing.org_id;
     startCronJob(schedule, orgId);
   }
 
@@ -207,24 +200,17 @@ async function triggerScheduledExecution(
 
     // Validate service dependencies — skip if not connected
     const adminConns = await getAdminConnections(orgId, flowId);
-    const tokens: Record<string, string> = {};
     for (const svc of flow.manifest.requires.services) {
       const mode = svc.connectionMode ?? "user";
-      let tokenUserId: string;
+      const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
 
-      if (mode === "admin") {
-        const adminUserId = adminConns[svc.id];
-        if (!adminUserId) {
-          logger.warn("Admin service not bound, skipping schedule", {
-            serviceId: svc.id,
-            scheduleId,
-            flowId,
-          });
-          return;
-        }
-        tokenUserId = adminUserId;
-      } else {
-        tokenUserId = userId;
+      if (!tokenUserId) {
+        logger.warn("Admin service not bound, skipping schedule", {
+          serviceId: svc.id,
+          scheduleId,
+          flowId,
+        });
+        return;
       }
 
       const conn = await getConnectionStatus(svc.provider, orgId, tokenUserId);
@@ -237,31 +223,19 @@ async function triggerScheduledExecution(
         });
         return;
       }
-      const token = await getAccessToken(svc.provider, orgId, tokenUserId);
-      if (token) tokens[svc.id] = token;
     }
 
-    // Get config and previous state
-    const config = await getFlowConfig(orgId, flowId);
-    const previousState = await getLastExecutionState(flowId, userId, orgId);
-
-    // Build prompt context
     const executionId = `exec_${crypto.randomUUID()}`;
-    const promptContext = buildPromptContext({
+
+    // Build execution context (tokens, config, state, providers, package, version)
+    const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
+      executionId,
       flow,
-      tokens,
-      config,
-      previousState,
-      executionApi: buildExecutionApi(executionId),
+      adminConns,
+      orgId,
+      userId,
       input,
     });
-
-    // Get flow package (ZIP) for injection into container
-    const flowPackage = await getFlowPackage(flow, orgId);
-
-    // Get flow version ID for user flows
-    const flowVersionId =
-      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
 
     // Create execution record with schedule_id and version
     await createExecution(
@@ -341,7 +315,7 @@ export async function initScheduler() {
       });
       continue;
     }
-    const orgId = (schedule as unknown as { org_id: string }).org_id;
+    const orgId = schedule.org_id;
     startCronJob(schedule, orgId);
     started++;
   }

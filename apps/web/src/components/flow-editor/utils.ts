@@ -2,7 +2,6 @@ import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { getOrderedKeys } from "@appstrate/shared-types";
-import { detectPreset } from "./credential-presets";
 
 export function toResourceEntry(r: {
   id: string;
@@ -123,21 +122,12 @@ export function fieldsToSchema(
 }
 
 export function detailToFormState(detail: FlowDetail): FlowFormState {
-  const services: ServiceEntry[] = detail.requires.services.map((s) => {
-    const credentialSchema = s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [];
-    return {
-      id: s.id,
-      name: s.name ?? "",
-      provider: s.provider,
-      description: s.description,
-      scopes: "",
-      connectionMode: s.connectionMode === "admin" ? "admin" : "user",
-      credentialSchema,
-      authorizedUris: s.authorizedUris?.join("\n") ?? "",
-      allowAllUris: s.allowAllUris ?? false,
-      schemaPreset: s.provider === "custom" ? detectPreset(credentialSchema) : "custom",
-    };
-  });
+  const services: ServiceEntry[] = detail.requires.services.map((s) => ({
+    id: s.id,
+    provider: s.provider,
+    scopes: "",
+    connectionMode: s.connectionMode === "admin" ? "admin" : "user",
+  }));
 
   return {
     metadata: {
@@ -178,25 +168,13 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
           const svc: Record<string, unknown> = {
             id: s.id,
             provider: s.provider,
-            description: s.description,
           };
-          if (s.name) svc.name = s.name;
           const scopes = s.scopes
             .split(",")
             .map((v) => v.trim())
             .filter(Boolean);
           if (scopes.length > 0) svc.scopes = scopes;
           svc.connectionMode = s.connectionMode || "user";
-          if (s.provider === "custom") {
-            const schema = fieldsToSchema(s.credentialSchema, "credentials");
-            if (schema) svc.schema = schema;
-          }
-          const uris = s.authorizedUris
-            .split(/[,\n]/)
-            .map((u) => u.trim())
-            .filter(Boolean);
-          if (uris.length > 0) svc.authorized_uris = uris;
-          if (s.allowAllUris) svc.allow_all_uris = true;
           return svc;
         }),
       skills: state.skills,
@@ -237,27 +215,12 @@ export function payloadToFormState(payload: {
   const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
   const execution = (manifest.execution as Record<string, unknown>) || {};
 
-  const services: ServiceEntry[] = rawServices.map((s) => {
-    const provider = (s.provider as string) || "";
-    const credentialSchema =
-      provider === "custom"
-        ? schemaToFields(s.schema as JSONSchemaObject | undefined, "credentials")
-        : [];
-    return {
-      id: (s.id as string) || "",
-      name: (s.name as string) || "",
-      provider,
-      description: (s.description as string) || "",
-      scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
-      connectionMode: (s.connectionMode as "user" | "admin") || "user",
-      credentialSchema,
-      authorizedUris: Array.isArray(s.authorized_uris)
-        ? (s.authorized_uris as string[]).join("\n")
-        : "",
-      allowAllUris: (s.allow_all_uris as boolean) ?? false,
-      schemaPreset: provider === "custom" ? detectPreset(credentialSchema) : "custom",
-    };
-  });
+  const services: ServiceEntry[] = rawServices.map((s) => ({
+    id: (s.id as string) || "",
+    provider: (s.provider as string) || "",
+    scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
+    connectionMode: (s.connectionMode as "user" | "admin") || "user",
+  }));
 
   const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
   const skills = rawSkills.map((s) =>

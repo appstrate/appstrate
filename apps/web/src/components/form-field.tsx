@@ -1,10 +1,11 @@
-interface FormFieldProps {
+export interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;
   type?: "text" | "number";
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   description?: string;
   enumValues?: string[];
@@ -17,6 +18,7 @@ export function FormField({
   type = "text",
   value,
   onChange,
+  onBlur,
   placeholder,
   description,
   enumValues,
@@ -48,6 +50,7 @@ export function FormField({
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
           placeholder={placeholder}
           aria-describedby={hintId}
         />

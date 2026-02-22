@@ -37,7 +37,7 @@ const serviceRequirementSchema = z.object({
   name: z.string().optional(),
   provider: z.string(),
   scopes: z.array(z.string()).optional().default([]),
-  description: z.string(),
+  description: z.string().optional(),
   connectionMode: z.enum(["user", "admin"]).optional().default("user"),
   schema: jsonSchemaObjectSchema.optional(),
   authorized_uris: z.array(z.string()).optional(),

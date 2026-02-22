@@ -1,17 +1,65 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
-import {
-  getRecentExecutions,
-  getAdminConnections,
-  getCustomCredentials,
-} from "../services/state.ts";
+import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getFlow } from "../services/flow-service.ts";
-import { getAccessToken } from "../services/nango.ts";
-import {
-  getDefaultAuthorizedUris,
-  getNangoCredentialField,
-} from "../services/adapters/provider-urls.ts";
+import { resolveCredentialsForProxy } from "@appstrate/connect";
+
+/**
+ * Verify the execution token from the Authorization header.
+ * Returns the execution data or an HTTP error response.
+ */
+async function verifyExecutionToken(c: Context): Promise<
+  | {
+      ok: true;
+      executionId: string;
+      execution: { flow_id: string; user_id: string; org_id: string; status: string };
+    }
+  | { ok: false; response: Response }
+> {
+  const authHeader = c.req.header("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return {
+      ok: false,
+      response: c.json({ error: "UNAUTHORIZED", message: "Missing execution token" }, 401),
+    };
+  }
+
+  const executionId = authHeader.slice(7);
+  if (!executionId) {
+    return {
+      ok: false,
+      response: c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401),
+    };
+  }
+
+  const { data: execution, error } = await supabase
+    .from("executions")
+    .select("flow_id, user_id, org_id, status")
+    .eq("id", executionId)
+    .single();
+
+  if (error || !execution) {
+    return {
+      ok: false,
+      response: c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404),
+    };
+  }
+
+  if (execution.status !== "running") {
+    return {
+      ok: false,
+      response: c.json({ error: "FORBIDDEN", message: "Execution is not running" }, 403),
+    };
+  }
+
+  return {
+    ok: true,
+    executionId,
+    execution: execution as { flow_id: string; user_id: string; org_id: string; status: string },
+  };
+}
 
 export function createInternalRouter() {
   const router = new Hono();
@@ -19,30 +67,10 @@ export function createInternalRouter() {
   // GET /internal/execution-history — called from inside containers
   // Auth: Bearer <executionId> (verified against executions table, must be running)
   router.get("/execution-history", async (c) => {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return c.json({ error: "UNAUTHORIZED", message: "Missing execution token" }, 401);
-    }
+    const auth = await verifyExecutionToken(c);
+    if (!auth.ok) return auth.response;
 
-    const executionId = authHeader.slice(7);
-    if (!executionId) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401);
-    }
-
-    // Look up the execution — must exist and be running
-    const { data: execution, error } = await supabase
-      .from("executions")
-      .select("flow_id, user_id, org_id, status")
-      .eq("id", executionId)
-      .single();
-
-    if (error || !execution) {
-      return c.json({ error: "UNAUTHORIZED", message: "Execution not found" }, 401);
-    }
-
-    if (execution.status !== "running") {
-      return c.json({ error: "UNAUTHORIZED", message: "Execution is not running" }, 401);
-    }
+    const { executionId, execution } = auth;
 
     // Parse query parameters
     const limitParam = c.req.query("limit");
@@ -88,32 +116,11 @@ export function createInternalRouter() {
   // Auth: Bearer <executionId> (same mechanism as execution-history)
   // Returns unified format: { credentials: Record<string, string>, authorizedUris: string[] | null }
   router.get("/credentials/:serviceId", async (c) => {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return c.json({ error: "UNAUTHORIZED", message: "Missing execution token" }, 401);
-    }
+    const auth = await verifyExecutionToken(c);
+    if (!auth.ok) return auth.response;
 
-    const executionId = authHeader.slice(7);
-    if (!executionId) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401);
-    }
-
+    const { executionId, execution } = auth;
     const serviceId = c.req.param("serviceId");
-
-    // Look up the execution — must exist and be running
-    const { data: execution, error } = await supabase
-      .from("executions")
-      .select("flow_id, user_id, org_id, status")
-      .eq("id", executionId)
-      .single();
-
-    if (error || !execution) {
-      return c.json({ error: "UNAUTHORIZED", message: "Execution not found" }, 401);
-    }
-
-    if (execution.status !== "running") {
-      return c.json({ error: "UNAUTHORIZED", message: "Execution is not running" }, 401);
-    }
 
     // Load the flow to validate the requested service
     const flow = await getFlow(execution.flow_id, execution.org_id);
@@ -151,53 +158,23 @@ export function createInternalRouter() {
         }
       }
 
-      // Custom service — return credentials from DB
-      if (service.provider === "custom") {
-        const creds = await getCustomCredentials(
-          tokenOrgId,
-          tokenUserId,
-          execution.flow_id,
-          serviceId,
-        );
-        if (!creds) {
-          return c.json(
-            {
-              error: "TOKEN_NOT_AVAILABLE",
-              message: `No credentials for custom service '${serviceId}'`,
-            },
-            404,
-          );
-        }
+      // Unified credential resolution — all services resolve via provider
+      const result = await resolveCredentialsForProxy(
+        supabase,
+        tokenOrgId,
+        tokenUserId,
+        service.provider,
+      );
 
-        logger.info("Credential access (custom)", {
-          executionId,
-          serviceId,
-          flowId: execution.flow_id,
-          connectionMode,
-        });
-
-        return c.json({
-          credentials: creds,
-          authorizedUris: service.authorized_uris ?? null,
-          allowAllUris: service.allow_all_uris ?? false,
-        });
-      }
-
-      // Nango service — return token wrapped in unified format
-      const token = await getAccessToken(service.provider, tokenOrgId, tokenUserId);
-      if (!token) {
+      if (!result) {
         return c.json(
           {
             error: "TOKEN_NOT_AVAILABLE",
-            message: `No active connection for service '${serviceId}'`,
+            message: `No credentials for service '${serviceId}'`,
           },
           404,
         );
       }
-
-      const { name: fieldName } = getNangoCredentialField(serviceId);
-      const authorizedUris =
-        service.authorized_uris ?? getDefaultAuthorizedUris(serviceId, service.provider);
 
       logger.info("Credential access", {
         executionId,
@@ -207,11 +184,7 @@ export function createInternalRouter() {
         connectionMode,
       });
 
-      return c.json({
-        credentials: { [fieldName]: token },
-        authorizedUris,
-        allowAllUris: service.allow_all_uris ?? false,
-      });
+      return c.json(result);
     } catch (err) {
       logger.error("Failed to resolve credentials", {
         executionId,

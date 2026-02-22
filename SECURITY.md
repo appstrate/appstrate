@@ -529,7 +529,7 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 | **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards |
 | **AU-3** Content of Audit Records           | Structured JSON logging with execution context                     |
 | **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                   |
-| **SC-28** Protection of Information at Rest | Credentials stored in Nango (encrypted) or Supabase (RLS)          |
+| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in Supabase (RLS)            |
 
 ### CIS Docker Benchmark v1.8.0
 
