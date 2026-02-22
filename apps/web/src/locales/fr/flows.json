@@ -165,7 +165,7 @@
   "editor.jsonApply": "Appliquer au formulaire",
   "editor.scopeDesc": "description",
   "editor.scopePlaceholder": "scopes (virgule)",
-  "editor.customScopePlaceholder": "Ajouter un scope custom...",
+  "editor.customScopePlaceholder": "Sélectionner un scope...",
   "editor.addScope": "Ajouter",
   "editor.addCustomService": "+ Connecteur custom",
   "editor.customServiceId": "Identifiant du connecteur",

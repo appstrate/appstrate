@@ -14,7 +14,6 @@ interface ServicePickerProps {
 interface ScopeOption {
   value: string;
   label: string;
-  description?: string;
 }
 
 const scopeSelectStyles: StylesConfig<ScopeOption, true> = {
@@ -121,7 +120,6 @@ function ScopeMultiSelect({
       (availableScopes ?? []).map((s) => ({
         value: s.value,
         label: s.label,
-        description: s.description,
       })),
     [availableScopes],
   );
@@ -136,12 +134,12 @@ function ScopeMultiSelect({
   };
 
   const formatOptionLabel = (option: ScopeOption, ctx: { context: string }) => {
-    if (ctx.context === "menu" && option.description) {
+    if (ctx.context === "menu") {
       return (
         <div>
           <div style={{ fontWeight: 500 }}>{option.label}</div>
           <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "1px" }}>
-            {option.description}
+            {option.value}
           </div>
         </div>
       );
