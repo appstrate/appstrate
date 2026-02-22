@@ -5,6 +5,12 @@ import { supabase, ensureBucket } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
 import { FLOWS_DIR } from "./flow-service.ts";
+import {
+  isBuiltInSkill,
+  isBuiltInExtension,
+  getBuiltInSkillFiles,
+  getBuiltInExtensionFile,
+} from "./builtin-library.ts";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -88,7 +94,7 @@ export async function getFlowPackage(flow: LoadedFlow, orgId?: string): Promise<
   return downloadFlowPackage(flow.id);
 }
 
-/** Build a user flow package ZIP on-the-fly from org library content. */
+/** Build a user flow package ZIP on-the-fly from org library + built-in content. */
 async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Buffer> {
   const { getFlowSkillFiles, getFlowExtensionFiles } = await import("./library.ts");
 
@@ -97,7 +103,7 @@ async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Bu
     "prompt.md": new TextEncoder().encode(flow.prompt),
   };
 
-  // Fetch all skill files (including assets) and add to ZIP under skills/{id}/...
+  // Fetch org skill files from library storage
   const skillFiles = await getFlowSkillFiles(flow.id, orgId);
   for (const [skillId, files] of skillFiles) {
     for (const [filePath, content] of Object.entries(files)) {
@@ -105,11 +111,34 @@ async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Bu
     }
   }
 
-  // Fetch all extension files and add to ZIP under extensions/...
+  // Add built-in skills referenced by the flow
+  for (const skill of flow.skills) {
+    if (isBuiltInSkill(skill.id) && !skillFiles.has(skill.id)) {
+      const files = await getBuiltInSkillFiles(skill.id);
+      if (files) {
+        for (const [filePath, content] of Object.entries(files)) {
+          entries[`skills/${skill.id}/${filePath}`] = content;
+        }
+      }
+    }
+  }
+
+  // Fetch org extension files from library storage
   const extFiles = await getFlowExtensionFiles(flow.id, orgId);
   for (const [, files] of extFiles) {
     for (const [filePath, content] of Object.entries(files)) {
       entries[`extensions/${filePath}`] = content;
+    }
+  }
+
+  // Add built-in extensions referenced by the flow
+  const orgExtIds = new Set([...extFiles.keys()]);
+  for (const ext of flow.extensions) {
+    if (isBuiltInExtension(ext.id) && !orgExtIds.has(ext.id)) {
+      const file = await getBuiltInExtensionFile(ext.id);
+      if (file) {
+        entries[`extensions/${ext.id}.ts`] = file;
+      }
     }
   }
 

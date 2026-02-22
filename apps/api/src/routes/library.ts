@@ -12,6 +12,7 @@ import {
   deleteOrgExtension,
   uploadLibraryPackage,
 } from "../services/library.ts";
+import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { extractSkillMeta } from "../services/skill-utils.ts";
 import { unzipAndNormalize } from "../services/flow-package.ts";
 import { requireAdmin } from "../middleware/guards.ts";
@@ -192,6 +193,16 @@ export function createLibraryRouter() {
     });
     if (parsed instanceof Response) return parsed;
 
+    if (isBuiltInSkill(parsed.id)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `Le skill '${parsed.id}' est integre et ne peut pas etre modifie`,
+        },
+        403,
+      );
+    }
+
     const skill = await upsertOrgSkill(orgId, {
       id: parsed.id,
       name: parsed.name,
@@ -227,6 +238,16 @@ export function createLibraryRouter() {
     const user = c.get("user");
     const skillId = c.req.param("id");
 
+    if (isBuiltInSkill(skillId)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `Le skill '${skillId}' est integre et ne peut pas etre modifie`,
+        },
+        403,
+      );
+    }
+
     const existing = await getOrgSkill(orgId, skillId);
     if (!existing) {
       return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' introuvable` }, 404);
@@ -248,6 +269,16 @@ export function createLibraryRouter() {
   router.delete("/skills/:id", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const skillId = c.req.param("id");
+
+    if (isBuiltInSkill(skillId)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `Le skill '${skillId}' est integre et ne peut pas etre supprime`,
+        },
+        403,
+      );
+    }
 
     const result = await deleteOrgSkill(orgId, skillId);
     if (!result.ok) {
@@ -286,6 +317,16 @@ export function createLibraryRouter() {
     });
     if (parsed instanceof Response) return parsed;
 
+    if (isBuiltInExtension(parsed.id)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `L'extension '${parsed.id}' est integree et ne peut pas etre modifiee`,
+        },
+        403,
+      );
+    }
+
     const ext = await upsertOrgExtension(orgId, {
       id: parsed.id,
       name: parsed.name,
@@ -318,6 +359,16 @@ export function createLibraryRouter() {
     const user = c.get("user");
     const extId = c.req.param("id");
 
+    if (isBuiltInExtension(extId)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `L'extension '${extId}' est integree et ne peut pas etre modifiee`,
+        },
+        403,
+      );
+    }
+
     const existing = await getOrgExtension(orgId, extId);
     if (!existing) {
       return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' introuvable` }, 404);
@@ -341,6 +392,16 @@ export function createLibraryRouter() {
   router.delete("/extensions/:id", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const extId = c.req.param("id");
+
+    if (isBuiltInExtension(extId)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `L'extension '${extId}' est integree et ne peut pas etre supprimee`,
+        },
+        403,
+      );
+    }
 
     const result = await deleteOrgExtension(orgId, extId);
     if (!result.ok) {

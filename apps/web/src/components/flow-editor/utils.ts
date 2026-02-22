@@ -125,12 +125,8 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
   const services: ServiceEntry[] = detail.requires.services.map((s) => ({
     id: s.id,
     provider: s.provider,
-    description: s.description,
-    scopes: "",
+    scopes: s.scopesRequired ?? [],
     connectionMode: s.connectionMode === "admin" ? "admin" : "user",
-    credentialSchema: s.provider === "custom" ? schemaToFields(s.schema, "credentials") : [],
-    authorizedUris: s.authorizedUris?.join("\n") ?? "",
-    allowAllUris: s.allowAllUris ?? false,
   }));
 
   return {
@@ -172,24 +168,10 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
           const svc: Record<string, unknown> = {
             id: s.id,
             provider: s.provider,
-            description: s.description,
           };
-          const scopes = s.scopes
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean);
+          const scopes = s.scopes.filter(Boolean);
           if (scopes.length > 0) svc.scopes = scopes;
           svc.connectionMode = s.connectionMode || "user";
-          if (s.provider === "custom") {
-            const schema = fieldsToSchema(s.credentialSchema, "credentials");
-            if (schema) svc.schema = schema;
-          }
-          const uris = s.authorizedUris
-            .split(/[,\n]/)
-            .map((u) => u.trim())
-            .filter(Boolean);
-          if (uris.length > 0) svc.authorized_uris = uris;
-          if (s.allowAllUris) svc.allow_all_uris = true;
           return svc;
         }),
       skills: state.skills,
@@ -230,24 +212,12 @@ export function payloadToFormState(payload: {
   const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
   const execution = (manifest.execution as Record<string, unknown>) || {};
 
-  const services: ServiceEntry[] = rawServices.map((s) => {
-    const provider = (s.provider as string) || "";
-    return {
-      id: (s.id as string) || "",
-      provider,
-      description: (s.description as string) || "",
-      scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
-      connectionMode: (s.connectionMode as "user" | "admin") || "user",
-      credentialSchema:
-        provider === "custom"
-          ? schemaToFields(s.schema as JSONSchemaObject | undefined, "credentials")
-          : [],
-      authorizedUris: Array.isArray(s.authorized_uris)
-        ? (s.authorized_uris as string[]).join("\n")
-        : "",
-      allowAllUris: (s.allow_all_uris as boolean) ?? false,
-    };
-  });
+  const services: ServiceEntry[] = rawServices.map((s) => ({
+    id: (s.id as string) || "",
+    provider: (s.provider as string) || "",
+    scopes: Array.isArray(s.scopes) ? (s.scopes as string[]) : [],
+    connectionMode: (s.connectionMode as "user" | "admin") || "user",
+  }));
 
   const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
   const skills = rawSkills.map((s) =>

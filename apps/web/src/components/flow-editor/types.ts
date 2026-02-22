@@ -13,12 +13,8 @@ export type EditorTab =
 export interface ServiceEntry {
   id: string;
   provider: string;
-  description: string;
-  scopes: string;
+  scopes: string[];
   connectionMode: "user" | "admin";
-  credentialSchema: SchemaField[];
-  authorizedUris: string;
-  allowAllUris: boolean;
 }
 
 export interface ResourceEntry {

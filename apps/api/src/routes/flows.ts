@@ -9,11 +9,8 @@ import {
   getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
-  setCustomCredentials,
-  deleteCustomCredentials,
-  hasCustomCredentials,
 } from "../services/state.ts";
-import { getConnectionStatus, resolveServiceStatuses } from "../services/nango.ts";
+import { getConnectionStatus, resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateConfig } from "../services/schema.ts";
 import { getFlowById } from "../services/user-flows.ts";
 import { listFlows } from "../services/flow-service.ts";
@@ -66,7 +63,6 @@ export function createFlowsRouter() {
       adminConns,
       orgId,
       user.id,
-      flow.id,
     );
 
     // Get config (global), last execution (per-user), running count (per-user)
@@ -145,7 +141,7 @@ export function createFlowsRouter() {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: "Configuration invalide",
+          message: "Invalid configuration",
           details: validation.errors.map((e) => ({ field: e.field, error: e.message })),
         },
         400,
@@ -174,7 +170,7 @@ export function createFlowsRouter() {
 
     const zipBuffer = await getFlowPackage(flow, orgId);
     if (!zipBuffer) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: "Package introuvable" }, 404);
+      return c.json({ error: "FLOW_NOT_FOUND", message: "Package not found" }, 404);
     }
 
     c.header("Content-Type", "application/zip");
@@ -214,7 +210,7 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
         404,
       );
     }
@@ -222,7 +218,7 @@ export function createFlowsRouter() {
       return c.json(
         {
           error: "INVALID_CONNECTION_MODE",
-          message: `Le connecteur '${serviceId}' n'est pas en mode admin`,
+          message: `Service '${serviceId}' is not in admin mode`,
         },
         400,
       );
@@ -230,30 +226,15 @@ export function createFlowsRouter() {
 
     // Verify admin has a connection for this provider
     const orgId = c.get("orgId");
-
-    if (svc.provider === "custom") {
-      // For custom services, check that admin has saved credentials
-      const hasCreds = await hasCustomCredentials(orgId, user.id, flow.id, serviceId);
-      if (!hasCreds) {
-        return c.json(
-          {
-            error: "ADMIN_NOT_CONNECTED",
-            message: `Vous n'avez pas de credentials pour '${serviceId}'`,
-          },
-          400,
-        );
-      }
-    } else {
-      const conn = await getConnectionStatus(svc.provider, orgId, user.id);
-      if (conn.status !== "connected") {
-        return c.json(
-          {
-            error: "ADMIN_NOT_CONNECTED",
-            message: `Vous n'avez pas de connexion active pour '${svc.provider}'`,
-          },
-          400,
-        );
-      }
+    const conn = await getConnectionStatus(svc.provider, orgId, user.id);
+    if (conn.status !== "connected") {
+      return c.json(
+        {
+          error: "ADMIN_NOT_CONNECTED",
+          message: `No active connection for '${svc.provider}'`,
+        },
+        400,
+      );
     }
 
     await bindAdminConnection(orgId, flow.id, serviceId, user.id);
@@ -268,68 +249,13 @@ export function createFlowsRouter() {
     const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
     if (!svc) {
       return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
+        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
         404,
       );
     }
 
     await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
     return c.json({ unbound: true });
-  });
-
-  // POST /api/flows/:id/services/:serviceId/credentials — save custom service credentials
-  router.post("/:id/services/:serviceId/credentials", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const orgId = c.get("orgId");
-    const serviceId = c.req.param("serviceId");
-
-    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
-    if (!svc) {
-      return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
-        404,
-      );
-    }
-    if (svc.provider !== "custom") {
-      return c.json(
-        {
-          error: "INVALID_PROVIDER",
-          message: `Le connecteur '${serviceId}' n'est pas un connecteur custom`,
-        },
-        400,
-      );
-    }
-
-    const body = await c.req.json<{ credentials: Record<string, string> }>();
-    if (!body.credentials || typeof body.credentials !== "object") {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Le champ 'credentials' est requis" },
-        400,
-      );
-    }
-
-    await setCustomCredentials(orgId, user.id, flow.id, serviceId, body.credentials);
-    return c.json({ saved: true });
-  });
-
-  // DELETE /api/flows/:id/services/:serviceId/credentials — delete custom service credentials
-  router.delete("/:id/services/:serviceId/credentials", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const orgId = c.get("orgId");
-    const serviceId = c.req.param("serviceId");
-
-    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
-    if (!svc) {
-      return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Connecteur '${serviceId}' introuvable` },
-        404,
-      );
-    }
-
-    await deleteCustomCredentials(orgId, user.id, flow.id, serviceId);
-    return c.json({ deleted: true });
   });
 
   // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)
@@ -348,7 +274,7 @@ export function createFlowsRouter() {
           {
             error: "SHARE_NOT_ALLOWED",
             message:
-              "Ce flow ne peut pas etre partage publiquement car il necessite des connexions utilisateur.",
+              "This flow cannot be shared publicly because it requires user-mode connections.",
           },
           400,
         );
@@ -361,8 +287,7 @@ export function createFlowsRouter() {
           return c.json(
             {
               error: "SHARE_NOT_READY",
-              message:
-                "Tous les connecteurs admin doivent etre lies avant de generer un lien public.",
+              message: "All admin services must be bound before generating a public link.",
             },
             400,
           );

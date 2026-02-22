@@ -1,9 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { supabase } from "./lib/supabase.ts";
 import { logger } from "./lib/logger.ts";
+import { initBuiltInProviders } from "@appstrate/connect";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
+import { initBuiltInLibrary } from "./services/builtin-library.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
@@ -17,6 +21,7 @@ import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
 import { createLibraryRouter } from "./routes/library.ts";
+import { createProvidersRouter } from "./routes/providers.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
@@ -58,10 +63,12 @@ async function verifyUser(authHeader: string | undefined) {
 app.use("*", async (c, next) => {
   const path = c.req.path;
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  // OAuth callback is a redirect from the provider — no JWT
+  if (path === "/auth/callback") return next();
 
   const user = await verifyUser(c.req.header("Authorization"));
   if (!user) {
-    return c.json({ error: "UNAUTHORIZED", message: "Token invalide ou manquant" }, 401);
+    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing token" }, 401);
   }
   c.set("user", user);
   return next();
@@ -74,6 +81,7 @@ app.use("*", async (c, next) => {
 
   // Skip org context for routes that don't need it
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  if (path === "/auth/callback") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
   // Allow /api/orgs/:orgId/* routes (they handle their own auth)
   if (path.startsWith("/api/orgs/")) return next();
@@ -81,10 +89,24 @@ app.use("*", async (c, next) => {
   return requireOrgContext()(c, next);
 });
 
+// Load built-in providers from data/providers.json + SYSTEM_PROVIDERS env var
+const providersPath = join(process.cwd(), "data", "providers.json");
+try {
+  const fileProviders = JSON.parse(readFileSync(providersPath, "utf-8"));
+  initBuiltInProviders(fileProviders);
+  logger.info("Built-in providers loaded", { count: fileProviders.length });
+} catch {
+  initBuiltInProviders();
+  logger.info("Built-in providers loaded (env var only)");
+}
+
 // Load built-in flows from filesystem
 logger.info("Loading flows...");
 await initFlowService();
 logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
+
+// Load built-in library (skills + extensions) from data/
+await initBuiltInLibrary();
 
 // Ensure Supabase Storage buckets
 try {
@@ -126,6 +148,15 @@ try {
   await initScheduler();
 } catch (err) {
   logger.warn("Could not initialize scheduler", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Clean up expired OAuth states
+try {
+  await supabase.rpc("cleanup_expired_oauth_states");
+} catch (err) {
+  logger.warn("Could not clean up expired OAuth states", {
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -188,6 +219,7 @@ app.route("/api/flows", flowsRouter);
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
+app.route("/api/providers", createProvidersRouter());
 app.route("/api", profileRouter);
 app.route("/auth", authRouter);
 

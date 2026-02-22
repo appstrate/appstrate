@@ -77,6 +77,7 @@ export function getOrderedKeys(schema: JSONSchemaObject): string[] {
 
 export interface ServiceStatus {
   id: string;
+  name?: string;
   provider: string;
   description: string;
   status: "connected" | "not_connected";
@@ -86,9 +87,11 @@ export interface ServiceStatus {
   adminProvided?: boolean;
   adminUserId?: string;
   adminDisplayName?: string;
-  schema?: JSONSchemaObject;
-  authorizedUris?: string[];
-  allowAllUris?: boolean;
+  // Scope validation
+  scopesRequired?: string[];
+  scopesGranted?: string[];
+  scopesSufficient?: boolean;
+  scopesMissing?: string[];
 }
 
 export interface FlowListItem {
@@ -138,6 +141,7 @@ export interface OrgSkill {
   id: string;
   name?: string | null;
   description?: string | null;
+  source?: "built-in" | "user";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;
@@ -154,6 +158,7 @@ export interface OrgExtension {
   id: string;
   name?: string | null;
   description?: string | null;
+  source?: "built-in" | "user";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;
@@ -176,4 +181,41 @@ export interface Integration {
   status: "connected" | "not_connected";
   authMode?: string;
   connectedAt?: string;
+}
+
+// --- Available Scope Types ---
+
+export interface AvailableScope {
+  value: string;
+  label: string;
+}
+
+// --- Provider Config Types ---
+
+export interface ProviderConfig {
+  id: string;
+  displayName: string;
+  authMode: "oauth2" | "api_key" | "basic" | "custom";
+  source: "built-in" | "custom";
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  defaultScopes?: string[];
+  scopeSeparator?: string;
+  pkceEnabled?: boolean;
+  authorizationParams?: Record<string, string>;
+  tokenParams?: Record<string, string>;
+  credentialSchema?: Record<string, unknown>;
+  credentialFieldName?: string;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  iconUrl?: string;
+  categories?: string[];
+  docsUrl?: string;
+  authorizedUris?: string[];
+  allowAllUris?: boolean;
+  availableScopes?: AvailableScope[];
+  usedByFlows?: number;
 }

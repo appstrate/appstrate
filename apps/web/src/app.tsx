@@ -7,7 +7,6 @@ import { FlowEditorPage } from "./pages/flow-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
-import { ServicesListPage } from "./pages/services-list";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { LibraryPage } from "./pages/library";
 import { CreateOrgPage } from "./pages/create-org";
@@ -133,9 +132,6 @@ function MainLayout() {
           <Link className={`nav-tab ${currentPath === "/library" ? "active" : ""}`} to="/library">
             {t("nav.library")}
           </Link>
-          <Link className={`nav-tab ${currentPath === "/services" ? "active" : ""}`} to="/services">
-            {t("nav.services")}
-          </Link>
         </nav>
         <OrgSwitcher />
         <UserMenu
@@ -236,7 +232,6 @@ export function App() {
               <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/library" element={<LibraryPage />} />
-              <Route path="/services" element={<ServicesListPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

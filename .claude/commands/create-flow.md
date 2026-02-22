@@ -26,7 +26,7 @@ Ask the user which delivery mode they prefer. Default to ZIP if not specified, a
 Before writing anything, ask the user about:
 
 1. **What the flow does** — what data it processes, what actions it takes, what output it produces
-2. **Which external services** it needs (Gmail, ClickUp, Google Calendar, Brevo, or others). Each service must be a Nango integration. Check available integrations with the user.
+2. **Which external services** it needs (Gmail, ClickUp, Google Calendar, Brevo, or others). Each service must have a configured provider. Check available providers with the user.
 3. **User input** — does the flow need per-execution input from the user? (e.g., a search topic, a date range)
 4. **Configuration** — what parameters should be configurable between runs? (e.g., max items to process, language, target list/folder IDs)
 5. **State persistence** — does the flow need to remember anything between runs? (e.g., last_run timestamp, last processed item ID for incremental runs)
@@ -76,7 +76,7 @@ The manifest defines everything about the flow. Follow this structure exactly:
 }
 ```
 - `id`: Short name used in env vars. The token is injected as `TOKEN_{ID_UPPERCASED}` (hyphens become underscores: `brevo-api-key` → `TOKEN_BREVO_API_KEY`)
-- `provider`: Must match a Nango integration unique_key. Known providers: `google-mail`, `google-calendar`, `clickup`, `brevo-api-key`
+- `provider`: Must match a configured provider ID. Known providers: `google-mail`, `google-calendar`, `clickup`, `brevo-api-key`
 - `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
 - `description`: Shown in the UI to explain why this service is needed
 
@@ -379,13 +379,13 @@ After creating the flow files (before packaging):
 
 1. **Check the manifest is valid JSON**: `cat /tmp/appstrate-flow-{flow-name}/{flow-name}/manifest.json | jq .`
 2. **Verify prompt doesn't use template syntax**: Prompts should NOT contain `{{...}}` — all context is injected automatically as structured sections
-3. **Verify service IDs**: Each service in `requires.services` must reference a real Nango provider
+3. **Verify service IDs**: Each service in `requires.services` must reference a configured provider
 4. **For built-in flows**: Restart the dev server (`bun run dev`), the flow should appear in the flow list. Check the logs for "Loaded flow: {name}"
 5. **For ZIP imports**: Import via the UI or API, check the flow appears in the flow list without restart
 
-## Available Nango Providers
+## Available Providers
 
-These integrations are set up by default (via `scripts/setup-nango.ts`):
+These providers are bootstrapped by default (via `SYSTEM_PROVIDERS` env var):
 
 | Provider Key | Type | Description |
 |---|---|---|
@@ -395,7 +395,7 @@ These integrations are set up by default (via `scripts/setup-nango.ts`):
 | `brevo-api-key` | API_KEY | Brevo email marketing API |
 
 If the flow needs a service not in this list, tell the user they need to:
-1. Add the integration to Nango (via Nango UI at :3003 or `setup-nango.ts`)
+1. Add a provider config via the Org Settings page or API (`POST /api/providers`)
 2. Reference the correct `provider` key in the manifest
 
 ## Reference: Complete Manifest Example

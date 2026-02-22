@@ -7,26 +7,14 @@ import {
   linkExecutionToToken,
 } from "../services/share-tokens.ts";
 import { getFlow } from "../services/flow-service.ts";
-import {
-  getFlowConfig,
-  getLastExecutionState,
-  createExecution,
-  getAdminConnections,
-} from "../services/state.ts";
-import { getAccessToken, resolveServiceStatuses } from "../services/nango.ts";
-import {
-  validateInput,
-  validateFileInputs,
-  schemaHasFileFields,
-  parseFormDataFiles,
-} from "../services/schema.ts";
-import { buildPromptContext, buildExecutionApi } from "../services/env-builder.ts";
-import { getFlowPackage } from "../services/flow-package.ts";
-import { getLatestVersionId } from "../services/flow-versions.ts";
+import { createExecution, getAdminConnections } from "../services/state.ts";
+import { resolveServiceStatuses } from "../services/connection-manager.ts";
+import { validateFlowDependencies } from "../services/dependency-validation.ts";
+import { parseRequestInput } from "../services/input-parser.ts";
+import { buildExecutionContext } from "../services/env-builder.ts";
 import { uploadExecutionFiles } from "../services/file-storage.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
-import type { UploadedFile } from "../services/adapters/types.ts";
 import type { FileReference } from "../services/adapters/index.ts";
 
 export function createShareRouter() {
@@ -38,13 +26,13 @@ export function createShareRouter() {
     const shareToken = await getShareToken(token);
 
     if (!shareToken || shareToken.expires_at! < new Date().toISOString()) {
-      return c.json({ error: "TOKEN_INVALID", message: "Ce lien n'est plus valide." }, 410);
+      return c.json({ error: "TOKEN_INVALID", message: "This link is no longer valid." }, 410);
     }
 
     const orgId = shareToken.org_id as string;
     const flow = await getFlow(shareToken.flow_id, orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow introuvable." }, 404);
+      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
 
     // Resolve service statuses
@@ -54,7 +42,6 @@ export function createShareRouter() {
       adminConns,
       orgId,
       undefined,
-      flow.id,
     );
 
     const result: Record<string, unknown> = {
@@ -94,7 +81,10 @@ export function createShareRouter() {
     const consumed = await consumeShareToken(token);
     if (!consumed) {
       return c.json(
-        { error: "TOKEN_INVALID", message: "Ce lien a deja ete utilise ou n'est plus valide." },
+        {
+          error: "TOKEN_INVALID",
+          message: "This link has already been used or is no longer valid.",
+        },
         410,
       );
     }
@@ -103,57 +93,15 @@ export function createShareRouter() {
 
     const flow = await getFlow(flowId, orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow introuvable." }, 404);
+      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
 
     const inputSchema = flow.manifest.input?.schema;
-    const hasFileFields = schemaHasFileFields(inputSchema);
-
-    let body: { input?: Record<string, unknown> };
-    let uploadedFiles: UploadedFile[] | undefined;
-
-    if (hasFileFields) {
-      try {
-        const formData = await c.req.formData();
-        const parsed = await parseFormDataFiles(formData, inputSchema!);
-        body = { input: parsed.input };
-        uploadedFiles = parsed.files;
-      } catch (err) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `Erreur de parsing FormData: ${err instanceof Error ? err.message : String(err)}`,
-          },
-          400,
-        );
-      }
-
-      if (uploadedFiles.length > 0) {
-        const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
-        if (!fileValidation.valid) {
-          const first = fileValidation.errors[0]!;
-          return c.json(
-            { error: "VALIDATION_ERROR", message: first.message, field: first.field },
-            400,
-          );
-        }
-      }
-    } else {
-      try {
-        body = await c.req.json<{ input?: Record<string, unknown> }>();
-      } catch {
-        body = {};
-      }
+    const inputResult = await parseRequestInput(c, inputSchema);
+    if (!inputResult.ok) {
+      return c.json(inputResult.error, inputResult.status);
     }
-
-    // Validate non-file input fields
-    if (inputSchema) {
-      const inputValidation = validateInput(body.input, inputSchema);
-      if (!inputValidation.valid) {
-        const first = inputValidation.errors[0]!;
-        return c.json({ error: "INPUT_REQUIRED", message: first.message, field: first.field }, 400);
-      }
-    }
+    const { input: parsedInput, uploadedFiles } = inputResult.data;
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
@@ -166,48 +114,35 @@ export function createShareRouter() {
         return c.json(
           {
             error: "FILE_UPLOAD_FAILED",
-            message: `Echec de l'upload des fichiers: ${err instanceof Error ? err.message : String(err)}`,
+            message: `File upload failed: ${err instanceof Error ? err.message : String(err)}`,
           },
           500,
         );
       }
     }
 
-    // Resolve config, previous state, and tokens using the admin's (created_by) credentials
+    // Validate service dependencies before execution
     const adminConns = await getAdminConnections(orgId, flowId);
-    const config = await getFlowConfig(orgId, flowId);
-    const previousState = await getLastExecutionState(flowId, userId, orgId);
-    const tokens: Record<string, string> = {};
-    for (const svc of flow.manifest.requires.services) {
-      const mode = svc.connectionMode ?? "user";
-      if (svc.provider === "custom") {
-        tokens[svc.id] = "custom";
-      } else {
-        const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
-        if (tokenUserId) {
-          const accessToken = await getAccessToken(svc.provider, orgId, tokenUserId);
-          if (accessToken) tokens[svc.id] = accessToken;
-        }
-      }
+    const depError = await validateFlowDependencies(
+      flow.manifest.requires.services,
+      adminConns,
+      orgId,
+      userId,
+    );
+    if (depError) {
+      return c.json(depError, 400);
     }
 
-    // Build prompt context
-    const promptContext = buildPromptContext({
+    // Build execution context (tokens, config, state, providers, package, version)
+    const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
+      executionId,
       flow,
-      tokens,
-      config,
-      previousState,
-      executionApi: buildExecutionApi(executionId),
-      input: body.input,
+      adminConns,
+      orgId,
+      userId,
+      input: parsedInput,
       files: fileRefs,
     });
-
-    // Get flow package
-    const flowPackage = await getFlowPackage(flow, orgId);
-
-    // Get flow version ID
-    const flowVersionId =
-      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
 
     // Create execution record (using admin's user_id), then link to share token
     await createExecution(
@@ -215,7 +150,7 @@ export function createShareRouter() {
       flowId,
       userId,
       orgId,
-      body.input ?? null,
+      parsedInput ?? null,
       undefined,
       flowVersionId ?? undefined,
     );
@@ -246,7 +181,7 @@ export function createShareRouter() {
     const shareToken = await getShareToken(token);
 
     if (!shareToken) {
-      return c.json({ error: "TOKEN_INVALID", message: "Ce lien n'est plus valide." }, 410);
+      return c.json({ error: "TOKEN_INVALID", message: "This link is no longer valid." }, 410);
     }
 
     if (!shareToken.execution_id) {

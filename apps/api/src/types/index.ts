@@ -21,6 +21,7 @@ export type {
   Organization,
   OrganizationMember,
   OrganizationWithRole,
+  ProviderConfig,
 } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
@@ -54,12 +55,11 @@ export interface FlowRequirements {
 export interface FlowServiceRequirement {
   id: string;
   provider: string;
-  scopes: string[];
-  description: string;
+  scopes?: string[];
   connectionMode?: "user" | "admin";
-  schema?: import("@appstrate/shared-types").JSONSchemaObject;
-  authorized_uris?: string[];
-  allow_all_uris?: boolean;
+  // Backward compat: tolerated at parsing but ignored at runtime
+  description?: string;
+  name?: string;
 }
 
 export interface FlowInputSpec {

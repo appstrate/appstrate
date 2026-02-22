@@ -91,6 +91,11 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, []);
 
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  }, []);
+
   return {
     session: state.session,
     user: state.user,
@@ -99,5 +104,6 @@ export function useAuth() {
     login,
     signup,
     logout,
+    updatePassword,
   };
 }

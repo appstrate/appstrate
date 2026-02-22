@@ -15,16 +15,6 @@ services:
       timeout: 5s
       retries: 5
 
-  nango-db-init:
-    image: postgres:16-alpine
-    restart: "no"
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    depends_on:
-      appstrate-postgres:
-        condition: service_healthy
-    entrypoint: ["sh", "-c", "psql -h appstrate-postgres -U ${POSTGRES_USER:-appstrate} -tc \"SELECT 1 FROM pg_database WHERE datname='nango'\" | grep -q 1 || psql -h appstrate-postgres -U ${POSTGRES_USER:-appstrate} -c 'CREATE DATABASE nango;'"]
-
   appstrate-redis:
     image: redis:7.2-alpine
     restart: unless-stopped
@@ -35,33 +25,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  nango:
-    image: nangohq/nango-server:hosted
-    platform: linux/amd64
-    restart: unless-stopped
-    mem_limit: 1g
-    networks:
-      - default
-    environment:
-      - NANGO_DB_HOST=appstrate-postgres
-      - NANGO_DB_PORT=5432
-      - NANGO_DB_USER=${POSTGRES_USER:-appstrate}
-      - NANGO_DB_PASSWORD=${POSTGRES_PASSWORD}
-      - NANGO_DB_NAME=nango
-      - NANGO_DB_SSL=false
-      - NANGO_REDIS_URL=redis://appstrate-redis:6379
-      - NANGO_ENCRYPTION_KEY=${NANGO_ENCRYPTION_KEY}
-      - NANGO_SECRET_KEY_DEV=${NANGO_SECRET_KEY}
-      - NANGO_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
-      - NANGO_PUBLIC_SERVER_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
-      - SERVER_PORT=8080
-      - FLAG_AUTH_ENABLED=false
-    depends_on:
-      nango-db-init:
-        condition: service_completed_successfully
-      appstrate-redis:
-        condition: service_healthy
 
   appstrate-pi:
     build:
@@ -93,16 +56,13 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - NANGO_URL=http://nango:8080
-      - NANGO_PUBLIC_URL=${NANGO_PUBLIC_URL:-http://localhost:3003}
-      - NANGO_SECRET_KEY=${NANGO_SECRET_KEY}
+      - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
+      - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      nango:
-        condition: service_started
       appstrate-pi:
         condition: service_completed_successfully
       appstrate-sidecar:

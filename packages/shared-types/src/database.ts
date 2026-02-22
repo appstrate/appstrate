@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -39,44 +34,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      custom_service_credentials: {
-        Row: {
-          created_at: string | null
-          credentials: Json
-          flow_id: string
-          org_id: string
-          service_id: string
-          updated_at: string | null
-          user_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          credentials?: Json
-          flow_id: string
-          org_id: string
-          service_id: string
-          updated_at?: string | null
-          user_id: string
-        }
-        Update: {
-          created_at?: string | null
-          credentials?: Json
-          flow_id?: string
-          org_id?: string
-          service_id?: string
-          updated_at?: string | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "custom_service_credentials_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       execution_logs: {
         Row: {
           created_at: string | null
@@ -454,6 +411,42 @@ export type Database = {
           },
         ]
       }
+      oauth_states: {
+        Row: {
+          code_verifier: string
+          created_at: string | null
+          expires_at: string
+          org_id: string
+          provider_id: string
+          redirect_uri: string
+          scopes_requested: string[] | null
+          state: string
+          user_id: string
+        }
+        Insert: {
+          code_verifier: string
+          created_at?: string | null
+          expires_at?: string
+          org_id: string
+          provider_id: string
+          redirect_uri: string
+          scopes_requested?: string[] | null
+          state: string
+          user_id: string
+        }
+        Update: {
+          code_verifier?: string
+          created_at?: string | null
+          expires_at?: string
+          org_id?: string
+          provider_id?: string
+          redirect_uri?: string
+          scopes_requested?: string[] | null
+          state?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       org_extensions: {
         Row: {
           content: string
@@ -616,6 +609,101 @@ export type Database = {
         }
         Relationships: []
       }
+      provider_configs: {
+        Row: {
+          allow_all_uris: boolean | null
+          auth_mode: string
+          authorization_params: Json | null
+          authorization_url: string | null
+          authorized_uris: string[] | null
+          available_scopes: Json | null
+          categories: string[] | null
+          client_id_encrypted: string | null
+          client_secret_encrypted: string | null
+          created_at: string | null
+          credential_field_name: string | null
+          credential_header_name: string | null
+          credential_header_prefix: string | null
+          credential_schema: Json | null
+          default_scopes: string[] | null
+          display_name: string
+          docs_url: string | null
+          icon_url: string | null
+          id: string
+          org_id: string
+          pkce_enabled: boolean | null
+          refresh_url: string | null
+          scope_separator: string | null
+          token_params: Json | null
+          token_url: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          allow_all_uris?: boolean | null
+          auth_mode: string
+          authorization_params?: Json | null
+          authorization_url?: string | null
+          authorized_uris?: string[] | null
+          available_scopes?: Json | null
+          categories?: string[] | null
+          client_id_encrypted?: string | null
+          client_secret_encrypted?: string | null
+          created_at?: string | null
+          credential_field_name?: string | null
+          credential_header_name?: string | null
+          credential_header_prefix?: string | null
+          credential_schema?: Json | null
+          default_scopes?: string[] | null
+          display_name: string
+          docs_url?: string | null
+          icon_url?: string | null
+          id: string
+          org_id: string
+          pkce_enabled?: boolean | null
+          refresh_url?: string | null
+          scope_separator?: string | null
+          token_params?: Json | null
+          token_url?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          allow_all_uris?: boolean | null
+          auth_mode?: string
+          authorization_params?: Json | null
+          authorization_url?: string | null
+          authorized_uris?: string[] | null
+          available_scopes?: Json | null
+          categories?: string[] | null
+          client_id_encrypted?: string | null
+          client_secret_encrypted?: string | null
+          created_at?: string | null
+          credential_field_name?: string | null
+          credential_header_name?: string | null
+          credential_header_prefix?: string | null
+          credential_schema?: Json | null
+          default_scopes?: string[] | null
+          display_name?: string
+          docs_url?: string | null
+          icon_url?: string | null
+          id?: string
+          org_id?: string
+          pkce_enabled?: boolean | null
+          refresh_url?: string | null
+          scope_separator?: string | null
+          token_params?: Json | null
+          token_url?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_configs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       schedule_runs: {
         Row: {
           created_at: string | null
@@ -654,6 +742,65 @@ export type Database = {
             columns: ["schedule_id"]
             isOneToOne: false
             referencedRelation: "flow_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_connections: {
+        Row: {
+          auth_mode: string
+          connection_config: Json | null
+          created_at: string | null
+          credentials_encrypted: string
+          expires_at: string | null
+          flow_id: string | null
+          id: string
+          metadata: Json | null
+          org_id: string
+          provider_id: string
+          raw_token_response: Json | null
+          scopes_granted: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          auth_mode: string
+          connection_config?: Json | null
+          created_at?: string | null
+          credentials_encrypted: string
+          expires_at?: string | null
+          flow_id?: string | null
+          id?: string
+          metadata?: Json | null
+          org_id: string
+          provider_id: string
+          raw_token_response?: Json | null
+          scopes_granted?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          auth_mode?: string
+          connection_config?: Json | null
+          created_at?: string | null
+          credentials_encrypted?: string
+          expires_at?: string | null
+          flow_id?: string | null
+          id?: string
+          metadata?: Json | null
+          org_id?: string
+          provider_id?: string
+          raw_token_response?: Json | null
+          scopes_granted?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_connections_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -714,6 +861,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_expired_oauth_states: { Args: never; Returns: undefined }
       cleanup_old_schedule_runs: {
         Args: { retention_days?: number }
         Returns: number
@@ -730,6 +878,15 @@ export type Database = {
         Args: { p_created_by: string; p_flow_id: string }
         Returns: number
       }
+      delete_service_connection: {
+        Args: {
+          p_flow_id?: string
+          p_org_id: string
+          p_provider_id: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       is_org_admin: { Args: { p_org_id: string }; Returns: boolean }
       is_org_member: { Args: { p_org_id: string }; Returns: boolean }
       try_acquire_schedule_lock: {
@@ -739,6 +896,21 @@ export type Database = {
           p_schedule_id: string
         }
         Returns: boolean
+      }
+      upsert_service_connection: {
+        Args: {
+          p_auth_mode?: string
+          p_connection_config?: Json
+          p_credentials_encrypted?: string
+          p_expires_at?: string
+          p_flow_id?: string
+          p_org_id: string
+          p_provider_id: string
+          p_raw_token_response?: Json
+          p_scopes_granted?: string[]
+          p_user_id: string
+        }
+        Returns: undefined
       }
     }
     Enums: {
@@ -875,3 +1047,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

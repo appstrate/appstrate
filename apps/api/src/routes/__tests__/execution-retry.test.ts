@@ -34,17 +34,27 @@ mock.module("../../services/state.ts", () => ({
   getLastExecutionState: mock(async () => null),
   createExecution: mock(async () => {}),
   getAdminConnections: mock(async () => ({})),
+  getRunningExecutionsForFlow: mock(async () => 0),
+  getExecution: mock(async () => null),
+  deleteFlowExecutions: mock(async () => {}),
 }));
 
-mock.module("../../services/nango.ts", () => ({
+mock.module("../../services/connection-manager.ts", () => ({
   getConnectionStatus: mock(async () => ({ status: "connected" })),
-  getAccessToken: mock(async () => "mock-token"),
-  listConnections: mock(async () => []),
+  listUserConnections: mock(async () => []),
+  hasCustomConnection: mock(async () => false),
+  validateScopes: mock(() => ({ sufficient: true, granted: [], required: [], missing: [] })),
+  getConnection: mock(async () => null),
 }));
 
 mock.module("../../services/env-builder.ts", () => ({
   buildPromptContext: mock(() => makePromptContext()),
   buildExecutionApi: mock((id: string) => ({ url: "http://localhost:3000", token: id })),
+  buildExecutionContext: mock(async () => ({
+    promptContext: makePromptContext(),
+    flowPackage: null,
+    flowVersionId: null,
+  })),
 }));
 
 mock.module("../../services/flow-versions.ts", () => ({
@@ -52,8 +62,9 @@ mock.module("../../services/flow-versions.ts", () => ({
 }));
 
 mock.module("../../services/execution-tracker.ts", () => ({
-  trackExecution: mock(() => {}),
+  trackExecution: mock(() => new AbortController()),
   untrackExecution: mock(() => {}),
+  abortExecution: mock(() => {}),
 }));
 
 mock.module("../../middleware/guards.ts", () => ({
@@ -63,6 +74,10 @@ mock.module("../../middleware/guards.ts", () => ({
 
 mock.module("../../middleware/rate-limit.ts", () => ({
   rateLimit: mock(() => mock()),
+}));
+
+mock.module("../../services/docker.ts", () => ({
+  stopContainer: mock(async () => {}),
 }));
 
 // Track how many times the adapter's execute() is called
