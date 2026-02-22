@@ -65,7 +65,7 @@
   "library.detailFlows": "Flows using this resource",
   "library.detailNone": "None",
   "library.detailContent": "Content",
-  "library.builtIn": "built-in",
+  "library.builtIn": "Built-in",
   "schedules.title": "Schedules",
   "schedules.empty": "No schedules.",
   "schedules.emptyHint": "Add a schedule to run a flow automatically.",
