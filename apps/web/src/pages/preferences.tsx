@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useUpdateLanguage } from "../hooks/use-profile";
+import { useAuth } from "../hooks/use-auth";
 import { useServices } from "../hooks/use-services";
 import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
 import { ApiKeyModal } from "../components/api-key-modal";
@@ -90,13 +91,7 @@ function GeneralTab({
       </div>
 
       <div className="section-title">{t("preferences.account")}</div>
-      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
-        <div className="service-card-header" style={{ marginBottom: 0 }}>
-          <div className="service-info">
-            <span className="service-provider">{t("preferences.accountHint")}</span>
-          </div>
-        </div>
-      </div>
+      <PasswordChangeForm />
 
       <div className="section-title">{t("preferences.notifications")}</div>
       <div className="service-card">
@@ -107,6 +102,80 @@ function GeneralTab({
         </div>
       </div>
     </>
+  );
+}
+
+function PasswordChangeForm() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { updatePassword } = useAuth();
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (newPassword !== confirmPassword) {
+      setError(t("preferences.passwordMismatch"));
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await updatePassword(newPassword);
+      setSuccess(t("preferences.passwordChanged"));
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t("login.error"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const canSubmit = newPassword.length >= 6 && confirmPassword.length > 0 && !submitting;
+
+  return (
+    <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+      <form onSubmit={handleSubmit} style={{ padding: "0.25rem 0" }}>
+        <div className="form-group">
+          <label>{t("preferences.newPassword")}</label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => {
+              setNewPassword(e.target.value);
+              setError("");
+              setSuccess("");
+            }}
+            minLength={6}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="form-group">
+          <label>{t("preferences.confirmPassword")}</label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              setError("");
+              setSuccess("");
+            }}
+            autoComplete="new-password"
+          />
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        {success && <div className="form-success">{success}</div>}
+        <button type="submit" className="primary" disabled={!canSubmit}>
+          {submitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
+        </button>
+      </form>
+    </div>
   );
 }
 
