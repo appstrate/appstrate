@@ -325,6 +325,8 @@ CREATE TABLE public.provider_configs (
   credential_field_name TEXT,
   credential_header_name TEXT,
   credential_header_prefix TEXT,
+  -- Available scopes
+  available_scopes JSONB DEFAULT '[]'::jsonb,
   -- URI restrictions
   authorized_uris TEXT[] DEFAULT '{}',
   allow_all_uris BOOLEAN DEFAULT false,
