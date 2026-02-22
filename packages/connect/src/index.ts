@@ -8,7 +8,6 @@ export type {
   ProviderConfigRow,
   ScopeValidationResult,
 } from "./types.ts";
-
 // Encryption
 export { encrypt, decrypt, encryptCredentials, decryptCredentials } from "./encryption.ts";
 

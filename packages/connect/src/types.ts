@@ -1,4 +1,4 @@
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
 export type AuthMode = "oauth2" | "api_key" | "basic" | "custom";
 
@@ -27,6 +27,8 @@ export interface ProviderDefinition {
   // URI restrictions (for sidecar proxy)
   authorizedUris?: string[];
   allowAllUris?: boolean;
+  // Scopes
+  availableScopes?: AvailableScope[];
   // Meta
   iconUrl?: string;
   categories?: string[];
@@ -95,6 +97,7 @@ export interface ProviderConfigRow {
   docs_url: string | null;
   authorized_uris: string[];
   allow_all_uris: boolean;
+  available_scopes: AvailableScope[];
   created_at: string;
   updated_at: string;
 }

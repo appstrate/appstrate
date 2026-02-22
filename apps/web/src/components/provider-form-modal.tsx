@@ -5,7 +5,7 @@ import { Spinner } from "./spinner";
 import { SchemaSection, type SchemaField } from "./flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "./flow-editor/utils";
 import { toSlug, toLiveSlug } from "../lib/strings";
-import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
+import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
 interface ProviderFormModalProps {
   open: boolean;
@@ -110,6 +110,9 @@ function ProviderFormBody({
       ? schemaToFields(provider.credentialSchema as unknown as JSONSchemaObject, "credentials")
       : [],
   );
+  const [availableScopes, setAvailableScopes] = useState<AvailableScope[]>(
+    () => provider?.availableScopes ?? [],
+  );
 
   const setField = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -146,6 +149,9 @@ function ProviderFormBody({
       }
       data.scopeSeparator = form.scopeSeparator;
       data.pkceEnabled = form.pkceEnabled;
+      if (availableScopes.length > 0) {
+        data.availableScopes = availableScopes.filter((s) => s.value.trim() && s.label.trim());
+      }
     }
 
     if (form.authMode === "api_key") {
@@ -399,6 +405,92 @@ function ProviderFormBody({
                 </label>
               </div>
             </div>
+
+            {/* Available scopes section */}
+            {!isBuiltIn && (
+              <>
+                <div className="section-title" style={{ marginTop: "0.5rem" }}>
+                  {t("providers.form.sectionAvailableScopes")}
+                </div>
+                <div className="hint" style={{ marginBottom: "0.5rem" }}>
+                  {t("providers.form.availableScopesHint")}
+                </div>
+                {availableScopes.map((scope, idx) => (
+                  <div key={idx} className="field-card" style={{ marginBottom: "0.375rem" }}>
+                    <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
+                      <input
+                        type="text"
+                        placeholder={t("providers.form.scopeValue")}
+                        value={scope.value}
+                        onChange={(e) => {
+                          const next = [...availableScopes];
+                          next[idx] = { ...next[idx], value: e.target.value };
+                          setAvailableScopes(next);
+                        }}
+                        style={{ flex: 2 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder={t("providers.form.scopeLabel")}
+                        value={scope.label}
+                        onChange={(e) => {
+                          const next = [...availableScopes];
+                          next[idx] = { ...next[idx], label: e.target.value };
+                          setAvailableScopes(next);
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-remove"
+                        onClick={() =>
+                          setAvailableScopes(availableScopes.filter((_, i) => i !== idx))
+                        }
+                      >
+                        &times;
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={t("providers.form.scopeDescription")}
+                      value={scope.description ?? ""}
+                      onChange={(e) => {
+                        const next = [...availableScopes];
+                        next[idx] = { ...next[idx], description: e.target.value || undefined };
+                        setAvailableScopes(next);
+                      }}
+                      style={{ marginTop: "0.25rem", width: "100%" }}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="add-field-btn"
+                  onClick={() => setAvailableScopes([...availableScopes, { value: "", label: "" }])}
+                >
+                  {t("providers.form.addAvailableScope")}
+                </button>
+              </>
+            )}
+
+            {/* Read-only display for built-in providers */}
+            {isBuiltIn && provider?.availableScopes && provider.availableScopes.length > 0 && (
+              <>
+                <div className="section-title" style={{ marginTop: "0.5rem" }}>
+                  {t("providers.form.sectionAvailableScopes")}
+                </div>
+                <div className="scope-options">
+                  {provider.availableScopes.map((scope) => (
+                    <div key={scope.value} className="scope-option" style={{ cursor: "default" }}>
+                      <div className="scope-option-info">
+                        <span className="scope-label">{scope.label}</span>
+                        <span className="scope-value">{scope.value}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 

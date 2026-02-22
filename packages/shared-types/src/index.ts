@@ -183,6 +183,14 @@ export interface Integration {
   connectedAt?: string;
 }
 
+// --- Available Scope Types ---
+
+export interface AvailableScope {
+  value: string;
+  label: string;
+  description?: string;
+}
+
 // --- Provider Config Types ---
 
 export interface ProviderConfig {
@@ -209,4 +217,5 @@ export interface ProviderConfig {
   docsUrl?: string;
   authorizedUris?: string[];
   allowAllUris?: boolean;
+  availableScopes?: AvailableScope[];
 }

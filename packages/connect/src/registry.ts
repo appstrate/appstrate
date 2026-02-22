@@ -99,6 +99,7 @@ function rowToDefinition(row: ProviderConfigRow): ProviderDefinition {
     docsUrl: row.docs_url ?? undefined,
     authorizedUris: row.authorized_uris?.length ? row.authorized_uris : undefined,
     allowAllUris: row.allow_all_uris ?? false,
+    availableScopes: row.available_scopes?.length ? row.available_scopes : undefined,
   };
 }
 
