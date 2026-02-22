@@ -578,7 +578,11 @@ function ProvidersTab({
                     <button
                       onClick={() => onDelete(p)}
                       disabled={!!p.usedByFlows && p.usedByFlows > 0}
-                      title={p.usedByFlows && p.usedByFlows > 0 ? t("providers.cannotDeleteInUse") : undefined}
+                      title={
+                        p.usedByFlows && p.usedByFlows > 0
+                          ? t("providers.cannotDeleteInUse")
+                          : undefined
+                      }
                     >
                       {t("btn.delete", { ns: "common" })}
                     </button>
