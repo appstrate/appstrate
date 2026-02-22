@@ -616,6 +616,7 @@ export type Database = {
           authorization_params: Json | null
           authorization_url: string | null
           authorized_uris: string[] | null
+          available_scopes: Json | null
           categories: string[] | null
           client_id_encrypted: string | null
           client_secret_encrypted: string | null
@@ -643,6 +644,7 @@ export type Database = {
           authorization_params?: Json | null
           authorization_url?: string | null
           authorized_uris?: string[] | null
+          available_scopes?: Json | null
           categories?: string[] | null
           client_id_encrypted?: string | null
           client_secret_encrypted?: string | null
@@ -670,6 +672,7 @@ export type Database = {
           authorization_params?: Json | null
           authorization_url?: string | null
           authorized_uris?: string[] | null
+          available_scopes?: Json | null
           categories?: string[] | null
           client_id_encrypted?: string | null
           client_secret_encrypted?: string | null

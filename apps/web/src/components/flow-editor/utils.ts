@@ -125,7 +125,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
   const services: ServiceEntry[] = detail.requires.services.map((s) => ({
     id: s.id,
     provider: s.provider,
-    scopes: "",
+    scopes: s.scopesRequired ?? [],
     connectionMode: s.connectionMode === "admin" ? "admin" : "user",
   }));
 
@@ -169,10 +169,7 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
             id: s.id,
             provider: s.provider,
           };
-          const scopes = s.scopes
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean);
+          const scopes = s.scopes.filter(Boolean);
           if (scopes.length > 0) svc.scopes = scopes;
           svc.connectionMode = s.connectionMode || "user";
           return svc;
@@ -218,7 +215,7 @@ export function payloadToFormState(payload: {
   const services: ServiceEntry[] = rawServices.map((s) => ({
     id: (s.id as string) || "",
     provider: (s.provider as string) || "",
-    scopes: Array.isArray(s.scopes) ? s.scopes.join(", ") : "",
+    scopes: Array.isArray(s.scopes) ? (s.scopes as string[]) : [],
     connectionMode: (s.connectionMode as "user" | "admin") || "user",
   }));
 

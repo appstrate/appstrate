@@ -1944,23 +1944,21 @@ button:disabled {
 .service-picker-selected-fields {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  align-items: flex-start;
 }
-.service-picker-selected-fields input {
-  flex: 1;
-  padding: 0.375rem 0.5rem;
-  font-size: 0.8rem;
-  font-family: inherit;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  outline: none;
+.service-picker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   min-width: 0;
 }
-.service-picker-selected-fields input:focus,
-.service-picker-selected-fields select:focus {
-  border-color: var(--primary);
+.service-picker-field:first-child {
+  flex: 1;
+}
+.service-picker-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 .service-picker-selected-fields select {
   padding: 0.375rem 0.5rem;
@@ -1971,7 +1969,7 @@ button:disabled {
   border-radius: 4px;
   color: var(--text);
   outline: none;
-  width: 90px;
+  width: 110px;
   flex-shrink: 0;
   cursor: pointer;
   appearance: none;
@@ -1979,6 +1977,45 @@ button:disabled {
   background-repeat: no-repeat;
   background-position: right 0.5rem center;
   padding-right: 1.5rem;
+  height: 34px;
+}
+.service-picker-selected-fields select:focus {
+  border-color: var(--primary);
+}
+
+/* Scope options (provider form read-only display) */
+.scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.scope-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+.scope-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+.scope-label {
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+.scope-value {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Service picker grid */

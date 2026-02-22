@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import type { ProviderConfig, TablesInsert, Json } from "@appstrate/shared-types";
+import type { ProviderConfig, TablesInsert, Json, AvailableScope } from "@appstrate/shared-types";
 import { requireAdmin } from "../middleware/guards.ts";
 import { supabase } from "../lib/supabase.ts";
 import { getBuiltInProviders, isBuiltInProvider, encrypt } from "@appstrate/connect";
@@ -32,6 +32,15 @@ const createProviderSchema = z.object({
   docsUrl: z.string().optional(),
   authorizedUris: z.array(z.string()).optional(),
   allowAllUris: z.boolean().optional(),
+  availableScopes: z
+    .array(
+      z.object({
+        value: z.string(),
+        label: z.string(),
+        description: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 const updateProviderSchema = createProviderSchema.omit({ id: true }).partial();
@@ -64,6 +73,9 @@ function rowToProviderConfig(
     docsUrl: row.docs_url ?? undefined,
     authorizedUris: row.authorized_uris?.length ? row.authorized_uris : undefined,
     allowAllUris: row.allow_all_uris ?? undefined,
+    availableScopes: (row.available_scopes as unknown as AvailableScope[])?.length
+      ? (row.available_scopes as unknown as AvailableScope[])
+      : undefined,
   };
 }
 
@@ -116,11 +128,12 @@ export function createProvidersRouter() {
         docsUrl: def.docsUrl,
         authorizedUris: def.authorizedUris,
         allowAllUris: def.allowAllUris,
+        availableScopes: def.availableScopes,
       });
     }
 
     // Custom providers (DB only, IDs different from built-in)
-    for (const row of (rows ?? []) as ProviderConfigRow[]) {
+    for (const row of (rows ?? []) as unknown as ProviderConfigRow[]) {
       if (!builtIn.has(row.id)) {
         providers.push(rowToProviderConfig(row, "custom"));
       }
@@ -191,6 +204,7 @@ export function createProvidersRouter() {
       client_secret_encrypted: data.clientSecret ? encrypt(data.clientSecret) : null,
       authorized_uris: data.authorizedUris ?? [],
       allow_all_uris: data.allowAllUris ?? false,
+      available_scopes: (data.availableScopes ?? []) as unknown as Json,
     };
 
     const { error } = await supabase.from("provider_configs").insert(row);
@@ -281,6 +295,9 @@ export function createProvidersRouter() {
       client_secret_encrypted: clientSecretEncrypted,
       authorized_uris: data.authorizedUris ?? existing.authorized_uris ?? [],
       allow_all_uris: data.allowAllUris ?? existing.allow_all_uris ?? false,
+      available_scopes: (data.availableScopes ??
+        (existing as unknown as Record<string, unknown>).available_scopes ??
+        []) as unknown as Json,
     };
 
     const { error } = await supabase
