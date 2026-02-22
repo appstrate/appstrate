@@ -223,14 +223,16 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                   </button>
                 </div>
                 <div className="service-picker-selected-fields">
-                  <div className="service-picker-field">
-                    <label className="service-picker-label">{t("editor.scopesLabel")}</label>
-                    <ScopeMultiSelect
-                      scopes={svc.scopes}
-                      availableScopes={providerDef?.availableScopes}
-                      onChange={(scopes) => update(i, { scopes })}
-                    />
-                  </div>
+                  {providerDef?.authMode === "oauth2" && (
+                    <div className="service-picker-field">
+                      <label className="service-picker-label">{t("editor.scopesLabel")}</label>
+                      <ScopeMultiSelect
+                        scopes={svc.scopes}
+                        availableScopes={providerDef?.availableScopes}
+                        onChange={(scopes) => update(i, { scopes })}
+                      />
+                    </div>
+                  )}
                   <div className="service-picker-field">
                     <label className="service-picker-label">
                       {t("editor.connectionModeLabel")}
