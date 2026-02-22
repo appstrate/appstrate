@@ -1,9 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { supabase } from "./lib/supabase.ts";
 import { logger } from "./lib/logger.ts";
+import { initBuiltInProviders } from "@appstrate/connect";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
+import { initBuiltInLibrary } from "./services/builtin-library.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
@@ -85,10 +89,24 @@ app.use("*", async (c, next) => {
   return requireOrgContext()(c, next);
 });
 
+// Load built-in providers from data/providers.json + SYSTEM_PROVIDERS env var
+const providersPath = join(process.cwd(), "data", "providers.json");
+try {
+  const fileProviders = JSON.parse(readFileSync(providersPath, "utf-8"));
+  initBuiltInProviders(fileProviders);
+  logger.info("Built-in providers loaded", { count: fileProviders.length });
+} catch {
+  initBuiltInProviders();
+  logger.info("Built-in providers loaded (env var only)");
+}
+
 // Load built-in flows from filesystem
 logger.info("Loading flows...");
 await initFlowService();
 logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
+
+// Load built-in library (skills + extensions) from data/
+await initBuiltInLibrary();
 
 // Ensure Supabase Storage buckets
 try {

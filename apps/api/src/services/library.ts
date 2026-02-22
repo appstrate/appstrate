@@ -1,6 +1,12 @@
 import { zipSync, unzipSync } from "fflate";
 import { supabase, ensureBucket } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
+import {
+  getBuiltInSkills,
+  getBuiltInExtensions,
+  isBuiltInSkill,
+  isBuiltInExtension,
+} from "./builtin-library.ts";
 
 const LIBRARY_BUCKET = "library-packages";
 
@@ -24,7 +30,7 @@ async function getFlowDisplayNames(
 
 // --- Skills ---
 
-/** List all skills in the org with usedByFlows count. */
+/** List all skills in the org with usedByFlows count (built-in + org). */
 export async function listOrgSkills(orgId: string) {
   const { data, error } = await supabase
     .from("org_skills")
@@ -34,20 +40,57 @@ export async function listOrgSkills(orgId: string) {
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => ({
+  const orgSkillIds = new Set((data ?? []).map((row) => row.id));
+
+  // Built-in skills first
+  const builtInItems = [...getBuiltInSkills().values()]
+    .filter((s) => !orgSkillIds.has(s.id))
+    .map((s) => ({
+      id: s.id,
+      orgId: null as string | null,
+      name: s.name,
+      description: s.description,
+      source: "built-in" as const,
+      createdBy: null as string | null,
+      createdAt: "",
+      updatedAt: "",
+      usedByFlows: 0,
+    }));
+
+  const orgItems = (data ?? []).map((row) => ({
     id: row.id,
     orgId: row.org_id,
     name: row.name,
     description: row.description,
+    source: "user" as const,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     usedByFlows: Array.isArray(row.flow_skills) ? row.flow_skills.length : 0,
   }));
+
+  return [...builtInItems, ...orgItems];
 }
 
 /** Get a single skill with content and list of flows referencing it. */
 export async function getOrgSkill(orgId: string, skillId: string) {
+  // Check built-in skills first
+  const builtIn = getBuiltInSkills().get(skillId);
+  if (builtIn) {
+    return {
+      id: builtIn.id,
+      orgId: null as string | null,
+      name: builtIn.name,
+      description: builtIn.description,
+      content: builtIn.content,
+      source: "built-in" as const,
+      createdBy: null as string | null,
+      createdAt: "",
+      updatedAt: "",
+      flows: [],
+    };
+  }
+
   const { data, error } = await supabase
     .from("org_skills")
     .select("*, flow_skills(flow_id)")
@@ -67,6 +110,7 @@ export async function getOrgSkill(orgId: string, skillId: string) {
     name: data.name,
     description: data.description,
     content: data.content,
+    source: "user" as const,
     createdBy: data.created_by,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
@@ -139,7 +183,7 @@ export async function deleteOrgSkill(
 
 // --- Extensions ---
 
-/** List all extensions in the org with usedByFlows count. */
+/** List all extensions in the org with usedByFlows count (built-in + org). */
 export async function listOrgExtensions(orgId: string) {
   const { data, error } = await supabase
     .from("org_extensions")
@@ -149,20 +193,57 @@ export async function listOrgExtensions(orgId: string) {
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => ({
+  const orgExtIds = new Set((data ?? []).map((row) => row.id));
+
+  // Built-in extensions first
+  const builtInItems = [...getBuiltInExtensions().values()]
+    .filter((e) => !orgExtIds.has(e.id))
+    .map((e) => ({
+      id: e.id,
+      orgId: null as string | null,
+      name: e.name,
+      description: e.description,
+      source: "built-in" as const,
+      createdBy: null as string | null,
+      createdAt: "",
+      updatedAt: "",
+      usedByFlows: 0,
+    }));
+
+  const orgItems = (data ?? []).map((row) => ({
     id: row.id,
     orgId: row.org_id,
     name: row.name,
     description: row.description,
+    source: "user" as const,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     usedByFlows: Array.isArray(row.flow_extensions) ? row.flow_extensions.length : 0,
   }));
+
+  return [...builtInItems, ...orgItems];
 }
 
 /** Get a single extension with content and list of flows referencing it. */
 export async function getOrgExtension(orgId: string, extId: string) {
+  // Check built-in extensions first
+  const builtIn = getBuiltInExtensions().get(extId);
+  if (builtIn) {
+    return {
+      id: builtIn.id,
+      orgId: null as string | null,
+      name: builtIn.name,
+      description: builtIn.description,
+      content: builtIn.content,
+      source: "built-in" as const,
+      createdBy: null as string | null,
+      createdAt: "",
+      updatedAt: "",
+      flows: [],
+    };
+  }
+
   const { data, error } = await supabase
     .from("org_extensions")
     .select("*, flow_extensions(flow_id)")
@@ -182,6 +263,7 @@ export async function getOrgExtension(orgId: string, extId: string) {
     name: data.name,
     description: data.description,
     content: data.content,
+    source: "user" as const,
     createdBy: data.created_by,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
@@ -352,22 +434,25 @@ export async function getFlowExtensionFiles(
 
 // --- Flow reference management ---
 
-/** Replace all skill references for a flow. Validates before deleting to prevent data loss. */
+/** Replace all skill references for a flow. Built-in skills are not stored in DB. */
 export async function setFlowSkills(
   flowId: string,
   orgId: string,
   skillIds: string[],
 ): Promise<void> {
-  // Validate BEFORE deleting old references
-  if (skillIds.length > 0) {
+  // Built-in IDs are resolved at execution time, only org IDs go to DB
+  const orgSkillIds = skillIds.filter((id) => !isBuiltInSkill(id));
+
+  // Validate org skills BEFORE deleting old references
+  if (orgSkillIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_skills")
       .select("id")
       .eq("org_id", orgId)
-      .in("id", skillIds);
+      .in("id", orgSkillIds);
 
     const existingIds = new Set((existing ?? []).map((s) => s.id));
-    const missing = skillIds.filter((id) => !existingIds.has(id));
+    const missing = orgSkillIds.filter((id) => !existingIds.has(id));
     if (missing.length > 0) {
       throw new Error(`Skills introuvables dans la bibliotheque: ${missing.join(", ")}`);
     }
@@ -375,9 +460,9 @@ export async function setFlowSkills(
 
   await supabase.from("flow_skills").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (skillIds.length === 0) return;
+  if (orgSkillIds.length === 0) return;
 
-  const rows = skillIds.map((skillId) => ({
+  const rows = orgSkillIds.map((skillId) => ({
     flow_id: flowId,
     skill_id: skillId,
     org_id: orgId,
@@ -387,22 +472,25 @@ export async function setFlowSkills(
   if (error) throw error;
 }
 
-/** Replace all extension references for a flow. Validates before deleting to prevent data loss. */
+/** Replace all extension references for a flow. Built-in extensions are not stored in DB. */
 export async function setFlowExtensions(
   flowId: string,
   orgId: string,
   extensionIds: string[],
 ): Promise<void> {
-  // Validate BEFORE deleting old references
-  if (extensionIds.length > 0) {
+  // Built-in IDs are resolved at execution time, only org IDs go to DB
+  const orgExtIds = extensionIds.filter((id) => !isBuiltInExtension(id));
+
+  // Validate org extensions BEFORE deleting old references
+  if (orgExtIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_extensions")
       .select("id")
       .eq("org_id", orgId)
-      .in("id", extensionIds);
+      .in("id", orgExtIds);
 
     const existingIds = new Set((existing ?? []).map((e) => e.id));
-    const missing = extensionIds.filter((id) => !existingIds.has(id));
+    const missing = orgExtIds.filter((id) => !existingIds.has(id));
     if (missing.length > 0) {
       throw new Error(`Extensions introuvables dans la bibliotheque: ${missing.join(", ")}`);
     }
@@ -410,9 +498,9 @@ export async function setFlowExtensions(
 
   await supabase.from("flow_extensions").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (extensionIds.length === 0) return;
+  if (orgExtIds.length === 0) return;
 
-  const rows = extensionIds.map((extensionId) => ({
+  const rows = orgExtIds.map((extensionId) => ({
     flow_id: flowId,
     extension_id: extensionId,
     org_id: orgId,

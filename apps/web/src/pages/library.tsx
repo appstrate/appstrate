@@ -120,6 +120,9 @@ function LibraryTab({ type }: { type: LibraryType }) {
                 <tr key={item.id}>
                   <td className="cell-id">
                     <code>{item.id}</code>
+                    {item.source === "built-in" && (
+                      <span className="badge badge-builtin">{t("library.builtIn")}</span>
+                    )}
                   </td>
                   <td className="cell-meta">
                     <div className="cell-name">{item.name || "-"}</div>
@@ -132,7 +135,7 @@ function LibraryTab({ type }: { type: LibraryType }) {
                     <button type="button" className="btn-sm" onClick={() => setSelectedId(item.id)}>
                       {t("btn.view")}
                     </button>
-                    {isOrgAdmin && (
+                    {isOrgAdmin && item.source !== "built-in" && (
                       <button
                         type="button"
                         className="btn-sm btn-danger"

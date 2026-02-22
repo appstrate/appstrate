@@ -3,9 +3,15 @@ import { join } from "node:path";
 import { supabase } from "../lib/supabase.ts";
 import { logger } from "../lib/logger.ts";
 import { validateManifest } from "./schema.ts";
+import {
+  isBuiltInSkill,
+  isBuiltInExtension,
+  getBuiltInSkills,
+  getBuiltInExtensions,
+} from "./builtin-library.ts";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
-export const FLOWS_DIR = join(process.cwd(), "flows");
+export const FLOWS_DIR = join(process.cwd(), "data", "flows");
 
 // Immutable cache for built-in flows (loaded once at boot, never mutated)
 let builtInFlows: ReadonlyMap<string, LoadedFlow> = new Map();
@@ -90,25 +96,48 @@ interface DbFlowRow {
 function dbRowToLoadedFlow(row: DbFlowRow): LoadedFlow {
   const manifest = row.manifest as unknown as FlowManifest;
 
-  // Prefer join table data over manifest for user flows
-  let skills = manifest.requires.skills ?? [];
-  let extensions = manifest.requires.extensions ?? [];
+  // Org skills/extensions from DB join tables
+  const orgSkills = (row.flow_skills ?? []).map((fs) => ({
+    id: fs.skill_id,
+    name: fs.org_skills?.name ?? undefined,
+    description: fs.org_skills?.description ?? undefined,
+  }));
 
-  if (row.flow_skills && row.flow_skills.length > 0) {
-    skills = row.flow_skills.map((fs) => ({
-      id: fs.skill_id,
-      name: fs.org_skills?.name ?? undefined,
-      description: fs.org_skills?.description ?? undefined,
-    }));
-  }
+  const orgExtensions = (row.flow_extensions ?? []).map((fe) => ({
+    id: fe.extension_id,
+    name: fe.org_extensions?.name ?? undefined,
+    description: fe.org_extensions?.description ?? undefined,
+  }));
 
-  if (row.flow_extensions && row.flow_extensions.length > 0) {
-    extensions = row.flow_extensions.map((fe) => ({
-      id: fe.extension_id,
-      name: fe.org_extensions?.name ?? undefined,
-      description: fe.org_extensions?.description ?? undefined,
-    }));
-  }
+  // Built-in skills/extensions declared in manifest
+  const manifestSkills = (manifest.requires.skills ?? [])
+    .filter((s) => isBuiltInSkill(s.id))
+    .map((s) => {
+      const builtIn = getBuiltInSkills().get(s.id);
+      return {
+        id: s.id,
+        name: builtIn?.name ?? s.name,
+        description: builtIn?.description ?? s.description,
+      };
+    });
+
+  const manifestExtensions = (manifest.requires.extensions ?? [])
+    .filter((e) => isBuiltInExtension(e.id))
+    .map((e) => {
+      const builtIn = getBuiltInExtensions().get(e.id);
+      return {
+        id: e.id,
+        name: builtIn?.name ?? e.name,
+        description: builtIn?.description ?? e.description,
+      };
+    });
+
+  // Merge: org items + built-in items (deduplicate by ID)
+  const seenSkillIds = new Set(orgSkills.map((s) => s.id));
+  const skills = [...orgSkills, ...manifestSkills.filter((s) => !seenSkillIds.has(s.id))];
+
+  const seenExtIds = new Set(orgExtensions.map((e) => e.id));
+  const extensions = [...orgExtensions, ...manifestExtensions.filter((e) => !seenExtIds.has(e.id))];
 
   return {
     id: row.id,

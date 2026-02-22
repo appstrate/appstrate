@@ -52,17 +52,17 @@ bun run dev                   # turbo dev → Hono on :3000
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
 - **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is. Only the latest execution's state is injected in the prompt (lightweight). Historical executions are available on demand via the internal API.
 - **Credential isolation via sidecar proxy**: Credentials **never enter the agent container**. Each execution launches a sidecar proxy (`appstrate-sidecar`) on an isolated Docker network. The agent calls the sidecar via `curl` with `X-Service` and `X-Target` headers. The sidecar fetches credentials from `GET /internal/credentials/:serviceId`, substitutes `{{variable}}` placeholders in headers and URL, validates the URL against `authorizedUris`, and forwards the full HTTP request (any method, any body) to the target. The agent has no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, and no route to the host — only `SIDECAR_URL=http://sidecar:8080`. The sidecar also proxies execution history requests. `authorized_uris` and `allow_all_uris` are configured per provider in `provider_configs`.
-- **Connection manager**: `@appstrate/connect` handles all credential operations — OAuth2 flows (PKCE), API key storage, token refresh, and encrypted credential persistence in the `service_connections` table. Provider configurations (OAuth client IDs/secrets, auth URLs, credential schemas) are stored in `provider_configs`. System providers can be bootstrapped via `SYSTEM_PROVIDERS` env var.
+- **Connection manager**: `@appstrate/connect` handles all credential operations — OAuth2 flows (PKCE), API key storage, token refresh, and encrypted credential persistence in the `service_connections` table. Provider configurations (OAuth client IDs/secrets, auth URLs, credential schemas) are stored in `provider_configs`. Built-in providers are loaded from `data/providers.json` at boot via `initBuiltInProviders()`, then merged with `SYSTEM_PROVIDERS` env var (env entries override file entries with same ID, with a warning).
 - **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Generated from Supabase schema (`database.ts`) + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Supabase Realtime**: Both execution status changes and execution logs are delivered via Supabase Realtime (`postgres_changes` on `executions` and `execution_logs` tables). The `execution_logs` table has a denormalized `user_id` column enabling a direct RLS policy (`auth.uid() = user_id`) that is compatible with Realtime CDC. The frontend uses `useExecutionLogsRealtime` for live log streaming with deduplication against the initial REST fetch.
 - **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
-- **FlowService (dual-read)**: Built-in flows are loaded from the `flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling.
+- **FlowService (dual-read)**: Built-in flows are loaded from the `data/flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling.
 - **Flow versioning**: Every create/update of a user flow creates a snapshot in `flow_versions` (auto-incrementing `version_number` per flow via RPC). Executions are tagged with `flow_version_id` for audit trail. Versions are non-blocking (errors caught and logged).
 - **Structured logging**: All backend logging uses `lib/logger.ts` which emits JSON to stdout (`{ level, msg, timestamp, ...data }`). No `console.*` calls.
 - **Rate limiting**: Token bucket middleware per `method:path:userId`. Applied on `POST /api/flows/:id/run` (20/min), `POST /api/flows/import` (10/min), `POST /api/flows` (10/min).
 - **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
-- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. For user flows, skills are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime.
-- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions ship with the Pi runtime image. For user flows, custom extensions are stored inside the flow's ZIP package in Supabase Storage and extracted into the container at runtime. Declared in `manifest.requires.extensions[]`.
+- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. Built-in skills live in `data/skills/` and are always visible in the library (`source: "built-in"`). For user flows, org skills are stored in Supabase Storage; built-in skills are resolved from the filesystem and injected into the container ZIP at runtime. Built-in skills cannot be edited or deleted via the API (403).
+- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions live in `data/extensions/` and are always visible in the library (`source: "built-in"`). For user flows, org extensions are stored in Supabase Storage; built-in extensions are resolved from the filesystem. Declared in `manifest.requires.extensions[]`. Built-in extensions cannot be edited or deleted via the API (403).
 - **Flow packages (ZIP)**: User flows are stored as ZIP packages in Supabase Storage (`flow-packages` bucket). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
 - **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-tenant isolation**: All data tables have Row Level Security (RLS) scoped by organization membership. Users see data within their org. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
@@ -139,6 +139,18 @@ appstrate/
 ├── docker-compose.yml                # PostgreSQL 16 + Redis
 ├── CLAUDE.md
 │
+├── data/                              # Static data directory (centralized)
+│   ├── flows/                         # Built-in flow definitions (loaded at runtime)
+│   │   └── {flow-name}/
+│   │       ├── manifest.json          # Flow spec: metadata, requires, config/state/input/output schema
+│   │       └── prompt.md              # Agent instructions
+│   ├── providers.json                 # Built-in provider definitions (merged with SYSTEM_PROVIDERS env var)
+│   ├── skills/                        # Built-in skills (always visible in library, source: "built-in")
+│   │   └── {skill-id}/
+│   │       └── SKILL.md               # Skill definition with YAML frontmatter
+│   └── extensions/                    # Built-in extensions (always visible in library, source: "built-in")
+│       └── {extension-id}.ts          # Extension file (Pi agent tool)
+│
 ├── supabase/
 │   └── migrations/
 │       └── 001_initial.sql           # Full schema: orgs, profiles, flows, executions, schedules, provider_configs, service_connections, oauth_states, RLS, RPCs, Realtime
@@ -149,7 +161,7 @@ appstrate/
 │   │   ├── tsconfig.json
 │   │   ├── eslint.config.js
 │   │   └── src/
-│   │       ├── index.ts              # Hono app entry: CORS, JWT auth, health route, shutdown gate, graceful shutdown, scheduler init
+│   │       ├── index.ts              # Hono app entry: CORS, JWT auth, health route, shutdown gate, graceful shutdown, scheduler init, built-in providers/library init
 │   │       ├── lib/
 │   │       │   ├── supabase.ts       # Supabase client (service role key), getUserProfile(), isAdmin()
 │   │       │   └── logger.ts         # Structured JSON logger (debug, info, warn, error → stdout)
@@ -196,6 +208,7 @@ appstrate/
 │   │       │   ├── env-builder.ts    # buildPromptContext(), resolveProviderDefs(), buildExecutionContext(): builds typed PromptContext and full execution context
 │   │       │   ├── library.ts        # Org library CRUD for skills and extensions
 │   │       │   ├── organizations.ts  # Organization CRUD and membership management
+│   │       │   ├── builtin-library.ts # Built-in skills/extensions from data/ directory (loaded at boot)
 │   │       │   └── skill-utils.ts    # Skill file parsing utilities
 │   │       └── types/
 │   │           └── index.ts          # Backend-only types (FlowManifest, LoadedFlow, SkillMeta) + re-exports from @appstrate/shared-types
@@ -285,21 +298,6 @@ appstrate/
 │           ├── token-utils.ts        # Token utility functions
 │           ├── types.ts              # Package types (ProviderConfig, ServiceConnection, etc.)
 │           └── utils.ts              # Shared utility functions
-│
-├── flows/                            # Built-in flow definitions (loaded at runtime)
-│   ├── clickup-summary/
-│   ├── email-summary/
-│   ├── email-to-tickets/
-│   ├── meeting-prep/
-│   ├── newsletter-search/
-│   └── skill-test/
-│       ├── manifest.json             # Flow spec: metadata, requires, config/state/input/output schema, execution settings
-│       ├── prompt.md                 # Agent instructions (appended as-is after structured context sections)
-│       ├── skills/                   # Optional: agent skills
-│       │   └── {skill-id}/
-│       │       └── SKILL.md          # Skill definition with YAML frontmatter (description)
-│       └── extensions/               # Optional: Pi agent extensions (TypeScript tools)
-│           └── {id}.ts               # Extension file (custom tool for pi adapter)
 │
 └── runtime-pi/                       # Docker image for Pi Coding Agent SDK
     ├── Dockerfile

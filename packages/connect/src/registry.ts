@@ -7,32 +7,68 @@ export type SupabaseClient = _SupabaseClient<Database>;
 
 /**
  * Built-in provider definitions.
- * Loaded from SYSTEM_PROVIDERS env var (JSON array). Empty map if not set.
+ * Merged from two sources: file-based (data/providers.json) and env var (SYSTEM_PROVIDERS).
+ * Env var entries override file entries with the same ID.
  * Inline clientId/clientSecret are used directly without DB lookup.
  */
-let BUILT_IN_PROVIDERS: Map<string, ProviderDefinition>;
+let BUILT_IN_PROVIDERS: Map<string, ProviderDefinition> | null = null;
 
-if (process.env.SYSTEM_PROVIDERS) {
+function isValidProvider(p: ProviderDefinition): boolean {
+  return !!(p.id && p.displayName && p.authMode);
+}
+
+function addProviders(
+  map: Map<string, ProviderDefinition>,
+  providers: ProviderDefinition[],
+  source: string,
+  warnOverride = false,
+): void {
+  for (const p of providers) {
+    if (!isValidProvider(p)) {
+      console.error(`[connect] ${source}: skipping invalid entry (missing id/displayName/authMode)`, p);
+      continue;
+    }
+    if (warnOverride && map.has(p.id)) {
+      console.warn(`[connect] ${source} overrides file provider '${p.id}'`);
+    }
+    map.set(p.id, p);
+  }
+}
+
+function parseEnvProviders(): ProviderDefinition[] {
+  if (!process.env.SYSTEM_PROVIDERS) return [];
   try {
     const parsed = JSON.parse(process.env.SYSTEM_PROVIDERS) as ProviderDefinition[];
     if (!Array.isArray(parsed)) throw new Error("SYSTEM_PROVIDERS must be a JSON array");
-    BUILT_IN_PROVIDERS = new Map<string, ProviderDefinition>();
-    for (const p of parsed) {
-      if (!p.id || !p.displayName || !p.authMode) {
-        console.error(
-          `[connect] SYSTEM_PROVIDERS: skipping invalid entry (missing id/displayName/authMode)`,
-          p,
-        );
-        continue;
-      }
-      BUILT_IN_PROVIDERS.set(p.id, p);
-    }
+    return parsed;
   } catch (err) {
     console.error("[connect] Failed to parse SYSTEM_PROVIDERS:", err);
-    BUILT_IN_PROVIDERS = new Map();
+    return [];
   }
-} else {
-  BUILT_IN_PROVIDERS = new Map();
+}
+
+/**
+ * Initialize built-in providers from file-based definitions + env var.
+ * File providers are loaded first, then env var entries override (with a warning).
+ * Call once at boot before any provider lookups.
+ */
+export function initBuiltInProviders(fileProviders?: ProviderDefinition[]): void {
+  const map = new Map<string, ProviderDefinition>();
+
+  if (fileProviders) {
+    addProviders(map, fileProviders, "providers.json");
+  }
+  addProviders(map, parseEnvProviders(), "SYSTEM_PROVIDERS", true);
+
+  BUILT_IN_PROVIDERS = map;
+}
+
+/** Ensure providers are initialized (auto-init from env var if initBuiltInProviders was never called). */
+function ensureInit(): Map<string, ProviderDefinition> {
+  if (!BUILT_IN_PROVIDERS) {
+    initBuiltInProviders();
+  }
+  return BUILT_IN_PROVIDERS!;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -77,7 +113,7 @@ export async function getProvider(
   providerId: string,
 ): Promise<ProviderDefinition | null> {
   // Built-in providers always win
-  const builtIn = BUILT_IN_PROVIDERS.get(providerId);
+  const builtIn = ensureInit().get(providerId);
   if (builtIn) return builtIn;
 
   // Check DB for custom providers
@@ -141,7 +177,7 @@ export async function getProviderOAuthCredentials(
   providerId: string,
 ): Promise<{ clientId: string; clientSecret: string } | null> {
   // 1. Check built-in provider's inline credentials
-  const builtIn = BUILT_IN_PROVIDERS.get(providerId);
+  const builtIn = ensureInit().get(providerId);
   if (builtIn?.clientId && builtIn?.clientSecret) {
     return { clientId: builtIn.clientId, clientSecret: builtIn.clientSecret };
   }
@@ -178,7 +214,7 @@ export async function listProviders(
   const result = new Map<string, ProviderDefinition>();
 
   // Start with built-in providers (immutable)
-  for (const [id, def] of BUILT_IN_PROVIDERS) {
+  for (const [id, def] of ensureInit()) {
     result.set(id, def);
   }
 
@@ -227,12 +263,12 @@ export function getCredentialFieldName(provider: ProviderDefinition): string {
  * Get the built-in providers map (for routes and prompt building).
  */
 export function getBuiltInProviders(): ReadonlyMap<string, ProviderDefinition> {
-  return BUILT_IN_PROVIDERS;
+  return ensureInit();
 }
 
 /**
  * Check if a provider ID is a built-in provider.
  */
 export function isBuiltInProvider(providerId: string): boolean {
-  return BUILT_IN_PROVIDERS.has(providerId);
+  return ensureInit().has(providerId);
 }
