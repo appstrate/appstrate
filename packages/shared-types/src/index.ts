@@ -217,4 +217,5 @@ export interface ProviderConfig {
   authorizedUris?: string[];
   allowAllUris?: boolean;
   availableScopes?: AvailableScope[];
+  usedByFlows?: number;
 }
