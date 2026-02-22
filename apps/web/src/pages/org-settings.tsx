@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -17,7 +17,13 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
-  const [tab, setTab] = useState<"general" | "members" | "providers">("general");
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const validTabs = ["general", "members", "providers"] as const;
+  type Tab = (typeof validTabs)[number];
+  const [tab, setTab] = useState<Tab>(
+    validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
+  );
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -175,6 +181,9 @@ export function OrgSettingsPage() {
 
   return (
     <>
+      <div className="page-header">
+        <h2>{t("orgSettings.pageTitle")}</h2>
+      </div>
       <div className="exec-tabs" role="tablist">
         <button
           role="tab"
