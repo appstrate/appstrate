@@ -3,6 +3,7 @@
   "list.import": "Import flow",
   "list.empty": "No flows available.",
   "list.emptyHint": "Add a flow in the <1>flows/</1> directory or import a ZIP",
+  "list.badgeBuiltIn": "Built-in",
   "list.badgeUser": "User",
   "list.running": "{{count}} running",
   "detail.breadcrumb": "Flows",
