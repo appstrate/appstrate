@@ -980,6 +980,11 @@ button:disabled {
   color: var(--danger);
   margin-bottom: 0.5rem;
 }
+.form-success {
+  font-size: 0.8rem;
+  color: var(--success);
+  margin-bottom: 0.5rem;
+}
 .login-switch {
   text-align: center;
   font-size: 0.8rem;
