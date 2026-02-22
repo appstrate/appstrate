@@ -2066,6 +2066,21 @@ button:disabled {
   font-size: 0.9rem;
   font-weight: 600;
 }
+.service-picker-add-provider {
+  border-style: dashed;
+  text-decoration: none;
+  color: var(--text-muted);
+}
+.service-picker-add-provider:hover {
+  color: var(--text);
+}
+.service-picker-add-icon {
+  font-size: 1.25rem;
+  font-weight: 300;
+  width: 24px;
+  text-align: center;
+  color: inherit;
+}
 .auth-mode-badge {
   font-size: 0.6rem;
   font-weight: 600;

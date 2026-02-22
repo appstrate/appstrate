@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import CreatableSelect from "react-select/creatable";
 import type { StylesConfig, MultiValue } from "react-select";
+import { Link } from "react-router-dom";
 import { useProviders } from "../../hooks/use-providers";
+import { useOrg } from "../../hooks/use-org";
 import type { ServiceEntry } from "./types";
 import type { AvailableScope, ProviderConfig } from "@appstrate/shared-types";
 
@@ -165,8 +167,9 @@ function ScopeMultiSelect({
 }
 
 export function ServicePicker({ value, onChange }: ServicePickerProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["flows", "common", "settings"]);
   const { data: providers, isLoading } = useProviders();
+  const { isOrgAdmin } = useOrg();
 
   const update = (index: number, patch: Partial<ServiceEntry>) => {
     const next = value.map((s, i) => (i === index ? { ...s, ...patch } : s));
@@ -278,6 +281,19 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
               </button>
             );
           })}
+          {isOrgAdmin && (
+            <Link
+              to="/org-settings?tab=providers"
+              className="service-picker-card service-picker-add-provider"
+            >
+              <span className="service-picker-add-icon">+</span>
+              <div className="service-picker-card-info">
+                <span className="service-picker-card-name">
+                  {t("providers.addProvider", { ns: "settings" })}
+                </span>
+              </div>
+            </Link>
+          )}
         </div>
       )}
     </div>
