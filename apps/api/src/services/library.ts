@@ -34,11 +34,22 @@ async function getFlowDisplayNames(
 export async function listOrgSkills(orgId: string) {
   const { data, error } = await supabase
     .from("org_skills")
-    .select("*, flow_skills(flow_id)")
+    .select("*")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
+
+  // Count flows per skill via separate query (no FK between flow_skills.skill_id and org_skills.id)
+  const { data: flowSkillRows } = await supabase
+    .from("flow_skills")
+    .select("skill_id")
+    .eq("org_id", orgId);
+
+  const countMap = new Map<string, number>();
+  for (const row of flowSkillRows ?? []) {
+    countMap.set(row.skill_id, (countMap.get(row.skill_id) ?? 0) + 1);
+  }
 
   const orgSkillIds = new Set((data ?? []).map((row) => row.id));
 
@@ -54,7 +65,7 @@ export async function listOrgSkills(orgId: string) {
       createdBy: null as string | null,
       createdAt: "",
       updatedAt: "",
-      usedByFlows: 0,
+      usedByFlows: countMap.get(s.id) ?? 0,
     }));
 
   const orgItems = (data ?? []).map((row) => ({
@@ -66,7 +77,7 @@ export async function listOrgSkills(orgId: string) {
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    usedByFlows: Array.isArray(row.flow_skills) ? row.flow_skills.length : 0,
+    usedByFlows: countMap.get(row.id) ?? 0,
   }));
 
   return [...builtInItems, ...orgItems];
@@ -187,11 +198,22 @@ export async function deleteOrgSkill(
 export async function listOrgExtensions(orgId: string) {
   const { data, error } = await supabase
     .from("org_extensions")
-    .select("*, flow_extensions(flow_id)")
+    .select("*")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
+
+  // Count flows per extension via separate query (no FK between flow_extensions.extension_id and org_extensions.id)
+  const { data: flowExtRows } = await supabase
+    .from("flow_extensions")
+    .select("extension_id")
+    .eq("org_id", orgId);
+
+  const countMap = new Map<string, number>();
+  for (const row of flowExtRows ?? []) {
+    countMap.set(row.extension_id, (countMap.get(row.extension_id) ?? 0) + 1);
+  }
 
   const orgExtIds = new Set((data ?? []).map((row) => row.id));
 
@@ -207,7 +229,7 @@ export async function listOrgExtensions(orgId: string) {
       createdBy: null as string | null,
       createdAt: "",
       updatedAt: "",
-      usedByFlows: 0,
+      usedByFlows: countMap.get(e.id) ?? 0,
     }));
 
   const orgItems = (data ?? []).map((row) => ({
@@ -219,7 +241,7 @@ export async function listOrgExtensions(orgId: string) {
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    usedByFlows: Array.isArray(row.flow_extensions) ? row.flow_extensions.length : 0,
+    usedByFlows: countMap.get(row.id) ?? 0,
   }));
 
   return [...builtInItems, ...orgItems];
@@ -434,16 +456,14 @@ export async function getFlowExtensionFiles(
 
 // --- Flow reference management ---
 
-/** Replace all skill references for a flow. Built-in skills are not stored in DB. */
+/** Replace all skill references for a flow. All IDs (built-in + org) are stored for counting. */
 export async function setFlowSkills(
   flowId: string,
   orgId: string,
   skillIds: string[],
 ): Promise<void> {
-  // Built-in IDs are resolved at execution time, only org IDs go to DB
+  // Validate org skills (non-built-in) BEFORE deleting old references
   const orgSkillIds = skillIds.filter((id) => !isBuiltInSkill(id));
-
-  // Validate org skills BEFORE deleting old references
   if (orgSkillIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_skills")
@@ -460,9 +480,9 @@ export async function setFlowSkills(
 
   await supabase.from("flow_skills").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (orgSkillIds.length === 0) return;
+  if (skillIds.length === 0) return;
 
-  const rows = orgSkillIds.map((skillId) => ({
+  const rows = skillIds.map((skillId) => ({
     flow_id: flowId,
     skill_id: skillId,
     org_id: orgId,
@@ -472,16 +492,14 @@ export async function setFlowSkills(
   if (error) throw error;
 }
 
-/** Replace all extension references for a flow. Built-in extensions are not stored in DB. */
+/** Replace all extension references for a flow. All IDs (built-in + org) are stored for counting. */
 export async function setFlowExtensions(
   flowId: string,
   orgId: string,
   extensionIds: string[],
 ): Promise<void> {
-  // Built-in IDs are resolved at execution time, only org IDs go to DB
+  // Validate org extensions (non-built-in) BEFORE deleting old references
   const orgExtIds = extensionIds.filter((id) => !isBuiltInExtension(id));
-
-  // Validate org extensions BEFORE deleting old references
   if (orgExtIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_extensions")
@@ -498,9 +516,9 @@ export async function setFlowExtensions(
 
   await supabase.from("flow_extensions").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (orgExtIds.length === 0) return;
+  if (extensionIds.length === 0) return;
 
-  const rows = orgExtIds.map((extensionId) => ({
+  const rows = extensionIds.map((extensionId) => ({
     flow_id: flowId,
     extension_id: extensionId,
     org_id: orgId,

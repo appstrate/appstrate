@@ -12,7 +12,6 @@ import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
 import { Modal } from "../components/modal";
 import { LibraryItemDetail } from "../components/library-item-detail";
-import { formatDateShort } from "../lib/markdown";
 import type { OrgSkill, OrgExtension } from "@appstrate/shared-types";
 
 type LibraryType = "skills" | "extensions";
@@ -110,7 +109,6 @@ function LibraryTab({ type }: { type: LibraryType }) {
                 <th>{t("library.colId")}</th>
                 <th>{t("library.colName")}</th>
                 <th>{t("library.colUploader")}</th>
-                <th>{t("library.colDate")}</th>
                 <th>{t("library.colFlows")}</th>
                 <th></th>
               </tr>
@@ -129,7 +127,6 @@ function LibraryTab({ type }: { type: LibraryType }) {
                     {item.description && <div className="cell-desc">{item.description}</div>}
                   </td>
                   <td>{item.createdByName || "-"}</td>
-                  <td>{formatDateShort(item.createdAt)}</td>
                   <td className="cell-count">{item.usedByFlows ?? 0}</td>
                   <td className="cell-actions">
                     <button type="button" className="btn-sm" onClick={() => setSelectedId(item.id)}>
