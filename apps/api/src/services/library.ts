@@ -13,6 +13,28 @@ const LIBRARY_BUCKET = "library-packages";
 /** Ensure the library-packages Storage bucket exists. Call once at boot. */
 export const ensureLibraryBucket = () => ensureBucket(LIBRARY_BUCKET);
 
+/** Count built-in skill/extension usage from flow manifests (since built-in IDs can't be in junction tables). */
+async function countBuiltInUsageFromManifests(
+  orgId: string,
+  field: "skills" | "extensions",
+): Promise<Map<string, number>> {
+  const { data: flows } = await supabase.from("flows").select("manifest").eq("org_id", orgId);
+
+  const countMap = new Map<string, number>();
+  const isBuiltIn = field === "skills" ? isBuiltInSkill : isBuiltInExtension;
+
+  for (const flow of flows ?? []) {
+    const manifest = flow.manifest as { requires?: { [k: string]: { id: string }[] } };
+    const items = manifest?.requires?.[field] ?? [];
+    for (const item of items) {
+      if (isBuiltIn(item.id)) {
+        countMap.set(item.id, (countMap.get(item.id) ?? 0) + 1);
+      }
+    }
+  }
+  return countMap;
+}
+
 // --- Helpers ---
 
 /** Fetch flow display names from a list of flow IDs. */
@@ -40,7 +62,7 @@ export async function listOrgSkills(orgId: string) {
 
   if (error) throw error;
 
-  // Count flows per skill via separate query (no FK between flow_skills.skill_id and org_skills.id)
+  // Count org skills from junction table
   const { data: flowSkillRows } = await supabase
     .from("flow_skills")
     .select("skill_id")
@@ -50,6 +72,9 @@ export async function listOrgSkills(orgId: string) {
   for (const row of flowSkillRows ?? []) {
     countMap.set(row.skill_id, (countMap.get(row.skill_id) ?? 0) + 1);
   }
+
+  // Count built-in skills from flow manifests (they can't be in the junction table due to FK)
+  const builtInCounts = await countBuiltInUsageFromManifests(orgId, "skills");
 
   const orgSkillIds = new Set((data ?? []).map((row) => row.id));
 
@@ -65,7 +90,7 @@ export async function listOrgSkills(orgId: string) {
       createdBy: null as string | null,
       createdAt: "",
       updatedAt: "",
-      usedByFlows: countMap.get(s.id) ?? 0,
+      usedByFlows: builtInCounts.get(s.id) ?? 0,
     }));
 
   const orgItems = (data ?? []).map((row) => ({
@@ -204,7 +229,7 @@ export async function listOrgExtensions(orgId: string) {
 
   if (error) throw error;
 
-  // Count flows per extension via separate query (no FK between flow_extensions.extension_id and org_extensions.id)
+  // Count org extensions from junction table
   const { data: flowExtRows } = await supabase
     .from("flow_extensions")
     .select("extension_id")
@@ -214,6 +239,9 @@ export async function listOrgExtensions(orgId: string) {
   for (const row of flowExtRows ?? []) {
     countMap.set(row.extension_id, (countMap.get(row.extension_id) ?? 0) + 1);
   }
+
+  // Count built-in extensions from flow manifests (they can't be in the junction table due to FK)
+  const builtInCounts = await countBuiltInUsageFromManifests(orgId, "extensions");
 
   const orgExtIds = new Set((data ?? []).map((row) => row.id));
 
@@ -229,7 +257,7 @@ export async function listOrgExtensions(orgId: string) {
       createdBy: null as string | null,
       createdAt: "",
       updatedAt: "",
-      usedByFlows: countMap.get(e.id) ?? 0,
+      usedByFlows: builtInCounts.get(e.id) ?? 0,
     }));
 
   const orgItems = (data ?? []).map((row) => ({
@@ -456,14 +484,15 @@ export async function getFlowExtensionFiles(
 
 // --- Flow reference management ---
 
-/** Replace all skill references for a flow. All IDs (built-in + org) are stored for counting. */
+/** Replace all skill references for a flow. Only org skill IDs are stored (built-in are tracked via manifest). */
 export async function setFlowSkills(
   flowId: string,
   orgId: string,
   skillIds: string[],
 ): Promise<void> {
-  // Validate org skills (non-built-in) BEFORE deleting old references
+  // Only org skills can be stored in flow_skills (FK constraint to org_skills)
   const orgSkillIds = skillIds.filter((id) => !isBuiltInSkill(id));
+
   if (orgSkillIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_skills")
@@ -480,9 +509,9 @@ export async function setFlowSkills(
 
   await supabase.from("flow_skills").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (skillIds.length === 0) return;
+  if (orgSkillIds.length === 0) return;
 
-  const rows = skillIds.map((skillId) => ({
+  const rows = orgSkillIds.map((skillId) => ({
     flow_id: flowId,
     skill_id: skillId,
     org_id: orgId,
@@ -492,14 +521,15 @@ export async function setFlowSkills(
   if (error) throw error;
 }
 
-/** Replace all extension references for a flow. All IDs (built-in + org) are stored for counting. */
+/** Replace all extension references for a flow. Only org extension IDs are stored (built-in are tracked via manifest). */
 export async function setFlowExtensions(
   flowId: string,
   orgId: string,
   extensionIds: string[],
 ): Promise<void> {
-  // Validate org extensions (non-built-in) BEFORE deleting old references
+  // Only org extensions can be stored in flow_extensions (FK constraint to org_extensions)
   const orgExtIds = extensionIds.filter((id) => !isBuiltInExtension(id));
+
   if (orgExtIds.length > 0) {
     const { data: existing } = await supabase
       .from("org_extensions")
@@ -516,9 +546,9 @@ export async function setFlowExtensions(
 
   await supabase.from("flow_extensions").delete().eq("flow_id", flowId).eq("org_id", orgId);
 
-  if (extensionIds.length === 0) return;
+  if (orgExtIds.length === 0) return;
 
-  const rows = extensionIds.map((extensionId) => ({
+  const rows = orgExtIds.map((extensionId) => ({
     flow_id: flowId,
     extension_id: extensionId,
     org_id: orgId,
