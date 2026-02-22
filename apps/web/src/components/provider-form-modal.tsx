@@ -553,7 +553,6 @@ function ProviderFormBody({
                   type="checkbox"
                   checked={form.allowAllUris}
                   onChange={(e) => setField("allowAllUris", e.target.checked)}
-                  style={{ width: "auto" }}
                 />
                 {t("providers.form.allowAllUris")}
               </label>
