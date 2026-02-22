@@ -59,6 +59,9 @@ export function FlowList() {
             <div className="flow-card-header">
               <h2>{flow.displayName}</h2>
               <div className="flow-card-badges">
+                {flow.source === "built-in" && (
+                  <span className="source-badge">{t("list.badgeBuiltIn")}</span>
+                )}
                 {flow.source === "user" && (
                   <span className="source-badge">{t("list.badgeUser")}</span>
                 )}

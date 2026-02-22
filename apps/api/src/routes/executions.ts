@@ -3,15 +3,15 @@ import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
   getFlowConfig,
-  getLastExecutionState,
   createExecution,
   updateExecution,
   appendExecutionLog,
   getAdminConnections,
   getExecution,
-  hasCustomCredentials,
+  getRunningExecutionsForFlow,
+  deleteFlowExecutions,
 } from "../services/state.ts";
-import { listConnections, getAccessToken, getConnectionStatus } from "../services/nango.ts";
+import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import {
   getAdapter,
   getAdapterName,
@@ -19,22 +19,14 @@ import {
   buildRetryPrompt,
 } from "../services/adapters/index.ts";
 import type { TokenUsage, FileReference } from "../services/adapters/index.ts";
-import type { UploadedFile, PromptContext } from "../services/adapters/types.ts";
+import type { PromptContext } from "../services/adapters/types.ts";
 import { uploadExecutionFiles, cleanupExecutionFiles } from "../services/file-storage.ts";
-import { buildPromptContext, buildExecutionApi } from "../services/env-builder.ts";
-import { getFlowPackage } from "../services/flow-package.ts";
-import {
-  validateConfig,
-  validateInput,
-  validateOutput,
-  validateFileInputs,
-  schemaHasFileFields,
-  parseFormDataFiles,
-} from "../services/schema.ts";
-import { getLatestVersionId } from "../services/flow-versions.ts";
+import { buildExecutionContext } from "../services/env-builder.ts";
+import { validateConfig, validateOutput } from "../services/schema.ts";
+import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireFlow } from "../middleware/guards.ts";
+import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { stopContainer } from "../services/docker.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
@@ -55,7 +47,7 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
 
 export async function executeFlowInBackground(
   executionId: string,
-  flowId: string,
+  _flowId: string,
   userId: string,
   orgId: string,
   flow: LoadedFlow,
@@ -161,6 +153,9 @@ export async function executeFlowInBackground(
         while (!outputValidation.valid && retriesLeft > 0) {
           const remaining = timeoutMs - (Date.now() - startTime);
           if (remaining < MIN_RETRY_TIME_MS) break;
+
+          // Brief pause before retrying to avoid hammering on identical invalid results
+          await new Promise((r) => setTimeout(r, 1_000));
 
           const attempt = maxRetries - retriesLeft + 1;
           await appendExecutionLog(
@@ -334,80 +329,14 @@ export function createExecutionsRouter() {
 
     // Validate service dependencies
     const adminConns = await getAdminConnections(orgId, flowId);
-    const connections = await listConnections(orgId, user.id);
-    const connectedProviders = new Set(connections.map((c) => c.provider));
-
-    for (const svc of flow.manifest.requires.services) {
-      const mode = svc.connectionMode ?? "user";
-
-      if (svc.provider === "custom") {
-        // Custom service — check custom_service_credentials
-        if (mode === "admin") {
-          const adminUserId = adminConns[svc.id];
-          if (!adminUserId) {
-            return c.json(
-              {
-                error: "DEPENDENCY_NOT_SATISFIED",
-                message: `Le connecteur '${svc.id}' n'est pas lie par un administrateur`,
-              },
-              400,
-            );
-          }
-          const hasCreds = await hasCustomCredentials(orgId, adminUserId, flowId, svc.id);
-          if (!hasCreds) {
-            return c.json(
-              {
-                error: "DEPENDENCY_NOT_SATISFIED",
-                message: `Les credentials admin pour '${svc.id}' ne sont plus disponibles`,
-              },
-              400,
-            );
-          }
-        } else {
-          const hasCreds = await hasCustomCredentials(orgId, user.id, flowId, svc.id);
-          if (!hasCreds) {
-            return c.json(
-              {
-                error: "DEPENDENCY_NOT_SATISFIED",
-                message: `Le connecteur '${svc.id}' n'est pas configure`,
-              },
-              400,
-            );
-          }
-        }
-      } else if (mode === "admin") {
-        const adminUserId = adminConns[svc.id];
-        if (!adminUserId) {
-          return c.json(
-            {
-              error: "DEPENDENCY_NOT_SATISFIED",
-              message: `Le connecteur '${svc.id}' n'est pas lie par un administrateur`,
-            },
-            400,
-          );
-        }
-        const conn = await getConnectionStatus(svc.provider, orgId, adminUserId);
-        if (conn.status !== "connected") {
-          return c.json(
-            {
-              error: "DEPENDENCY_NOT_SATISFIED",
-              message: `La connexion admin pour '${svc.id}' n'est plus active`,
-            },
-            400,
-          );
-        }
-      } else {
-        if (!connectedProviders.has(svc.provider)) {
-          return c.json(
-            {
-              error: "DEPENDENCY_NOT_SATISFIED",
-              message: `Le connecteur '${svc.id}' n'est pas connecte`,
-              connectUrl: `/auth/connect/${svc.provider}`,
-            },
-            400,
-          );
-        }
-      }
+    const depError = await validateFlowDependencies(
+      flow.manifest.requires.services,
+      adminConns,
+      orgId,
+      user.id,
+    );
+    if (depError) {
+      return c.json(depError, 400);
     }
 
     // Validate config
@@ -422,7 +351,7 @@ export function createExecutionsRouter() {
       return c.json(
         {
           error: "CONFIG_INCOMPLETE",
-          message: `Le parametre '${first.field}' est requis`,
+          message: `Parameter '${first.field}' is required`,
           configUrl: `/api/flows/${flowId}/config`,
         },
         400,
@@ -430,53 +359,11 @@ export function createExecutionsRouter() {
     }
 
     const inputSchema = flow.manifest.input?.schema;
-    const hasFileFields = schemaHasFileFields(inputSchema);
-
-    let body: { input?: Record<string, unknown> };
-    let uploadedFiles: UploadedFile[] | undefined;
-
-    if (hasFileFields) {
-      try {
-        const formData = await c.req.formData();
-        const parsed = await parseFormDataFiles(formData, inputSchema!);
-        body = { input: parsed.input };
-        uploadedFiles = parsed.files;
-      } catch (err) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `Erreur de parsing FormData: ${err instanceof Error ? err.message : String(err)}`,
-          },
-          400,
-        );
-      }
-
-      if (uploadedFiles.length > 0) {
-        const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
-        if (!fileValidation.valid) {
-          const first = fileValidation.errors[0]!;
-          return c.json(
-            { error: "VALIDATION_ERROR", message: first.message, field: first.field },
-            400,
-          );
-        }
-      }
-    } else {
-      try {
-        body = await c.req.json<{ input?: Record<string, unknown> }>();
-      } catch {
-        body = {};
-      }
+    const inputResult = await parseRequestInput(c, inputSchema);
+    if (!inputResult.ok) {
+      return c.json(inputResult.error, inputResult.status);
     }
-
-    // Validate required input fields (non-file fields)
-    if (inputSchema) {
-      const inputValidation = validateInput(body.input, inputSchema);
-      if (!inputValidation.valid) {
-        const first = inputValidation.errors[0]!;
-        return c.json({ error: "INPUT_REQUIRED", message: first.message, field: first.field }, 400);
-      }
-    }
+    const { input: parsedInput, uploadedFiles } = inputResult.data;
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
@@ -489,47 +376,23 @@ export function createExecutionsRouter() {
         return c.json(
           {
             error: "FILE_UPLOAD_FAILED",
-            message: `Echec de l'upload des fichiers: ${err instanceof Error ? err.message : String(err)}`,
+            message: `File upload failed: ${err instanceof Error ? err.message : String(err)}`,
           },
           500,
         );
       }
     }
 
-    // Get previous state and tokens (resolve based on connectionMode)
-    const previousState = await getLastExecutionState(flowId, user.id, orgId);
-    const tokens: Record<string, string> = {};
-    for (const svc of flow.manifest.requires.services) {
-      const mode = svc.connectionMode ?? "user";
-      if (svc.provider === "custom") {
-        // For custom services, tokens is a boolean marker — actual credentials resolved at runtime
-        tokens[svc.id] = "custom";
-      } else {
-        const tokenUserId = mode === "admin" ? adminConns[svc.id] : user.id;
-        if (tokenUserId) {
-          const token = await getAccessToken(svc.provider, orgId, tokenUserId);
-          if (token) tokens[svc.id] = token;
-        }
-      }
-    }
-
-    // Build prompt context
-    const promptContext = buildPromptContext({
+    // Build execution context (tokens, config, state, providers, package, version)
+    const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
+      executionId,
       flow,
-      tokens,
-      config,
-      previousState,
-      executionApi: buildExecutionApi(executionId),
-      input: body.input,
+      adminConns,
+      orgId,
+      userId: user.id,
+      input: parsedInput,
       files: fileRefs,
     });
-
-    // Get flow package (ZIP) for injection into container
-    const flowPackage = await getFlowPackage(flow, orgId);
-
-    // Get flow version ID for user flows (non-blocking on failure)
-    const flowVersionId =
-      flow.source === "user" ? await getLatestVersionId(flowId).catch(() => null) : null;
 
     // Create execution record
     await createExecution(
@@ -537,7 +400,7 @@ export function createExecutionsRouter() {
       flowId,
       user.id,
       orgId,
-      body.input ?? null,
+      parsedInput ?? null,
       undefined,
       flowVersionId ?? undefined,
     );
@@ -569,18 +432,18 @@ export function createExecutionsRouter() {
 
     const execution = await getExecution(execId);
     if (!execution) {
-      return c.json({ error: "EXECUTION_NOT_FOUND", message: "Execution introuvable" }, 404);
+      return c.json({ error: "EXECUTION_NOT_FOUND", message: "Execution not found" }, 404);
     }
 
     // Verify ownership (same org)
     if (execution.org_id !== orgId) {
-      return c.json({ error: "UNAUTHORIZED", message: "Non autorise" }, 403);
+      return c.json({ error: "UNAUTHORIZED", message: "Not authorized" }, 403);
     }
 
     // Verify cancellable
     if (execution.status !== "pending" && execution.status !== "running") {
       return c.json(
-        { error: "NOT_CANCELLABLE", message: "Cette execution ne peut pas etre annulee" },
+        { error: "NOT_CANCELLABLE", message: "This execution cannot be cancelled" },
         409,
       );
     }
@@ -604,6 +467,23 @@ export function createExecutionsRouter() {
     stopContainer(`appstrate-pi-${execId}`).catch(() => {});
 
     return c.json({ ok: true });
+  });
+
+  // DELETE /api/flows/:id/executions — delete all executions for a flow (admin only)
+  router.delete("/flows/:id/executions", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+
+    const running = await getRunningExecutionsForFlow(flow.id);
+    if (running > 0) {
+      return c.json(
+        { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) still running` },
+        409,
+      );
+    }
+
+    const deleted = await deleteFlowExecutions(flow.id, orgId);
+    return c.json({ deleted });
   });
 
   return router;

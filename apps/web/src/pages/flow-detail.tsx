@@ -14,12 +14,12 @@ import {
   useRunFlow,
   useConnect,
   useDeleteFlow,
+  useDeleteFlowExecutions,
   useConnectApiKey,
+  useConnectCredentials,
   useBindAdminService,
   useUnbindAdminService,
-  useSaveCustomCredentials,
   useDisconnect,
-  useDeleteCustomCredentials,
 } from "../hooks/use-mutations";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
@@ -31,10 +31,11 @@ import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
+import { useProviders } from "../hooks/use-providers";
 import { truncate, formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
-import type { Schedule } from "@appstrate/shared-types";
+import type { Schedule, JSONSchemaObject } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
   config: {
@@ -64,18 +65,19 @@ export function FlowDetailPage() {
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
   const { data: executions } = useExecutions(flowId);
   const { data: schedules } = useSchedules(flowId);
+  const { data: providers } = useProviders();
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.user_id).filter((id): id is string => !!id),
   );
   const runFlow = useRunFlow(flowId!);
   const deleteFlow = useDeleteFlow();
+  const deleteExecutions = useDeleteFlowExecutions(flowId!);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
+  const credentialsMutation = useConnectCredentials();
   const bindAdmin = useBindAdminService(flowId!);
   const unbindAdmin = useUnbindAdminService(flowId!);
-  const saveCustomCreds = useSaveCustomCredentials(flowId!);
   const disconnectMutation = useDisconnect();
-  const deleteCustomCreds = useDeleteCustomCredentials(flowId!);
   const createSchedule = useCreateSchedule(flowId!);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
@@ -91,7 +93,9 @@ export function FlowDetailPage() {
     bindAfter?: boolean;
   } | null>(null);
   const [customCredService, setCustomCredService] = useState<{
+    provider: string;
     id: string;
+    name?: string;
     bindAfter?: boolean;
   } | null>(null);
 
@@ -99,10 +103,16 @@ export function FlowDetailPage() {
 
   if (error || !detail) return <ErrorState message={error?.message} />;
 
-  const customCredSchema = customCredService
-    ? detail.requires.services.find((s) => s.id === customCredService.id)?.schema
+  // Look up provider's credentialSchema for custom credential modal
+  const customCredProviderDef = customCredService
+    ? providers?.find((p) => p.id === customCredService.provider)
     : undefined;
-  const allConnected = detail.requires.services.every((s) => s.status === "connected");
+  const customCredSchema =
+    (customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined) ?? undefined;
+
+  const allConnected = detail.requires.services.every(
+    (s) => s.status === "connected" && s.scopesSufficient !== false,
+  );
   const hasRequiredConfig = checkRequiredConfig(detail);
   const hasInputSchema =
     detail.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
@@ -115,6 +125,25 @@ export function FlowDetailPage() {
     } else {
       runFlow.mutate(undefined);
     }
+  };
+
+  /** Resolve provider authMode for a service */
+  const getServiceAuthMode = (svc: { provider: string; authMode?: string }): string | undefined => {
+    // First from the service status (backend-resolved)
+    if (svc.authMode) return svc.authMode;
+    // Fallback: look up provider definition
+    const pDef = providers?.find((p) => p.id === svc.provider);
+    return pDef?.authMode === "api_key"
+      ? "API_KEY"
+      : pDef?.authMode === "oauth2"
+        ? "OAUTH2"
+        : undefined;
+  };
+
+  /** Check if a provider uses credential-based auth (basic/custom) */
+  const isCredentialAuth = (provider: string): boolean => {
+    const pDef = providers?.find((p) => p.id === provider);
+    return pDef?.authMode === "basic" || pDef?.authMode === "custom";
   };
 
   return (
@@ -134,19 +163,11 @@ export function FlowDetailPage() {
         {detail.requires.services.map((svc) => {
           const isConnected = svc.status === "connected";
           const isAdminMode = svc.connectionMode === "admin";
-
-          const isCustom = svc.provider === "custom";
+          const authMode = getServiceAuthMode(svc);
 
           // Admin-provided service
           if (isAdminMode) {
             const handleBind = async () => {
-              if (isCustom) {
-                // For custom services, open credentials modal first if not connected
-                if (svc.schema) {
-                  setCustomCredService({ id: svc.id, bindAfter: true });
-                }
-                return;
-              }
               try {
                 await bindAdmin.mutateAsync(svc.id);
               } catch (err) {
@@ -157,11 +178,23 @@ export function FlowDetailPage() {
                 }
                 // Admin not connected to the provider — open connect flow then retry
                 try {
-                  if (svc.authMode === "API_KEY") {
+                  if (authMode === "API_KEY") {
                     setApiKeyService({ provider: svc.provider, id: svc.id, bindAfter: true });
                     return;
                   }
-                  await connectMutation.mutateAsync(svc.provider);
+                  if (isCredentialAuth(svc.provider)) {
+                    setCustomCredService({
+                      provider: svc.provider,
+                      id: svc.id,
+                      name: svc.name,
+                      bindAfter: true,
+                    });
+                    return;
+                  }
+                  await connectMutation.mutateAsync({
+                    provider: svc.provider,
+                    scopes: svc.scopesRequired,
+                  });
                   await bindAdmin.mutateAsync(svc.id);
                 } catch (retryErr) {
                   const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
@@ -175,7 +208,7 @@ export function FlowDetailPage() {
               return (
                 <div key={svc.id} className="service admin-provided" title={svc.description}>
                   <span className="status-dot connected" />
-                  {svc.id}
+                  {svc.name || svc.id}
                   {!isSelf && (
                     <span className="admin-service-badge">
                       {svc.adminDisplayName ?? t("admin")}
@@ -198,7 +231,7 @@ export function FlowDetailPage() {
             return (
               <div key={svc.id} className="service admin-pending" title={svc.description}>
                 <span className="status-dot disconnected" />
-                {svc.id}
+                {svc.name || svc.id}
                 {isOrgAdmin ? (
                   <button
                     type="button"
@@ -216,64 +249,48 @@ export function FlowDetailPage() {
           }
 
           // User mode (default behavior)
-          if (isCustom) {
-            // Custom service — open credentials modal
-            const handleCustomConnect = () => {
-              if (svc.schema) {
-                setCustomCredService({ id: svc.id });
-              }
-            };
-            if (isConnected) {
-              return (
-                <div key={svc.id} className="service" title={svc.description}>
-                  <span className="status-dot connected" />
-                  {svc.id}
-                  <button
-                    type="button"
-                    className="btn-unbind"
-                    onClick={() => {
-                      if (confirm(t("detail.disconnectConfirm", { name: svc.id }))) {
-                        deleteCustomCreds.mutate(svc.id);
-                      }
-                    }}
-                    disabled={deleteCustomCreds.isPending}
-                  >
-                    {t("detail.disconnect")}
-                  </button>
-                </div>
-              );
-            }
-            return (
-              <button
-                key={svc.id}
-                type="button"
-                className="service not-connected"
-                onClick={handleCustomConnect}
-                title={svc.description}
-              >
-                <span className="status-dot disconnected" />
-                {svc.id}
-                {` (${t("detail.connect")})`}
-              </button>
-            );
-          }
           const handleServiceConnect = () => {
-            if (svc.authMode === "API_KEY") {
+            if (authMode === "API_KEY") {
               setApiKeyService({ provider: svc.provider, id: svc.id });
+            } else if (isCredentialAuth(svc.provider)) {
+              setCustomCredService({
+                provider: svc.provider,
+                id: svc.id,
+                name: svc.name,
+              });
             } else {
-              connectMutation.mutate(svc.provider);
+              connectMutation.mutate({
+                provider: svc.provider,
+                scopes: svc.scopesRequired,
+              });
             }
           };
+          const hasScopeIssue = isConnected && svc.scopesSufficient === false;
           if (isConnected) {
             return (
-              <div key={svc.id} className="service" title={svc.description}>
-                <span className="status-dot connected" />
-                {svc.id}
+              <div
+                key={svc.id}
+                className={`service${hasScopeIssue ? " scope-warning" : ""}`}
+                title={svc.description}
+              >
+                <span className={`status-dot ${hasScopeIssue ? "warning" : "connected"}`} />
+                {svc.name || svc.id}
+                {hasScopeIssue && svc.scopesMissing && (
+                  <button
+                    type="button"
+                    className="btn-scope-upgrade"
+                    onClick={handleServiceConnect}
+                    disabled={connectMutation.isPending}
+                    title={`Missing: ${svc.scopesMissing.join(", ")}`}
+                  >
+                    {t("detail.updatePermissions", { defaultValue: "Update permissions" })}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn-unbind"
                   onClick={() => {
-                    if (confirm(t("detail.disconnectConfirm", { name: svc.id }))) {
+                    if (confirm(t("detail.disconnectConfirm", { name: svc.name || svc.id }))) {
                       disconnectMutation.mutate(svc.provider);
                     }
                   }}
@@ -293,7 +310,7 @@ export function FlowDetailPage() {
               title={svc.description}
             >
               <span className="status-dot disconnected" />
-              {svc.id}
+              {svc.name || svc.id}
               {` (${t("detail.connect")})`}
             </button>
           );
@@ -370,6 +387,27 @@ export function FlowDetailPage() {
 
       {tab === "executions" && (
         <>
+          {isOrgAdmin && executions && executions.length > 0 && (
+            <div className="section-header">
+              <div />
+              <button
+                className="btn-danger"
+                disabled={detail.runningExecutions > 0 || deleteExecutions.isPending}
+                title={
+                  detail.runningExecutions > 0
+                    ? t("detail.clearExecRunning")
+                    : t("detail.clearExec")
+                }
+                onClick={() => {
+                  if (confirm(t("detail.clearExecConfirm"))) {
+                    deleteExecutions.mutate();
+                  }
+                }}
+              >
+                {t("detail.clearExec")}
+              </button>
+            </div>
+          )}
           {!executions || executions.length === 0 ? (
             <EmptyState message={t("detail.emptyExec")} compact />
           ) : (
@@ -500,11 +538,12 @@ export function FlowDetailPage() {
           onClose={() => setCustomCredService(null)}
           schema={customCredSchema}
           serviceId={customCredService.id}
-          isPending={saveCustomCreds.isPending}
+          serviceName={customCredService.name}
+          isPending={credentialsMutation.isPending}
           onSubmit={(credentials) => {
-            const { id: serviceId, bindAfter } = customCredService;
-            saveCustomCreds.mutate(
-              { serviceId, credentials },
+            const { provider, id: serviceId, bindAfter } = customCredService;
+            credentialsMutation.mutate(
+              { provider, credentials },
               {
                 onSuccess: () => {
                   setCustomCredService(null);

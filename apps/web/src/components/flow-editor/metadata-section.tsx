@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-import { toSlug } from "../../lib/strings";
+import { toSlug, toLiveSlug } from "../../lib/strings";
 
 interface MetadataState {
   name: string;
@@ -64,14 +64,9 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           value={value.name}
           onChange={(v) => {
             setNameEdited(true);
-            update({
-              name: v
-                .toLowerCase()
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .replace(/[^a-z0-9-]/g, "-"),
-            });
+            update({ name: toLiveSlug(v) });
           }}
+          onBlur={() => update({ name: toSlug(value.name) })}
           placeholder={t("editor.metaNamePlaceholder")}
           description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
         />

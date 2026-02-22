@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
-import { toSlug } from "../lib/strings";
+import { toSlug, toLiveSlug } from "../lib/strings";
 
 export function CreateOrgPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -89,9 +89,10 @@ export function CreateOrgPage() {
               type="text"
               value={slug}
               onChange={(e) => {
-                setSlug(e.target.value);
+                setSlug(toLiveSlug(e.target.value));
                 setSlugEdited(true);
               }}
+              onBlur={() => setSlug(toSlug(slug))}
               placeholder={t("createOrg.slugPlaceholder")}
               required
             />

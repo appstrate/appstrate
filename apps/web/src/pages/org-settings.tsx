@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
+import { useProviders } from "../hooks/use-providers";
+import { useCreateProvider, useUpdateProvider, useDeleteProvider } from "../hooks/use-mutations";
+import { ProviderFormModal } from "../components/provider-form-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
-import type { OrganizationMember, OrgRole } from "@appstrate/shared-types";
+import type { OrganizationMember, OrgRole, ProviderConfig } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -14,13 +17,27 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
-  const [tab, setTab] = useState<"general" | "members">("general");
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab");
+  const validTabs = ["general", "members", "providers"] as const;
+  type Tab = (typeof validTabs)[number];
+  const [tab, setTab] = useState<Tab>(
+    validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
+  );
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
 
   // Members
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteError, setInviteError] = useState<string | null>(null);
+
+  // Providers
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [editProvider, setEditProvider] = useState<ProviderConfig | null>(null);
+  const { data: providers, isLoading: providersLoading, error: providersError } = useProviders();
+  const createProviderMutation = useCreateProvider();
+  const updateProviderMutation = useUpdateProvider();
+  const deleteProviderMutation = useDeleteProvider();
 
   const orgId = currentOrg?.id;
 
@@ -164,6 +181,9 @@ export function OrgSettingsPage() {
 
   return (
     <>
+      <div className="page-header">
+        <h2>{t("orgSettings.pageTitle")}</h2>
+      </div>
       <div className="exec-tabs" role="tablist">
         <button
           role="tab"
@@ -180,6 +200,14 @@ export function OrgSettingsPage() {
           onClick={() => setTab("members")}
         >
           {t("orgSettings.tabMembers", { count: members.length })}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "providers"}
+          className={`tab ${tab === "providers" ? "active" : ""}`}
+          onClick={() => setTab("providers")}
+        >
+          {t("orgSettings.tabProviders")}
         </button>
       </div>
 
@@ -394,6 +422,178 @@ export function OrgSettingsPage() {
             />
           )}
         </>
+      )}
+
+      {tab === "providers" && (
+        <ProvidersTab
+          providers={providers}
+          isLoading={providersLoading}
+          error={providersError}
+          onCreate={() => {
+            setEditProvider(null);
+            setProviderModalOpen(true);
+          }}
+          onEdit={(p) => {
+            setEditProvider(p);
+            setProviderModalOpen(true);
+          }}
+          onDelete={(p) => {
+            if (!confirm(t("providers.deleteConfirm", { name: p.displayName }))) return;
+            deleteProviderMutation.mutate(p.id);
+          }}
+        />
+      )}
+
+      <ProviderFormModal
+        open={providerModalOpen}
+        onClose={() => setProviderModalOpen(false)}
+        provider={editProvider}
+        isPending={createProviderMutation.isPending || updateProviderMutation.isPending}
+        onSubmit={(data) => {
+          if (editProvider) {
+            updateProviderMutation.mutate(
+              { id: editProvider.id, data },
+              { onSuccess: () => setProviderModalOpen(false) },
+            );
+          } else {
+            createProviderMutation.mutate(data, { onSuccess: () => setProviderModalOpen(false) });
+          }
+        }}
+      />
+    </>
+  );
+}
+
+function ProvidersTab({
+  providers,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+}: {
+  providers: ProviderConfig[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  onCreate: () => void;
+  onEdit: (p: ProviderConfig) => void;
+  onDelete: (p: ProviderConfig) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
+  const authModeLabel: Record<string, string> = {
+    oauth2: t("providers.authMode.oauth2"),
+    api_key: t("providers.authMode.apiKey"),
+    basic: t("providers.authMode.basic"),
+    custom: t("providers.authMode.custom"),
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: "1rem",
+        }}
+      >
+        <button className="primary" onClick={onCreate}>
+          {t("providers.addProvider")}
+        </button>
+      </div>
+
+      {providers && providers.length > 0 ? (
+        <div className="services-grid">
+          {providers.map((p) => {
+            const isBuiltIn = p.source === "built-in";
+            return (
+              <div key={p.id} className="service-card">
+                <div className="service-card-header">
+                  <div className="service-info">
+                    <h3
+                      style={{
+                        fontSize: "0.875rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      {p.iconUrl && (
+                        <img
+                          src={p.iconUrl}
+                          alt=""
+                          style={{ width: 20, height: 20, borderRadius: 4 }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      )}
+                      {p.displayName}
+                    </h3>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "0.375rem",
+                        marginTop: "0.25rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span className="badge badge-pending" style={{ fontSize: "0.7rem" }}>
+                        {authModeLabel[p.authMode] ?? p.authMode}
+                      </span>
+                      {isBuiltIn && (
+                        <span className="badge" style={{ fontSize: "0.7rem", opacity: 0.6 }}>
+                          {t("providers.builtIn")}
+                        </span>
+                      )}
+                      {p.source === "custom" && (
+                        <span className="badge" style={{ fontSize: "0.7rem", opacity: 0.6 }}>
+                          {t("providers.custom")}
+                        </span>
+                      )}
+                      {p.usedByFlows != null && p.usedByFlows > 0 && (
+                        <span className="badge badge-success" style={{ fontSize: "0.7rem" }}>
+                          {t("providers.usedByFlows", { count: p.usedByFlows })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {!isBuiltIn && (
+                  <div
+                    className="service-card-actions"
+                    style={{
+                      marginTop: "0.75rem",
+                      paddingTop: "0.75rem",
+                      borderTop: "1px solid var(--border)",
+                      display: "flex",
+                      gap: "0.5rem",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <button onClick={() => onEdit(p)}>{t("btn.edit", { ns: "common" })}</button>
+                    <button
+                      onClick={() => onDelete(p)}
+                      disabled={!!p.usedByFlows && p.usedByFlows > 0}
+                      title={
+                        p.usedByFlows && p.usedByFlows > 0
+                          ? t("providers.cannotDeleteInUse")
+                          : undefined
+                      }
+                    >
+                      {t("btn.delete", { ns: "common" })}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState message={t("providers.empty", { defaultValue: "No providers configured." })} />
       )}
     </>
   );

@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useOrgSkillDetail, useOrgExtensionDetail } from "../hooks/use-library";
 import { Spinner } from "./spinner";
-import { formatDateLong } from "../lib/markdown";
 
 interface LibraryItemDetailProps {
   type: "skill" | "extension";
@@ -37,7 +36,6 @@ export function LibraryItemDetail({ type, itemId }: LibraryItemDetailProps) {
       <div className="detail-meta">
         <code className="detail-id">{detail.id}</code>
         {detail.createdByName && <span className="detail-creator">{detail.createdByName}</span>}
-        <span className="detail-date">{formatDateLong(detail.createdAt)}</span>
       </div>
 
       {detail.description && (

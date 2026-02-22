@@ -79,11 +79,15 @@ function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
 export function useConnect() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (provider: string) => {
-      const session = await apiFetch<{ connectLink: string }>(`/auth/connect/${provider}`, {
+    mutationFn: async (params: string | { provider: string; scopes?: string[] }) => {
+      const provider = typeof params === "string" ? params : params.provider;
+      const scopes = typeof params === "string" ? undefined : params.scopes;
+
+      const session = await apiFetch<{ authUrl: string }>(`/auth/connect/${provider}`, {
         method: "POST",
+        ...(scopes ? { body: JSON.stringify({ scopes }) } : {}),
       });
-      const popup = window.open(session.connectLink, "oauth", "width=600,height=700");
+      const popup = window.open(session.authUrl, "oauth", "width=600,height=700");
       if (!popup) {
         throw new Error(i18n.t("error.popupBlocked"));
       }
@@ -261,17 +265,17 @@ export function useCancelExecution() {
   });
 }
 
-export function useSaveCustomCredentials(flowId: string) {
+export function useConnectCredentials() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
-      serviceId,
+      provider,
       credentials,
     }: {
-      serviceId: string;
+      provider: string;
       credentials: Record<string, string>;
     }) => {
-      return api(`/flows/${flowId}/services/${serviceId}/credentials`, {
+      return apiFetch(`/auth/connect/${provider}/credentials`, {
         method: "POST",
         body: JSON.stringify({ credentials }),
       });
@@ -281,15 +285,17 @@ export function useSaveCustomCredentials(flowId: string) {
   });
 }
 
-export function useDeleteCustomCredentials(flowId: string) {
+export function useDeleteFlowExecutions(flowId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (serviceId: string) => {
-      return api(`/flows/${flowId}/services/${serviceId}/credentials`, {
-        method: "DELETE",
-      });
+    mutationFn: async () => {
+      return api<{ deleted: number }>(`/flows/${flowId}/executions`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["executions"] });
+      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+    },
     onError: onMutationError,
   });
 }
@@ -305,6 +311,52 @@ export function useDeleteFlow() {
       qc.invalidateQueries({ queryKey: ["flows"] });
       navigate("/");
     },
+    onError: onMutationError,
+  });
+}
+
+// --- Provider mutations ---
+
+function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["providers"] });
+  qc.invalidateQueries({ queryKey: ["services"] });
+}
+
+export function useCreateProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      return api<{ id: string }>("/providers", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => invalidateProviderQueries(qc),
+    onError: onMutationError,
+  });
+}
+
+export function useUpdateProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      return api(`/providers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => invalidateProviderQueries(qc),
+    onError: onMutationError,
+  });
+}
+
+export function useDeleteProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      return api(`/providers/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => invalidateProviderQueries(qc),
     onError: onMutationError,
   });
 }
