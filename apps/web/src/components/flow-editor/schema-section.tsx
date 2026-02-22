@@ -15,6 +15,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { toSlug, toLiveSlug } from "../../lib/strings";
 
 export interface SchemaField {
   _id: string;
@@ -99,7 +100,8 @@ function SortableFieldCard({
           type="text"
           placeholder={t("editor.fieldKey")}
           value={field.key}
-          onChange={(e) => onUpdate(index, { key: e.target.value })}
+          onChange={(e) => onUpdate(index, { key: toLiveSlug(e.target.value) })}
+          onBlur={() => onUpdate(index, { key: toSlug(field.key) })}
           className="field-key"
           disabled={readOnly}
         />

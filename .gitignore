@@ -36,9 +36,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# Local setup scripts (contain OAuth credentials)
-scripts/setup-nango.ts
-
 # Runtime data (materialized user flows)
 data/
 

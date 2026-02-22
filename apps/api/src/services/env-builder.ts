@@ -1,6 +1,45 @@
 import type { PromptContext } from "./adapters/types.ts";
-import type { LoadedFlow } from "../types/index.ts";
+import type { LoadedFlow, FlowServiceRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
+import { getProvider } from "@appstrate/connect";
+import type { SupabaseClient } from "@appstrate/connect";
+import { supabase } from "../lib/supabase.ts";
+import { buildServiceTokens } from "./token-resolver.ts";
+import { getFlowConfig, getLastExecutionState } from "./state.ts";
+import { getFlowPackage } from "./flow-package.ts";
+import { getLatestVersionId } from "./flow-versions.ts";
+
+/**
+ * Resolve unique provider definitions for prompt context.
+ */
+export async function resolveProviderDefs(
+  supabase: SupabaseClient,
+  orgId: string,
+  services: FlowServiceRequirement[],
+): Promise<NonNullable<PromptContext["providers"]>> {
+  const providerDefs: NonNullable<PromptContext["providers"]> = [];
+  const seen = new Set<string>();
+  for (const svc of services) {
+    if (seen.has(svc.provider)) continue;
+    seen.add(svc.provider);
+    const def = await getProvider(supabase, orgId, svc.provider);
+    if (def) {
+      providerDefs.push({
+        id: def.id,
+        displayName: def.displayName,
+        authMode: def.authMode,
+        credentialSchema: def.credentialSchema,
+        credentialFieldName: def.credentialFieldName,
+        credentialHeaderName: def.credentialHeaderName,
+        credentialHeaderPrefix: def.credentialHeaderPrefix,
+        authorizedUris: def.authorizedUris,
+        allowAllUris: def.allowAllUris,
+        docsUrl: def.docsUrl,
+      });
+    }
+  }
+  return providerDefs;
+}
 
 /**
  * Build the execution API descriptor for container-to-host calls.
@@ -22,6 +61,7 @@ export function buildPromptContext(params: {
   executionApi?: { url: string; token: string };
   input?: Record<string, unknown>;
   files?: FileReference[];
+  providers?: PromptContext["providers"];
 }): PromptContext {
   return {
     rawPrompt: params.flow.prompt,
@@ -38,13 +78,52 @@ export function buildPromptContext(params: {
     },
     services: params.flow.manifest.requires.services.map((s) => ({
       id: s.id,
-      name: s.name,
       provider: s.provider,
-      description: s.description,
-      schema: s.schema,
-      authorized_uris: s.authorized_uris,
-      allow_all_uris: s.allow_all_uris,
     })),
+    providers: params.providers,
     llmModel: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
   };
+}
+
+/**
+ * Build the full execution context (tokens, config, state, providers, package, version).
+ * Shared by executions.ts, share.ts, and scheduler.ts.
+ */
+export async function buildExecutionContext(params: {
+  executionId: string;
+  flow: LoadedFlow;
+  adminConns: Record<string, string>;
+  orgId: string;
+  userId: string;
+  input?: Record<string, unknown>;
+  files?: FileReference[];
+}): Promise<{
+  promptContext: PromptContext;
+  flowPackage: Buffer | null;
+  flowVersionId: number | null;
+}> {
+  const { executionId, flow, adminConns, orgId, userId, input, files } = params;
+
+  const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId] =
+    await Promise.all([
+      buildServiceTokens(flow.manifest.requires.services, adminConns, orgId, userId),
+      getFlowConfig(orgId, flow.id),
+      getLastExecutionState(flow.id, userId, orgId),
+      resolveProviderDefs(supabase, orgId, flow.manifest.requires.services),
+      getFlowPackage(flow, orgId),
+      flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
+    ]);
+
+  const promptContext = buildPromptContext({
+    flow,
+    tokens,
+    config,
+    previousState,
+    executionApi: buildExecutionApi(executionId),
+    input,
+    files,
+    providers: providerDefs,
+  });
+
+  return { promptContext, flowPackage, flowVersionId };
 }

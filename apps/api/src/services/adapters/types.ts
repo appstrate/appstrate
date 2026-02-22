@@ -44,12 +44,19 @@ export interface PromptContext {
   };
   services: Array<{
     id: string;
-    name?: string;
     provider: string;
-    description: string;
-    schema?: import("@appstrate/shared-types").JSONSchemaObject;
-    authorized_uris?: string[];
-    allow_all_uris?: boolean;
+  }>;
+  providers?: Array<{
+    id: string;
+    displayName: string;
+    authMode: string;
+    credentialSchema?: import("@appstrate/shared-types").JSONSchemaObject;
+    credentialFieldName?: string;
+    credentialHeaderName?: string;
+    credentialHeaderPrefix?: string;
+    authorizedUris?: string[];
+    allowAllUris?: boolean;
+    docsUrl?: string;
   }>;
   llmModel: string;
 }

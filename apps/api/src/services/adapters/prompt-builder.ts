@@ -1,23 +1,33 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { PromptContext } from "./types.ts";
-import { getDefaultAuthorizedUris, getNangoCredentialField } from "./provider-urls.ts";
+import {
+  getBuiltInProviders,
+  getCredentialFieldName,
+  getDefaultAuthorizedUris,
+  type ProviderDefinition,
+} from "@appstrate/connect";
+
+type ProviderLike = NonNullable<PromptContext["providers"]>[number];
+
+/**
+ * Get provider definition for prompt building.
+ * Prefers ctx.providers (includes custom DB providers) over built-in registry.
+ */
+function getProviderDef(
+  providerId: string,
+  ctx?: PromptContext,
+): ProviderLike | ProviderDefinition | null {
+  if (ctx?.providers) {
+    const found = ctx.providers.find((p) => p.id === providerId);
+    if (found) return found;
+  }
+  return getBuiltInProviders().get(providerId) ?? null;
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function curlExample(serviceId: string, targetUrl: string, authHeader: string): string[] {
-  return [
-    "  Example:",
-    "  ```bash",
-    `  curl -s "$SIDECAR_URL/proxy" \\`,
-    `    -H "X-Service: ${serviceId}" \\`,
-    `    -H "X-Target: ${targetUrl}" \\`,
-    `    -H "${authHeader}"`,
-    "  ```",
-  ];
 }
 
 export function buildEnrichedPrompt(ctx: PromptContext): string {
@@ -27,90 +37,68 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
   if (connectedServices.length > 0) {
     sections.push("## API Access\n");
-    sections.push("Make authenticated API requests via the proxy at `$SIDECAR_URL/proxy`.");
+    sections.push("Make authenticated API requests via the proxy at `$SIDECAR_URL/proxy`.\n");
+    sections.push("Headers:");
+    sections.push("- `X-Service`: the service ID");
+    sections.push("- `X-Target`: the target URL (must match the service's authorized URLs)");
+    sections.push("- All other headers and the body are forwarded as-is");
     sections.push(
-      "Add `X-Service` and `X-Target` headers — all other headers and the body are forwarded as-is.",
+      "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials",
     );
-    sections.push(
-      "Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials.",
-    );
-    sections.push(
-      "Add `X-Substitute-Body: true` if the request body also contains `{{variable}}` placeholders.\n",
-    );
+    sections.push("- Add `X-Substitute-Body: true` if the body also contains placeholders\n");
+    sections.push("Example:");
+    sections.push("```bash");
+    sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
+    sections.push(`  -H "X-Service: <service_id>" \\`);
+    sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
+    sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
+    sections.push("```\n");
+
+    sections.push("### Connected Services\n");
 
     for (const svc of connectedServices) {
-      const svcLabel = svc.name || svc.id;
-      if (svc.provider === "custom") {
-        const props = svc.schema?.properties ?? {};
+      const provider = getProviderDef(svc.provider, ctx);
+      const displayName = provider?.displayName ?? svc.id;
+      const authorizedUris = provider
+        ? getDefaultAuthorizedUris(provider as ProviderDefinition)
+        : null;
+      const allowAllUris = provider?.allowAllUris ?? false;
+
+      sections.push(`- **${displayName}** (service ID: \`${svc.id}\`)`);
+
+      // For basic/custom providers with credentialSchema, show all variables
+      if (
+        provider &&
+        (provider.authMode === "basic" || provider.authMode === "custom") &&
+        provider.credentialSchema
+      ) {
+        const props = provider.credentialSchema.properties ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
           const desc = props[name]?.description ?? name;
           return `\`{{${name}}}\` — ${desc}`;
         });
-        sections.push(`- **${svcLabel}** [${svc.id}] (${svc.description}):`);
         if (varDescriptions.length > 0) {
           sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
         }
-        if (svc.allow_all_uris) {
-          sections.push(`  Allowed URLs: all public URLs (SSRF protection active)`);
-        } else if (svc.authorized_uris && svc.authorized_uris.length > 0) {
-          sections.push(`  Allowed URLs: ${svc.authorized_uris.join(", ")}`);
-        }
-        const exampleUrl =
-          svc.authorized_uris?.[0]?.replace("/*", "/v1/data") ?? "https://api.example.com/v1/data";
-        const firstVar = varNames[0];
-        if (firstVar) {
-          sections.push(...curlExample(svc.id, exampleUrl, `Authorization: {{${firstVar}}}`));
-        }
       } else {
-        const { name: fieldName, description: fieldDesc } = getNangoCredentialField(svc.id);
-        const authorizedUris =
-          svc.authorized_uris ?? getDefaultAuthorizedUris(svc.id, svc.provider);
+        // OAuth2 / API key — single credential field with header info
+        const fieldName = provider
+          ? getCredentialFieldName(provider as ProviderDefinition)
+          : "token";
+        const headerName = provider?.credentialHeaderName ?? "Authorization";
+        const headerPrefix = provider?.credentialHeaderPrefix ?? "Bearer ";
+        sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
+      }
 
-        sections.push(`- **${svcLabel}** [${svc.id}] (${svc.description}):`);
-        sections.push(`  Credential: \`{{${fieldName}}}\` — ${fieldDesc}`);
-        if (svc.allow_all_uris) {
-          sections.push(`  Allowed URLs: all public URLs (SSRF protection active)`);
-        } else if (authorizedUris && authorizedUris.length > 0) {
-          sections.push(`  Allowed URLs: ${authorizedUris.join(", ")}`);
-        }
+      if (provider?.docsUrl) {
+        sections.push(`  Documentation: ${provider.docsUrl}`);
+      }
 
-        if (svc.provider === "gmail" || svc.id === "gmail") {
-          sections.push(
-            ...curlExample(
-              "gmail",
-              "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20",
-              `Authorization: Bearer {{${fieldName}}}`,
-            ),
-          );
-        } else if (svc.provider === "clickup" || svc.id === "clickup") {
-          sections.push(
-            ...curlExample(
-              "clickup",
-              "https://api.clickup.com/api/v2/team",
-              `Authorization: {{${fieldName}}}`,
-            ),
-          );
-        } else if (svc.provider === "brevo" || svc.id === "brevo") {
-          sections.push(
-            ...curlExample(
-              "brevo",
-              "https://api.brevo.com/v3/contacts",
-              `api-key: {{${fieldName}}}`,
-            ),
-          );
-        } else if (svc.provider === "facebook" || svc.id === "facebook") {
-          sections.push(
-            ...curlExample(
-              "facebook",
-              "https://graph.facebook.com/v21.0/me/accounts",
-              `Authorization: Bearer {{${fieldName}}}`,
-            ),
-          );
-          sections.push(
-            `  Note: Use the Page Access Token from /me/accounts when posting to a Page.`,
-          );
-        }
+      if (allowAllUris) {
+        sections.push(`  Authorized URLs: all public URLs`);
+      } else if (authorizedUris && authorizedUris.length > 0) {
+        sections.push(`  Authorized URLs: ${authorizedUris.join(", ")}`);
       }
     }
     sections.push("");

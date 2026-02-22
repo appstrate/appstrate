@@ -282,78 +282,9 @@ export async function deleteAdminConnectionsForFlow(orgId: string, flowId: strin
   await supabase.from("flow_admin_connections").delete().eq("org_id", orgId).eq("flow_id", flowId);
 }
 
-// --- Custom Service Credentials ---
-
-export async function getCustomCredentials(
-  orgId: string,
-  userId: string,
-  flowId: string,
-  serviceId: string,
-): Promise<Record<string, string> | null> {
-  const { data } = await supabase
-    .from("custom_service_credentials")
-    .select("credentials")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .eq("flow_id", flowId)
-    .eq("service_id", serviceId)
-    .single();
-  return (data?.credentials as Record<string, string>) ?? null;
-}
-
-export async function setCustomCredentials(
-  orgId: string,
-  userId: string,
-  flowId: string,
-  serviceId: string,
-  credentials: Record<string, string>,
-): Promise<void> {
-  const { error } = await supabase.from("custom_service_credentials").upsert(
-    {
-      org_id: orgId,
-      user_id: userId,
-      flow_id: flowId,
-      service_id: serviceId,
-      credentials: credentials as Json,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "org_id,user_id,flow_id,service_id" },
-  );
-  if (error) {
-    throw new Error(`Failed to save custom credentials for ${serviceId}: ${error.message}`);
-  }
-}
-
-export async function deleteCustomCredentials(
-  orgId: string,
-  userId: string,
-  flowId: string,
-  serviceId: string,
-): Promise<void> {
-  await supabase
-    .from("custom_service_credentials")
-    .delete()
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .eq("flow_id", flowId)
-    .eq("service_id", serviceId);
-}
-
-export async function hasCustomCredentials(
-  orgId: string,
-  userId: string,
-  flowId: string,
-  serviceId: string,
-): Promise<boolean> {
-  const { count } = await supabase
-    .from("custom_service_credentials")
-    .select("*", { count: "exact", head: true })
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .eq("flow_id", flowId)
-    .eq("service_id", serviceId);
-  return (count ?? 0) > 0;
-}
+// Custom service credentials functions removed — now handled by @appstrate/connect
+// via connection-manager.ts. The custom_service_credentials table has been
+// migrated to service_connections (migration 012).
 
 export async function getExecution(id: string) {
   const { data } = await supabase

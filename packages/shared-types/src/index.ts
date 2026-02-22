@@ -87,9 +87,11 @@ export interface ServiceStatus {
   adminProvided?: boolean;
   adminUserId?: string;
   adminDisplayName?: string;
-  schema?: JSONSchemaObject;
-  authorizedUris?: string[];
-  allowAllUris?: boolean;
+  // Scope validation
+  scopesRequired?: string[];
+  scopesGranted?: string[];
+  scopesSufficient?: boolean;
+  scopesMissing?: string[];
 }
 
 export interface FlowListItem {
@@ -177,4 +179,32 @@ export interface Integration {
   status: "connected" | "not_connected";
   authMode?: string;
   connectedAt?: string;
+}
+
+// --- Provider Config Types ---
+
+export interface ProviderConfig {
+  id: string;
+  displayName: string;
+  authMode: "oauth2" | "api_key" | "basic" | "custom";
+  source: "built-in" | "custom";
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  defaultScopes?: string[];
+  scopeSeparator?: string;
+  pkceEnabled?: boolean;
+  authorizationParams?: Record<string, string>;
+  tokenParams?: Record<string, string>;
+  credentialSchema?: Record<string, unknown>;
+  credentialFieldName?: string;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  iconUrl?: string;
+  categories?: string[];
+  docsUrl?: string;
+  authorizedUris?: string[];
+  allowAllUris?: boolean;
 }
