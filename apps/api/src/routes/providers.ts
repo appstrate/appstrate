@@ -6,6 +6,7 @@ import { requireAdmin } from "../middleware/guards.ts";
 import { supabase } from "../lib/supabase.ts";
 import { getBuiltInProviders, isBuiltInProvider, encrypt } from "@appstrate/connect";
 import type { ProviderConfigRow, AuthMode } from "@appstrate/connect";
+import { listFlows } from "../services/flow-service.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -99,6 +100,15 @@ export function createProvidersRouter() {
       return c.json({ error: "DB_ERROR", message: error.message }, 500);
     }
 
+    // Count provider usage across all flows (built-in + user)
+    const allFlows = await listFlows(orgId);
+    const providerUsage = new Map<string, number>();
+    for (const flow of allFlows) {
+      for (const svc of flow.manifest.requires?.services ?? []) {
+        providerUsage.set(svc.provider, (providerUsage.get(svc.provider) ?? 0) + 1);
+      }
+    }
+
     const providers: ProviderConfig[] = [];
 
     // Built-in providers — always source "built-in"
@@ -128,13 +138,16 @@ export function createProvidersRouter() {
         authorizedUris: def.authorizedUris,
         allowAllUris: def.allowAllUris,
         availableScopes: def.availableScopes,
+        usedByFlows: providerUsage.get(id) ?? 0,
       });
     }
 
     // Custom providers (DB only, IDs different from built-in)
     for (const row of (rows ?? []) as unknown as ProviderConfigRow[]) {
       if (!builtIn.has(row.id)) {
-        providers.push(rowToProviderConfig(row, "custom"));
+        const cfg = rowToProviderConfig(row, "custom");
+        cfg.usedByFlows = providerUsage.get(row.id) ?? 0;
+        providers.push(cfg);
       }
     }
 
@@ -323,6 +336,27 @@ export function createProvidersRouter() {
           message: `Cannot delete built-in provider '${providerId}'`,
         },
         403,
+      );
+    }
+
+    // Block deleting providers that are in use by flows
+    const allFlows = await listFlows(orgId);
+    let usageCount = 0;
+    for (const flow of allFlows) {
+      for (const svc of flow.manifest.requires?.services ?? []) {
+        if (svc.provider === providerId) {
+          usageCount++;
+          break;
+        }
+      }
+    }
+    if (usageCount > 0) {
+      return c.json(
+        {
+          error: "PROVIDER_IN_USE",
+          message: `Cannot delete provider '${providerId}': used by ${usageCount} flow(s)`,
+        },
+        409,
       );
     }
 

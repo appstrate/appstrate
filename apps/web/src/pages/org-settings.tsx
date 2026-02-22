@@ -554,6 +554,11 @@ function ProvidersTab({
                           {t("providers.custom")}
                         </span>
                       )}
+                      {p.usedByFlows != null && p.usedByFlows > 0 && (
+                        <span className="badge badge-success" style={{ fontSize: "0.7rem" }}>
+                          {t("providers.usedByFlows", { count: p.usedByFlows })}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -570,7 +575,13 @@ function ProvidersTab({
                     }}
                   >
                     <button onClick={() => onEdit(p)}>{t("btn.edit", { ns: "common" })}</button>
-                    <button onClick={() => onDelete(p)}>{t("btn.delete", { ns: "common" })}</button>
+                    <button
+                      onClick={() => onDelete(p)}
+                      disabled={!!p.usedByFlows && p.usedByFlows > 0}
+                      title={p.usedByFlows && p.usedByFlows > 0 ? t("providers.cannotDeleteInUse") : undefined}
+                    >
+                      {t("btn.delete", { ns: "common" })}
+                    </button>
                   </div>
                 )}
               </div>

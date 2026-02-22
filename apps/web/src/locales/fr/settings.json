@@ -149,6 +149,8 @@
   "providers.form.scopeValue": "Scope",
   "providers.form.scopeLabel": "Label",
   "providers.form.addAvailableScope": "+ Ajouter un scope",
+  "providers.usedByFlows": "{{count}} flow(s)",
+  "providers.cannotDeleteInUse": "Impossible de supprimer : utilisé par des flows",
   "providers.authMode.oauth2": "OAuth2",
   "providers.authMode.apiKey": "Clé API",
   "providers.authMode.basic": "Basic",
