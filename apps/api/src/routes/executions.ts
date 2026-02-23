@@ -21,9 +21,8 @@ import {
   TimeoutError,
   buildRetryPrompt,
 } from "../services/adapters/index.ts";
-import type { TokenUsage, FileReference } from "../services/adapters/index.ts";
-import type { PromptContext } from "../services/adapters/types.ts";
-import { uploadExecutionFiles, cleanupExecutionFiles } from "../services/file-storage.ts";
+import type { TokenUsage } from "../services/adapters/index.ts";
+import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
 import { validateConfig, validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -56,6 +55,7 @@ export async function executeFlowInBackground(
   flow: LoadedFlow,
   promptContext: PromptContext,
   flowPackage?: Buffer | null,
+  inputFiles?: UploadedFile[],
 ) {
   const startTime = Date.now();
   const controller = trackExecution(executionId);
@@ -98,6 +98,7 @@ export async function executeFlowInBackground(
         timeout,
         flowPackage ?? undefined,
         signal,
+        inputFiles,
       )) {
         if (msg.usage) accumulateUsage(accumulated, msg.usage);
         if (msg.type === "progress") {
@@ -307,14 +308,6 @@ export async function executeFlowInBackground(
     });
   } finally {
     untrackExecution(executionId);
-    if (promptContext.files?.length) {
-      cleanupExecutionFiles(executionId).catch((err) => {
-        logger.warn("Failed to cleanup execution files", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
   }
 }
 
@@ -370,21 +363,13 @@ export function createExecutionsRouter() {
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Upload files to storage
-    let fileRefs: FileReference[] | undefined;
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      try {
-        fileRefs = await uploadExecutionFiles(executionId, uploadedFiles);
-      } catch (err) {
-        return c.json(
-          {
-            error: "FILE_UPLOAD_FAILED",
-            message: `File upload failed: ${err instanceof Error ? err.message : String(err)}`,
-          },
-          500,
-        );
-      }
-    }
+    // Build file metadata for prompt context (no URLs — files injected directly into container)
+    const fileRefs = uploadedFiles?.map((f) => ({
+      fieldName: f.fieldName,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+    }));
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
@@ -417,6 +402,7 @@ export function createExecutionsRouter() {
       flow,
       promptContext,
       flowPackage,
+      uploadedFiles,
     ).catch((err) => {
       logger.error("Unhandled error in background execution", {
         executionId,

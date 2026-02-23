@@ -16,6 +16,7 @@ export interface ContainerLifecycleOptions {
   executionId: string;
   timeout: number;
   flowPackage?: Buffer;
+  inputFiles?: Array<{ name: string; buffer: Buffer }>;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
   /** Extra container IDs to stop on timeout (e.g. sidecar). */
@@ -37,6 +38,15 @@ export async function* runContainerLifecycle(
   // Inject flow package ZIP before starting
   if (flowPackage) {
     await injectFile(containerId, "flow-package.zip", flowPackage, "/workspace");
+  }
+
+  // Inject uploaded input files into /workspace/documents/
+  // Use /workspace as target and prefix filename with documents/ so the tar
+  // creates the subdirectory (Docker archive API requires the target dir to exist).
+  if (options.inputFiles && options.inputFiles.length > 0) {
+    for (const file of options.inputFiles) {
+      await injectFile(containerId, `documents/${file.name}`, file.buffer, "/workspace");
+    }
   }
 
   yield {

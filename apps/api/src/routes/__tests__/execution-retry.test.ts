@@ -36,7 +36,10 @@ mock.module("../../services/state.ts", () => ({
   getAdminConnections: mock(async () => ({})),
   getRunningExecutionsForFlow: mock(async () => 0),
   getExecution: mock(async () => null),
+  getExecutionFull: mock(async () => null),
   deleteFlowExecutions: mock(async () => {}),
+  listFlowExecutions: mock(async () => []),
+  listExecutionLogs: mock(async () => []),
 }));
 
 mock.module("../../services/connection-manager.ts", () => ({
@@ -104,8 +107,7 @@ mock.module("../../services/flow-package.ts", () => ({
 }));
 
 mock.module("../../services/file-storage.ts", () => ({
-  uploadExecutionFiles: mock(async () => []),
-  cleanupExecutionFiles: mock(async () => {}),
+  sanitizeStorageKey: (name: string) => name,
 }));
 
 // Import after mocks are set up

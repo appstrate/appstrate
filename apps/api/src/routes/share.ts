@@ -14,10 +14,8 @@ import { resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
-import { uploadExecutionFiles } from "../services/file-storage.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
-import type { FileReference } from "../services/adapters/index.ts";
 
 export function createShareRouter() {
   const router = new Hono();
@@ -112,21 +110,13 @@ export function createShareRouter() {
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Upload files to storage
-    let fileRefs: FileReference[] | undefined;
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      try {
-        fileRefs = await uploadExecutionFiles(executionId, uploadedFiles);
-      } catch (err) {
-        return c.json(
-          {
-            error: "FILE_UPLOAD_FAILED",
-            message: `File upload failed: ${err instanceof Error ? err.message : String(err)}`,
-          },
-          500,
-        );
-      }
-    }
+    // Build file metadata for prompt context (no URLs — files injected directly into container)
+    const fileRefs = uploadedFiles?.map((f) => ({
+      fieldName: f.fieldName,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+    }));
 
     // Validate service dependencies before execution
     const adminConns = await getAdminConnections(orgId, flowId);
@@ -172,6 +162,7 @@ export function createShareRouter() {
       flow,
       promptContext,
       flowPackage,
+      uploadedFiles,
     ).catch((err) => {
       logger.error("Unhandled error in shared execution", {
         executionId,

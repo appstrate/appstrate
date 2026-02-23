@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdir, rm, readdir, stat } from "node:fs/promises";
+import { mkdir, rm, readdir } from "node:fs/promises";
 import { getEnv } from "@appstrate/env";
 
 const STORAGE_DIR = getEnv().STORAGE_DIR || join(process.cwd(), "data", "storage");
@@ -53,42 +53,4 @@ export async function listFiles(bucket: string, prefix = ""): Promise<string[]> 
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
-}
-
-/**
- * Delete all files under a prefix in a bucket.
- */
-export async function deletePrefix(bucket: string, prefix: string): Promise<void> {
-  const dir = join(STORAGE_DIR, bucket, prefix);
-  await rm(dir, { recursive: true, force: true });
-}
-
-/**
- * Get file info (size, modified date). Returns null if not found.
- */
-export async function getFileInfo(
-  bucket: string,
-  path: string,
-): Promise<{ size: number; modified: Date } | null> {
-  try {
-    const info = await stat(join(STORAGE_DIR, bucket, path));
-    return { size: info.size, modified: info.mtime };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
-}
-
-/**
- * Get a Bun.file() reference for streaming responses.
- */
-export function getFileRef(bucket: string, path: string) {
-  return Bun.file(join(STORAGE_DIR, bucket, path));
-}
-
-/**
- * Get the absolute filesystem path for a file.
- */
-export function getFilePath(bucket: string, path: string): string {
-  return join(STORAGE_DIR, bucket, path);
 }

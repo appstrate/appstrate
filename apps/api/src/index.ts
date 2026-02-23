@@ -21,7 +21,6 @@ import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
 import { ensureLibraryBucket } from "./services/library.ts";
-import { ensureFilesBucket } from "./services/file-storage.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
@@ -148,13 +147,6 @@ try {
   await ensureLibraryBucket();
 } catch (err) {
   logger.warn("Could not ensure library bucket", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-try {
-  await ensureFilesBucket();
-} catch (err) {
-  logger.warn("Could not ensure execution-files bucket", {
     error: err instanceof Error ? err.message : String(err),
   });
 }
