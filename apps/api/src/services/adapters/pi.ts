@@ -272,6 +272,8 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
         return null;
     }
   } catch {
-    return null;
+    const trimmed = line.trim();
+    if (trimmed.length === 0) return null;
+    return { type: "progress", message: `[container] ${trimmed}` };
   }
 }

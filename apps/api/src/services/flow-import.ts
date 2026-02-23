@@ -6,6 +6,7 @@ import { validateManifest } from "./schema.ts";
 import { insertUserFlow } from "./user-flows.ts";
 import { createVersionAndUpload } from "./flow-versions.ts";
 import { extractSkillMeta } from "./skill-utils.ts";
+import { validateExtensionSource } from "./extension-validation.ts";
 import {
   upsertOrgSkill,
   upsertOrgExtension,
@@ -24,6 +25,7 @@ export interface ImportResult {
   skillsMatched: number;
   extensionsCreated: number;
   extensionsMatched: number;
+  warnings: string[];
 }
 
 export class FlowImportError extends Error {
@@ -177,12 +179,14 @@ export async function upsertSkillsAndExtensionsFromFiles(
   skillsMatched: number;
   extensionsCreated: number;
   extensionsMatched: number;
+  warnings: string[];
 }> {
   const root = findRoot(files);
   let skillsCreated = 0;
   let skillsMatched = 0;
   let extensionsCreated = 0;
   let extensionsMatched = 0;
+  const warnings: string[] = [];
 
   // Process skills — group all files per skill directory
   const skillPrefix = root + "skills/";
@@ -258,6 +262,15 @@ export async function upsertSkillsAndExtensionsFromFiles(
     const tsFilename = Object.keys(extFiles)[0]!;
     const content = new TextDecoder().decode(extFiles[tsFilename]!);
 
+    // Validate extension source
+    const validation = validateExtensionSource(content);
+    for (const err of validation.errors) {
+      warnings.push(`Extension "${extId}": ${err}`);
+    }
+    for (const warn of validation.warnings) {
+      warnings.push(`Extension "${extId}": ${warn}`);
+    }
+
     // Check if extension already exists in org
     const existing = await db
       .select({ id: orgExtensions.id })
@@ -288,7 +301,7 @@ export async function upsertSkillsAndExtensionsFromFiles(
     await setFlowExtensions(flowId, orgId, extIds);
   }
 
-  return { skillsCreated, skillsMatched, extensionsCreated, extensionsMatched };
+  return { skillsCreated, skillsMatched, extensionsCreated, extensionsMatched, warnings };
 }
 
 export async function importFlowFromZip(
@@ -348,6 +361,10 @@ export async function importFlowFromZip(
   return {
     flowId,
     displayName: metadata.displayName,
-    ...libResult,
+    skillsCreated: libResult.skillsCreated,
+    skillsMatched: libResult.skillsMatched,
+    extensionsCreated: libResult.extensionsCreated,
+    extensionsMatched: libResult.extensionsMatched,
+    warnings: libResult.warnings,
   };
 }
