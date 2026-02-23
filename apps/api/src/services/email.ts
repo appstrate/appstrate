@@ -31,13 +31,14 @@ export async function sendEmail({ to, subject, htmlContent }: SendEmailParams): 
       }),
     });
 
+    const body = await res.text();
+
     if (!res.ok) {
-      const body = await res.text();
       logger.error("Brevo API error", { status: res.status, body, to, subject });
       return false;
     }
 
-    logger.info("Email sent", { to, subject });
+    logger.info("Email sent", { to, subject, status: res.status, response: body });
     return true;
   } catch (err) {
     logger.error("Email send failed", {
