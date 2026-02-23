@@ -9,6 +9,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/connect/package.json packages/connect/
+COPY packages/db/package.json packages/db/
 
 RUN bun install --frozen-lockfile
 
@@ -24,10 +25,6 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
 
 COPY . .
-
-# VITE_* vars must be set at build time for the frontend bundle
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
 
 RUN bun run build
 
@@ -52,6 +49,10 @@ COPY --from=build /app/packages/shared-types/package.json ./packages/shared-type
 # Connect package (used by API at runtime)
 COPY --from=build /app/packages/connect/src ./packages/connect/src
 COPY --from=build /app/packages/connect/package.json ./packages/connect/
+
+# DB package (schema, client, auth, storage, notify — used by API at runtime)
+COPY --from=build /app/packages/db/src ./packages/db/src
+COPY --from=build /app/packages/db/package.json ./packages/db/
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
