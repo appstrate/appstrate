@@ -61,6 +61,12 @@ export function useGlobalExecutionSync() {
       }
     });
 
+    // Prevent native auto-reconnect loop (Safari aggressively reconnects on failure)
+    es.onerror = () => {
+      console.warn("[SSE] realtime connection failed, closing");
+      es.close();
+    };
+
     return () => {
       es.close();
     };
