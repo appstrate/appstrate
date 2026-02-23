@@ -15,11 +15,7 @@ import {
   slugify,
   isSlugAvailable,
 } from "../services/organizations.ts";
-import {
-  createInvitation,
-  getOrgInvitations,
-  cancelInvitation,
-} from "../services/invitations.ts";
+import { createInvitation, getOrgInvitations, cancelInvitation } from "../services/invitations.ts";
 
 const router = new Hono<AppEnv>();
 

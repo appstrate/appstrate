@@ -72,7 +72,7 @@ export function PackageSection({
                 type="file"
                 accept=".zip"
                 onChange={handleUploadZip}
-                style={{ display: "none" }}
+                className="hidden"
                 disabled={uploadMutation.isPending}
               />
             </label>

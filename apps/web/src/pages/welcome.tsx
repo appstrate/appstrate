@@ -71,16 +71,7 @@ export function WelcomePage() {
         <h1 className="login-title">
           <span>App</span>strate
         </h1>
-        <p
-          style={{
-            textAlign: "center",
-            color: "var(--text-secondary)",
-            marginBottom: "1.5rem",
-            fontSize: "0.9rem",
-          }}
-        >
-          {t("welcome.subtitle")}
-        </p>
+        <p className="auth-subtitle">{t("welcome.subtitle")}</p>
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -98,10 +89,7 @@ export function WelcomePage() {
 
           <div className="form-group">
             <label htmlFor="password">
-              {t("welcome.password")}{" "}
-              <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
-                ({t("welcome.optional")})
-              </span>
+              {t("welcome.password")} <span className="label-hint">({t("welcome.optional")})</span>
             </label>
             <input
               id="password"

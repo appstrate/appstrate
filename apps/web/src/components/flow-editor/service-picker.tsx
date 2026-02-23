@@ -139,10 +139,8 @@ function ScopeMultiSelect({
     if (ctx.context === "menu") {
       return (
         <div>
-          <div style={{ fontWeight: 500 }}>{option.label}</div>
-          <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "1px" }}>
-            {option.value}
-          </div>
+          <div className="scope-menu-label">{option.label}</div>
+          <div className="scope-menu-value">{option.value}</div>
         </div>
       );
     }
@@ -201,7 +199,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
       {/* Selected services */}
       {value.length > 0 && (
         <div className="service-picker-selected">
-          <div className="section-title" style={{ marginBottom: "0.5rem" }}>
+          <div className="section-title section-title-mb-sm">
             {t("editor.selectedServices", { count: value.length })}
           </div>
           {value.map((svc, i) => {
@@ -255,7 +253,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
       )}
 
       {/* Available providers */}
-      <div className="section-title" style={{ marginTop: value.length > 0 ? "1rem" : 0 }}>
+      <div className={`section-title${value.length > 0 ? " section-title-mt-md" : ""}`}>
         {t("editor.availableIntegrations")}
       </div>
       {isLoading ? (
