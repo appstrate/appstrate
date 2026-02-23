@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useCallback, useEffect } from "react";
+import { useSyncExternalStore, useCallback } from "react";
 import { authClient } from "../lib/auth-client";
 import { api } from "../api";
 import i18n from "../i18n";
@@ -81,20 +81,6 @@ export function useAuth() {
   initAuth();
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  // Listen for session changes
-  useEffect(() => {
-    const unsub = authClient.$store.listen("$sessionSignal", async () => {
-      const result = await authClient.getSession();
-      if (result.data?.user) {
-        const profile = await fetchProfile();
-        setAuthenticatedUser(result.data.user, profile);
-      } else {
-        setState({ user: null, profile: null, loading: false });
-      }
-    });
-    return typeof unsub === "function" ? unsub : () => {};
-  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
