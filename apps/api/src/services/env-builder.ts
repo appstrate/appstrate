@@ -4,6 +4,7 @@ import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
+import { getEnv } from "@appstrate/env";
 import { buildServiceTokens } from "./token-resolver.ts";
 import { getFlowConfig, getLastExecutionState } from "./state.ts";
 import { getFlowPackage } from "./flow-package.ts";
@@ -45,8 +46,8 @@ export async function resolveProviderDefs(
  * Build the execution API descriptor for container-to-host calls.
  */
 export function buildExecutionApi(executionId: string): { url: string; token: string } {
-  const url =
-    process.env.PLATFORM_API_URL || `http://host.docker.internal:${process.env.PORT || "3000"}`;
+  const apiEnv = getEnv();
+  const url = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
   return { url, token: executionId };
 }
 
@@ -81,7 +82,7 @@ export function buildPromptContext(params: {
       provider: s.provider,
     })),
     providers: params.providers,
-    llmModel: process.env.LLM_MODEL || "claude-sonnet-4-5-20250929",
+    llmModel: getEnv().LLM_MODEL_ID,
   };
 }
 

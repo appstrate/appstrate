@@ -3,6 +3,7 @@ import { providerConfigs } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition, ProviderConfigRow } from "./types.ts";
 import { decrypt } from "./encryption.ts";
+import { getEnv } from "@appstrate/env";
 
 export type { Db };
 
@@ -40,15 +41,8 @@ function addProviders(
 }
 
 function parseEnvProviders(): ProviderDefinition[] {
-  if (!process.env.SYSTEM_PROVIDERS) return [];
-  try {
-    const parsed = JSON.parse(process.env.SYSTEM_PROVIDERS) as ProviderDefinition[];
-    if (!Array.isArray(parsed)) throw new Error("SYSTEM_PROVIDERS must be a JSON array");
-    return parsed;
-  } catch (err) {
-    console.error("[connect] Failed to parse SYSTEM_PROVIDERS:", err);
-    return [];
-  }
+  const raw = getEnv().SYSTEM_PROVIDERS;
+  return raw as ProviderDefinition[];
 }
 
 /**

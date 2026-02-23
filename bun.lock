@@ -19,6 +19,7 @@
       "dependencies": {
         "@appstrate/connect": "workspace:*",
         "@appstrate/db": "workspace:*",
+        "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "ajv": "^8.18.0",
         "croner": "^10.0.1",
@@ -80,6 +81,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/db": "workspace:*",
+        "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "drizzle-orm": "^0.39.3",
       },
@@ -88,12 +90,20 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/env": "workspace:*",
         "better-auth": "^1.2.8",
         "drizzle-orm": "^0.39.3",
         "postgres": "^3.4.7",
       },
       "devDependencies": {
         "drizzle-kit": "^0.30.5",
+      },
+    },
+    "packages/env": {
+      "name": "@appstrate/env",
+      "version": "0.0.0",
+      "dependencies": {
+        "zod": "^4.3.6",
       },
     },
     "packages/shared-types": {
@@ -110,6 +120,8 @@
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
+
+    "@appstrate/env": ["@appstrate/env@workspace:packages/env"],
 
     "@appstrate/shared-types": ["@appstrate/shared-types@workspace:packages/shared-types"],
 

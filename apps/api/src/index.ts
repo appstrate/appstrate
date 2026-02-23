@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { lt } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { db, closeDb } from "./lib/db.ts";
 import { auth } from "./lib/auth.ts";
 import { oauthStates, scheduleRuns } from "@appstrate/db/schema";
@@ -38,12 +39,13 @@ import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import type { AppEnv } from "./types/index.ts";
 
+// Fail-fast: validate all env vars at startup
+const env = getEnv();
+
 const app = new Hono<AppEnv>();
 
 // Middleware
-const trustedOrigins = process.env.TRUSTED_ORIGINS
-  ? process.env.TRUSTED_ORIGINS.split(",").map((s) => s.trim())
-  : ["http://localhost:3010"];
+const trustedOrigins = env.TRUSTED_ORIGINS;
 
 app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 
@@ -111,7 +113,7 @@ app.use("*", async (c, next) => {
 });
 
 // Load built-in resources from DATA_DIR (if configured)
-const dataDir = process.env.DATA_DIR;
+const dataDir = env.DATA_DIR;
 
 if (dataDir) {
   // Load built-in providers from {dataDir}/providers.json + SYSTEM_PROVIDERS env var
@@ -303,12 +305,10 @@ app.use("/*", serveStatic({ root: "./apps/web/dist" }));
 app.get("/*", serveStatic({ root: "./apps/web/dist", path: "index.html" }));
 
 // Start server
-const port = parseInt(process.env.PORT || "3010", 10);
-
 export default {
-  port,
+  port: env.PORT,
   fetch: app.fetch,
   idleTimeout: 255,
 };
 
-logger.info("Server started", { port });
+logger.info("Server started", { port: env.PORT });

@@ -3,8 +3,9 @@ import { orgInvitations, organizations, profiles } from "@appstrate/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import { sendEmail } from "./email.ts";
+import { getEnv } from "@appstrate/env";
 
-const BASE_URL = process.env.APP_URL || "http://localhost:3010";
+const BASE_URL = getEnv().APP_URL;
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
