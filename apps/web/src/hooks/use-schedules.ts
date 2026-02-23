@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "../lib/supabase";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { Schedule } from "@appstrate/shared-types";
@@ -9,12 +8,7 @@ export function useAllSchedules() {
   return useQuery({
     queryKey: ["schedules", orgId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("flow_schedules")
-        .select("*")
-        .order("created_at", { ascending: true });
-      if (error) throw new Error(error.message);
-      return data;
+      return api<Schedule[]>("/schedules");
     },
   });
 }
@@ -24,13 +18,7 @@ export function useSchedules(flowId: string | undefined) {
   return useQuery({
     queryKey: ["schedules", orgId, flowId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("flow_schedules")
-        .select("*")
-        .eq("flow_id", flowId!)
-        .order("created_at", { ascending: true });
-      if (error) throw new Error(error.message);
-      return data;
+      return api<Schedule[]>(`/flows/${flowId}/schedules`);
     },
     enabled: !!flowId,
   });

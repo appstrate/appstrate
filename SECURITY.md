@@ -15,7 +15,7 @@ This document describes Appstrate's defense-in-depth approach, the threat model 
 - [Layer 3 — URL Authorization](#layer-3--url-authorization)
 - [Layer 4 — Container Hardening](#layer-4--container-hardening)
 - [Layer 5 — Platform Authentication](#layer-5--platform-authentication)
-- [Layer 6 — Data Isolation (Row Level Security)](#layer-6--data-isolation-row-level-security)
+- [Layer 6 — Data Isolation (Application-Level Security)](#layer-6--data-isolation-application-level-security)
 - [Layer 7 — Input Validation](#layer-7--input-validation)
 - [Layer 8 — Operational Safety](#layer-8--operational-safety)
 - [Industry Standards Compliance](#industry-standards-compliance)
@@ -280,35 +280,38 @@ Labels: {
 
 ## Layer 5 — Platform Authentication
 
-### User authentication (JWT)
+### User authentication (Cookie Sessions)
 
-All API endpoints under `/api/*` and `/auth/*` require a valid Supabase JWT:
+All API endpoints under `/api/*` and `/auth/*` require a valid Better Auth session cookie:
 
 ```typescript
 // index.ts — global middleware
-app.use("/api/*", async (c, next) => {
-  const user = await verifyUser(token);
-  if (!user) return c.json({ error: "UNAUTHORIZED" }, 401);
-  c.set("user", user);
-  await next();
+app.use("*", async (c, next) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session?.user) {
+    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing session" }, 401);
+  }
+  c.set("user", { id: session.user.id, email: session.user.email });
+  return next();
 });
 ```
 
-The JWT is verified server-side via `supabase.auth.getUser(token)` using the service role key — not client-side validation.
+Sessions are managed by Better Auth (email/password + cookie-based sessions). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
 ### Organization context verification
 
-Every authenticated request must include an `X-Org-Id` header. The middleware verifies the user is a member of the specified organization:
+Every authenticated request must include an `X-Org-Id` header. The middleware verifies the user is a member of the specified organization via Drizzle:
 
 ```typescript
 // org-context.ts
-const { data } = await supabase
-  .from("organization_members")
-  .select("role")
-  .eq("org_id", orgId)
-  .eq("user_id", user.id)
-  .single();
-if (!data) return c.json({ error: "FORBIDDEN" }, 403);
+const membership = await db
+  .select({ role: organizationMembers.role })
+  .from(organizationMembers)
+  .where(
+    and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)),
+  )
+  .limit(1);
+if (!membership[0]) return c.json({ error: "FORBIDDEN" }, 403);
 ```
 
 ### Execution tokens (container-to-host)
@@ -321,13 +324,13 @@ Internal endpoints (`/internal/*`) use the execution ID as a bearer token. This 
 
 ```typescript
 // internal.ts — credential endpoint
-const { data: execution } = await supabase
-  .from("executions")
-  .select("flow_id, status, org_id")
-  .eq("id", executionId)
-  .single();
+const rows = await db
+  .select({ flowId: executions.flowId, status: executions.status, orgId: executions.orgId })
+  .from(executions)
+  .where(eq(executions.id, executionId))
+  .limit(1);
 
-if (!execution || execution.status !== "running") {
+if (!rows[0] || rows[0].status !== "running") {
   return c.json({ error: "Invalid or expired execution token" }, 401);
 }
 ```
@@ -362,36 +365,43 @@ await markOrphanExecutionsFailed();
 
 ---
 
-## Layer 6 — Data Isolation (Row Level Security)
+## Layer 6 — Data Isolation (Application-Level Security)
 
-**Files:** `supabase/migrations/001_initial.sql`, `supabase/migrations/006_organizations.sql`
+**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/services/state.ts`, all route handlers
 
-All database tables have Supabase Row Level Security (RLS) enabled. Users can only access data belonging to their organization.
+All data access is scoped by organization at the application level. Every Drizzle query includes an `orgId` filter via `where` clauses, enforced by the org-context middleware which validates organization membership on every request.
 
-| Table                        | SELECT                    | INSERT                | UPDATE                | DELETE                |
-| ---------------------------- | ------------------------- | --------------------- | --------------------- | --------------------- |
-| `executions`                 | Org members               | Own user + org member | —                     | —                     |
-| `execution_logs`             | Org members               | Org members           | —                     | —                     |
-| `flow_configs`               | Org members               | Org admins            | Org admins            | Org admins            |
-| `flows`                      | Org members               | Org admins            | Org admins            | Org admins            |
-| `flow_schedules`             | Org members               | Own user + org member | Own user + org member | Own user + org member |
-| `custom_service_credentials` | Own user (admins see org) | Own user + org member | Own user + org member | Own user + org member |
-| `share_tokens`               | Service role only         | Service role only     | Service role only     | —                     |
+| Table                  | SELECT          | INSERT                | UPDATE                | DELETE                |
+| ---------------------- | --------------- | --------------------- | --------------------- | --------------------- |
+| `executions`           | Org members     | Own user + org member | —                     | —                     |
+| `execution_logs`       | Org members     | Org members           | —                     | —                     |
+| `flow_configs`         | Org members     | Org admins            | Org admins            | Org admins            |
+| `flows`                | Org members     | Org admins            | Org admins            | Org admins            |
+| `flow_schedules`       | Org members     | Own user + org member | Own user + org member | Own user + org member |
+| `service_connections`  | Own user + org  | Own user + org member | Own user + org member | Own user + org member |
+| `share_tokens`         | Org members     | Org members           | Org members           | —                     |
 
-RLS policies use `SECURITY DEFINER` helper functions for organization membership checks:
+Application-level isolation uses the org-context middleware and Drizzle `where` clauses:
 
-```sql
-CREATE FUNCTION is_org_member(p_org_id UUID) RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM organization_members
-    WHERE org_id = p_org_id AND user_id = auth.uid()
-  );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```typescript
+// org-context.ts — verify membership on every request
+const membership = await db
+  .select({ role: organizationMembers.role })
+  .from(organizationMembers)
+  .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)))
+  .limit(1);
+if (!membership[0]) return c.json({ error: "FORBIDDEN" }, 403);
+c.set("orgId", orgId);
+c.set("orgRole", membership[0].role);
+
+// Every query filters by orgId — example from state.ts
+const rows = await db
+  .select()
+  .from(executions)
+  .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)));
 ```
 
-For Supabase Realtime CDC compatibility, additional `_realtime` SELECT policies use direct column checks (`auth.uid() = user_id`) since CDC cannot evaluate `SECURITY DEFINER` functions.
-
-**Standard:** RLS implements mandatory access control at the database level, satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
+**Standard:** Application-level org-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
 
 ---
 
@@ -524,12 +534,12 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 | Control                                     | Implementation                                                     |
 | ------------------------------------------- | ------------------------------------------------------------------ |
-| **AC-3** Access Enforcement                 | RLS, JWT auth, org membership verification                         |
+| **AC-3** Access Enforcement                 | Application-level org-scoped queries, cookie session auth, org membership verification |
 | **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering             |
 | **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards |
 | **AU-3** Content of Audit Records           | Structured JSON logging with execution context                     |
 | **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                   |
-| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in Supabase (RLS)            |
+| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (application-level isolation) |
 
 ### CIS Docker Benchmark v1.8.0
 
@@ -554,9 +564,9 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 | Risk                                           | Mitigation                                                                          |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| **API1 — BOLA**                                | Execution tokens scoped to single execution. RLS enforces org-level data isolation. |
-| **API2 — Broken Authentication**               | Multi-layer auth: JWT + org membership + admin guards + execution tokens.           |
-| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. RLS at database level.                       |
+| **API1 — BOLA**                                | Execution tokens scoped to single execution. Org-scoped queries enforce data isolation. |
+| **API2 — Broken Authentication**               | Multi-layer auth: cookie sessions + org membership + admin guards + execution tokens.   |
+| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. Org-scoped queries at application level.          |
 | **API8 — Security Misconfiguration**           | `authorizedUris` URL restriction. Input validation on all external boundaries.      |
 
 ---

@@ -43,21 +43,24 @@ services:
   appstrate:
     build:
       context: .
-      args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     restart: unless-stopped
     mem_limit: 512m
     networks:
       - default
     environment:
       - PORT=3000
-      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-5-20250929}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
+      - APP_URL=${APP_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-claude-sonnet-4-5-20250929}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
       - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL}
+      - SYSTEM_PROVIDERS=${SYSTEM_PROVIDERS:-[]}
+      - DATA_DIR=${DATA_DIR:-./data}
+      - STORAGE_DIR=${STORAGE_DIR:-./storage}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:

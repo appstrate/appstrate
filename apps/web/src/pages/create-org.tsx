@@ -10,7 +10,7 @@ export function CreateOrgPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { switchOrg } = useOrg();
+  const { orgs, switchOrg } = useOrg();
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -103,11 +103,13 @@ export function CreateOrgPage() {
             {createMutation.isPending ? t("createOrg.creating") : t("createOrg.submit")}
           </button>
         </form>
-        <p className="login-switch">
-          <button type="button" className="link-btn" onClick={() => navigate("/")}>
-            {t("btn.back")}
-          </button>
-        </p>
+        {orgs.length > 0 && (
+          <p className="login-switch">
+            <button type="button" className="link-btn" onClick={() => navigate("/")}>
+              {t("btn.back")}
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );

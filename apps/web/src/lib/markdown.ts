@@ -19,9 +19,10 @@ export function truncate(str: string, max: number): string {
   return str.slice(0, max) + "...";
 }
 
-export function formatDateField(dateStr: string): string {
+export function formatDateField(dateStr: string | Date): string {
   try {
-    return new Date(dateStr).toLocaleString(i18n.language, {
+    const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
+    return d.toLocaleString(i18n.language, {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -29,7 +30,7 @@ export function formatDateField(dateStr: string): string {
       minute: "2-digit",
     });
   } catch {
-    return dateStr;
+    return String(dateStr);
   }
 }
 

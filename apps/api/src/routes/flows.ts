@@ -120,7 +120,7 @@ export function createFlowsRouter() {
         : null,
       ...(flow.source === "user" && userFlowRow
         ? {
-            updatedAt: userFlowRow.updated_at,
+            updatedAt: userFlowRow.updatedAt,
             prompt: flow.prompt,
             executionSettings: m.execution ?? null,
           }
@@ -296,9 +296,10 @@ export function createFlowsRouter() {
     }
 
     const shareToken = await createShareToken(flow.id, user.id, orgId);
+    if (!shareToken) throw new Error("Failed to create share token");
     return c.json({
       token: shareToken.token,
-      expiresAt: shareToken.expires_at,
+      expiresAt: shareToken.expiresAt,
     });
   });
 

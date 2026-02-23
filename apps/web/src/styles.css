@@ -516,10 +516,18 @@ button:disabled {
   padding: 0.125rem 0;
 }
 
+.log-entry.progress {
+  white-space: pre-wrap;
+  padding-left: 1.5em;
+}
+
 .log-entry.progress::before {
   content: "\2192";
   color: var(--primary);
-  margin-right: 0.5rem;
+  display: inline-block;
+  width: 1em;
+  margin-left: -1.5em;
+  margin-right: 0.5em;
 }
 
 .log-entry.system {

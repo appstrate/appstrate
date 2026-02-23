@@ -1,11 +1,20 @@
-import { supabase } from "../lib/supabase.ts";
-import type { FlowRow, Json } from "@appstrate/shared-types";
+import { eq, and } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import {
+  flows,
+  executions,
+  flowSchedules,
+  flowConfigs,
+  flowVersions,
+  flowAdminConnections,
+} from "@appstrate/db/schema";
+import type { Flow } from "@appstrate/db/schema";
 
-export type { FlowRow };
+export type FlowRow = Flow;
 
 export async function getFlowById(id: string): Promise<FlowRow | null> {
-  const { data } = await supabase.from("flows").select("*").eq("id", id).single();
-  return data ?? null;
+  const rows = await db.select().from(flows).where(eq(flows.id, id)).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function insertUserFlow(
@@ -14,18 +23,13 @@ export async function insertUserFlow(
   manifest: Record<string, unknown>,
   prompt: string,
 ): Promise<FlowRow> {
-  const { data, error } = await supabase
-    .from("flows")
-    .insert({
-      id,
-      org_id: orgId,
-      manifest: manifest as Json,
-      prompt,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  const now = new Date();
+  const [row] = await db
+    .insert(flows)
+    .values({ id, orgId, manifest, prompt, createdAt: now, updatedAt: now })
+    .returning();
+  if (!row) throw new Error("Failed to insert flow: no row returned");
+  return row;
 }
 
 export async function updateUserFlow(
@@ -36,34 +40,28 @@ export async function updateUserFlow(
   },
   expectedUpdatedAt: string,
 ): Promise<FlowRow | null> {
-  const updatePayload: Record<string, unknown> = {
-    manifest: payload.manifest as Json,
-    prompt: payload.prompt,
-    updated_at: new Date().toISOString(),
-  };
+  const rows = await db
+    .update(flows)
+    .set({
+      manifest: payload.manifest,
+      prompt: payload.prompt,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(flows.id, id), eq(flows.updatedAt, new Date(expectedUpdatedAt))))
+    .returning();
 
-  const { data, error } = await supabase
-    .from("flows")
-    .update(updatePayload)
-    .eq("id", id)
-    .eq("updated_at", expectedUpdatedAt)
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") return null; // 0 rows matched = stale
-    throw error;
-  }
-  return data;
+  return rows[0] ?? null;
 }
 
 export async function deleteUserFlow(id: string): Promise<void> {
-  // flow_skills and flow_extensions cascade-deleted via flows FK
-  // execution_logs cascade-deleted via executions FK
-  await supabase.from("executions").delete().eq("flow_id", id);
-  await supabase.from("flow_schedules").delete().eq("flow_id", id);
-  await supabase.from("flow_configs").delete().eq("flow_id", id);
-  await supabase.from("flow_versions").delete().eq("flow_id", id);
-  await supabase.from("flow_admin_connections").delete().eq("flow_id", id);
-  await supabase.from("flows").delete().eq("id", id);
+  await db.transaction(async (tx) => {
+    // flow_skills and flow_extensions cascade-deleted via flows FK
+    // execution_logs cascade-deleted via executions FK
+    await tx.delete(executions).where(eq(executions.flowId, id));
+    await tx.delete(flowSchedules).where(eq(flowSchedules.flowId, id));
+    await tx.delete(flowConfigs).where(eq(flowConfigs.flowId, id));
+    await tx.delete(flowVersions).where(eq(flowVersions.flowId, id));
+    await tx.delete(flowAdminConnections).where(eq(flowAdminConnections.flowId, id));
+    await tx.delete(flows).where(eq(flows.id, id));
+  });
 }

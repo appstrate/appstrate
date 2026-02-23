@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
-import { supabase } from "../lib/supabase";
-import type { RealtimeChannel } from "@supabase/supabase-js";
-import type { Tables } from "@appstrate/shared-types";
+import { getCurrentOrgId } from "./use-org";
 
+/**
+ * Subscribe to execution status changes + log inserts for a single execution via SSE.
+ */
 export function useExecutionRealtime(
   executionId: string | null | undefined,
   onStatusChange?: (payload: Record<string, unknown>) => void,
@@ -14,25 +15,25 @@ export function useExecutionRealtime(
 
   useEffect(() => {
     if (!executionId) return;
+    const orgId = getCurrentOrgId();
+    if (!orgId) return;
 
-    const channel: RealtimeChannel = supabase
-      .channel(`exec-${executionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "executions",
-          filter: `id=eq.${executionId}`,
-        },
-        (payload) => {
-          onStatusRef.current?.(payload.new as Record<string, unknown>);
-        },
-      )
-      .subscribe();
+    const es = new EventSource(
+      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}`,
+      { withCredentials: true },
+    );
+
+    es.addEventListener("execution_update", (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        onStatusRef.current?.(data);
+      } catch {
+        // Ignore malformed SSE payloads
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      es.close();
     };
   }, [executionId]);
 }
@@ -48,25 +49,20 @@ export function useFlowExecutionRealtime(flowId: string | null | undefined, call
 
   useEffect(() => {
     if (!flowId) return;
+    const orgId = getCurrentOrgId();
+    if (!orgId) return;
 
-    const channel: RealtimeChannel = supabase
-      .channel(`flow-exec-${flowId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "executions",
-          filter: `flow_id=eq.${flowId}`,
-        },
-        () => {
-          cbRef.current();
-        },
-      )
-      .subscribe();
+    const es = new EventSource(
+      `/api/realtime/flows/${flowId}/executions?orgId=${encodeURIComponent(orgId)}`,
+      { withCredentials: true },
+    );
+
+    es.addEventListener("execution_update", () => {
+      cbRef.current();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      es.close();
     };
   }, [flowId]);
 }
@@ -83,34 +79,29 @@ export function useAllExecutionsRealtime(callback: () => void) {
   const stableCallback = useCallback(() => cbRef.current(), []);
 
   useEffect(() => {
-    const channel: RealtimeChannel = supabase
-      .channel("all-executions")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "executions",
-        },
-        () => {
-          stableCallback();
-        },
-      )
-      .subscribe();
+    const orgId = getCurrentOrgId();
+    if (!orgId) return;
+
+    const es = new EventSource(`/api/realtime/executions?orgId=${encodeURIComponent(orgId)}`, {
+      withCredentials: true,
+    });
+
+    es.addEventListener("execution_update", () => {
+      stableCallback();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      es.close();
     };
   }, [stableCallback]);
 }
 
 /**
- * Subscribe to execution_logs INSERTs via Supabase Realtime.
- * Enabled by denormalized user_id column with direct RLS policy.
+ * Subscribe to execution_logs INSERTs via SSE.
  */
 export function useExecutionLogsRealtime(
   executionId: string | null | undefined,
-  onNewLog: (log: Tables<"execution_logs">) => void,
+  onNewLog: (log: Record<string, unknown>) => void,
 ) {
   const onNewLogRef = useRef(onNewLog);
   useEffect(() => {
@@ -119,25 +110,25 @@ export function useExecutionLogsRealtime(
 
   useEffect(() => {
     if (!executionId) return;
+    const orgId = getCurrentOrgId();
+    if (!orgId) return;
 
-    const channel: RealtimeChannel = supabase
-      .channel(`exec-logs-${executionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "execution_logs",
-          filter: `execution_id=eq.${executionId}`,
-        },
-        (payload) => {
-          onNewLogRef.current(payload.new as Tables<"execution_logs">);
-        },
-      )
-      .subscribe();
+    const es = new EventSource(
+      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}`,
+      { withCredentials: true },
+    );
+
+    es.addEventListener("execution_log", (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        onNewLogRef.current(data);
+      } catch {
+        // Ignore malformed SSE payloads
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      es.close();
     };
   }, [executionId]);
 }

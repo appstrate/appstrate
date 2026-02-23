@@ -1,6 +1,7 @@
-import { supabase } from "../lib/supabase.ts";
+import { eq, and, ne, desc, isNotNull, inArray, count } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { flowConfigs, executions, executionLogs, flowAdminConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import type { Json } from "../types/index.ts";
 
 // --- Flow Config (per-org) ---
 
@@ -8,13 +9,12 @@ export async function getFlowConfig(
   orgId: string,
   flowId: string,
 ): Promise<Record<string, unknown>> {
-  const { data } = await supabase
-    .from("flow_configs")
-    .select("config")
-    .eq("org_id", orgId)
-    .eq("flow_id", flowId)
-    .single();
-  return (data?.config ?? {}) as Record<string, unknown>;
+  const [row] = await db
+    .select({ config: flowConfigs.config })
+    .from(flowConfigs)
+    .where(and(eq(flowConfigs.orgId, orgId), eq(flowConfigs.flowId, flowId)))
+    .limit(1);
+  return (row?.config ?? {}) as Record<string, unknown>;
 }
 
 export async function setFlowConfig(
@@ -22,18 +22,21 @@ export async function setFlowConfig(
   flowId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
-  const { error } = await supabase.from("flow_configs").upsert(
-    {
-      org_id: orgId,
-      flow_id: flowId,
-      config: config as Json,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "org_id,flow_id" },
-  );
-  if (error) {
-    throw new Error(`Failed to save config for flow ${flowId}: ${error.message}`);
-  }
+  await db
+    .insert(flowConfigs)
+    .values({
+      orgId,
+      flowId,
+      config,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [flowConfigs.orgId, flowConfigs.flowId],
+      set: {
+        config,
+        updatedAt: new Date(),
+      },
+    });
 }
 
 // --- Executions ---
@@ -47,20 +50,17 @@ export async function createExecution(
   scheduleId?: string,
   flowVersionId?: number,
 ): Promise<void> {
-  const { error } = await supabase.from("executions").insert({
+  await db.insert(executions).values({
     id,
-    flow_id: flowId,
-    user_id: userId,
-    org_id: orgId,
+    flowId,
+    userId,
+    orgId,
     status: "pending",
-    input: input as Json,
-    started_at: new Date().toISOString(),
-    schedule_id: scheduleId ?? null,
-    flow_version_id: flowVersionId ?? null,
+    input,
+    startedAt: new Date(),
+    scheduleId: scheduleId ?? null,
+    flowVersionId: flowVersionId ?? null,
   });
-  if (error) {
-    throw new Error(`Failed to create execution ${id}: ${error.message}`);
-  }
 }
 
 export async function updateExecution(
@@ -77,18 +77,25 @@ export async function updateExecution(
     cost_usd?: number;
   },
 ): Promise<void> {
-  const { result, state, token_usage, ...rest } = updates;
-  const { error } = await supabase
-    .from("executions")
-    .update({
-      ...rest,
-      ...(result !== undefined ? { result: result as Json } : {}),
-      ...(state !== undefined ? { state: state as Json } : {}),
-      ...(token_usage !== undefined ? { token_usage: token_usage as Json } : {}),
-    })
-    .eq("id", id);
-  if (error) {
-    logger.error("Failed to update execution", { executionId: id, error: error.message });
+  const set: Record<string, unknown> = {};
+
+  if (updates.status !== undefined) set.status = updates.status;
+  if (updates.error !== undefined) set.error = updates.error;
+  if (updates.tokens_used !== undefined) set.tokensUsed = updates.tokens_used;
+  if (updates.completed_at !== undefined) set.completedAt = new Date(updates.completed_at);
+  if (updates.duration !== undefined) set.duration = updates.duration;
+  if (updates.result !== undefined) set.result = updates.result;
+  if (updates.state !== undefined) set.state = updates.state;
+  if (updates.token_usage !== undefined) set.tokenUsage = updates.token_usage;
+  if (updates.cost_usd !== undefined) set.costUsd = String(updates.cost_usd);
+
+  try {
+    await db.update(executions).set(set).where(eq(executions.id, id));
+  } catch (err) {
+    logger.error("Failed to update execution", {
+      executionId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -97,17 +104,20 @@ export async function getLastExecutionState(
   userId: string,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
-  const { data } = await supabase
-    .from("executions")
-    .select("state")
-    .eq("flow_id", flowId)
-    .eq("user_id", userId)
-    .eq("org_id", orgId)
-    .not("state", "is", null)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .single();
-  return (data?.state as Record<string, unknown>) ?? null;
+  const [row] = await db
+    .select({ state: executions.state })
+    .from(executions)
+    .where(
+      and(
+        eq(executions.flowId, flowId),
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+        isNotNull(executions.state),
+      ),
+    )
+    .orderBy(desc(executions.startedAt))
+    .limit(1);
+  return (row?.state as Record<string, unknown>) ?? null;
 }
 
 export async function getRecentExecutions(
@@ -123,26 +133,36 @@ export async function getRecentExecutions(
   const limit = options.limit ?? 10;
   const fields = options.fields ?? ["state"];
 
-  let query = supabase
-    .from("executions")
-    .select("id, status, started_at, duration, state, result")
-    .eq("flow_id", flowId)
-    .eq("user_id", userId)
-    .eq("org_id", orgId)
-    .eq("status", "success")
-    .order("started_at", { ascending: false })
-    .limit(limit);
+  const conditions = [
+    eq(executions.flowId, flowId),
+    eq(executions.userId, userId),
+    eq(executions.orgId, orgId),
+    eq(executions.status, "success"),
+  ];
 
   if (options.excludeExecutionId) {
-    query = query.neq("id", options.excludeExecutionId);
+    conditions.push(ne(executions.id, options.excludeExecutionId));
   }
 
-  const { data } = await query;
-  return (data ?? []).map((row) => {
+  const rows = await db
+    .select({
+      id: executions.id,
+      status: executions.status,
+      startedAt: executions.startedAt,
+      duration: executions.duration,
+      state: executions.state,
+      result: executions.result,
+    })
+    .from(executions)
+    .where(and(...conditions))
+    .orderBy(desc(executions.startedAt))
+    .limit(limit);
+
+  return rows.map((row) => {
     const entry: Record<string, unknown> = {
       id: row.id,
       status: row.status,
-      date: row.started_at,
+      date: row.startedAt?.toISOString() ?? null,
       duration: row.duration,
     };
     if (fields.includes("state")) entry.state = row.state;
@@ -152,16 +172,24 @@ export async function getRecentExecutions(
 }
 
 export async function getLastExecution(flowId: string, userId: string, orgId: string) {
-  const { data } = await supabase
-    .from("executions")
-    .select("id, status, started_at, duration")
-    .eq("flow_id", flowId)
-    .eq("user_id", userId)
-    .eq("org_id", orgId)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .single();
-  return data ?? null;
+  const [row] = await db
+    .select({
+      id: executions.id,
+      status: executions.status,
+      started_at: executions.startedAt,
+      duration: executions.duration,
+    })
+    .from(executions)
+    .where(
+      and(
+        eq(executions.flowId, flowId),
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+      ),
+    )
+    .orderBy(desc(executions.startedAt))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function appendExecutionLog(
@@ -173,54 +201,58 @@ export async function appendExecutionLog(
   message: string | null,
   data: Record<string, unknown> | null,
 ): Promise<number> {
-  const { data: row, error } = await supabase
-    .from("execution_logs")
-    .insert({
-      execution_id: executionId,
-      user_id: userId,
-      org_id: orgId,
-      type,
-      event,
-      message,
-      data: data as Json,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    logger.error("Failed to append execution log", { executionId, error: error.message });
+  try {
+    const [row] = await db
+      .insert(executionLogs)
+      .values({
+        executionId,
+        userId,
+        orgId,
+        type,
+        event,
+        message,
+        data,
+      })
+      .returning({ id: executionLogs.id });
+    return row?.id ?? 0;
+  } catch (err) {
+    logger.error("Failed to append execution log", {
+      executionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return 0;
   }
-  return row?.id ?? 0;
 }
 
 export async function getRunningExecutionsForFlow(
   flowId: string,
   userId?: string,
 ): Promise<number> {
-  let query = supabase
-    .from("executions")
-    .select("id", { count: "exact", head: true })
-    .eq("flow_id", flowId)
-    .in("status", ["running", "pending"]);
+  const conditions = [
+    eq(executions.flowId, flowId),
+    inArray(executions.status, ["running", "pending"]),
+  ];
 
   if (userId) {
-    query = query.eq("user_id", userId);
+    conditions.push(eq(executions.userId, userId));
   }
 
-  const { count } = await query;
-  return count ?? 0;
+  const [row] = await db
+    .select({ count: count() })
+    .from(executions)
+    .where(and(...conditions));
+  return row?.count ?? 0;
 }
 
 export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
-  const { data } = await supabase
-    .from("executions")
-    .select("flow_id")
-    .eq("org_id", orgId)
-    .in("status", ["running", "pending"]);
+  const rows = await db
+    .select({ flowId: executions.flowId })
+    .from(executions)
+    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])));
 
   const counts: Record<string, number> = {};
-  for (const row of data ?? []) {
-    const flowId = row.flow_id;
+  for (const row of rows) {
+    const flowId = row.flowId;
     counts[flowId] = (counts[flowId] ?? 0) + 1;
   }
   return counts;
@@ -232,14 +264,16 @@ export async function getAdminConnections(
   orgId: string,
   flowId: string,
 ): Promise<Record<string, string>> {
-  const { data } = await supabase
-    .from("flow_admin_connections")
-    .select("service_id, admin_user_id")
-    .eq("org_id", orgId)
-    .eq("flow_id", flowId);
+  const rows = await db
+    .select({
+      serviceId: flowAdminConnections.serviceId,
+      adminUserId: flowAdminConnections.adminUserId,
+    })
+    .from(flowAdminConnections)
+    .where(and(eq(flowAdminConnections.orgId, orgId), eq(flowAdminConnections.flowId, flowId)));
   const result: Record<string, string> = {};
-  for (const row of data ?? []) {
-    result[row.service_id] = row.admin_user_id;
+  for (const row of rows) {
+    result[row.serviceId] = row.adminUserId;
   }
   return result;
 }
@@ -250,19 +284,23 @@ export async function bindAdminConnection(
   serviceId: string,
   adminUserId: string,
 ): Promise<void> {
-  const { error } = await supabase.from("flow_admin_connections").upsert(
-    {
-      org_id: orgId,
-      flow_id: flowId,
-      service_id: serviceId,
-      admin_user_id: adminUserId,
-      connected_at: new Date().toISOString(),
-    },
-    { onConflict: "flow_id,service_id" },
-  );
-  if (error) {
-    throw new Error(`Failed to bind admin connection: ${error.message}`);
-  }
+  await db
+    .insert(flowAdminConnections)
+    .values({
+      orgId,
+      flowId,
+      serviceId,
+      adminUserId,
+      connectedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [flowAdminConnections.flowId, flowAdminConnections.serviceId],
+      set: {
+        orgId,
+        adminUserId,
+        connectedAt: new Date(),
+      },
+    });
 }
 
 export async function unbindAdminConnection(
@@ -270,52 +308,81 @@ export async function unbindAdminConnection(
   flowId: string,
   serviceId: string,
 ): Promise<void> {
-  await supabase
-    .from("flow_admin_connections")
-    .delete()
-    .eq("org_id", orgId)
-    .eq("flow_id", flowId)
-    .eq("service_id", serviceId);
+  await db
+    .delete(flowAdminConnections)
+    .where(
+      and(
+        eq(flowAdminConnections.orgId, orgId),
+        eq(flowAdminConnections.flowId, flowId),
+        eq(flowAdminConnections.serviceId, serviceId),
+      ),
+    );
 }
 
 export async function deleteAdminConnectionsForFlow(orgId: string, flowId: string): Promise<void> {
-  await supabase.from("flow_admin_connections").delete().eq("org_id", orgId).eq("flow_id", flowId);
+  await db
+    .delete(flowAdminConnections)
+    .where(and(eq(flowAdminConnections.orgId, orgId), eq(flowAdminConnections.flowId, flowId)));
 }
 
-// Custom service credentials functions removed — now handled by @appstrate/connect
+// Custom service credentials functions removed --- now handled by @appstrate/connect
 // via connection-manager.ts. The custom_service_credentials table has been
 // migrated to service_connections (migration 012).
 
 export async function getExecution(id: string) {
-  const { data } = await supabase
-    .from("executions")
-    .select("id, status, user_id, org_id, flow_id")
-    .eq("id", id)
-    .single();
-  return data;
+  const [row] = await db
+    .select({
+      id: executions.id,
+      status: executions.status,
+      user_id: executions.userId,
+      org_id: executions.orgId,
+      flow_id: executions.flowId,
+    })
+    .from(executions)
+    .where(eq(executions.id, id))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function deleteFlowExecutions(flowId: string, orgId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from("executions")
-    .delete({ count: "exact" })
-    .eq("flow_id", flowId)
-    .eq("org_id", orgId);
-  if (error) {
-    throw new Error(`Failed to delete executions for flow ${flowId}: ${error.message}`);
-  }
-  return count ?? 0;
+  const deleted = await db
+    .delete(executions)
+    .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)))
+    .returning({ id: executions.id });
+  return deleted.length;
+}
+
+export async function listFlowExecutions(flowId: string, orgId: string, limit = 50) {
+  return db
+    .select()
+    .from(executions)
+    .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)))
+    .orderBy(desc(executions.startedAt))
+    .limit(limit);
+}
+
+export async function getExecutionFull(id: string) {
+  const [row] = await db.select().from(executions).where(eq(executions.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function listExecutionLogs(executionId: string, orgId: string) {
+  return db
+    .select()
+    .from(executionLogs)
+    .where(and(eq(executionLogs.executionId, executionId), eq(executionLogs.orgId, orgId)))
+    .orderBy(executionLogs.id);
 }
 
 export async function markOrphanExecutionsFailed(): Promise<number> {
-  const { data } = await supabase
-    .from("executions")
-    .update({
+  const updated = await db
+    .update(executions)
+    .set({
       status: "failed",
       error: "Server restarted",
-      completed_at: new Date().toISOString(),
+      completedAt: new Date(),
     })
-    .in("status", ["running", "pending"])
-    .select("id");
-  return data?.length ?? 0;
+    .where(inArray(executions.status, ["running", "pending"]))
+    .returning({ id: executions.id });
+  return updated.length;
 }

@@ -28,7 +28,7 @@ export {
   getBuiltInProviders,
   isBuiltInProvider,
 } from "./registry.ts";
-export type { SupabaseClient } from "./registry.ts";
+export type { Db } from "./registry.ts";
 
 // OAuth2
 export { initiateOAuth, handleOAuthCallback } from "./oauth.ts";
@@ -47,4 +47,3 @@ export {
   saveConnection,
   deleteConnection,
 } from "./credentials.ts";
-

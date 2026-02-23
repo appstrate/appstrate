@@ -1,8 +1,10 @@
 import { hostname } from "node:os";
 import { Cron } from "croner";
-import { supabase } from "../lib/supabase.ts";
+import { eq, and, asc } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { flowSchedules, scheduleRuns } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import type { Schedule, Json } from "@appstrate/shared-types";
+import type { Schedule } from "@appstrate/shared-types";
 import { createExecution, getAdminConnections } from "./state.ts";
 import { getConnectionStatus } from "./connection-manager.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
@@ -18,11 +20,38 @@ const INSTANCE_ID = `${hostname()}-${process.pid}`;
 // Cache schedule orgId for trigger context
 const scheduleOrgCache = new Map<string, string>();
 
+/** Convert a Drizzle schedule row to the Schedule type. */
+function toSchedule(row: typeof flowSchedules.$inferSelect): Schedule {
+  return {
+    ...row,
+    input: row.input as Record<string, unknown> | null,
+  };
+}
+
 // --- CRUD helpers ---
 
+export async function listSchedules(orgId: string): Promise<Schedule[]> {
+  const rows = await db
+    .select()
+    .from(flowSchedules)
+    .where(eq(flowSchedules.orgId, orgId))
+    .orderBy(asc(flowSchedules.createdAt));
+  return rows.map(toSchedule);
+}
+
+export async function listFlowSchedules(flowId: string, orgId: string): Promise<Schedule[]> {
+  const rows = await db
+    .select()
+    .from(flowSchedules)
+    .where(and(eq(flowSchedules.flowId, flowId), eq(flowSchedules.orgId, orgId)))
+    .orderBy(asc(flowSchedules.createdAt));
+  return rows.map(toSchedule);
+}
+
 export async function getSchedule(id: string): Promise<Schedule | null> {
-  const { data } = await supabase.from("flow_schedules").select("*").eq("id", id).single();
-  return data ?? null;
+  const rows = await db.select().from(flowSchedules).where(eq(flowSchedules.id, id)).limit(1);
+  if (!rows[0]) return null;
+  return toSchedule(rows[0]);
 }
 
 export async function createSchedule(
@@ -43,27 +72,26 @@ export async function createSchedule(
   const cron = new Cron(data.cronExpression, { timezone: tz, paused: true });
   const nextRun = cron.nextRun();
 
-  const { data: row, error } = await supabase
-    .from("flow_schedules")
-    .insert({
+  const [row] = await db
+    .insert(flowSchedules)
+    .values({
       id,
-      flow_id: flowId,
-      user_id: userId,
-      org_id: orgId,
+      flowId,
+      userId,
+      orgId,
       name: data.name ?? null,
       enabled: true,
-      cron_expression: data.cronExpression,
+      cronExpression: data.cronExpression,
       timezone: tz,
-      input: (data.input ?? null) as Json,
-      next_run_at: nextRun ? nextRun.toISOString() : null,
+      input: data.input ?? null,
+      nextRunAt: nextRun ?? null,
     })
-    .select("*")
-    .single();
+    .returning();
 
-  if (error || !row) {
-    throw new Error(`Failed to create schedule: ${error?.message ?? "no row returned"}`);
+  if (!row) {
+    throw new Error("Failed to create schedule: no row returned");
   }
-  const schedule = row;
+  const schedule = toSchedule(row);
 
   // Cache orgId and start the cron job
   scheduleOrgCache.set(schedule.id, orgId);
@@ -85,7 +113,7 @@ export async function updateSchedule(
   const existing = await getSchedule(id);
   if (!existing) return null;
 
-  const cronExpr = data.cronExpression ?? existing.cron_expression;
+  const cronExpr = data.cronExpression ?? existing.cronExpression;
   const tz = data.timezone ?? existing.timezone ?? "UTC";
   const enabled = data.enabled ?? existing.enabled;
 
@@ -94,31 +122,30 @@ export async function updateSchedule(
   const nextRun = enabled ? cron.nextRun() : null;
 
   const payload: Record<string, unknown> = {
-    cron_expression: cronExpr,
+    cronExpression: cronExpr,
     timezone: tz,
     enabled,
-    next_run_at: nextRun ? nextRun.toISOString() : null,
-    updated_at: new Date().toISOString(),
+    nextRunAt: nextRun ?? null,
+    updatedAt: new Date(),
   };
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
 
-  const { data: row, error } = await supabase
-    .from("flow_schedules")
-    .update(payload as Record<string, Json>)
-    .eq("id", id)
-    .select("*")
-    .single();
+  const [row] = await db
+    .update(flowSchedules)
+    .set(payload)
+    .where(eq(flowSchedules.id, id))
+    .returning();
 
-  if (error || !row) {
-    throw new Error(`Failed to update schedule ${id}: ${error?.message ?? "no row returned"}`);
+  if (!row) {
+    throw new Error(`Failed to update schedule ${id}: no row returned`);
   }
-  const schedule = row;
+  const schedule = toSchedule(row);
 
   // Restart or stop the cron job
   stopCronJob(id);
   if (schedule.enabled) {
-    const orgId = scheduleOrgCache.get(id) ?? existing.org_id;
+    const orgId = scheduleOrgCache.get(id) ?? existing.orgId;
     startCronJob(schedule, orgId);
   }
 
@@ -128,8 +155,11 @@ export async function updateSchedule(
 export async function deleteSchedule(id: string): Promise<boolean> {
   stopCronJob(id);
   scheduleOrgCache.delete(id);
-  const { data } = await supabase.from("flow_schedules").delete().eq("id", id).select("id");
-  return (data?.length ?? 0) > 0;
+  const deleted = await db
+    .delete(flowSchedules)
+    .where(eq(flowSchedules.id, id))
+    .returning({ id: flowSchedules.id });
+  return deleted.length > 0;
 }
 
 // --- Cron job management ---
@@ -141,7 +171,7 @@ function startCronJob(schedule: Schedule, orgId: string) {
   scheduleOrgCache.set(schedule.id, orgId);
 
   const job = new Cron(
-    schedule.cron_expression,
+    schedule.cronExpression,
     {
       timezone: schedule.timezone ?? "UTC",
       protect: true, // Prevent overlapping runs
@@ -149,8 +179,8 @@ function startCronJob(schedule: Schedule, orgId: string) {
     () => {
       triggerScheduledExecution(
         schedule.id,
-        schedule.flow_id,
-        schedule.user_id,
+        schedule.flowId,
+        schedule.userId,
         orgId,
         (schedule.input as Record<string, unknown>) ?? undefined,
       );
@@ -168,6 +198,30 @@ function stopCronJob(scheduleId: string) {
   }
 }
 
+/**
+ * Distributed lock: try to acquire schedule lock via INSERT ON CONFLICT DO NOTHING.
+ * Returns true if lock was acquired (row inserted), false if another instance won.
+ */
+async function tryAcquireScheduleLock(scheduleId: string, fireTime: Date): Promise<boolean> {
+  try {
+    const runId = `run_${crypto.randomUUID()}`;
+    const result = await db
+      .insert(scheduleRuns)
+      .values({
+        id: runId,
+        scheduleId,
+        fireTime,
+        instanceId: INSTANCE_ID,
+      })
+      .onConflictDoNothing({ target: [scheduleRuns.scheduleId, scheduleRuns.fireTime] })
+      .returning({ id: scheduleRuns.id });
+
+    return result.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function triggerScheduledExecution(
   scheduleId: string,
   flowId: string,
@@ -177,14 +231,10 @@ async function triggerScheduledExecution(
 ) {
   try {
     // Distributed lock: prevent duplicate executions across instances
-    const fireTime = new Date().toISOString();
-    const { data: lockResult } = await supabase.rpc("try_acquire_schedule_lock", {
-      p_schedule_id: scheduleId,
-      p_fire_time: fireTime,
-      p_instance_id: INSTANCE_ID,
-    });
+    const fireTime = new Date();
+    const locked = await tryAcquireScheduleLock(scheduleId, fireTime);
 
-    if (!lockResult) {
+    if (!locked) {
       logger.info("Schedule lock not acquired, skipping (another instance won)", {
         scheduleId,
         fireTime,
@@ -249,11 +299,10 @@ async function triggerScheduledExecution(
     );
 
     // Link execution to the schedule run lock row
-    await supabase
-      .from("schedule_runs")
-      .update({ execution_id: executionId })
-      .eq("schedule_id", scheduleId)
-      .eq("fire_time", fireTime);
+    await db
+      .update(scheduleRuns)
+      .set({ executionId })
+      .where(and(eq(scheduleRuns.scheduleId, scheduleId), eq(scheduleRuns.fireTime, fireTime)));
 
     logger.info("Triggering scheduled execution", {
       executionId,
@@ -283,14 +332,14 @@ async function triggerScheduledExecution(
     const job = activeJobs.get(scheduleId);
     const nextRun = job?.nextRun() ?? null;
 
-    await supabase
-      .from("flow_schedules")
-      .update({
-        last_run_at: new Date().toISOString(),
-        next_run_at: nextRun ? nextRun.toISOString() : null,
-        updated_at: new Date().toISOString(),
+    await db
+      .update(flowSchedules)
+      .set({
+        lastRunAt: new Date(),
+        nextRunAt: nextRun ?? null,
+        updatedAt: new Date(),
       })
-      .eq("id", scheduleId);
+      .where(eq(flowSchedules.id, scheduleId));
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
@@ -303,19 +352,19 @@ async function triggerScheduledExecution(
 // --- Lifecycle ---
 
 export async function initScheduler() {
-  const { data } = await supabase.from("flow_schedules").select("*").eq("enabled", true);
-  const schedules = data ?? [];
+  const rows = await db.select().from(flowSchedules).where(eq(flowSchedules.enabled, true));
 
   let started = 0;
-  for (const schedule of schedules) {
-    if (!(await flowExists(schedule.flow_id))) {
+  for (const row of rows) {
+    if (!(await flowExists(row.flowId))) {
       logger.warn("Schedule references missing flow, skipping", {
-        scheduleId: schedule.id,
-        flowId: schedule.flow_id,
+        scheduleId: row.id,
+        flowId: row.flowId,
       });
       continue;
     }
-    const orgId = schedule.org_id;
+    const orgId = row.orgId;
+    const schedule = toSchedule(row);
     startCronJob(schedule, orgId);
     started++;
   }

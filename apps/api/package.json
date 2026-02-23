@@ -15,10 +15,12 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
+    "@appstrate/db": "workspace:*",
+    "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
-    "@supabase/supabase-js": "^2.95.3",
     "ajv": "^8.18.0",
     "croner": "^10.0.1",
+    "drizzle-orm": "^0.39.3",
     "fflate": "^0.8.2",
     "hono": "^4.11.9",
     "pino": "^10.3.1",

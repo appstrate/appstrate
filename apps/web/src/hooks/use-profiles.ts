@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { supabase } from "../lib/supabase";
+import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 
 export function useProfiles(userIds: string[]) {
@@ -10,12 +10,13 @@ export function useProfiles(userIds: string[]) {
   const { data } = useQuery({
     queryKey: ["profiles", orgId, dedupedIds],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, display_name")
-        .in("id", dedupedIds);
-      if (error) throw new Error(error.message);
-      return data;
+      const result = await api<{
+        profiles: { id: string; display_name: string }[];
+      }>("/profiles/batch", {
+        method: "POST",
+        body: JSON.stringify({ ids: dedupedIds }),
+      });
+      return result.profiles;
     },
     enabled: dedupedIds.length > 0,
   });

@@ -1,20 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "../lib/supabase";
+import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import type { Execution, ExecutionLog } from "@appstrate/shared-types";
 
 export function useExecutions(flowId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["executions", orgId, flowId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("executions")
-        .select("*")
-        .eq("flow_id", flowId!)
-        .order("started_at", { ascending: false })
-        .limit(50);
-      if (error) throw new Error(error.message);
-      return data;
+      return api<Execution[]>(`/flows/${flowId}/executions`);
     },
     enabled: !!flowId,
   });
@@ -25,13 +19,7 @@ export function useExecution(execId: string | undefined) {
   return useQuery({
     queryKey: ["execution", orgId, execId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("executions")
-        .select("*")
-        .eq("id", execId!)
-        .single();
-      if (error) throw new Error(error.message);
-      return data;
+      return api<Execution>(`/executions/${execId}`);
     },
     enabled: !!execId,
   });
@@ -42,13 +30,7 @@ export function useExecutionLogs(execId: string | undefined) {
   return useQuery({
     queryKey: ["execution-logs", orgId, execId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("execution_logs")
-        .select("*")
-        .eq("execution_id", execId!)
-        .order("id", { ascending: true });
-      if (error) throw new Error(error.message);
-      return data;
+      return api<ExecutionLog[]>(`/executions/${execId}/logs`);
     },
     enabled: !!execId,
   });
