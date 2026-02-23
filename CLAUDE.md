@@ -29,23 +29,23 @@ bun run dev                   # turbo dev → Hono on :3010
 
 ## Stack & Conventions
 
-| Layer             | Technology                                        | Notes                                                                                           |
-| ----------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Monorepo          | **Turborepo** + Bun workspaces                    | Single `bun install`, task caching, parallel execution                                          |
-| Runtime           | **Bun**                                           | Use `bun` everywhere, not node. Bun auto-loads `.env`                                           |
-| API               | **Hono**                                          | NOT `Bun.serve()` — we need Hono for SSE (`streamSSE`), routing, middleware                     |
-| DB                | **PostgreSQL 16** + **Drizzle ORM**               | Schema in `packages/db/src/schema.ts`. All queries via Drizzle. No RLS — app-level security     |
+| Layer             | Technology                                         | Notes                                                                                           |
+| ----------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Monorepo          | **Turborepo** + Bun workspaces                     | Single `bun install`, task caching, parallel execution                                          |
+| Runtime           | **Bun**                                            | Use `bun` everywhere, not node. Bun auto-loads `.env`                                           |
+| API               | **Hono**                                           | NOT `Bun.serve()` — we need Hono for SSE (`streamSSE`), routing, middleware                     |
+| DB                | **PostgreSQL 16** + **Drizzle ORM**                | Schema in `packages/db/src/schema.ts`. All queries via Drizzle. No RLS — app-level security     |
 | Auth              | **Better Auth** (email/password + cookie sessions) | Cookie-based sessions, auto-profile+org creation on signup via databaseHooks                    |
-| OAuth/API keys    | **@appstrate/connect** (custom package)           | Manages OAuth2, API key, basic, and custom auth modes. Encrypted credential storage via Drizzle |
-| Validation        | **Zod**                                           | Manifest, config, input, output validation via `services/schema.ts`                             |
-| Scheduling        | **croner** (cron library)                         | In-memory cron jobs with DB persistence + distributed locking (`schedule_runs`)                 |
-| ZIP import        | **fflate** (decompression)                        | User flow import from ZIP files                                                                 |
-| Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                                            |
-| Container runtime | **Pi Coding Agent**                               | Uses Pi Coding Agent SDK, supports multiple LLM providers via API keys                          |
-| Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 BrowserRouter, builds to `apps/web/dist/`                          |
-| Real-time         | **PostgreSQL LISTEN/NOTIFY + SSE**                | Execution status + logs via pg_notify triggers → EventSource on frontend                        |
-| Shared types      | **Drizzle InferSelectModel**                      | Types derived from `@appstrate/db/schema`, shared via `@appstrate/shared-types`                 |
-| Storage           | **Local filesystem**                              | `STORAGE_DIR` env var (default: `./data/storage`). Flow packages, skills, extensions            |
+| OAuth/API keys    | **@appstrate/connect** (custom package)            | Manages OAuth2, API key, basic, and custom auth modes. Encrypted credential storage via Drizzle |
+| Validation        | **Zod**                                            | Manifest, config, input, output validation via `services/schema.ts`                             |
+| Scheduling        | **croner** (cron library)                          | In-memory cron jobs with DB persistence + distributed locking (`schedule_runs`)                 |
+| ZIP import        | **fflate** (decompression)                         | User flow import from ZIP files                                                                 |
+| Docker            | **Docker Engine API** via `fetch()` + unix socket  | NOT dockerode (socket bugs with Bun)                                                            |
+| Container runtime | **Pi Coding Agent**                                | Uses Pi Coding Agent SDK, supports multiple LLM providers via API keys                          |
+| Frontend          | **React 19 + Vite + React Query v5**               | `apps/web/`, React Router v7 BrowserRouter, builds to `apps/web/dist/`                          |
+| Real-time         | **PostgreSQL LISTEN/NOTIFY + SSE**                 | Execution status + logs via pg_notify triggers → EventSource on frontend                        |
+| Shared types      | **Drizzle InferSelectModel**                       | Types derived from `@appstrate/db/schema`, shared via `@appstrate/shared-types`                 |
+| Storage           | **Local filesystem**                               | `STORAGE_DIR` env var (default: `./storage`). Flow packages, skills, extensions                 |
 
 ### Key Patterns
 
@@ -65,7 +65,7 @@ bun run dev                   # turbo dev → Hono on :3010
 - **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
 - **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. Built-in skills live in `data/skills/` and are always visible in the library (`source: "built-in"`). For user flows, org skills are stored in local filesystem storage; built-in skills are resolved from the filesystem and injected into the container ZIP at runtime. Built-in skills cannot be edited or deleted via the API (403).
 - **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools (only used by the pi adapter). Built-in extensions live in `data/extensions/` and are always visible in the library (`source: "built-in"`). For user flows, org extensions are stored in local filesystem storage; built-in extensions are resolved from the filesystem. Declared in `manifest.requires.extensions[]`. Built-in extensions cannot be edited or deleted via the API (403).
-- **Flow packages (ZIP)**: User flows are stored as ZIP packages on the local filesystem (`data/storage/flow-packages/`). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
+- **Flow packages (ZIP)**: User flows are stored as ZIP packages on the local filesystem (`storage/flow-packages/`). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
 - **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-tenant isolation**: Application-level security scoped by organization membership. All queries filter by `orgId`. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
 - **Auth flow**: Frontend uses Better Auth React client (`createAuthClient`) → `signIn.email()` / `signUp.email()` → session cookie set automatically → sent via `credentials: "include"` on all API calls. Backend verifies session via `auth.api.getSession({ headers })`. The `X-Org-Id` header identifies the active organization.
@@ -346,23 +346,23 @@ appstrate/
 
 ### Auth (Better Auth)
 
-| Method       | Path               | Auth   | Description                                                    |
-| ------------ | ------------------ | ------ | -------------------------------------------------------------- |
-| `POST`       | `/api/auth/sign-up/email` | None  | Create account (email, password, name) → sets session cookie    |
-| `POST`       | `/api/auth/sign-in/email` | None  | Login → sets session cookie                                     |
-| `POST`       | `/api/auth/sign-out`      | Cookie | Logout → clears session cookie                                  |
-| `GET`        | `/api/auth/get-session`   | Cookie | Get current session + user info                                 |
+| Method | Path                      | Auth   | Description                                                  |
+| ------ | ------------------------- | ------ | ------------------------------------------------------------ |
+| `POST` | `/api/auth/sign-up/email` | None   | Create account (email, password, name) → sets session cookie |
+| `POST` | `/api/auth/sign-in/email` | None   | Login → sets session cookie                                  |
+| `POST` | `/api/auth/sign-out`      | Cookie | Logout → clears session cookie                               |
+| `GET`  | `/api/auth/get-session`   | Cookie | Get current session + user info                              |
 
 ### Flows
 
-| Method   | Path                      | Auth      | Description                                                                 |
-| -------- | ------------------------- | --------- | --------------------------------------------------------------------------- |
-| `GET`    | `/api/flows`              | Cookie    | List all flows (built-in + user) with `runningExecutions` count             |
-| `GET`    | `/api/flows/:id`          | Cookie    | Flow detail with service statuses (incl. `authMode`), config, state, skills |
-| `PUT`    | `/api/flows/:id/config`   | Cookie+Admin | Save flow configuration (Zod-validated against manifest schema)          |
-| `POST`   | `/api/flows/import`       | Cookie+Admin | Import flow from ZIP file (multipart/form-data)                          |
-| `GET`    | `/api/flows/:id/versions` | Cookie    | List version history for a user flow (newest first)                         |
-| `DELETE` | `/api/flows/:id`          | Cookie+Admin | Delete a user-imported flow (built-in flows cannot be deleted)           |
+| Method   | Path                      | Auth         | Description                                                                 |
+| -------- | ------------------------- | ------------ | --------------------------------------------------------------------------- |
+| `GET`    | `/api/flows`              | Cookie       | List all flows (built-in + user) with `runningExecutions` count             |
+| `GET`    | `/api/flows/:id`          | Cookie       | Flow detail with service statuses (incl. `authMode`), config, state, skills |
+| `PUT`    | `/api/flows/:id/config`   | Cookie+Admin | Save flow configuration (Zod-validated against manifest schema)             |
+| `POST`   | `/api/flows/import`       | Cookie+Admin | Import flow from ZIP file (multipart/form-data)                             |
+| `GET`    | `/api/flows/:id/versions` | Cookie       | List version history for a user flow (newest first)                         |
+| `DELETE` | `/api/flows/:id`          | Cookie+Admin | Delete a user-imported flow (built-in flows cannot be deleted)              |
 
 ### Executions
 
@@ -377,22 +377,22 @@ appstrate/
 
 ### Realtime (SSE)
 
-| Method | Path                                          | Auth   | Description                                                    |
-| ------ | --------------------------------------------- | ------ | -------------------------------------------------------------- |
-| `GET`  | `/api/realtime/executions`                    | Cookie | SSE: all execution status changes (for flow list counts)       |
-| `GET`  | `/api/realtime/executions/:id`                | Cookie | SSE: execution status + log events for one execution           |
-| `GET`  | `/api/realtime/flows/:flowId/executions`      | Cookie | SSE: execution changes for a specific flow                     |
+| Method | Path                                     | Auth   | Description                                              |
+| ------ | ---------------------------------------- | ------ | -------------------------------------------------------- |
+| `GET`  | `/api/realtime/executions`               | Cookie | SSE: all execution status changes (for flow list counts) |
+| `GET`  | `/api/realtime/executions/:id`           | Cookie | SSE: execution status + log events for one execution     |
+| `GET`  | `/api/realtime/flows/:flowId/executions` | Cookie | SSE: execution changes for a specific flow               |
 
 ### Schedules
 
-| Method   | Path                       | Auth   | Description                                              |
-| -------- | -------------------------- | ------ | -------------------------------------------------------- |
-| `GET`    | `/api/schedules`           | Cookie | List all schedules across all flows (org-scoped)         |
-| `GET`    | `/api/flows/:id/schedules` | Cookie | List schedules for a specific flow                       |
-| `POST`   | `/api/flows/:id/schedules` | Cookie | Create a cron schedule for a flow                        |
-| `GET`    | `/api/schedules/:id`       | Cookie | Get a single schedule                                    |
-| `PUT`    | `/api/schedules/:id`       | Cookie | Update a schedule (cron, timezone, enabled, input)       |
-| `DELETE` | `/api/schedules/:id`       | Cookie | Delete a schedule                                        |
+| Method   | Path                       | Auth   | Description                                        |
+| -------- | -------------------------- | ------ | -------------------------------------------------- |
+| `GET`    | `/api/schedules`           | Cookie | List all schedules across all flows (org-scoped)   |
+| `GET`    | `/api/flows/:id/schedules` | Cookie | List schedules for a specific flow                 |
+| `POST`   | `/api/flows/:id/schedules` | Cookie | Create a cron schedule for a flow                  |
+| `GET`    | `/api/schedules/:id`       | Cookie | Get a single schedule                              |
+| `PUT`    | `/api/schedules/:id`       | Cookie | Update a schedule (cron, timezone, enabled, input) |
+| `DELETE` | `/api/schedules/:id`       | Cookie | Delete a schedule                                  |
 
 ### Auth / Connections
 
@@ -415,17 +415,17 @@ appstrate/
 
 ### Invitations (Magic Links)
 
-| Method | Path                                        | Auth         | Description                                                                 |
-| ------ | ------------------------------------------- | ------------ | --------------------------------------------------------------------------- |
-| `GET`  | `/invite/:token/info`                       | None         | Invitation metadata (email, orgName, role, inviterName, expiresAt)          |
-| `POST` | `/invite/:token/accept`                     | None         | Accept invitation — auto-signup (new) or add to org (existing), set cookie  |
-| `DELETE`| `/api/orgs/:orgId/invitations/:invitationId`| Cookie+Admin | Cancel a pending invitation                                                |
+| Method   | Path                                         | Auth         | Description                                                                |
+| -------- | -------------------------------------------- | ------------ | -------------------------------------------------------------------------- |
+| `GET`    | `/invite/:token/info`                        | None         | Invitation metadata (email, orgName, role, inviterName, expiresAt)         |
+| `POST`   | `/invite/:token/accept`                      | None         | Accept invitation — auto-signup (new) or add to org (existing), set cookie |
+| `DELETE` | `/api/orgs/:orgId/invitations/:invitationId` | Cookie+Admin | Cancel a pending invitation                                                |
 
 ### Welcome (Post-Invite Setup)
 
-| Method | Path                 | Auth   | Description                                                    |
-| ------ | -------------------- | ------ | -------------------------------------------------------------- |
-| `POST` | `/api/welcome/setup` | Cookie | Set display name and/or password after invitation signup       |
+| Method | Path                 | Auth   | Description                                              |
+| ------ | -------------------- | ------ | -------------------------------------------------------- |
+| `POST` | `/api/welcome/setup` | Cookie | Set display name and/or password after invitation signup |
 
 ### Internal (container-to-host)
 
@@ -589,7 +589,7 @@ SYSTEM_PROVIDERS='[]'                       # JSON array of system provider conf
 PORT=3010
 DOCKER_SOCKET=/var/run/docker.sock
 PLATFORM_API_URL=http://host.docker.internal:3010  # Optional: override container-to-host URL
-STORAGE_DIR=./data/storage                  # Local filesystem storage directory
+STORAGE_DIR=./storage                  # Local filesystem storage directory
 
 # Email Service (Brevo SMTP for invitations)
 # BREVO_API_KEY=xkeysib-...               # Brevo transactional API key (optional — skipped if absent)
