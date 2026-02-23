@@ -26,7 +26,6 @@ export interface FileReference {
   name: string;
   type: string;
   size: number;
-  url: string;
 }
 
 export interface PromptContext {
@@ -68,6 +67,7 @@ export interface ExecutionAdapter {
     timeout: number,
     flowPackage?: Buffer,
     signal?: AbortSignal,
+    inputFiles?: UploadedFile[],
   ): AsyncGenerator<ExecutionMessage>;
 }
 

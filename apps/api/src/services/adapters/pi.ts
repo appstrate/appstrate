@@ -1,8 +1,9 @@
 import { logger } from "../../lib/logger.ts";
-import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.ts";
+import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { getEnv, LLM_API_KEY_NAMES } from "@appstrate/env";
+import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   connectContainerToNetwork,
   createContainer,
@@ -46,6 +47,7 @@ export class PiAdapter implements ExecutionAdapter {
     timeout: number,
     flowPackage?: Buffer,
     signal?: AbortSignal,
+    inputFiles?: UploadedFile[],
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
@@ -127,6 +129,10 @@ export class PiAdapter implements ExecutionAdapter {
         executionId,
         timeout,
         flowPackage,
+        inputFiles: inputFiles?.map((f) => ({
+          name: sanitizeStorageKey(f.name),
+          buffer: f.buffer,
+        })),
         extraData: { provider, model: modelId },
         signal,
         stopOnTimeout: sidecarContainerId ? [sidecarContainerId] : [],
