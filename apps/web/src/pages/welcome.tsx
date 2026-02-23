@@ -17,7 +17,7 @@ export function WelcomePage() {
 
   const finishAndRedirect = () => {
     if (orgId) {
-      localStorage.setItem("appstrate_org_id", orgId);
+      localStorage.setItem("appstrate_current_org", orgId);
     }
     navigate("/");
     window.location.reload();

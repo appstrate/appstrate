@@ -77,6 +77,16 @@ function initAuth() {
     });
 }
 
+export async function refreshAuth() {
+  const result = await authClient.getSession();
+  if (result.data?.user) {
+    const profile = await fetchProfile();
+    setAuthenticatedUser(result.data.user, profile);
+  } else {
+    setState({ user: null, profile: null, loading: false });
+  }
+}
+
 export function useAuth() {
   initAuth();
 

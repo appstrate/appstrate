@@ -38,7 +38,7 @@ export async function sendEmail({ to, subject, htmlContent }: SendEmailParams): 
       return false;
     }
 
-    logger.info("Email sent", { to, subject, status: res.status, response: body });
+    logger.info("Email sent", { to, subject });
     return true;
   } catch (err) {
     logger.error("Email send failed", {
