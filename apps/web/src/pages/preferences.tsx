@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useUpdateLanguage } from "../hooks/use-profile";
+import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth } from "../hooks/use-auth";
 import { useServices } from "../hooks/use-services";
 import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
@@ -91,6 +91,7 @@ function GeneralTab({
       </div>
 
       <div className="section-title">{t("preferences.account")}</div>
+      <DisplayNameForm />
       <PasswordChangeForm />
 
       <div className="section-title">{t("preferences.notifications")}</div>
@@ -102,6 +103,53 @@ function GeneralTab({
         </div>
       </div>
     </>
+  );
+}
+
+function DisplayNameForm() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { profile } = useAuth();
+  const updateDisplayName = useUpdateDisplayName();
+  const [name, setName] = useState(profile?.displayName ?? "");
+  const [success, setSuccess] = useState("");
+
+  const isDirty = name.trim() !== (profile?.displayName ?? "");
+  const canSubmit = name.trim().length > 0 && isDirty && !updateDisplayName.isPending;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess("");
+    updateDisplayName.mutate(name.trim(), {
+      onSuccess: () => {
+        setSuccess(t("preferences.displayNameChanged"));
+        window.location.reload();
+      },
+    });
+  };
+
+  return (
+    <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+      <form onSubmit={handleSubmit} style={{ padding: "0.25rem 0" }}>
+        <div className="form-group">
+          <label>{t("preferences.displayName")}</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setSuccess("");
+            }}
+            maxLength={100}
+          />
+        </div>
+        {success && <div className="form-success">{success}</div>}
+        <button type="submit" className="primary" disabled={!canSubmit}>
+          {updateDisplayName.isPending
+            ? t("preferences.savingDisplayName")
+            : t("preferences.saveDisplayName")}
+        </button>
+      </form>
+    </div>
   );
 }
 
