@@ -50,7 +50,7 @@ services:
     environment:
       - PORT=3000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL}
+      - APP_URL=${APP_URL}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
       - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}

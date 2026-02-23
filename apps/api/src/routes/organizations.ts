@@ -15,6 +15,14 @@ import {
   slugify,
   isSlugAvailable,
 } from "../services/organizations.ts";
+import {
+  createInvitation,
+  getOrgInvitations,
+  cancelInvitation,
+  sendInvitationEmail,
+  getInviterName,
+  getOrgName,
+} from "../services/invitations.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -81,7 +89,11 @@ router.get("/:orgId", async (c) => {
     return c.json({ error: "FORBIDDEN", message: "Non membre de cette organisation" }, 403);
   }
 
-  const [org, members] = await Promise.all([getOrgById(orgId), getOrgMembers(orgId)]);
+  const [org, members, invitations] = await Promise.all([
+    getOrgById(orgId),
+    getOrgMembers(orgId),
+    getOrgInvitations(orgId),
+  ]);
   if (!org) {
     return c.json({ error: "NOT_FOUND", message: "Organisation introuvable" }, 404);
   }
@@ -96,6 +108,13 @@ router.get("/:orgId", async (c) => {
       role: m.role,
       joinedAt: m.joined_at,
       displayName: m.display_name,
+    })),
+    invitations: invitations.map((inv) => ({
+      id: inv.id,
+      email: inv.email,
+      role: inv.role,
+      expiresAt: inv.expiresAt?.toISOString(),
+      createdAt: inv.createdAt?.toISOString(),
     })),
   });
 });
@@ -188,23 +207,69 @@ router.post("/:orgId/members", async (c) => {
   }
 
   const targetUser = await findUserByEmail(body.email.trim());
-  if (!targetUser) {
-    return c.json({ error: "USER_NOT_FOUND", message: "Aucun utilisateur avec cet email" }, 404);
+
+  if (targetUser) {
+    // User exists — add directly
+    try {
+      await addMember(orgId, targetUser.id, role);
+    } catch (err) {
+      return c.json(
+        {
+          error: "ADD_MEMBER_FAILED",
+          message: err instanceof Error ? err.message : "Impossible d'ajouter le membre",
+        },
+        400,
+      );
+    }
+    return c.json({ userId: targetUser.id, role, added: true }, 201);
   }
 
+  // User doesn't exist — create invitation and send email
   try {
-    await addMember(orgId, targetUser.id, role);
+    const invitation = await createInvitation({
+      email: body.email.trim(),
+      orgId,
+      role,
+      invitedBy: user.id,
+    });
+
+    // Fire-and-forget: send invitation email
+    const [orgName, inviterName] = await Promise.all([getOrgName(orgId), getInviterName(user.id)]);
+    sendInvitationEmail({
+      email: invitation.email,
+      token: invitation.token,
+      orgName,
+      inviterName,
+    });
+
+    return c.json({ invited: true, email: invitation.email, role }, 201);
   } catch (err) {
     return c.json(
       {
-        error: "ADD_MEMBER_FAILED",
-        message: err instanceof Error ? err.message : "Impossible d'ajouter le membre",
+        error: "INVITATION_FAILED",
+        message: err instanceof Error ? err.message : "Impossible d'envoyer l'invitation",
       },
-      400,
+      500,
+    );
+  }
+});
+
+// DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation (admin/owner only)
+router.delete("/:orgId/invitations/:invitationId", async (c) => {
+  const user = c.get("user");
+  const orgId = c.req.param("orgId");
+  const invitationId = c.req.param("invitationId");
+
+  const member = await getOrgMember(orgId, user.id);
+  if (!member || !["owner", "admin"].includes(member.role)) {
+    return c.json(
+      { error: "FORBIDDEN", message: "Seuls les admins peuvent annuler des invitations" },
+      403,
     );
   }
 
-  return c.json({ userId: targetUser.id, role }, 201);
+  await cancelInvitation(invitationId);
+  return c.json({ ok: true });
 });
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin/owner only)

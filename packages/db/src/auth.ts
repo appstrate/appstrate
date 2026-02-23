@@ -14,7 +14,7 @@ export const auth = betterAuth({
     schema,
   }),
 
-  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3010",
+  baseURL: process.env.APP_URL || "http://localhost:3010",
   basePath: "/api/auth",
   secret: process.env.BETTER_AUTH_SECRET,
 

@@ -72,6 +72,14 @@ export interface OrganizationWithRole extends Organization {
   role: OrgRole;
 }
 
+export interface OrgInvitation {
+  id: string;
+  email: string;
+  role: OrgRole;
+  expiresAt: string;
+  createdAt: string;
+}
+
 // --- JSON Schema Types ---
 
 export interface JSONSchemaProperty {
