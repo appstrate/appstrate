@@ -10,6 +10,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
+COPY packages/env/package.json packages/env/
 
 RUN bun install --frozen-lockfile
 
@@ -53,6 +54,10 @@ COPY --from=build /app/packages/connect/package.json ./packages/connect/
 # DB package (schema, client, auth, storage, notify — used by API at runtime)
 COPY --from=build /app/packages/db/src ./packages/db/src
 COPY --from=build /app/packages/db/package.json ./packages/db/
+
+# Env package (Zod-validated env vars — used by API, DB, connect at runtime)
+COPY --from=build /app/packages/env/src ./packages/env/src
+COPY --from=build /app/packages/env/package.json ./packages/env/
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
