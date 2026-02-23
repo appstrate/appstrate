@@ -42,7 +42,7 @@ bun run dev                   # turbo dev → Hono on :3010
 | ZIP import        | **fflate** (decompression)                        | User flow import from ZIP files                                                                 |
 | Docker            | **Docker Engine API** via `fetch()` + unix socket | NOT dockerode (socket bugs with Bun)                                                            |
 | Container runtime | **Pi Coding Agent**                               | Uses Pi Coding Agent SDK, supports multiple LLM providers via API keys                          |
-| Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 HashRouter, builds to `apps/web/dist/`                             |
+| Frontend          | **React 19 + Vite + React Query v5**              | `apps/web/`, React Router v7 BrowserRouter, builds to `apps/web/dist/`                          |
 | Real-time         | **PostgreSQL LISTEN/NOTIFY + SSE**                | Execution status + logs via pg_notify triggers → EventSource on frontend                        |
 | Shared types      | **Drizzle InferSelectModel**                      | Types derived from `@appstrate/db/schema`, shared via `@appstrate/shared-types`                 |
 | Storage           | **Local filesystem**                              | `STORAGE_DIR` env var (default: `./data/storage`). Flow packages, skills, extensions            |
@@ -69,17 +69,18 @@ bun run dev                   # turbo dev → Hono on :3010
 - **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-tenant isolation**: Application-level security scoped by organization membership. All queries filter by `orgId`. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
 - **Auth flow**: Frontend uses Better Auth React client (`createAuthClient`) → `signIn.email()` / `signUp.email()` → session cookie set automatically → sent via `credentials: "include"` on all API calls. Backend verifies session via `auth.api.getSession({ headers })`. The `X-Org-Id` header identifies the active organization.
+- **Invitation system (magic links)**: Admins invite users by email via `POST /api/orgs/:orgId/members`. If the user exists, they're added directly. If not, an `org_invitations` record is created with a 64-char token (7-day expiry), and a dark-themed HTML email is sent via Brevo SMTP (`services/email.ts`). Re-inviting the same email auto-cancels prior pending invitations. The invite link (`/invite/:token`) is a public frontend route. `POST /invite/:token/accept` creates the user account (via `auth.api.signUpEmail` with a random password + `signInEmail` to get a session cookie), adds them to the org, and redirects to `/welcome` for profile setup (display name + optional password). Existing users are simply added to the org. Expired invitations are cleaned up at startup.
 
 ## Architecture
 
 ```
-User Browser (hash-based SPA)    Platform (Bun + Hono :3010)
+User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (email/password → cookie session)
      |                                |-- POST /api/auth/** (Better Auth handler)
      |                                |
-     |-- #/ (Flow List) ------------->|-- GET /api/flows (with runningExecutions count)
-     |-- #/flows/:id (Flow Detail) -->|-- GET /api/flows/:id (with services, config, state, skills)
+     |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
+     |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
      |-- PUT /api/flows/:id/config -->|-- schema.ts (Zod validation) → state.ts (Drizzle)
      |-- POST /auth/connect/:prov --->|-- connection-manager.ts → OAuth2 flow / API key storage
      |                                |
@@ -105,7 +106,7 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3010)
      |                                |
      |   Health:                      |-- GET /health (no auth) → healthy/degraded
      |                                |
-     |-- #/flows/:id/executions/:eid->|
+     |-- /flows/:id/executions/:eid-->|
      |   (Execution Detail)           |
      |-- GET /api/executions/:id/stream (SSE: replay DB + live via pub/sub)
      |-- GET /api/executions/:id/logs  (REST: paginated historical logs)
@@ -113,8 +114,14 @@ User Browser (hash-based SPA)    Platform (Bun + Hono :3010)
      |-- POST /api/flows/import ------>|-- flow-import.ts: unzip, validate manifest, persist to DB
      |-- DELETE /api/flows/:id ------->|-- user-flows.ts: delete user flow + cascade cleanup
      |                                |
-     |-- #/schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
-     |-- #/settings (Org Settings) --->|-- Provider CRUD, member management
+     |-- /schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
+     |-- /org-settings (Org Settings)->|-- Provider CRUD, member management, invitations
+     |                                |
+     |   Invitations (magic links):   |-- POST /api/orgs/:orgId/members → invite if user not found
+     |   /invite/:token (public)      |-- GET /invite/:token/info → invitation metadata
+     |                                |-- POST /invite/:token/accept → create user or add to org
+     |   /welcome (post-signup)       |-- POST /api/welcome/setup → set displayName + password
+     |   Brevo SMTP                   |-- sendInvitationEmail() → dark-themed HTML email
      |                                |
      |            Docker network: appstrate-exec-{execId} (isolated bridge)
      |            ┌─────────────────────────────────────────────┐
@@ -183,6 +190,8 @@ appstrate/
 │   │       │   ├── profile.ts        # User profile routes
 │   │       │   ├── library.ts        # Org library routes (skills + extensions)
 │   │       │   ├── realtime.ts       # SSE endpoints: /api/realtime/executions, /api/realtime/executions/:id, /api/realtime/flows/:id/executions
+│   │       │   ├── invitations.ts   # Public: GET /invite/:token/info, POST /invite/:token/accept (magic link acceptance)
+│   │       │   ├── welcome.ts       # POST /api/welcome/setup (profile setup after invite signup)
 │   │       │   └── __tests__/
 │   │       │       └── execution-retry.test.ts  # Output validation retry tests
 │   │       ├── services/
@@ -213,7 +222,9 @@ appstrate/
 │   │       │   ├── library.ts        # Org library CRUD for skills and extensions
 │   │       │   ├── organizations.ts  # Organization CRUD and membership management
 │   │       │   ├── builtin-library.ts # Built-in skills/extensions from data/ directory (loaded at boot)
-│   │       │   └── skill-utils.ts    # Skill file parsing utilities
+│   │       │   ├── skill-utils.ts    # Skill file parsing utilities
+│   │       │   ├── email.ts          # Brevo SMTP: sendEmail() for transactional emails (invitations)
+│   │       │   └── invitations.ts    # Invitation CRUD: create, accept, cancel, expire, sendInvitationEmail()
 │   │       └── types/
 │   │           └── index.ts          # Backend-only types (FlowManifest, LoadedFlow, SkillMeta) + re-exports from @appstrate/shared-types
 │   │
@@ -224,7 +235,7 @@ appstrate/
 │       ├── vite.config.ts            # envDir: "../../" to load env vars from monorepo root
 │       ├── index.html
 │       └── src/
-│           ├── main.tsx              # Root: QueryClientProvider + HashRouter + App
+│           ├── main.tsx              # Root: QueryClientProvider + BrowserRouter + App
 │           ├── app.tsx               # Auth gate (LoginPage if !user), layout with UserMenu, nav, <Routes/>, useGlobalExecutionSync
 │           ├── styles.css            # All CSS (dark theme)
 │           ├── api.ts                # apiFetch(), api() — cookie-based auth via credentials: "include", X-Org-Id header
@@ -247,14 +258,16 @@ appstrate/
 │           ├── pages/
 │           │   ├── login.tsx         # Login/signup form (email + password + display name)
 │           │   ├── create-org.tsx    # Organization creation page
-│           │   ├── flow-list.tsx     # #/ — flow cards grid with import button
-│           │   ├── flow-detail.tsx   # #/flows/:flowId — config/state/input modals, execution list, service connect
-│           │   ├── flow-editor.tsx   # #/flows/:flowId/edit — flow manifest editor
-│           │   ├── execution-detail.tsx # #/flows/:flowId/executions/:execId — logs + result via SSE
-│           │   ├── org-settings.tsx  # #/settings — provider CRUD, member management
-│           │   ├── library.tsx       # #/library — org skills and extensions management
-│           │   ├── preferences.tsx   # #/preferences — user preferences (language)
-│           │   ├── schedules-list.tsx # #/schedules — manage cron schedules across all flows
+│           │   ├── flow-list.tsx     # / — flow cards grid with import button
+│           │   ├── flow-detail.tsx   # /flows/:flowId — config/state/input modals, execution list, service connect
+│           │   ├── flow-editor.tsx   # /flows/:flowId/edit — flow manifest editor
+│           │   ├── execution-detail.tsx # /flows/:flowId/executions/:execId — logs + result via SSE
+│           │   ├── invite-accept.tsx # /invite/:token — public invitation acceptance page
+│           │   ├── welcome.tsx      # /welcome — post-invite profile setup (displayName + password)
+│           │   ├── org-settings.tsx  # /org-settings — provider CRUD, member management, invitations
+│           │   ├── library.tsx       # /library — org skills and extensions management
+│           │   ├── preferences.tsx   # /preferences — user preferences (language)
+│           │   ├── schedules-list.tsx # /schedules — manage cron schedules across all flows
 │           │   ├── public-share-run.tsx # Public share execution page
 │           │   └── shareable-run.tsx # Shareable run page
 │           └── components/
@@ -288,7 +301,7 @@ appstrate/
 │   │   ├── drizzle.config.ts         # Drizzle Kit config (PostgreSQL, schema path, migrations dir)
 │   │   ├── drizzle/                  # Generated migration files (drizzle-kit generate)
 │   │   └── src/
-│   │       ├── schema.ts             # Full Drizzle schema: 23 tables, enums, indexes, types
+│   │       ├── schema.ts             # Full Drizzle schema: 24 tables, enums, indexes, types
 │   │       ├── client.ts             # db instance (drizzle + postgres), listenClient (LISTEN), createDb(), closeDb()
 │   │       ├── auth.ts               # Better Auth config: email/password, cookie sessions, databaseHooks (auto profile+org)
 │   │       ├── storage.ts            # Local filesystem storage: uploadFile, downloadFile, deleteFile, listFiles
@@ -400,6 +413,20 @@ appstrate/
 | `PUT`    | `/api/providers/:id` | Cookie+Admin | Update a provider config                         |
 | `DELETE` | `/api/providers/:id` | Cookie+Admin | Delete a provider config                         |
 
+### Invitations (Magic Links)
+
+| Method | Path                                        | Auth         | Description                                                                 |
+| ------ | ------------------------------------------- | ------------ | --------------------------------------------------------------------------- |
+| `GET`  | `/invite/:token/info`                       | None         | Invitation metadata (email, orgName, role, inviterName, expiresAt)          |
+| `POST` | `/invite/:token/accept`                     | None         | Accept invitation — auto-signup (new) or add to org (existing), set cookie  |
+| `DELETE`| `/api/orgs/:orgId/invitations/:invitationId`| Cookie+Admin | Cancel a pending invitation                                                |
+
+### Welcome (Post-Invite Setup)
+
+| Method | Path                 | Auth   | Description                                                    |
+| ------ | -------------------- | ------ | -------------------------------------------------------------- |
+| `POST` | `/api/welcome/setup` | Cookie | Set display name and/or password after invitation signup       |
+
 ### Internal (container-to-host)
 
 | Method | Path                               | Auth          | Description                                                                 |
@@ -481,6 +508,11 @@ share_tokens (id TEXT PK, token UNIQUE, flow_id, org_id UUID FK→organizations,
 -- Flow admin connections
 flow_admin_connections (flow_id, service_id, org_id UUID FK→organizations, admin_user_id TEXT FK→user, connected_at, PK(flow_id, service_id))
 
+-- Organization invitations (magic link system)
+org_invitations (id TEXT PK, token TEXT UNIQUE, email TEXT, org_id UUID FK→organizations CASCADE, role ENUM('owner','admin','member'), status ENUM('pending','accepted','expired','cancelled'), invited_by TEXT FK→user, accepted_by TEXT FK→user, expires_at TIMESTAMP, accepted_at TIMESTAMP, created_at)
+  -- Indexes: token, org_id, email
+  -- 7-day expiry, auto-cancel on re-invite, cleaned at startup via expireOldInvitations()
+
 -- Organization library
 org_skills (id TEXT, org_id UUID FK→organizations CASCADE, name, description, content TEXT, created_by TEXT FK→user, created_at, updated_at, PK(org_id, id))
 org_extensions (id TEXT, org_id UUID FK→organizations CASCADE, name, description, content TEXT, created_by TEXT FK→user, created_at, updated_at, PK(org_id, id))
@@ -541,8 +573,10 @@ If `result.state` is present, the platform persists it to the `state` column of 
 # Database (PostgreSQL + Drizzle)
 DATABASE_URL=postgresql://appstrate:appstrate@localhost:5432/appstrate
 
+# App
+APP_URL=http://localhost:3010              # Base URL for the platform (auth, invitation links, etc.)
+
 # Better Auth
-BETTER_AUTH_URL=http://localhost:3010      # Base URL for auth callbacks/redirects
 BETTER_AUTH_SECRET=<random-secret>          # Session signing secret (use a strong random value in production)
 # TRUSTED_ORIGINS=http://localhost:3000,http://localhost:5173  # Optional: comma-separated trusted origins (CORS + Better Auth)
 
@@ -556,6 +590,11 @@ PORT=3010
 DOCKER_SOCKET=/var/run/docker.sock
 PLATFORM_API_URL=http://host.docker.internal:3010  # Optional: override container-to-host URL
 STORAGE_DIR=./data/storage                  # Local filesystem storage directory
+
+# Email Service (Brevo SMTP for invitations)
+# BREVO_API_KEY=xkeysib-...               # Brevo transactional API key (optional — skipped if absent)
+# EMAIL_FROM=noreply@appstrate.io          # Sender email address
+# EMAIL_FROM_NAME=Appstrate                # Sender display name
 
 # Execution Adapter (pi is the default and only active adapter)
 EXECUTION_ADAPTER=pi
@@ -602,8 +641,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 - `authorized_uris` / `allow_all_uris` URL restriction on all providers with pattern matching
 - Sidecar proxy for credential isolation — agent cannot access `EXECUTION_TOKEN` or `/internal/credentials`
 - Variable substitution (`{{variable}}`) in sidecar proxy for credentials injection
-- Drizzle migrations generated and applied (23 tables)
+- Drizzle migrations generated and applied (24 tables)
 - NOTIFY triggers installed at startup for executions + execution_logs
+- Invitation magic links: create invitation, send email (Brevo), accept (new user auto-signup + existing user org join), expire/cancel
+- Public `/invite/:token/info` and `/invite/:token/accept` endpoints (no auth required)
+- Welcome page `/api/welcome/setup` for post-invite profile setup (displayName + password)
+- Expired invitations cleanup at startup via `expireOldInvitations()`
 
 ## Detailed Specs
 

@@ -33,6 +33,13 @@ export const executionStatusEnum = pgEnum("execution_status", [
 
 export const authModeEnum = pgEnum("auth_mode", ["oauth2", "api_key", "basic", "custom"]);
 
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "expired",
+  "cancelled",
+]);
+
 // ────────────────────────────────────────────────────────────
 // Better Auth tables (managed by Better Auth)
 // We define them here so Drizzle knows about them for
@@ -117,6 +124,32 @@ export const organizationMembers = pgTable(
   (table) => [
     primaryKey({ columns: [table.orgId, table.userId] }),
     index("idx_organization_members_user_id").on(table.userId),
+  ],
+);
+
+export const orgInvitations = pgTable(
+  "org_invitations",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    token: text("token").notNull().unique(),
+    email: text("email").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    role: orgRoleEnum("role").notNull().default("member"),
+    status: invitationStatusEnum("status").notNull().default("pending"),
+    invitedBy: text("invited_by").references(() => user.id),
+    acceptedBy: text("accepted_by").references(() => user.id),
+    expiresAt: timestamp("expires_at").notNull(),
+    acceptedAt: timestamp("accepted_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("idx_org_invitations_token").on(table.token),
+    index("idx_org_invitations_org_id").on(table.orgId),
+    index("idx_org_invitations_email").on(table.email),
   ],
 );
 
@@ -616,3 +649,6 @@ export type NewServiceConnection = InferInsertModel<typeof serviceConnections>;
 
 export type OAuthState = InferSelectModel<typeof oauthStates>;
 export type NewOAuthState = InferInsertModel<typeof oauthStates>;
+
+export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
+export type NewOrgInvitation = InferInsertModel<typeof orgInvitations>;

@@ -18,6 +18,7 @@ export type {
   OrganizationMember,
   OrganizationWithRole,
   ProviderConfig,
+  OrgInvitation,
 } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---

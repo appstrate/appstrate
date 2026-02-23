@@ -12,6 +12,7 @@ import {
   flowConfigs,
   flows,
   serviceConnections,
+  orgInvitations,
 } from "@appstrate/db/schema";
 import { eq, and, inArray, count } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
@@ -236,6 +237,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(flows).where(eq(flows.orgId, orgId));
     // serviceConnections has onDelete cascade from org, but explicit is safer in a tx
     await tx.delete(serviceConnections).where(eq(serviceConnections.orgId, orgId));
+    await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // organization_members cascades from organizations (onDelete: "cascade")
 
     const deleted = await tx

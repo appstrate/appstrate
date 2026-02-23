@@ -7,6 +7,7 @@ import { lt } from "drizzle-orm";
 import { db, closeDb } from "./lib/db.ts";
 import { auth } from "./lib/auth.ts";
 import { oauthStates, scheduleRuns } from "@appstrate/db/schema";
+import { expireOldInvitations } from "./services/invitations.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./lib/logger.ts";
 import { initRealtime } from "./services/realtime.ts";
@@ -33,6 +34,8 @@ import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
+import invitationsRouter from "./routes/invitations.ts";
+import welcomeRouter from "./routes/welcome.ts";
 import type { AppEnv } from "./types/index.ts";
 
 const app = new Hono<AppEnv>();
@@ -101,6 +104,8 @@ app.use("*", async (c, next) => {
   // Profile routes are user-scoped, not org-scoped
   if (path === "/api/profile" || path === "/api/profile/") return next();
   if (path === "/api/profiles/batch") return next();
+  // Welcome setup is user-scoped, not org-scoped
+  if (path === "/api/welcome/setup") return next();
 
   return requireOrgContext()(c, next);
 });
@@ -202,6 +207,18 @@ try {
   });
 }
 
+// Clean up expired invitations
+try {
+  const expiredCount = await expireOldInvitations();
+  if (expiredCount > 0) {
+    logger.info("Expired old invitations", { count: expiredCount });
+  }
+} catch (err) {
+  logger.warn("Could not expire old invitations", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
 // Clean up old schedule_runs rows (retention: 30 days)
 try {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -265,9 +282,15 @@ app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/auth", authRouter);
 
+// Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
+app.route("/invite", invitationsRouter);
+
 // Public share routes (no JWT required — path doesn't start with /api/ or /auth/)
 const shareRouter = createShareRouter();
 app.route("/share", shareRouter);
+
+// Welcome route (authenticated, cookie-based — org context not required)
+app.route("/api", welcomeRouter);
 
 // Internal routes (container-to-host, auth via execution token — no JWT)
 const internalRouter = createInternalRouter();
