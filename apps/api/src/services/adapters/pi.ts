@@ -2,6 +2,7 @@ import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage, PromptContext } from "./types.ts";
 import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
+import { getEnv, LLM_API_KEY_NAMES } from "@appstrate/env";
 import {
   connectContainerToNetwork,
   createContainer,
@@ -48,8 +49,9 @@ export class PiAdapter implements ExecutionAdapter {
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
-    const provider = process.env.LLM_PROVIDER || "anthropic";
-    const modelId = process.env.LLM_MODEL_ID || ctx.llmModel;
+    const apiEnv = getEnv();
+    const provider = apiEnv.LLM_PROVIDER;
+    const modelId = apiEnv.LLM_MODEL_ID;
 
     const networkName = `appstrate-exec-${executionId}`;
     let networkId: string | undefined;
@@ -67,7 +69,7 @@ export class PiAdapter implements ExecutionAdapter {
         sidecarEnv.EXECUTION_TOKEN = ctx.executionApi.token;
         if (platformNetwork) {
           // Platform is inside Docker — use its internal network hostname
-          sidecarEnv.PLATFORM_API_URL = `http://${platformNetwork.hostname}:${process.env.PORT || "3000"}`;
+          sidecarEnv.PLATFORM_API_URL = `http://${platformNetwork.hostname}:${apiEnv.PORT}`;
         } else {
           sidecarEnv.PLATFORM_API_URL = ctx.executionApi.url;
         }
@@ -105,8 +107,9 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.CONNECTED_SERVICES = connectedServiceIds.join(",");
       }
 
-      for (const key of API_KEY_ENV_VARS) {
-        if (process.env[key]) containerEnv[key] = process.env[key]!;
+      for (const key of LLM_API_KEY_NAMES) {
+        const val = apiEnv[key];
+        if (val) containerEnv[key] = val;
       }
 
       // 5. Create agent on the custom network ONLY
@@ -154,17 +157,7 @@ export class PiAdapter implements ExecutionAdapter {
   }
 }
 
-// --- Constants & helpers ---
-
-const API_KEY_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "GEMINI_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "TOGETHER_API_KEY",
-  "DEEPSEEK_API_KEY",
-];
+// --- Helpers ---
 
 async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<ExecutionMessage> {
   let textBuffer = "";

@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { mkdir, rm, readdir, stat } from "node:fs/promises";
+import { getEnv } from "@appstrate/env";
 
-const STORAGE_DIR = process.env.STORAGE_DIR || join(process.cwd(), "data", "storage");
+const STORAGE_DIR = getEnv().STORAGE_DIR || join(process.cwd(), "data", "storage");
 
 /**
  * Ensure a bucket directory exists.

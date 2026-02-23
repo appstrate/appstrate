@@ -1,13 +1,12 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.ts";
+import { getEnv } from "@appstrate/env";
 
-if (!process.env.DATABASE_URL) {
-  console.warn("[db] DATABASE_URL not set, using default local connection");
-}
+const { DATABASE_URL } = getEnv();
 
 // Main query connection pool
-const queryClient = postgres(process.env.DATABASE_URL!, {
+const queryClient = postgres(DATABASE_URL, {
   max: 20,
   idle_timeout: 30,
   connect_timeout: 30,
@@ -21,7 +20,7 @@ export const db = drizzle(queryClient, { schema });
 export type Db = typeof db;
 
 // Dedicated LISTEN connection (single, long-lived, no pooling)
-export const listenClient = postgres(process.env.DATABASE_URL!, {
+export const listenClient = postgres(DATABASE_URL, {
   max: 1,
   idle_timeout: 0,
   max_lifetime: 0,

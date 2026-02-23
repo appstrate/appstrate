@@ -3,10 +3,9 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles } from "./schema.ts";
+import { getEnv } from "@appstrate/env";
 
-if (!process.env.BETTER_AUTH_SECRET) {
-  throw new Error("BETTER_AUTH_SECRET environment variable is required");
-}
+const env = getEnv();
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -14,9 +13,9 @@ export const auth = betterAuth({
     schema,
   }),
 
-  baseURL: process.env.APP_URL || "http://localhost:3010",
+  baseURL: env.APP_URL,
   basePath: "/api/auth",
-  secret: process.env.BETTER_AUTH_SECRET,
+  secret: env.BETTER_AUTH_SECRET,
 
   emailAndPassword: {
     enabled: true,
@@ -36,9 +35,7 @@ export const auth = betterAuth({
     additionalFields: {},
   },
 
-  trustedOrigins: process.env.TRUSTED_ORIGINS
-    ? process.env.TRUSTED_ORIGINS.split(",")
-    : ["http://localhost:3010", "http://localhost:5173"],
+  trustedOrigins: env.TRUSTED_ORIGINS,
 
   databaseHooks: {
     user: {

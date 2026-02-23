@@ -10,6 +10,7 @@ import type { ServiceStatus } from "@appstrate/shared-types";
 import { eq } from "drizzle-orm";
 import { profiles } from "@appstrate/db/schema";
 
+import { getEnv } from "@appstrate/env";
 import {
   initiateOAuth,
   handleOAuthCallback,
@@ -72,9 +73,8 @@ export async function initiateConnection(
   userId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
-  const redirectUri =
-    process.env.OAUTH_CALLBACK_URL ??
-    `http://localhost:${process.env.PORT || "3000"}/auth/callback`;
+  const apiEnv = getEnv();
+  const redirectUri = apiEnv.OAUTH_CALLBACK_URL ?? `http://localhost:${apiEnv.PORT}/auth/callback`;
   return initiateOAuth(db, orgId, userId, provider, redirectUri, requestedScopes);
 }
 

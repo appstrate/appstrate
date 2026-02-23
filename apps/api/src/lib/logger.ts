@@ -1,7 +1,8 @@
 import pino from "pino";
+import { getEnv } from "@appstrate/env";
 
 const pinoLogger = pino({
-  level: process.env.LOG_LEVEL || "info",
+  level: getEnv().LOG_LEVEL,
 });
 
 type LogFn = (msg: string, data?: Record<string, unknown>) => void;

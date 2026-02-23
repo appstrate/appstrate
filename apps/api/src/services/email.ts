@@ -1,8 +1,7 @@
 import { logger } from "../lib/logger.ts";
+import { getEnv } from "@appstrate/env";
 
-const BREVO_API_KEY = process.env.BREVO_API_KEY;
-const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@appstrate.io";
-const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || "Appstrate";
+const { BREVO_API_KEY, EMAIL_FROM, EMAIL_FROM_NAME } = getEnv();
 
 interface SendEmailParams {
   to: string;

@@ -1,12 +1,13 @@
 import type { ExecutionAdapter } from "./types.ts";
 import { PiAdapter } from "./pi.ts";
+import { getEnv } from "@appstrate/env";
 
 export { TimeoutError } from "./types.ts";
 export type { TokenUsage, FileReference, PromptContext } from "./types.ts";
 export { buildRetryPrompt } from "./prompt-builder.ts";
 
 export function getAdapter(): ExecutionAdapter {
-  const type = process.env.EXECUTION_ADAPTER || "pi";
+  const type = getEnv().EXECUTION_ADAPTER;
   switch (type) {
     case "pi":
       return new PiAdapter();
@@ -16,5 +17,5 @@ export function getAdapter(): ExecutionAdapter {
 }
 
 export function getAdapterName(): string {
-  return process.env.EXECUTION_ADAPTER || "pi";
+  return getEnv().EXECUTION_ADAPTER;
 }

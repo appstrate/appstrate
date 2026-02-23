@@ -1,7 +1,8 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
+import { getEnv } from "@appstrate/env";
 
-const DOCKER_SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
+const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 
 // Bun supports fetch() with unix: option for Unix sockets
 async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
