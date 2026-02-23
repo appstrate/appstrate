@@ -71,6 +71,7 @@ export function createUserFlowsRouter() {
           skillsMatched: result.skillsMatched,
           extensionsCreated: result.extensionsCreated,
           extensionsMatched: result.extensionsMatched,
+          ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
         },
         201,
       );

@@ -33,6 +33,11 @@ function substituteVars(text: string, credentials: Record<string, string>): stri
   return text.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? _match);
 }
 
+function findUnresolvedPlaceholders(text: string): string[] {
+  const matches = [...text.matchAll(/\{\{(\w+)\}\}/g)];
+  return matches.map((m) => m[1]!);
+}
+
 function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
   return patterns.some((pattern) => {
     if (pattern.endsWith("*")) {
@@ -152,6 +157,18 @@ app.all("/proxy", async (c) => {
   // 3. Substitute {{variable}} in target URL
   const resolvedUrl = substituteVars(targetUrl, creds.credentials);
 
+  // 3b. Check for unresolved placeholders in URL
+  const unresolvedInUrl = findUnresolvedPlaceholders(resolvedUrl);
+  if (unresolvedInUrl.length > 0) {
+    const available = Object.keys(creds.credentials);
+    return c.json(
+      {
+        error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}. Available: ${available.join(", ") || "(none)"}`,
+      },
+      400,
+    );
+  }
+
   // 4. Validate URL against authorizedUris (or block internal targets)
   if (creds.allowAllUris) {
     // Allow all URLs but still block internal/private networks
@@ -198,7 +215,21 @@ app.all("/proxy", async (c) => {
     forwardedHeaders[key] = substituteVars(value, creds.credentials);
   }
 
-  // 5b. Inject stored cookies from cookie jar
+  // 5b. Check for unresolved placeholders in headers
+  for (const [key, value] of Object.entries(forwardedHeaders)) {
+    const unresolved = findUnresolvedPlaceholders(value);
+    if (unresolved.length > 0) {
+      const available = Object.keys(creds.credentials);
+      return c.json(
+        {
+          error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}. Available: ${available.join(", ") || "(none)"}`,
+        },
+        400,
+      );
+    }
+  }
+
+  // 5c. Inject stored cookies from cookie jar
   const storedCookies = cookieJar.get(serviceId);
   if (storedCookies && storedCookies.length > 0) {
     const existing = forwardedHeaders["cookie"] || "";
@@ -217,6 +248,17 @@ app.all("/proxy", async (c) => {
       // Buffer body and substitute variables
       const rawBody = await c.req.text();
       body = substituteVars(rawBody, creds.credentials);
+      // Check for unresolved placeholders in body
+      const unresolvedInBody = findUnresolvedPlaceholders(body);
+      if (unresolvedInBody.length > 0) {
+        const available = Object.keys(creds.credentials);
+        return c.json(
+          {
+            error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}. Available: ${available.join(", ") || "(none)"}`,
+          },
+          400,
+        );
+      }
     } else {
       // Stream body through as-is
       body = c.req.raw.body ?? undefined;

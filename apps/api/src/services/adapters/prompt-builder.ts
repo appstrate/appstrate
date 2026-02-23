@@ -245,16 +245,79 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 }
 
 export function extractJsonResult(text: string): Record<string, unknown> | null {
-  // Look for ```json ... ``` blocks (last one wins)
-  const matches = [...text.matchAll(/```json\s*\n([\s\S]*?)```/g)];
-  if (matches.length > 0) {
-    const lastMatch = matches[matches.length - 1]!;
+  // Strategy 1: ```json ... ``` blocks, case-insensitive (last one wins)
+  const jsonFenceMatches = [...text.matchAll(/```json\s*\n([\s\S]*?)```/gi)];
+  if (jsonFenceMatches.length > 0) {
+    const lastMatch = jsonFenceMatches[jsonFenceMatches.length - 1]!;
     try {
       return JSON.parse(lastMatch[1]!.trim());
     } catch {
-      return null;
+      // Fall through to next strategy
     }
   }
+
+  // Strategy 2: bare ``` fences (no language tag) whose content starts with { (last one wins)
+  const bareFenceMatches = [...text.matchAll(/```(?!\w)\s*\n([\s\S]*?)```/g)];
+  for (let i = bareFenceMatches.length - 1; i >= 0; i--) {
+    const content = bareFenceMatches[i]![1]!.trim();
+    if (content.startsWith("{")) {
+      try {
+        return JSON.parse(content);
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  // Strategy 3: raw JSON object in text — find { and its matching }, try parsing
+  let searchFrom = text.length;
+  while (searchFrom > 0) {
+    const openIdx = text.lastIndexOf("{", searchFrom - 1);
+    if (openIdx === -1) break;
+
+    // Find matching closing brace (respects string literals)
+    let depth = 0;
+    let inStr = false;
+    let escaped = false;
+    let endIdx = -1;
+    for (let i = openIdx; i < text.length; i++) {
+      const ch = text[i]!;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\" && inStr) {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = !inStr;
+        continue;
+      }
+      if (inStr) continue;
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          endIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (endIdx !== -1) {
+      try {
+        const parsed = JSON.parse(text.slice(openIdx, endIdx + 1));
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch {
+        // Try previous occurrence
+      }
+    }
+    searchFrom = openIdx;
+  }
+
   return null;
 }
 

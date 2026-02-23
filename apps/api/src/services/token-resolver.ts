@@ -25,9 +25,14 @@ export async function buildServiceTokens(
 
     if (tokenUserId) {
       const result = await getCredentials(db, orgId, tokenUserId, svc.provider);
-      const token = result
+      let token = result
         ? (result.credentials.access_token ?? result.credentials.api_key ?? null)
         : null;
+      // Fallback: if credentials exist but no standard field, mark as connected
+      // so the service appears in the prompt and CONNECTED_SERVICES
+      if (!token && result && Object.keys(result.credentials).length > 0) {
+        token = "__connected__";
+      }
       if (token) {
         tokens[svc.id] = token;
       } else {
