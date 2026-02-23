@@ -49,6 +49,8 @@ export function useGlobalExecutionSync() {
   useEffect(() => {
     if (!orgId) return;
 
+    console.log("[SSE] effect run, orgId =", orgId);
+
     const controller = new AbortController();
 
     (async () => {
