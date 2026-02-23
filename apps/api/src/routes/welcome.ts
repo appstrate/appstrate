@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { db } from "../lib/db.ts";
 import { profiles, user, account } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
+import { hashPassword } from "../lib/auth.ts";
 import type { AppEnv } from "../types/index.ts";
 
 const router = new Hono<AppEnv>();
@@ -27,11 +28,10 @@ router.post("/welcome/setup", async (c) => {
       );
     }
 
-    const hashedPassword = await Bun.password.hash(body.password, "bcrypt");
-
+    const hashed = await hashPassword(body.password);
     await db
       .update(account)
-      .set({ password: hashedPassword, updatedAt: new Date() })
+      .set({ password: hashed, updatedAt: new Date() })
       .where(and(eq(account.userId, currentUser.id), eq(account.providerId, "credential")));
   }
 

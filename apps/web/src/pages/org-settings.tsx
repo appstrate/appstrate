@@ -395,9 +395,7 @@ export function OrgSettingsPage() {
                   <div className="service-card-header" style={{ marginBottom: 0 }}>
                     <div className="service-info">
                       <h3 style={{ fontSize: "0.875rem" }}>{label}</h3>
-                      {member.email && member.displayName && (
-                        <span className="service-provider">{member.email}</span>
-                      )}
+                      {member.email && <span className="service-provider">{member.email}</span>}
                     </div>
                     <span
                       className={`badge ${isOwner ? "badge-running" : member.role === "admin" ? "badge-success" : "badge-pending"}`}

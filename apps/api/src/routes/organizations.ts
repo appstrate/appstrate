@@ -108,6 +108,7 @@ router.get("/:orgId", async (c) => {
       role: m.role,
       joinedAt: m.joined_at,
       displayName: m.display_name,
+      email: m.email,
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,

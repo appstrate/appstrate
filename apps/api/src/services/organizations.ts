@@ -115,7 +115,7 @@ export async function updateOrganization(
 
 export async function getOrgMembers(
   orgId: string,
-): Promise<(OrgMemberRow & { display_name?: string })[]> {
+): Promise<(OrgMemberRow & { display_name?: string; email?: string })[]> {
   const rows = await db
     .select()
     .from(organizationMembers)
@@ -125,18 +125,23 @@ export async function getOrgMembers(
   const members = rows.map(toOrgMemberRow);
   if (members.length === 0) return [];
 
-  // Fetch display names from profiles
+  // Fetch display names and emails
   const userIds = members.map((m) => m.user_id);
-  const profileRows = await db
-    .select({ id: profiles.id, displayName: profiles.displayName })
-    .from(profiles)
-    .where(inArray(profiles.id, userIds));
+  const [profileRows, userRows] = await Promise.all([
+    db
+      .select({ id: profiles.id, displayName: profiles.displayName })
+      .from(profiles)
+      .where(inArray(profiles.id, userIds)),
+    db.select({ id: user.id, email: user.email }).from(user).where(inArray(user.id, userIds)),
+  ]);
 
   const profileMap = new Map(profileRows.map((p) => [p.id, p.displayName]));
+  const emailMap = new Map(userRows.map((u) => [u.id, u.email]));
 
   return members.map((row) => ({
     ...row,
     display_name: profileMap.get(row.user_id) ?? undefined,
+    email: emailMap.get(row.user_id) ?? undefined,
   }));
 }
 
