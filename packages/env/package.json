@@ -1,0 +1,16 @@
+{
+  "name": "@appstrate/env",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint:fix": "prettier --write src/"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

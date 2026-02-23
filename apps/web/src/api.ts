@@ -1,4 +1,3 @@
-import { supabase } from "./lib/supabase";
 import { getCurrentOrgId } from "./hooks/use-org";
 
 const API_BASE = "/api";
@@ -10,22 +9,18 @@ async function throwIfNotOk(res: Response): Promise<void> {
   }
 }
 
-export async function getAuthHeaders(): Promise<Record<string, string>> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const token = session?.access_token;
+export function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   const orgId = getCurrentOrgId();
   if (orgId) headers["X-Org-Id"] = orgId;
   return headers;
 }
 
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
-  const authHeaders = await getAuthHeaders();
+  const authHeaders = getAuthHeaders();
   const res = await fetch(path, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...authHeaders,
@@ -46,9 +41,10 @@ export async function uploadFormData<T = unknown>(
   formData: FormData,
   method: "POST" | "PUT" = "POST",
 ): Promise<T> {
-  const authHeaders = await getAuthHeaders();
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    credentials: "include",
     headers: authHeaders,
     body: formData,
   });
@@ -57,8 +53,9 @@ export async function uploadFormData<T = unknown>(
 }
 
 export async function apiBlob(path: string): Promise<Blob> {
-  const authHeaders = await getAuthHeaders();
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
     headers: authHeaders,
   });
   await throwIfNotOk(res);

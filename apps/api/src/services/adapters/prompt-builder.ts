@@ -6,6 +6,7 @@ import {
   getDefaultAuthorizedUris,
   type ProviderDefinition,
 } from "@appstrate/connect";
+import { sanitizeStorageKey } from "../file-storage.ts";
 
 type ProviderLike = NonNullable<PromptContext["providers"]>[number];
 
@@ -134,12 +135,16 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   // Uploaded documents
   if (ctx.files && ctx.files.length > 0) {
     sections.push("## Documents\n");
-    sections.push("The following documents have been uploaded and are available for download:\n");
+    sections.push(
+      "The following documents have been uploaded and are available on the local filesystem:\n",
+    );
     for (const file of ctx.files) {
-      sections.push(`- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)})`);
-      sections.push(`  Download: \`curl -sL -o "${file.name}" "${file.url}"\``);
+      const safeName = sanitizeStorageKey(file.name);
+      sections.push(
+        `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`/workspace/documents/${safeName}\``,
+      );
     }
-    sections.push("\nDownload each document using curl before processing it.\n");
+    sections.push("\nRead the documents directly from the filesystem.\n");
   }
 
   // Configuration — enriched with schema metadata

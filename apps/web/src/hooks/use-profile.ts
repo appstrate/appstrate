@@ -16,3 +16,15 @@ export function useUpdateLanguage() {
     },
   });
 }
+
+export function useUpdateDisplayName() {
+  return useMutation({
+    mutationFn: async (displayName: string) => {
+      await api("/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ displayName }),
+      });
+      return displayName;
+    },
+  });
+}

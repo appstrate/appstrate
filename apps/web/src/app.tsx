@@ -10,6 +10,8 @@ import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { LibraryPage } from "./pages/library";
 import { CreateOrgPage } from "./pages/create-org";
+import { InviteAcceptPage } from "./pages/invite-accept";
+import { WelcomePage } from "./pages/welcome";
 import { OrgSettingsPage } from "./pages/org-settings";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
@@ -135,7 +137,7 @@ function MainLayout() {
         </nav>
         <OrgSwitcher />
         <UserMenu
-          displayName={profile?.display_name || user!.email || ""}
+          displayName={profile?.displayName || user!.email || ""}
           isAdmin={isOrgAdmin}
           onLogout={() => void handleLogout()}
         />
@@ -154,8 +156,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
 
-  // Allow create-org route through without org context
-  if (location.pathname === "/create-org") {
+  // Allow create-org and welcome routes through without org context
+  if (location.pathname === "/create-org" || location.pathname === "/welcome") {
     return <>{children}</>;
   }
 
@@ -203,6 +205,17 @@ export function App() {
     );
   }
 
+  // Public invitation routes — no authentication required
+  if (location.pathname.startsWith("/invite/")) {
+    return (
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/invite/:token" element={<InviteAcceptPage />} />
+        </Routes>
+      </ErrorBoundary>
+    );
+  }
+
   if (loading) {
     return (
       <div className="container">
@@ -223,6 +236,7 @@ export function App() {
         <GlobalRealtimeSync>
           <Routes>
             <Route path="/create-org" element={<CreateOrgPage />} />
+            <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<FlowList />} />

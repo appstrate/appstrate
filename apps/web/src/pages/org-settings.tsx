@@ -9,7 +9,12 @@ import { useCreateProvider, useUpdateProvider, useDeleteProvider } from "../hook
 import { ProviderFormModal } from "../components/provider-form-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
-import type { OrganizationMember, OrgRole, ProviderConfig } from "@appstrate/shared-types";
+import type {
+  OrganizationMember,
+  OrgRole,
+  OrgInvitation,
+  ProviderConfig,
+} from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -41,18 +46,22 @@ export function OrgSettingsPage() {
 
   const orgId = currentOrg?.id;
 
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+
   const {
-    data: members = [],
+    data: orgData,
     isLoading,
     error,
   } = useQuery({
     queryKey: ["org-members", orgId],
     queryFn: async () => {
-      const data = await api<{ members: OrganizationMember[] }>(`/orgs/${orgId}`);
-      return data.members;
+      return api<{ members: OrganizationMember[]; invitations: OrgInvitation[] }>(`/orgs/${orgId}`);
     },
     enabled: !!orgId,
   });
+
+  const members = orgData?.members ?? [];
+  const invitations = orgData?.invitations ?? [];
 
   // --- Mutations ---
 
@@ -74,18 +83,36 @@ export function OrgSettingsPage() {
 
   const addMemberMutation = useMutation({
     mutationFn: async (email: string) => {
-      return api(`/orgs/${orgId}/members`, {
+      return api<{ invited?: boolean; added?: boolean }>(`/orgs/${orgId}/members`, {
         method: "POST",
         body: JSON.stringify({ email }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
       setInviteEmail("");
       setInviteError(null);
+      if (data?.invited) {
+        setInviteSuccess(t("orgSettings.invitationSent"));
+        setTimeout(() => setInviteSuccess(null), 5000);
+      }
     },
     onError: (err: Error) => {
       setInviteError(err.message);
+    },
+  });
+
+  const cancelInvitationMutation = useMutation({
+    mutationFn: async (invitationId: string) => {
+      return api(`/orgs/${orgId}/invitations/${invitationId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+    },
+    onError: (err: Error) => {
+      alert(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -340,6 +367,17 @@ export function OrgSettingsPage() {
                   {inviteError}
                 </p>
               )}
+              {inviteSuccess && (
+                <p
+                  style={{
+                    marginTop: "0.25rem",
+                    color: "var(--success, #48bb78)",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  {inviteSuccess}
+                </p>
+              )}
             </div>
             <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
               {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
@@ -357,9 +395,7 @@ export function OrgSettingsPage() {
                   <div className="service-card-header" style={{ marginBottom: 0 }}>
                     <div className="service-info">
                       <h3 style={{ fontSize: "0.875rem" }}>{label}</h3>
-                      {member.email && member.displayName && (
-                        <span className="service-provider">{member.email}</span>
-                      )}
+                      {member.email && <span className="service-provider">{member.email}</span>}
                     </div>
                     <span
                       className={`badge ${isOwner ? "badge-running" : member.role === "admin" ? "badge-success" : "badge-pending"}`}
@@ -414,7 +450,50 @@ export function OrgSettingsPage() {
             })}
           </div>
 
-          {members.length === 0 && (
+          {/* Pending invitations */}
+          {invitations.length > 0 && (
+            <>
+              <div className="section-title" style={{ marginTop: "1.5rem" }}>
+                {t("orgSettings.pendingInvitations")}
+              </div>
+              <div className="services-grid">
+                {invitations.map((inv) => (
+                  <div key={inv.id} className="service-card">
+                    <div className="service-card-header" style={{ marginBottom: 0 }}>
+                      <div className="service-info">
+                        <h3 style={{ fontSize: "0.875rem" }}>{inv.email}</h3>
+                        <span className="service-provider">
+                          {inv.role === "admin"
+                            ? t("orgSettings.roleAdmin")
+                            : t("orgSettings.roleMember")}
+                        </span>
+                      </div>
+                      <span className="badge badge-pending">{t("orgSettings.invited")}</span>
+                    </div>
+                    <div
+                      className="service-card-actions"
+                      style={{
+                        marginTop: "0.75rem",
+                        paddingTop: "0.75rem",
+                        borderTop: "1px solid var(--border)",
+                        display: "flex",
+                        justifyContent: "flex-end",
+                      }}
+                    >
+                      <button
+                        onClick={() => cancelInvitationMutation.mutate(inv.id)}
+                        disabled={cancelInvitationMutation.isPending}
+                      >
+                        {t("btn.cancel", { ns: "common" })}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {members.length === 0 && invitations.length === 0 && (
             <EmptyState
               message={t("orgSettings.noMembers")}
               hint={t("orgSettings.noMembersHint")}

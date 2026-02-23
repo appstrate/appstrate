@@ -1,14 +1,12 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { supabase } from "../lib/supabase";
 import { useCurrentOrgId } from "./use-org";
 import type { Execution } from "@appstrate/shared-types";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 
 const TERMINAL_STATUSES = new Set(["success", "failed", "timeout"]);
 
 /**
- * Global Realtime subscription on the `executions` table.
+ * Global SSE subscription on execution changes.
  * Syncs INSERT/UPDATE events directly into React Query cache via setQueryData,
  * avoiding full refetches. Mounted once at app level (inside OrgGate).
  */
@@ -19,65 +17,52 @@ export function useGlobalExecutionSync() {
   useEffect(() => {
     if (!orgId) return;
 
-    const channel: RealtimeChannel = supabase
-      .channel("global-executions-sync")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "executions",
-        },
-        (payload) => {
-          const newRow = payload.new as Execution;
-          const flowId = newRow.flow_id;
+    const es = new EventSource(`/api/realtime/executions?orgId=${encodeURIComponent(orgId)}`, {
+      withCredentials: true,
+    });
 
-          // Prepend into executions list cache (if it exists)
-          qc.setQueryData<Execution[]>(["executions", orgId, flowId], (prev) => {
-            if (!prev) return prev;
-            if (prev.some((e) => e.id === newRow.id)) return prev;
-            return [newRow, ...prev].slice(0, 50);
-          });
+    es.addEventListener("execution_update", (e) => {
+      try {
+        const newRow = JSON.parse(e.data) as Record<string, unknown>;
+        const flowId = newRow.flowId as string;
+        const execId = newRow.id as string;
+        const status = newRow.status as string;
 
-          // Invalidate flow list & detail (runningExecutions count changes)
+        // Update single execution cache
+        qc.setQueryData<Execution>(["execution", orgId, execId], (prev) => {
+          if (!prev) return prev;
+          return { ...prev, ...newRow } as Execution;
+        });
+
+        // Update execution in list cache
+        qc.setQueryData<Execution[]>(["executions", orgId, flowId], (prev) => {
+          if (!prev) return prev;
+          const exists = prev.some((ex) => ex.id === execId);
+          if (exists) {
+            return prev.map((ex) => (ex.id === execId ? ({ ...ex, ...newRow } as Execution) : ex));
+          }
+          // New execution — prepend
+          return [newRow as Execution, ...prev].slice(0, 50);
+        });
+
+        // On terminal status, invalidate flows (runningExecutions count changes)
+        if (TERMINAL_STATUSES.has(status)) {
           qc.invalidateQueries({ queryKey: ["flows", orgId] });
           qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "executions",
-        },
-        (payload) => {
-          const newRow = payload.new as Execution;
-          const flowId = newRow.flow_id;
+        }
 
-          // Update single execution cache
-          qc.setQueryData<Execution>(["execution", orgId, newRow.id], (prev) => {
-            if (!prev) return prev;
-            return { ...prev, ...newRow };
-          });
-
-          // Update execution in list cache
-          qc.setQueryData<Execution[]>(["executions", orgId, flowId], (prev) => {
-            if (!prev) return prev;
-            return prev.map((e) => (e.id === newRow.id ? { ...e, ...newRow } : e));
-          });
-
-          // On terminal status, invalidate flows (runningExecutions count changes)
-          if (TERMINAL_STATUSES.has(newRow.status)) {
-            qc.invalidateQueries({ queryKey: ["flows", orgId] });
-            qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
-          }
-        },
-      )
-      .subscribe();
+        // On new execution (status pending/running), also invalidate flows
+        if (status === "pending" || status === "running") {
+          qc.invalidateQueries({ queryKey: ["flows", orgId] });
+          qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
+        }
+      } catch {
+        // Ignore malformed SSE payloads
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      es.close();
     };
   }, [qc, orgId]);
 }

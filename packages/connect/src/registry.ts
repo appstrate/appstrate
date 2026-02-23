@@ -1,9 +1,11 @@
-import type { SupabaseClient as _SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@appstrate/shared-types";
+import { eq, and } from "drizzle-orm";
+import { providerConfigs } from "@appstrate/db/schema";
+import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition, ProviderConfigRow } from "./types.ts";
 import { decrypt } from "./encryption.ts";
+import { getEnv } from "@appstrate/env";
 
-export type SupabaseClient = _SupabaseClient<Database>;
+export type { Db };
 
 /**
  * Built-in provider definitions.
@@ -25,7 +27,10 @@ function addProviders(
 ): void {
   for (const p of providers) {
     if (!isValidProvider(p)) {
-      console.error(`[connect] ${source}: skipping invalid entry (missing id/displayName/authMode)`, p);
+      console.error(
+        `[connect] ${source}: skipping invalid entry (missing id/displayName/authMode)`,
+        p,
+      );
       continue;
     }
     if (warnOverride && map.has(p.id)) {
@@ -36,15 +41,8 @@ function addProviders(
 }
 
 function parseEnvProviders(): ProviderDefinition[] {
-  if (!process.env.SYSTEM_PROVIDERS) return [];
-  try {
-    const parsed = JSON.parse(process.env.SYSTEM_PROVIDERS) as ProviderDefinition[];
-    if (!Array.isArray(parsed)) throw new Error("SYSTEM_PROVIDERS must be a JSON array");
-    return parsed;
-  } catch (err) {
-    console.error("[connect] Failed to parse SYSTEM_PROVIDERS:", err);
-    return [];
-  }
+  const raw = getEnv().SYSTEM_PROVIDERS;
+  return raw as ProviderDefinition[];
 }
 
 /**
@@ -109,7 +107,7 @@ function rowToDefinition(row: ProviderConfigRow): ProviderDefinition {
  * DB rows are exclusively custom providers (IDs different from built-in).
  */
 export async function getProvider(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   providerId: string,
 ): Promise<ProviderDefinition | null> {
@@ -118,14 +116,13 @@ export async function getProvider(
   if (builtIn) return builtIn;
 
   // Check DB for custom providers
-  const { data: row } = await supabase
-    .from("provider_configs")
-    .select("*")
-    .eq("org_id", orgId)
-    .eq("id", providerId)
-    .single();
+  const rows = await db
+    .select()
+    .from(providerConfigs)
+    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+    .limit(1);
 
-  if (row) return rowToDefinition(row as unknown as ProviderConfigRow);
+  if (rows.length > 0) return rowToDefinition(rows[0] as unknown as ProviderConfigRow);
 
   return null;
 }
@@ -135,12 +132,12 @@ export async function getProvider(
  * Optionally validates the auth mode.
  */
 export async function getProviderOrThrow(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   providerId: string,
   expectedAuthMode?: string,
 ): Promise<ProviderDefinition> {
-  const provider = await getProvider(supabase, orgId, providerId);
+  const provider = await getProvider(db, orgId, providerId);
   if (!provider) {
     throw new Error(`Provider '${providerId}' not found`);
   }
@@ -154,11 +151,11 @@ export async function getProviderOrThrow(
  * Get OAuth client credentials for a provider or throw if not configured.
  */
 export async function getProviderOAuthCredentialsOrThrow(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   providerId: string,
 ): Promise<{ clientId: string; clientSecret: string }> {
-  const creds = await getProviderOAuthCredentials(supabase, orgId, providerId);
+  const creds = await getProviderOAuthCredentials(db, orgId, providerId);
   if (!creds) {
     throw new Error(
       `No OAuth credentials configured for provider '${providerId}'. Set SYSTEM_PROVIDERS env var or configure via admin.`,
@@ -173,7 +170,7 @@ export async function getProviderOAuthCredentialsOrThrow(
  * 2. Fall back to DB config
  */
 export async function getProviderOAuthCredentials(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   providerId: string,
 ): Promise<{ clientId: string; clientSecret: string } | null> {
@@ -184,23 +181,22 @@ export async function getProviderOAuthCredentials(
   }
 
   // 2. Check DB config
-  const { data: row } = await supabase
-    .from("provider_configs")
-    .select("client_id_encrypted,client_secret_encrypted")
-    .eq("org_id", orgId)
-    .eq("id", providerId)
-    .single();
+  const rows = await db
+    .select({
+      clientIdEncrypted: providerConfigs.clientIdEncrypted,
+      clientSecretEncrypted: providerConfigs.clientSecretEncrypted,
+    })
+    .from(providerConfigs)
+    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+    .limit(1);
 
-  if (!row) return null;
-  const typedRow = row as {
-    client_id_encrypted: string | null;
-    client_secret_encrypted: string | null;
-  };
-  if (!typedRow.client_id_encrypted || !typedRow.client_secret_encrypted) return null;
+  if (rows.length === 0) return null;
+  const row = rows[0]!;
+  if (!row.clientIdEncrypted || !row.clientSecretEncrypted) return null;
 
   return {
-    clientId: decrypt(typedRow.client_id_encrypted),
-    clientSecret: decrypt(typedRow.client_secret_encrypted),
+    clientId: decrypt(row.clientIdEncrypted),
+    clientSecret: decrypt(row.clientSecretEncrypted),
   };
 }
 
@@ -208,10 +204,7 @@ export async function getProviderOAuthCredentials(
  * List all available providers (built-in + DB custom).
  * Built-in providers are immutable — DB rows with the same ID are skipped.
  */
-export async function listProviders(
-  supabase: SupabaseClient,
-  orgId: string,
-): Promise<ProviderDefinition[]> {
+export async function listProviders(db: Db, orgId: string): Promise<ProviderDefinition[]> {
   const result = new Map<string, ProviderDefinition>();
 
   // Start with built-in providers (immutable)
@@ -220,13 +213,11 @@ export async function listProviders(
   }
 
   // Add custom providers from DB (skip if ID conflicts with built-in)
-  const { data: rows } = await supabase.from("provider_configs").select("*").eq("org_id", orgId);
+  const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
 
-  if (rows) {
-    for (const row of rows as unknown as ProviderConfigRow[]) {
-      if (!result.has(row.id)) {
-        result.set(row.id, rowToDefinition(row));
-      }
+  for (const row of rows as unknown as ProviderConfigRow[]) {
+    if (!result.has(row.id)) {
+      result.set(row.id, rowToDefinition(row));
     }
   }
 
@@ -237,11 +228,11 @@ export async function listProviders(
  * Get the auth mode for a provider.
  */
 export async function getProviderAuthMode(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   providerId: string,
 ): Promise<string | undefined> {
-  const provider = await getProvider(supabase, orgId, providerId);
+  const provider = await getProvider(db, orgId, providerId);
   return provider?.authMode;
 }
 

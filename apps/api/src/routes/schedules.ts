@@ -3,6 +3,8 @@ import { Cron } from "croner";
 import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
+  listSchedules,
+  listFlowSchedules,
   createSchedule,
   updateSchedule,
   deleteSchedule,
@@ -12,6 +14,21 @@ import { requireFlow } from "../middleware/guards.ts";
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
+
+  // GET /api/schedules — list all schedules (org-scoped)
+  router.get("/schedules", async (c) => {
+    const orgId = c.get("orgId");
+    const schedules = await listSchedules(orgId);
+    return c.json(schedules);
+  });
+
+  // GET /api/flows/:id/schedules — list schedules for a flow
+  router.get("/flows/:id/schedules", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const schedules = await listFlowSchedules(flow.id, orgId);
+    return c.json(schedules);
+  });
 
   // POST /api/flows/:id/schedules — create a schedule
   router.post("/flows/:id/schedules", requireFlow(), async (c) => {

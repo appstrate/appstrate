@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { getEnv } from "@appstrate/env";
 
 const ALGO = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -9,20 +10,9 @@ let encryptionKey: Buffer | null = null;
 function getKey(): Buffer {
   if (encryptionKey) return encryptionKey;
 
-  const keyEnv = process.env.CONNECTION_ENCRYPTION_KEY;
-  if (!keyEnv) {
-    throw new Error("CONNECTION_ENCRYPTION_KEY is not set");
-  }
-
-  const keyBuffer = Buffer.from(keyEnv, "base64");
-  if (keyBuffer.length !== 32) {
-    throw new Error(
-      `CONNECTION_ENCRYPTION_KEY must be 32 bytes (256-bit) base64-encoded. Got ${keyBuffer.length} bytes.`,
-    );
-  }
-
-  encryptionKey = keyBuffer;
-  return keyBuffer;
+  const keyEnv = getEnv().CONNECTION_ENCRYPTION_KEY;
+  encryptionKey = Buffer.from(keyEnv, "base64");
+  return encryptionKey;
 }
 
 /**
