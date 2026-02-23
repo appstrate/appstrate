@@ -36,12 +36,14 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# Runtime data (materialized user flows)
+# Runtime storage (user uploads, execution files)
 data/
+storage/
 
+docs/
 zip-flows/
 flows/*
 
-supabase/.*
+claudedocs/
 
 .tasks

@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
+import { serviceConnections } from "@appstrate/db/schema";
+import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import type { SupabaseClient } from "./registry.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { parseTokenResponse } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
@@ -18,7 +20,7 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
  * subsequent callers wait for the same promise.
  */
 export async function refreshIfNeeded(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   connectionId: string,
   providerId: string,
@@ -39,13 +41,7 @@ export async function refreshIfNeeded(
   if (inflight) return inflight;
 
   // Start refresh
-  const refreshPromise = doRefresh(
-    supabase,
-    orgId,
-    connectionId,
-    providerId,
-    credentialsEncrypted,
-  );
+  const refreshPromise = doRefresh(db, orgId, connectionId, providerId, credentialsEncrypted);
 
   inflightRefreshes.set(connectionId, refreshPromise);
 
@@ -57,7 +53,7 @@ export async function refreshIfNeeded(
 }
 
 async function doRefresh(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   connectionId: string,
   providerId: string,
@@ -66,17 +62,16 @@ async function doRefresh(
   const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
 
   if (!creds.refresh_token) {
-    // No refresh token — return current credentials (best effort)
     return creds;
   }
 
-  const provider = await getProviderOrThrow(supabase, orgId, providerId);
+  const provider = await getProviderOrThrow(db, orgId, providerId);
   const tokenUrl = provider.refreshUrl ?? provider.tokenUrl;
   if (!tokenUrl) {
     throw new Error(`Provider '${providerId}' has no token URL for refresh`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(supabase, orgId, providerId);
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId);
 
   // Perform token refresh
   const body = new URLSearchParams({
@@ -125,16 +120,16 @@ async function doRefresh(
 
   // Update the connection in DB
   const newEncrypted = encryptCredentials(newCreds);
-  const { error: updateError } = await supabase.from("service_connections")
-    .update({
-      credentials_encrypted: newEncrypted,
-      expires_at: newExpiresAt,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", connectionId);
-
-  if (updateError) {
-    // Log but don't throw — return fresh credentials for the current execution
+  try {
+    await db
+      .update(serviceConnections)
+      .set({
+        credentialsEncrypted: newEncrypted,
+        expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(serviceConnections.id, connectionId));
+  } catch (updateError) {
     console.error(`Failed to persist refreshed token for connection ${connectionId}:`, updateError);
   }
 

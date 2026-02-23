@@ -3,8 +3,14 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
-import { supabase } from "./lib/supabase.ts";
+import { lt } from "drizzle-orm";
+import { db, closeDb } from "./lib/db.ts";
+import { auth } from "./lib/auth.ts";
+import { oauthStates, scheduleRuns } from "@appstrate/db/schema";
+import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./lib/logger.ts";
+import { initRealtime } from "./services/realtime.ts";
+import { createRealtimeRouter } from "./routes/realtime.ts";
 import { initBuiltInProviders } from "@appstrate/connect";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { initBuiltInLibrary } from "./services/builtin-library.ts";
@@ -32,7 +38,11 @@ import type { AppEnv } from "./types/index.ts";
 const app = new Hono<AppEnv>();
 
 // Middleware
-app.use("*", cors());
+const trustedOrigins = process.env.TRUSTED_ORIGINS
+  ? process.env.TRUSTED_ORIGINS.split(",").map((s) => s.trim())
+  : ["http://localhost:3010"];
+
+app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);
@@ -47,30 +57,31 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Auth middleware: verify Supabase JWT and inject user into context
-async function verifyUser(authHeader: string | undefined) {
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
-  return user;
-}
+// Mount Better Auth handler — handles signup, signin, session, etc.
+app.on(["POST", "GET"], "/api/auth/*", (c) => {
+  return auth.handler(c.req.raw);
+});
 
-// Single auth middleware for /api/* and /auth/* routes
+// Auth middleware: verify Better Auth session (cookie-based)
 app.use("*", async (c, next) => {
   const path = c.req.path;
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
-  // OAuth callback is a redirect from the provider — no JWT
+  // Better Auth endpoints are handled above
+  if (path.startsWith("/api/auth/")) return next();
+  // Realtime SSE endpoints handle their own auth (cookie-based, no X-Org-Id header)
+  if (path.startsWith("/api/realtime/")) return next();
+  // OAuth callback is a redirect from the provider — no session
   if (path === "/auth/callback") return next();
 
-  const user = await verifyUser(c.req.header("Authorization"));
-  if (!user) {
-    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing token" }, 401);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session?.user) {
+    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing session" }, 401);
   }
-  c.set("user", user);
+  c.set("user", {
+    id: session.user.id,
+    email: session.user.email ?? "",
+    name: session.user.name ?? "",
+  });
   return next();
 });
 
@@ -81,34 +92,44 @@ app.use("*", async (c, next) => {
 
   // Skip org context for routes that don't need it
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
+  if (path.startsWith("/api/auth/")) return next();
+  if (path.startsWith("/api/realtime/")) return next();
   if (path === "/auth/callback") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
   // Allow /api/orgs/:orgId/* routes (they handle their own auth)
   if (path.startsWith("/api/orgs/")) return next();
+  // Profile routes are user-scoped, not org-scoped
+  if (path === "/api/profile" || path === "/api/profile/") return next();
+  if (path === "/api/profiles/batch") return next();
 
   return requireOrgContext()(c, next);
 });
 
-// Load built-in providers from data/providers.json + SYSTEM_PROVIDERS env var
-const providersPath = join(process.cwd(), "data", "providers.json");
-try {
-  const fileProviders = JSON.parse(readFileSync(providersPath, "utf-8"));
-  initBuiltInProviders(fileProviders);
-  logger.info("Built-in providers loaded", { count: fileProviders.length });
-} catch {
-  initBuiltInProviders();
-  logger.info("Built-in providers loaded (env var only)");
+// Load built-in resources from DATA_DIR (if configured)
+const dataDir = process.env.DATA_DIR;
+
+if (dataDir) {
+  // Load built-in providers from {dataDir}/providers.json + SYSTEM_PROVIDERS env var
+  const providersPath = join(dataDir, "providers.json");
+  try {
+    const fileProviders = JSON.parse(readFileSync(providersPath, "utf-8"));
+    initBuiltInProviders(fileProviders);
+    logger.info("Built-in providers loaded", { count: fileProviders.length });
+  } catch {
+    initBuiltInProviders();
+    logger.info("Built-in providers loaded (env var only)");
+  }
+
+  await initFlowService(dataDir);
+  logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
+
+  await initBuiltInLibrary(dataDir);
+} else {
+  initBuiltInProviders(); // SYSTEM_PROVIDERS env var still loaded
+  logger.info("DATA_DIR not set — built-in resources disabled");
 }
 
-// Load built-in flows from filesystem
-logger.info("Loading flows...");
-await initFlowService();
-logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
-
-// Load built-in library (skills + extensions) from data/
-await initBuiltInLibrary();
-
-// Ensure Supabase Storage buckets
+// Ensure local storage directories
 try {
   await ensureStorageBucket();
 } catch (err) {
@@ -127,6 +148,25 @@ try {
   await ensureFilesBucket();
 } catch (err) {
   logger.warn("Could not ensure execution-files bucket", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Install NOTIFY triggers for realtime
+try {
+  await createNotifyTriggers(db);
+  logger.info("NOTIFY triggers installed");
+} catch (err) {
+  logger.warn("Could not install NOTIFY triggers", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Initialize realtime LISTEN channels
+try {
+  await initRealtime();
+} catch (err) {
+  logger.warn("Could not initialize realtime LISTEN", {
     error: err instanceof Error ? err.message : String(err),
   });
 }
@@ -154,7 +194,8 @@ try {
 
 // Clean up expired OAuth states
 try {
-  await supabase.rpc("cleanup_expired_oauth_states");
+  const deleted = await db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date()));
+  logger.debug("Cleaned up expired OAuth states", { deleted });
 } catch (err) {
   logger.warn("Could not clean up expired OAuth states", {
     error: err instanceof Error ? err.message : String(err),
@@ -163,12 +204,9 @@ try {
 
 // Clean up old schedule_runs rows (retention: 30 days)
 try {
-  const { data: deletedCount } = await supabase.rpc("cleanup_old_schedule_runs", {
-    retention_days: 30,
-  });
-  if (deletedCount && deletedCount > 0) {
-    logger.info("Cleaned up old schedule_runs", { deleted: deletedCount });
-  }
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const deleted = await db.delete(scheduleRuns).where(lt(scheduleRuns.createdAt, cutoff));
+  logger.debug("Cleaned up old schedule_runs", { deleted });
 } catch (err) {
   logger.warn("Could not clean up old schedule_runs", {
     error: err instanceof Error ? err.message : String(err),
@@ -199,6 +237,9 @@ const shutdown = async () => {
     }
   }
 
+  logger.info("Closing database connections...");
+  await closeDb();
+
   logger.info("Shutdown complete");
   process.exit(0);
 };
@@ -221,6 +262,7 @@ app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api", profileRouter);
+app.route("/api/realtime", createRealtimeRouter());
 app.route("/auth", authRouter);
 
 // Public share routes (no JWT required — path doesn't start with /api/ or /auth/)
@@ -238,7 +280,7 @@ app.use("/*", serveStatic({ root: "./apps/web/dist" }));
 app.get("/*", serveStatic({ root: "./apps/web/dist", path: "index.html" }));
 
 // Start server
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = parseInt(process.env.PORT || "3010", 10);
 
 export default {
   port,

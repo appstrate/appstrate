@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { supabase } from "../lib/supabase.ts";
 import {
   getShareToken,
   consumeShareToken,
@@ -25,12 +27,12 @@ export function createShareRouter() {
     const token = c.req.param("token");
     const shareToken = await getShareToken(token);
 
-    if (!shareToken || shareToken.expires_at! < new Date().toISOString()) {
+    if (!shareToken || shareToken.expiresAt < new Date()) {
       return c.json({ error: "TOKEN_INVALID", message: "This link is no longer valid." }, 410);
     }
 
-    const orgId = shareToken.org_id as string;
-    const flow = await getFlow(shareToken.flow_id, orgId);
+    const orgId = shareToken.orgId;
+    const flow = await getFlow(shareToken.flowId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
@@ -49,20 +51,25 @@ export function createShareRouter() {
       description: flow.manifest.metadata.description,
       ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
       ...(serviceStatuses.length > 0 ? { services: serviceStatuses } : {}),
-      consumed: !!shareToken.consumed_at,
+      consumed: !!shareToken.consumedAt,
     };
 
     // If already consumed and has execution, include execution status
-    if (shareToken.consumed_at && shareToken.execution_id) {
-      const { data: exec } = await supabase
-        .from("executions")
-        .select("status, result, error")
-        .eq("id", shareToken.execution_id)
-        .single();
+    if (shareToken.consumedAt && shareToken.executionId) {
+      const rows = await db
+        .select({
+          status: executions.status,
+          result: executions.result,
+          error: executions.error,
+        })
+        .from(executions)
+        .where(eq(executions.id, shareToken.executionId))
+        .limit(1);
 
+      const exec = rows[0];
       if (exec) {
         result.execution = {
-          id: shareToken.execution_id,
+          id: shareToken.executionId,
           status: exec.status,
           ...(exec.result ? { result: exec.result } : {}),
           ...(exec.error ? { error: exec.error } : {}),
@@ -89,7 +96,7 @@ export function createShareRouter() {
       );
     }
 
-    const { id: tokenId, flow_id: flowId, created_by: userId, org_id: orgId } = consumed;
+    const { id: tokenId, flowId, createdBy: userId, orgId } = consumed;
 
     const flow = await getFlow(flowId, orgId);
     if (!flow) {
@@ -105,7 +112,7 @@ export function createShareRouter() {
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Upload files to Supabase Storage
+    // Upload files to storage
     let fileRefs: FileReference[] | undefined;
     if (uploadedFiles && uploadedFiles.length > 0) {
       try {
@@ -184,16 +191,21 @@ export function createShareRouter() {
       return c.json({ error: "TOKEN_INVALID", message: "This link is no longer valid." }, 410);
     }
 
-    if (!shareToken.execution_id) {
+    if (!shareToken.executionId) {
       return c.json({ status: "pending" });
     }
 
-    const { data: exec } = await supabase
-      .from("executions")
-      .select("status, result, error")
-      .eq("id", shareToken.execution_id)
-      .single();
+    const rows = await db
+      .select({
+        status: executions.status,
+        result: executions.result,
+        error: executions.error,
+      })
+      .from(executions)
+      .where(eq(executions.id, shareToken.executionId))
+      .limit(1);
 
+    const exec = rows[0];
     return c.json({
       status: exec?.status ?? "pending",
       ...(exec?.result ? { result: exec.result } : {}),

@@ -3,11 +3,12 @@
  * Single source for connection operations.
  */
 
-import { supabase as supabaseFull } from "../lib/supabase.ts";
+import { db } from "../lib/db.ts";
 import { logger } from "../lib/logger.ts";
-import { getUserProfile } from "../lib/supabase.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 import type { ServiceStatus } from "@appstrate/shared-types";
+import { eq } from "drizzle-orm";
+import { profiles } from "@appstrate/db/schema";
 
 import {
   initiateOAuth,
@@ -25,8 +26,6 @@ import {
   type OAuthCallbackResult,
   type ScopeValidationResult,
 } from "@appstrate/connect";
-
-const supabase = supabaseFull;
 
 // Re-export types for consumers
 export type {
@@ -52,7 +51,7 @@ export async function getConnectionStatus(
   orgId: string,
   userId: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(supabase, orgId, userId, provider);
+  const conn = await getConnection(db, orgId, userId, provider);
   if (conn) {
     return {
       provider,
@@ -76,15 +75,15 @@ export async function initiateConnection(
   const redirectUri =
     process.env.OAUTH_CALLBACK_URL ??
     `http://localhost:${process.env.PORT || "3000"}/auth/callback`;
-  return initiateOAuth(supabase, orgId, userId, provider, redirectUri, requestedScopes);
+  return initiateOAuth(db, orgId, userId, provider, redirectUri, requestedScopes);
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
-  const result = await handleOAuthCallback(supabase, code, state);
+  const result = await handleOAuthCallback(db, code, state);
 
   // Save the connection
   await saveConnection(
-    supabase,
+    db,
     result.orgId,
     result.userId,
     result.providerId,
@@ -117,7 +116,7 @@ export async function saveApiKeyConnection(
   orgId: string,
   userId: string,
 ): Promise<void> {
-  await saveConnection(supabase, orgId, userId, provider, "api_key", { api_key: apiKey });
+  await saveConnection(db, orgId, userId, provider, "api_key", { api_key: apiKey });
 
   logger.info("API key connection saved", { provider, userId });
 }
@@ -131,7 +130,7 @@ export async function saveCredentialsConnection(
   orgId: string,
   userId: string,
 ): Promise<void> {
-  await saveConnection(supabase, orgId, userId, provider, authMode, credentials);
+  await saveConnection(db, orgId, userId, provider, authMode, credentials);
 
   logger.info("Credentials connection saved", { provider, authMode, userId });
 }
@@ -142,7 +141,7 @@ export async function listUserConnections(
   orgId: string,
   userId: string,
 ): Promise<ConnectionStatus[]> {
-  const connections = await listConnectionsRaw(supabase, orgId, userId);
+  const connections = await listConnectionsRaw(db, orgId, userId);
   return connections.map((c) => ({
     provider: c.providerId,
     status: "connected" as const,
@@ -159,7 +158,7 @@ export async function disconnectProvider(
   orgId: string,
   userId: string,
 ): Promise<void> {
-  await deleteConnectionRaw(supabase, orgId, userId, provider);
+  await deleteConnectionRaw(db, orgId, userId, provider);
   logger.info("Connection deleted", { provider, userId });
 }
 
@@ -169,7 +168,7 @@ export async function getProviderAuthMode(
   provider: string,
   orgId: string,
 ): Promise<string | undefined> {
-  return getProviderAuthModeRaw(supabase, orgId, provider);
+  return getProviderAuthModeRaw(db, orgId, provider);
 }
 
 export interface IntegrationWithStatus {
@@ -183,13 +182,24 @@ export interface IntegrationWithStatus {
   connectedAt?: string;
 }
 
+/** Get user profile display name. */
+async function getUserProfile(userId: string): Promise<{ display_name: string | null } | null> {
+  const rows = await db
+    .select({ displayName: profiles.displayName })
+    .from(profiles)
+    .where(eq(profiles.id, userId))
+    .limit(1);
+  if (!rows[0]) return null;
+  return { display_name: rows[0].displayName };
+}
+
 export async function getIntegrationsWithStatus(
   orgId: string,
   userId: string,
 ): Promise<IntegrationWithStatus[]> {
   const [providers, connections] = await Promise.all([
-    listProviders(supabase, orgId),
-    listConnectionsRaw(supabase, orgId, userId),
+    listProviders(db, orgId),
+    listConnectionsRaw(db, orgId, userId),
   ]);
 
   return providers.map((provider) => {

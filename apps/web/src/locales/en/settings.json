@@ -81,6 +81,7 @@
   "preferences.langFr": "Français",
   "preferences.langEn": "English",
   "preferences.account": "Account",
+  "preferences.currentPassword": "Current password",
   "preferences.newPassword": "New password",
   "preferences.confirmPassword": "Confirm password",
   "preferences.changePassword": "Change password",

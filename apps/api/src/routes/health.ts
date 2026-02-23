@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { supabase } from "../lib/supabase.ts";
+import { sql } from "drizzle-orm";
+import { db } from "../lib/db.ts";
 import { getBuiltInFlowCount } from "../services/flow-service.ts";
 
 const startedAt = Date.now();
@@ -12,9 +13,9 @@ healthRouter.get("/health", async (c) => {
   // Database check
   const dbStart = Date.now();
   try {
-    const { error } = await supabase.from("profiles").select("id", { count: "exact", head: true });
+    await db.execute(sql`SELECT 1`);
     checks.database = {
-      status: error ? "unhealthy" : "healthy",
+      status: "healthy",
       latency_ms: Date.now() - dbStart,
     };
   } catch {

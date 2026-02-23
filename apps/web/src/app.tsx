@@ -135,7 +135,7 @@ function MainLayout() {
         </nav>
         <OrgSwitcher />
         <UserMenu
-          displayName={profile?.display_name || user!.email || ""}
+          displayName={profile?.displayName || user!.email || ""}
           isAdmin={isOrgAdmin}
           onLogout={() => void handleLogout()}
         />

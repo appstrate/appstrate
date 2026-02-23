@@ -1,14 +1,11 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { tsImport } from "tsx/esm/api";
 import { getModel } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
-  createBashTool,
-  createReadTool,
-  createWriteTool,
-  createEditTool,
   DefaultResourceLoader,
   ModelRegistry,
   type ExtensionFactory,
@@ -27,6 +24,17 @@ function die(message: string): never {
   process.exit(1);
 }
 
+/** Unwrap the default export from a dynamically imported module.
+ *  tsImport (tsx) can double-wrap: mod.default may be a module namespace
+ *  whose own .default holds the actual function. Walk up to 2 levels. */
+function resolveDefaultExport(mod: Record<string, unknown>): unknown {
+  let value = mod.default;
+  if (typeof value !== "function" && value && typeof (value as any).default !== "undefined") {
+    value = (value as any).default;
+  }
+  return value;
+}
+
 // --- 1. Init workspace ---
 
 const WORKSPACE = "/workspace";
@@ -43,17 +51,27 @@ try {
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
 
-/** Load all .ts extension files from a directory, skipping already-loaded IDs. */
+/**
+ * Load all .ts extension files from a directory, skipping already-loaded IDs.
+ * Uses tsx's tsImport() to load extensions in an isolated module context,
+ * avoiding ERR_REQUIRE_CYCLE_MODULE when extensions share dependencies
+ * with the entrypoint's module graph.
+ */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir)) {
     if (!entry.endsWith(".ts")) continue;
     const id = entry.replace(/\.ts$/, "");
-    if (loadedExtensionIds.has(id)) continue; // flow-package extensions override runtime ones
+    if (loadedExtensionIds.has(id)) continue;
     const extPath = path.join(dir, entry);
     try {
-      const mod = await import(extPath);
-      extensionFactories.push(mod.default);
+      const mod = await tsImport(extPath, import.meta.url);
+      const factory = resolveDefaultExport(mod);
+      if (typeof factory !== "function") {
+        emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
+        continue;
+      }
+      extensionFactories.push(factory);
       loadedExtensionIds.add(id);
       emit({ type: "text_delta", text: `Loaded extension (${label}): ${entry}\n` });
     } catch (err) {
@@ -163,12 +181,6 @@ try {
     authStorage,
     modelRegistry,
     resourceLoader,
-    tools: [
-      createReadTool(WORKSPACE),
-      createWriteTool(WORKSPACE),
-      createEditTool(WORKSPACE),
-      createBashTool(WORKSPACE),
-    ],
     sessionManager: SessionManager.inMemory(),
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: false },

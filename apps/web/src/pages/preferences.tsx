@@ -108,6 +108,7 @@ function GeneralTab({
 function PasswordChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { updatePassword } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -126,8 +127,9 @@ function PasswordChangeForm() {
 
     setSubmitting(true);
     try {
-      await updatePassword(newPassword);
+      await updatePassword(currentPassword, newPassword);
       setSuccess(t("preferences.passwordChanged"));
+      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
@@ -137,11 +139,28 @@ function PasswordChangeForm() {
     }
   };
 
-  const canSubmit = newPassword.length >= 6 && confirmPassword.length > 0 && !submitting;
+  const canSubmit =
+    currentPassword.length > 0 &&
+    newPassword.length >= 6 &&
+    confirmPassword.length > 0 &&
+    !submitting;
 
   return (
     <div className="service-card" style={{ marginBottom: "1.5rem" }}>
       <form onSubmit={handleSubmit} style={{ padding: "0.25rem 0" }}>
+        <div className="form-group">
+          <label>{t("preferences.currentPassword")}</label>
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => {
+              setCurrentPassword(e.target.value);
+              setError("");
+              setSuccess("");
+            }}
+            autoComplete="current-password"
+          />
+        </div>
         <div className="form-group">
           <label>{t("preferences.newPassword")}</label>
           <input

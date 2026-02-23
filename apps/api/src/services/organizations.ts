@@ -1,4 +1,19 @@
-import { supabase } from "../lib/supabase.ts";
+import { db } from "../lib/db.ts";
+import {
+  organizations,
+  organizationMembers,
+  profiles,
+  user,
+  executions,
+  executionLogs,
+  shareTokens,
+  flowAdminConnections,
+  flowSchedules,
+  flowConfigs,
+  flows,
+  serviceConnections,
+} from "@appstrate/db/schema";
+import { eq, and, inArray, count } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 
 export interface OrgRow {
@@ -17,89 +32,106 @@ export interface OrgMemberRow {
   joined_at: string;
 }
 
+function toOrgRow(row: typeof organizations.$inferSelect): OrgRow {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    created_by: row.createdBy ?? "",
+    created_at: row.createdAt?.toISOString() ?? "",
+    updated_at: row.updatedAt?.toISOString() ?? "",
+  };
+}
+
+function toOrgMemberRow(row: typeof organizationMembers.$inferSelect): OrgMemberRow {
+  return {
+    org_id: row.orgId,
+    user_id: row.userId,
+    role: row.role,
+    joined_at: row.joinedAt?.toISOString() ?? "",
+  };
+}
+
 export async function createOrganization(
   name: string,
   slug: string,
   userId: string,
 ): Promise<OrgRow> {
-  const { data: org, error: orgErr } = await supabase
-    .from("organizations")
-    .insert({ name, slug, created_by: userId })
-    .select()
-    .single();
+  const [org] = await db
+    .insert(organizations)
+    .values({ name, slug, createdBy: userId })
+    .returning();
 
-  if (orgErr) throw new Error(`Failed to create organization: ${orgErr.message}`);
+  if (!org) throw new Error("Failed to create organization");
 
   // Add creator as owner
-  const { error: memberErr } = await supabase.from("organization_members").insert({
-    org_id: org.id,
-    user_id: userId,
+  await db.insert(organizationMembers).values({
+    orgId: org.id,
+    userId,
     role: "owner",
   });
 
-  if (memberErr) throw new Error(`Failed to add owner: ${memberErr.message}`);
-
-  return org as OrgRow;
+  return toOrgRow(org);
 }
 
 export async function getUserOrganizations(
   userId: string,
 ): Promise<(OrgRow & { role: OrgRole })[]> {
-  const { data, error } = await supabase
-    .from("organization_members")
-    .select("role, organizations(*)")
-    .eq("user_id", userId);
+  const rows = await db
+    .select({
+      org: organizations,
+      role: organizationMembers.role,
+    })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
+    .where(eq(organizationMembers.userId, userId));
 
-  if (error) throw new Error(`Failed to fetch user orgs: ${error.message}`);
-
-  return (data ?? []).map((row) => {
-    const org = (row as unknown as { organizations: OrgRow }).organizations;
-    return { ...org, role: row.role as OrgRole };
-  });
+  return rows.map((row) => ({
+    ...toOrgRow(row.org),
+    role: row.role as OrgRole,
+  }));
 }
 
 export async function getOrgById(orgId: string): Promise<OrgRow | null> {
-  const { data } = await supabase.from("organizations").select("*").eq("id", orgId).single();
-  return (data as OrgRow) ?? null;
+  const [row] = await db.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
+
+  return row ? toOrgRow(row) : null;
 }
 
 export async function updateOrganization(
   orgId: string,
   updates: { name?: string; slug?: string },
 ): Promise<OrgRow | null> {
-  const { data, error } = await supabase
-    .from("organizations")
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq("id", orgId)
-    .select()
-    .single();
+  const [row] = await db
+    .update(organizations)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(organizations.id, orgId))
+    .returning();
 
-  if (error) throw new Error(`Failed to update organization: ${error.message}`);
-  return (data as OrgRow) ?? null;
+  if (!row) throw new Error("Failed to update organization");
+  return toOrgRow(row);
 }
 
 export async function getOrgMembers(
   orgId: string,
 ): Promise<(OrgMemberRow & { display_name?: string })[]> {
-  const { data, error } = await supabase
-    .from("organization_members")
-    .select("org_id, user_id, role, joined_at")
-    .eq("org_id", orgId)
-    .order("joined_at", { ascending: true });
+  const rows = await db
+    .select()
+    .from(organizationMembers)
+    .where(eq(organizationMembers.orgId, orgId))
+    .orderBy(organizationMembers.joinedAt);
 
-  if (error) throw new Error(`Failed to fetch org members: ${error.message}`);
-
-  const members = (data ?? []) as OrgMemberRow[];
+  const members = rows.map(toOrgMemberRow);
   if (members.length === 0) return [];
 
-  // Fetch display names from profiles (no direct FK between organization_members and profiles)
+  // Fetch display names from profiles
   const userIds = members.map((m) => m.user_id);
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, display_name")
-    .in("id", userIds);
+  const profileRows = await db
+    .select({ id: profiles.id, displayName: profiles.displayName })
+    .from(profiles)
+    .where(inArray(profiles.id, userIds));
 
-  const profileMap = new Map((profiles ?? []).map((p) => [p.id, p.display_name]));
+  const profileMap = new Map(profileRows.map((p) => [p.id, p.displayName]));
 
   return members.map((row) => ({
     ...row,
@@ -108,38 +140,19 @@ export async function getOrgMembers(
 }
 
 export async function getOrgMember(orgId: string, userId: string): Promise<OrgMemberRow | null> {
-  const { data } = await supabase
-    .from("organization_members")
-    .select("*")
-    .eq("org_id", orgId)
-    .eq("user_id", userId)
-    .single();
+  const [row] = await db
+    .select()
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .limit(1);
 
-  return (data as OrgMemberRow) ?? null;
+  return row ? toOrgMemberRow(row) : null;
 }
 
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
-  // Look up user in auth.users via profiles join
-  // Since we use service role, we can query auth.users
-  const { data } = await supabase.rpc(
-    "get_user_id_by_email" as never,
-    {
-      p_email: email,
-    } as never,
-  );
+  const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email)).limit(1);
 
-  // Fallback: search in auth admin API
-  if (!data) {
-    const {
-      data: { users },
-      error,
-    } = await supabase.auth.admin.listUsers();
-    if (error) return null;
-    const user = users.find((u) => u.email === email);
-    return user ? { id: user.id } : null;
-  }
-
-  return data ? { id: data as string } : null;
+  return row ?? null;
 }
 
 export async function addMember(
@@ -147,27 +160,30 @@ export async function addMember(
   userId: string,
   role: OrgRole = "member",
 ): Promise<void> {
-  const { error } = await supabase.from("organization_members").insert({
-    org_id: orgId,
-    user_id: userId,
-    role,
-  });
-
-  if (error) {
-    if (error.code === "23505")
-      throw new Error("Cet utilisateur est deja membre de cette organisation");
-    throw new Error(`Failed to add member: ${error.message}`);
+  try {
+    await db.insert(organizationMembers).values({
+      orgId,
+      userId,
+      role,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("duplicate key") || message.includes("unique constraint")) {
+      throw new Error("Cet utilisateur est deja membre de cette organisation", { cause: err });
+    }
+    throw new Error(`Failed to add member: ${message}`, { cause: err });
   }
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  const { error } = await supabase
-    .from("organization_members")
-    .delete()
-    .eq("org_id", orgId)
-    .eq("user_id", userId);
+  const deleted = await db
+    .delete(organizationMembers)
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .returning({ orgId: organizationMembers.orgId });
 
-  if (error) throw new Error(`Failed to remove member: ${error.message}`);
+  if (deleted.length === 0) {
+    throw new Error("Failed to remove member: member not found");
+  }
 }
 
 export async function updateMemberRole(
@@ -175,13 +191,15 @@ export async function updateMemberRole(
   userId: string,
   role: OrgRole,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("organization_members")
-    .update({ role })
-    .eq("org_id", orgId)
-    .eq("user_id", userId);
+  const updated = await db
+    .update(organizationMembers)
+    .set({ role })
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .returning({ orgId: organizationMembers.orgId });
 
-  if (error) throw new Error(`Failed to update member role: ${error.message}`);
+  if (updated.length === 0) {
+    throw new Error("Failed to update member role: member not found");
+  }
 }
 
 export function slugify(name: string): string {
@@ -196,36 +214,45 @@ export function slugify(name: string): string {
 
 export async function deleteOrganization(orgId: string): Promise<void> {
   // Check for running executions
-  const { count: runningCount } = await supabase
-    .from("executions")
-    .select("id", { count: "exact", head: true })
-    .eq("org_id", orgId)
-    .in("status", ["pending", "running"]);
+  const runningResult = await db
+    .select({ runningCount: count() })
+    .from(executions)
+    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["pending", "running"])));
 
-  if (runningCount && runningCount > 0) {
+  if ((runningResult[0]?.runningCount ?? 0) > 0) {
     throw new Error("Impossible de supprimer l'organisation : des executions sont en cours");
   }
 
-  // Delete in FK-safe order (children before parents)
-  // execution_logs → executions (cascade), but org_id FK needs manual delete
-  await supabase.from("execution_logs").delete().eq("org_id", orgId);
-  await supabase.from("executions").delete().eq("org_id", orgId);
-  await supabase.from("share_tokens").delete().eq("org_id", orgId);
-  await supabase.from("flow_admin_connections").delete().eq("org_id", orgId);
-  // schedule_runs cascades from flow_schedules
-  await supabase.from("flow_schedules").delete().eq("org_id", orgId);
-  await supabase.from("flow_configs").delete().eq("org_id", orgId);
-  await supabase.from("flows").delete().eq("org_id", orgId);
-  // organization_members cascades from organizations
+  // Delete in FK-safe order within a transaction
+  await db.transaction(async (tx) => {
+    // execution_logs → executions (cascade exists, but org_id FK needs manual delete)
+    await tx.delete(executionLogs).where(eq(executionLogs.orgId, orgId));
+    await tx.delete(executions).where(eq(executions.orgId, orgId));
+    await tx.delete(shareTokens).where(eq(shareTokens.orgId, orgId));
+    await tx.delete(flowAdminConnections).where(eq(flowAdminConnections.orgId, orgId));
+    // schedule_runs cascades from flow_schedules
+    await tx.delete(flowSchedules).where(eq(flowSchedules.orgId, orgId));
+    await tx.delete(flowConfigs).where(eq(flowConfigs.orgId, orgId));
+    await tx.delete(flows).where(eq(flows.orgId, orgId));
+    // serviceConnections has onDelete cascade from org, but explicit is safer in a tx
+    await tx.delete(serviceConnections).where(eq(serviceConnections.orgId, orgId));
+    // organization_members cascades from organizations (onDelete: "cascade")
 
-  const { error } = await supabase.from("organizations").delete().eq("id", orgId);
-  if (error) throw new Error(`Failed to delete organization: ${error.message}`);
+    const deleted = await tx
+      .delete(organizations)
+      .where(eq(organizations.id, orgId))
+      .returning({ id: organizations.id });
+    if (deleted.length === 0) {
+      throw new Error("Failed to delete organization: not found");
+    }
+  });
 }
 
 export async function isSlugAvailable(slug: string): Promise<boolean> {
-  const { count } = await supabase
-    .from("organizations")
-    .select("id", { count: "exact", head: true })
-    .eq("slug", slug);
-  return (count ?? 0) === 0;
+  const result = await db
+    .select({ slugCount: count() })
+    .from(organizations)
+    .where(eq(organizations.slug, slug));
+
+  return (result[0]?.slugCount ?? 0) === 0;
 }

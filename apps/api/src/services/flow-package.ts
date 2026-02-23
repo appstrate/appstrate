@@ -1,10 +1,10 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { zipSync, unzipSync, type Zippable } from "fflate";
-import { supabase, ensureBucket } from "../lib/supabase.ts";
+import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import { FLOWS_DIR } from "./flow-service.ts";
+import { getFlowsDir } from "./flow-service.ts";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
@@ -19,7 +19,7 @@ const ZIP_COMPRESSION_LEVEL = 6;
 const builtInPackageCache = new Map<string, Buffer>();
 
 /** Ensure the flow-packages Storage bucket exists. Call once at boot. */
-export const ensureStorageBucket = () => ensureBucket(BUCKET);
+export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
 
 /** Upload a flow package ZIP to Storage. */
 export async function uploadFlowPackage(
@@ -28,12 +28,14 @@ export async function uploadFlowPackage(
   zipBuffer: Buffer,
 ): Promise<void> {
   const path = `${flowId}/${versionNumber}.zip`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, zipBuffer, {
-    contentType: "application/zip",
-    upsert: true,
-  });
-  if (error) {
-    logger.error("Failed to upload flow package", { flowId, versionNumber, error: error.message });
+  try {
+    await storage.uploadFile(BUCKET, path, zipBuffer);
+  } catch (error) {
+    logger.error("Failed to upload flow package", {
+      flowId,
+      versionNumber,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 }
@@ -48,22 +50,22 @@ export async function downloadFlowPackage(
   if (versionNumber !== undefined) {
     path = `${flowId}/${versionNumber}.zip`;
   } else {
-    // Find the latest version by listing files (sort by created_at for correct ordering)
-    const { data: files } = await supabase.storage.from(BUCKET).list(flowId, {
-      sortBy: { column: "created_at", order: "desc" },
-      limit: 1,
-    });
+    // Find the latest version by listing files
+    const files = await storage.listFiles(BUCKET, flowId);
     if (!files || files.length === 0) return null;
-    path = `${flowId}/${files[0]!.name}`;
+
+    // Sort by name descending to get latest version number
+    const sorted = files.sort((a, b) => b.localeCompare(a));
+    path = `${flowId}/${sorted[0]}`;
   }
 
-  const { data, error } = await supabase.storage.from(BUCKET).download(path);
-  if (error) {
-    logger.warn("Failed to download flow package", { path, error: error.message });
+  const data = await storage.downloadFile(BUCKET, path);
+  if (!data) {
+    logger.warn("Failed to download flow package", { path });
     return null;
   }
 
-  return Buffer.from(await data.arrayBuffer());
+  return Buffer.from(data);
 }
 
 /** Package a built-in flow directory into a ZIP buffer (cached in memory). */
@@ -71,7 +73,9 @@ async function getBuiltInFlowPackage(flowId: string): Promise<Buffer> {
   const cached = builtInPackageCache.get(flowId);
   if (cached) return cached;
 
-  const flowPath = join(FLOWS_DIR, flowId);
+  const dir = getFlowsDir();
+  if (!dir) throw new Error("DATA_DIR not configured — cannot package built-in flow");
+  const flowPath = join(dir, flowId);
   const zipData = await createZipFromDirectory(flowPath);
   const buffer = Buffer.from(zipData);
 

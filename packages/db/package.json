@@ -1,0 +1,28 @@
+{
+  "name": "@appstrate/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schema": "./src/schema.ts",
+    "./client": "./src/client.ts",
+    "./auth": "./src/auth.ts",
+    "./storage": "./src/storage.ts",
+    "./notify": "./src/notify.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint:fix": "prettier --write src/",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "better-auth": "^1.2.8",
+    "drizzle-orm": "^0.39.3",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.5"
+  }
+}

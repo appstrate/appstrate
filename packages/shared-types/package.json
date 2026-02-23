@@ -6,6 +6,10 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "lint:fix": "prettier --write src/"
+  },
+  "dependencies": {
+    "@appstrate/db": "workspace:*"
   }
 }

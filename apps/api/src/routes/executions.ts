@@ -8,8 +8,11 @@ import {
   appendExecutionLog,
   getAdminConnections,
   getExecution,
+  getExecutionFull,
   getRunningExecutionsForFlow,
   deleteFlowExecutions,
+  listFlowExecutions,
+  listExecutionLogs,
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import {
@@ -367,7 +370,7 @@ export function createExecutionsRouter() {
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Upload files to Supabase Storage and get signed URLs
+    // Upload files to storage
     let fileRefs: FileReference[] | undefined;
     if (uploadedFiles && uploadedFiles.length > 0) {
       try {
@@ -422,6 +425,38 @@ export function createExecutionsRouter() {
     });
 
     return c.json({ executionId });
+  });
+
+  // GET /api/flows/:id/executions — list executions for a flow
+  router.get("/flows/:id/executions", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 100);
+    const rows = await listFlowExecutions(flow.id, orgId, limit);
+    return c.json(rows);
+  });
+
+  // GET /api/executions/:id — get a single execution
+  router.get("/executions/:id", async (c) => {
+    const execId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const row = await getExecutionFull(execId);
+    if (!row || row.orgId !== orgId) {
+      return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
+    }
+    return c.json(row);
+  });
+
+  // GET /api/executions/:id/logs — get execution logs
+  router.get("/executions/:id/logs", async (c) => {
+    const execId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const exec = await getExecution(execId);
+    if (!exec || exec.org_id !== orgId) {
+      return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
+    }
+    const logs = await listExecutionLogs(execId, orgId);
+    return c.json(logs);
   });
 
   // POST /api/executions/:id/cancel — cancel a running/pending execution

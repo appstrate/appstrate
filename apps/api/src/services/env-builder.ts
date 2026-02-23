@@ -2,8 +2,8 @@ import type { PromptContext } from "./adapters/types.ts";
 import type { LoadedFlow, FlowServiceRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
-import type { SupabaseClient } from "@appstrate/connect";
-import { supabase } from "../lib/supabase.ts";
+import type { Db } from "@appstrate/connect";
+import { db } from "../lib/db.ts";
 import { buildServiceTokens } from "./token-resolver.ts";
 import { getFlowConfig, getLastExecutionState } from "./state.ts";
 import { getFlowPackage } from "./flow-package.ts";
@@ -13,7 +13,7 @@ import { getLatestVersionId } from "./flow-versions.ts";
  * Resolve unique provider definitions for prompt context.
  */
 export async function resolveProviderDefs(
-  supabase: SupabaseClient,
+  database: Db,
   orgId: string,
   services: FlowServiceRequirement[],
 ): Promise<NonNullable<PromptContext["providers"]>> {
@@ -22,7 +22,7 @@ export async function resolveProviderDefs(
   for (const svc of services) {
     if (seen.has(svc.provider)) continue;
     seen.add(svc.provider);
-    const def = await getProvider(supabase, orgId, svc.provider);
+    const def = await getProvider(database, orgId, svc.provider);
     if (def) {
       providerDefs.push({
         id: def.id,
@@ -109,7 +109,7 @@ export async function buildExecutionContext(params: {
       buildServiceTokens(flow.manifest.requires.services, adminConns, orgId, userId),
       getFlowConfig(orgId, flow.id),
       getLastExecutionState(flow.id, userId, orgId),
-      resolveProviderDefs(supabase, orgId, flow.manifest.requires.services),
+      resolveProviderDefs(db, orgId, flow.manifest.requires.services),
       getFlowPackage(flow, orgId),
       flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
     ]);

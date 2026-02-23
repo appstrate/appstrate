@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
 import { extractSkillMeta } from "./skill-utils.ts";
 
-const DATA_DIR = join(process.cwd(), "data");
-const SKILLS_DIR = join(DATA_DIR, "skills");
-const EXTENSIONS_DIR = join(DATA_DIR, "extensions");
+// Module-level directories, initialized by initBuiltInLibrary()
+let skillsDir: string | null = null;
+let extensionsDir: string | null = null;
 
 interface BuiltInLibraryItem {
   id: string;
@@ -17,16 +17,24 @@ interface BuiltInLibraryItem {
 let builtInSkills: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
 let builtInExtensions: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
 
-/** Load built-in skills and extensions from data/ directory. Call once at boot. */
-export async function initBuiltInLibrary(): Promise<void> {
+/** Load built-in skills and extensions from dataDir. Call once at boot. */
+export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
+  if (!dataDir) {
+    logger.info("Built-in library disabled (no dataDir)");
+    return;
+  }
+
+  skillsDir = join(dataDir, "skills");
+  extensionsDir = join(dataDir, "extensions");
+
   const skills = new Map<string, BuiltInLibraryItem>();
   const extensions = new Map<string, BuiltInLibraryItem>();
 
-  // Load skills from data/skills/{id}/SKILL.md
+  // Load skills from {dataDir}/skills/{id}/SKILL.md
   try {
-    const entries = await readdir(SKILLS_DIR);
+    const entries = await readdir(skillsDir);
     for (const entry of entries) {
-      const skillPath = join(SKILLS_DIR, entry);
+      const skillPath = join(skillsDir, entry);
       const info = await stat(skillPath).catch(() => null);
       if (!info?.isDirectory()) continue;
 
@@ -45,15 +53,15 @@ export async function initBuiltInLibrary(): Promise<void> {
       }
     }
   } catch {
-    // data/skills/ doesn't exist — that's fine
+    // skills/ doesn't exist — that's fine
   }
 
-  // Load extensions from data/extensions/{id}.ts
+  // Load extensions from {dataDir}/extensions/{id}.ts
   try {
-    const entries = await readdir(EXTENSIONS_DIR);
+    const entries = await readdir(extensionsDir);
     for (const entry of entries) {
       if (!entry.endsWith(".ts")) continue;
-      const extPath = join(EXTENSIONS_DIR, entry);
+      const extPath = join(extensionsDir, entry);
       const info = await stat(extPath).catch(() => null);
       if (!info?.isFile()) continue;
 
@@ -71,7 +79,7 @@ export async function initBuiltInLibrary(): Promise<void> {
       }
     }
   } catch {
-    // data/extensions/ doesn't exist — that's fine
+    // extensions/ doesn't exist — that's fine
   }
 
   builtInSkills = skills;
@@ -101,9 +109,9 @@ export function isBuiltInExtension(id: string): boolean {
 
 /** Get all files for a built-in skill (for ZIP packaging). */
 export async function getBuiltInSkillFiles(id: string): Promise<Record<string, Uint8Array> | null> {
-  if (!builtInSkills.has(id)) return null;
+  if (!builtInSkills.has(id) || !skillsDir) return null;
 
-  const skillDir = join(SKILLS_DIR, id);
+  const skillDir = join(skillsDir, id);
   const files: Record<string, Uint8Array> = {};
 
   async function readDirRecursive(dir: string, prefix: string) {
@@ -133,9 +141,9 @@ export async function getBuiltInSkillFiles(id: string): Promise<Record<string, U
 
 /** Get the file content for a built-in extension (for ZIP packaging). */
 export async function getBuiltInExtensionFile(id: string): Promise<Uint8Array | null> {
-  if (!builtInExtensions.has(id)) return null;
+  if (!builtInExtensions.has(id) || !extensionsDir) return null;
 
-  const extPath = join(EXTENSIONS_DIR, `${id}.ts`);
+  const extPath = join(extensionsDir, `${id}.ts`);
   try {
     const content = await readFile(extPath);
     return new Uint8Array(content);
