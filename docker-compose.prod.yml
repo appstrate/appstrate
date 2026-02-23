@@ -40,6 +40,17 @@ services:
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
 
+  appstrate-migrate:
+    build:
+      context: .
+    restart: "no"
+    command: ["bun", "packages/db/src/migrate.ts"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
+    depends_on:
+      appstrate-postgres:
+        condition: service_healthy
+
   appstrate:
     build:
       context: .
@@ -68,6 +79,8 @@ services:
       - appstrate-data:/app/data
       - appstrate-storage:/app/storage
     depends_on:
+      appstrate-migrate:
+        condition: service_completed_successfully
       appstrate-pi:
         condition: service_completed_successfully
       appstrate-sidecar:

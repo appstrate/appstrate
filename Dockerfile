@@ -57,9 +57,10 @@ COPY --from=build /app/packages/shared-types/package.json ./packages/shared-type
 COPY --from=build /app/packages/connect/src ./packages/connect/src
 COPY --from=build /app/packages/connect/package.json ./packages/connect/
 
-# DB package (schema, client, auth, storage, notify — used by API at runtime)
+# DB package (schema, client, auth, storage, notify, migrate — used by API at runtime)
 COPY --from=build /app/packages/db/src ./packages/db/src
 COPY --from=build /app/packages/db/package.json ./packages/db/
+COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
 # Env package (Zod-validated env vars — used by API, DB, connect at runtime)
 COPY --from=build /app/packages/env/src ./packages/env/src
