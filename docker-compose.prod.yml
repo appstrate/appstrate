@@ -65,6 +65,8 @@ services:
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - appstrate-data:/app/data
+      - appstrate-storage:/app/storage
     depends_on:
       appstrate-pi:
         condition: service_completed_successfully
@@ -73,3 +75,5 @@ services:
 
 volumes:
   pgdata:
+  appstrate-data:
+  appstrate-storage:

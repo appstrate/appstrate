@@ -62,8 +62,8 @@ COPY --from=build /app/packages/env/package.json ./packages/env/
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 
-# Built-in data (flows, providers, skills, extensions — loaded at runtime)
-COPY --from=build /app/data ./data
+# Create mount points for runtime volumes (data + storage)
+RUN mkdir -p data storage
 
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
