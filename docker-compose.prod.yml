@@ -56,8 +56,6 @@ services:
       context: .
     restart: unless-stopped
     mem_limit: 512m
-    networks:
-      - default
     environment:
       - PORT=3000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
