@@ -474,15 +474,17 @@ Supabase Realtime publishes `executions`, `execution_logs`, `organizations`, and
 
 ## Flow Manifest Format
 
-Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `flows/email-to-tickets/manifest.json` for the reference implementation. Key sections:
+Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `flows/pdf-explainer/manifest.json` for the reference implementation. Key sections:
 
-- **metadata**: name (kebab-case ID), displayName, description, author, tags
-- **requires.services[]**: Services needed — `{id, provider, description, scopes?, connectionMode?}`. `connectionMode` can be `"user"` (default) or `"admin"`.
-- **requires.tools[]**: Platform tools — `{id, type: "static"|"custom", description}`
+- **schemaVersion**: Format version string (e.g. `"1.0.0"`)
+- **metadata**: id (kebab-case slug), displayName, description (required), author, tags
+- **requires.services[]**: Services needed — `{id, provider, scopes?, connectionMode?}`. `connectionMode` can be `"user"` (default) or `"admin"`.
+- **requires.skills[]**: Skill IDs as `string[]` (e.g. `["greeting-style"]`)
+- **requires.extensions[]**: Extension IDs as `string[]` (e.g. `["web-search"]`)
 - **input.schema**: Per-execution user input — `{type, description, required, default, placeholder}`
 - **output.schema**: Expected result fields — `{type, description, required}`. Enables Zod validation + retry loop.
 - **config.schema**: User-configurable params — `{type, default, required, enum, description}`
-- **execution**: `timeout` (seconds), `maxTokens`, `outputRetries` (0-5, default 2 when output schema exists)
+- **execution**: `timeout` (seconds), `outputRetries` (0-5, default 2 when output schema exists)
 
 ### Skills
 

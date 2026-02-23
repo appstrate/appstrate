@@ -25,7 +25,7 @@ export interface ResourceEntry {
 
 export interface FlowFormState {
   metadata: {
-    name: string;
+    id: string;
     displayName: string;
     description: string;
     tags: string[];

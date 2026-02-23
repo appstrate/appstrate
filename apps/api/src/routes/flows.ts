@@ -34,7 +34,7 @@ export function createFlowsRouter() {
       id: f.id,
       displayName: f.manifest.metadata.displayName,
       description: f.manifest.metadata.description,
-      version: f.manifest.version,
+      schemaVersion: f.manifest.schemaVersion,
       author: f.manifest.metadata.author,
       tags: f.manifest.metadata.tags ?? [],
       requires: {
@@ -86,7 +86,7 @@ export function createFlowsRouter() {
       id: flow.id,
       displayName: m.metadata.displayName,
       description: m.metadata.description,
-      version: m.version,
+      schemaVersion: m.schemaVersion,
       author: m.metadata.author,
       tags: m.metadata.tags ?? [],
       source: flow.source,

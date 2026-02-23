@@ -98,9 +98,14 @@ export interface FlowListItem {
   id: string;
   displayName: string;
   description: string;
-  version: string;
+  schemaVersion: string;
   author: string;
   tags: string[];
+  requires: {
+    services: string[];
+    skills: string[];
+    extensions: string[];
+  };
   runningExecutions: number;
   source: "built-in" | "user";
 }
@@ -109,7 +114,7 @@ export interface FlowDetail {
   id: string;
   displayName: string;
   description: string;
-  version: string;
+  schemaVersion: string;
   author: string;
   tags: string[];
   source: "built-in" | "user";
@@ -132,7 +137,7 @@ export interface FlowDetail {
   lastExecution: Partial<Execution> | null;
   updatedAt?: string | null;
   prompt?: string;
-  executionSettings?: { timeout?: number; maxTokens?: number; outputRetries?: number } | null;
+  executionSettings?: { timeout?: number; outputRetries?: number } | null;
 }
 
 // --- Organization Library Types ---

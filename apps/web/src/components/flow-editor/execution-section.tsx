@@ -3,7 +3,6 @@ import { FormField } from "../form-field";
 
 export interface ExecutionSettings {
   timeout: number;
-  maxTokens: number;
   outputRetries: number;
 }
 
@@ -27,14 +26,6 @@ export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
           value={String(value.timeout)}
           onChange={(v) => update({ timeout: parseInt(v) || 300 })}
           description={t("editor.execTimeoutDesc")}
-        />
-        <FormField
-          id="exec-maxTokens"
-          label={t("editor.execMaxTokens")}
-          type="number"
-          value={String(value.maxTokens)}
-          onChange={(v) => update({ maxTokens: parseInt(v) || 8192 })}
-          description={t("editor.execMaxTokensDesc")}
         />
         <FormField
           id="exec-outputRetries"

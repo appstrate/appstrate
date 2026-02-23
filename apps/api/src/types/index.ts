@@ -28,7 +28,7 @@ export type {
 
 export interface FlowManifest {
   $schema?: string;
-  version: string;
+  schemaVersion: string;
   metadata: FlowMetadata;
   requires: FlowRequirements;
   input?: FlowInputSpec;
@@ -38,7 +38,7 @@ export interface FlowManifest {
 }
 
 export interface FlowMetadata {
-  name: string;
+  id: string;
   displayName: string;
   description: string;
   author: string;
@@ -48,8 +48,8 @@ export interface FlowMetadata {
 
 export interface FlowRequirements {
   services: FlowServiceRequirement[];
-  skills?: SkillMeta[];
-  extensions?: ExtensionMeta[];
+  skills?: string[];
+  extensions?: string[];
 }
 
 export interface FlowServiceRequirement {
@@ -57,9 +57,6 @@ export interface FlowServiceRequirement {
   provider: string;
   scopes?: string[];
   connectionMode?: "user" | "admin";
-  // Backward compat: tolerated at parsing but ignored at runtime
-  description?: string;
-  name?: string;
 }
 
 export interface FlowInputSpec {
@@ -76,7 +73,6 @@ export interface FlowConfigSpec {
 
 export interface FlowExecutionSpec {
   timeout?: number;
-  maxTokens?: number;
   outputRetries?: number;
 }
 

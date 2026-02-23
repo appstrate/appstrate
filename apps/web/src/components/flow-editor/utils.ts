@@ -13,7 +13,7 @@ export function toResourceEntry(r: {
 
 export function defaultFormState(): FlowFormState {
   return {
-    metadata: { name: "", displayName: "", description: "", tags: [] },
+    metadata: { id: "", displayName: "", description: "", tags: [] },
     prompt: "",
     services: [],
     skills: [],
@@ -21,7 +21,7 @@ export function defaultFormState(): FlowFormState {
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, maxTokens: 8192, outputRetries: 2 },
+    execution: { timeout: 300, outputRetries: 2 },
   };
 }
 
@@ -131,7 +131,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
 
   return {
     metadata: {
-      name: detail.id,
+      id: detail.id,
       displayName: detail.displayName,
       description: detail.description,
       tags: detail.tags || [],
@@ -145,7 +145,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     configSchema: schemaToFields(detail.config?.schema, "config"),
     execution: {
       timeout: detail.executionSettings?.timeout ?? 300,
-      maxTokens: detail.executionSettings?.maxTokens ?? 8192,
       outputRetries: detail.executionSettings?.outputRetries ?? 2,
     },
   };
@@ -153,9 +152,9 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
 
 export function assemblePayload(state: FlowFormState, userEmail: string) {
   const manifest: Record<string, unknown> = {
-    version: "1.0",
+    schemaVersion: "1.0",
     metadata: {
-      name: state.metadata.name,
+      id: state.metadata.id,
       displayName: state.metadata.displayName,
       description: state.metadata.description,
       author: userEmail,
@@ -174,8 +173,8 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
           svc.connectionMode = s.connectionMode || "user";
           return svc;
         }),
-      skills: state.skills,
-      extensions: state.extensions,
+      skills: state.skills.map((s) => s.id).filter(Boolean),
+      extensions: state.extensions.map((e) => e.id).filter(Boolean),
     },
   };
 
@@ -190,7 +189,6 @@ export function assemblePayload(state: FlowFormState, userEmail: string) {
 
   manifest.execution = {
     timeout: state.execution.timeout,
-    maxTokens: state.execution.maxTokens,
     outputRetries: state.execution.outputRetries,
   };
 
@@ -219,23 +217,11 @@ export function payloadToFormState(payload: {
     connectionMode: (s.connectionMode as "user" | "admin") || "user",
   }));
 
-  const rawSkills = (requires.skills as Array<Record<string, unknown>>) || [];
-  const skills = rawSkills.map((s) =>
-    toResourceEntry({
-      id: (s.id as string) || "",
-      name: s.name as string | undefined,
-      description: s.description as string | undefined,
-    }),
-  );
+  const rawSkills = (requires.skills as string[]) || [];
+  const skills = rawSkills.map((id) => toResourceEntry({ id }));
 
-  const rawExtensions = (requires.extensions as Array<Record<string, unknown>>) || [];
-  const extensions = rawExtensions.map((e) =>
-    toResourceEntry({
-      id: (e.id as string) || "",
-      name: e.name as string | undefined,
-      description: e.description as string | undefined,
-    }),
-  );
+  const rawExtensions = (requires.extensions as string[]) || [];
+  const extensions = rawExtensions.map((id) => toResourceEntry({ id }));
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;
@@ -243,7 +229,7 @@ export function payloadToFormState(payload: {
 
   return {
     metadata: {
-      name: (meta.name as string) || "",
+      id: (meta.id as string) || "",
       displayName: (meta.displayName as string) || "",
       description: (meta.description as string) || "",
       tags: Array.isArray(meta.tags) ? (meta.tags as string[]) : [],
@@ -257,7 +243,6 @@ export function payloadToFormState(payload: {
     configSchema: schemaToFields(configObj?.schema, "config"),
     execution: {
       timeout: (execution.timeout as number) ?? 300,
-      maxTokens: (execution.maxTokens as number) ?? 8192,
       outputRetries: (execution.outputRetries as number) ?? 2,
     },
   };
