@@ -80,17 +80,21 @@ export function ExecutionDetailPage() {
   const [inputOpen, setInputOpen] = useState(false);
   const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
 
-  // Build log entries from historical data
+  // Build log entries from historical data, merging consecutive text-only
+  // progress entries into a single flowing block so small streaming fragments
+  // don't each render on their own line.
   const { historicalLogs, historicalResult } = useMemo(() => {
     const entries: LogEntry[] = [];
     let result: Record<string, unknown> | null = null;
+    let lastWasPlainText = false;
 
     if (logs) {
       for (const log of logs) {
         if (log.event === "result" && log.data) {
           result = log.data as Record<string, unknown>;
+          lastWasPlainText = false;
         } else if (log.event === "execution_completed") {
-          // skip
+          lastWasPlainText = false;
         } else {
           const logData = (log.data ?? {}) as Record<string, unknown>;
           const message =
@@ -98,7 +102,16 @@ export function ExecutionDetailPage() {
           if (message) {
             const args = logData.args as Record<string, unknown> | undefined;
             const detail = args ? formatToolArgs(args) : undefined;
-            entries.push({ message, type: log.type || "progress", detail });
+            // Text-only progress: no structured data (tool calls have data.tool/data.args)
+            const isPlainText = log.type === "progress" && !log.data;
+
+            if (isPlainText && lastWasPlainText && entries.length > 0) {
+              // Merge into previous text entry with newline to preserve natural breaks
+              entries[entries.length - 1]!.message += "\n" + message;
+            } else {
+              entries.push({ message, type: log.type || "progress", detail });
+            }
+            lastWasPlainText = isPlainText;
           }
         }
       }
