@@ -1,6 +1,6 @@
 # Appstrate — Developer Guide
 
-Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp, Brevo), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Flows can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
+Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Flows can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
 
 ## Quick Start
 
@@ -69,7 +69,7 @@ bun run dev                   # turbo dev → Hono on :3010
 - **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
 - **Multi-tenant isolation**: Application-level security scoped by organization membership. All queries filter by `orgId`. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
 - **Auth flow**: Frontend uses Better Auth React client (`createAuthClient`) → `signIn.email()` / `signUp.email()` → session cookie set automatically → sent via `credentials: "include"` on all API calls. Backend verifies session via `auth.api.getSession({ headers })`. The `X-Org-Id` header identifies the active organization.
-- **Invitation system (magic links)**: Admins invite users by email via `POST /api/orgs/:orgId/members`. If the user exists, they're added directly. If not, an `org_invitations` record is created with a 64-char token (7-day expiry), and a dark-themed HTML email is sent via Brevo SMTP (`services/email.ts`). Re-inviting the same email auto-cancels prior pending invitations. The invite link (`/invite/:token`) is a public frontend route. `POST /invite/:token/accept` creates the user account (via `auth.api.signUpEmail` with a random password + `signInEmail` to get a session cookie), adds them to the org, and redirects to `/welcome` for profile setup (display name + optional password). Existing users are simply added to the org. Expired invitations are cleaned up at startup.
+- **Invitation system (magic links)**: Admins invite users via `POST /api/orgs/:orgId/members`. If the user exists, they're added directly. If not, an `org_invitations` record is created with a 64-char token (7-day expiry), and the API returns the token for the admin to copy the invite link. Re-inviting the same email auto-cancels prior pending invitations. The invite link (`/invite/:token`) is a public frontend route. `POST /invite/:token/accept` creates the user account (via `auth.api.signUpEmail` with a random password + `signInEmail` to get a session cookie), adds them to the org, and redirects to `/welcome` for profile setup (display name + optional password). Existing users are simply added to the org. Expired invitations are cleaned up at startup.
 
 ## Architecture
 
@@ -121,7 +121,6 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |   /invite/:token (public)      |-- GET /invite/:token/info → invitation metadata
      |                                |-- POST /invite/:token/accept → create user or add to org
      |   /welcome (post-signup)       |-- POST /api/welcome/setup → set displayName + password
-     |   Brevo SMTP                   |-- sendInvitationEmail() → dark-themed HTML email
      |                                |
      |            Docker network: appstrate-exec-{execId} (isolated bridge)
      |            ┌─────────────────────────────────────────────┐
@@ -223,8 +222,7 @@ appstrate/
 │   │       │   ├── organizations.ts  # Organization CRUD and membership management
 │   │       │   ├── builtin-library.ts # Built-in skills/extensions from data/ directory (loaded at boot)
 │   │       │   ├── skill-utils.ts    # Skill file parsing utilities
-│   │       │   ├── email.ts          # Brevo SMTP: sendEmail() for transactional emails (invitations)
-│   │       │   └── invitations.ts    # Invitation CRUD: create, accept, cancel, expire, sendInvitationEmail()
+│   │       │   └── invitations.ts    # Invitation CRUD: create, accept, cancel, expire
 │   │       └── types/
 │   │           └── index.ts          # Backend-only types (FlowManifest, LoadedFlow, SkillMeta) + re-exports from @appstrate/shared-types
 │   │
@@ -591,11 +589,6 @@ DOCKER_SOCKET=/var/run/docker.sock
 PLATFORM_API_URL=http://host.docker.internal:3010  # Optional: override container-to-host URL
 STORAGE_DIR=./storage                  # Local filesystem storage directory
 
-# Email Service (Brevo SMTP for invitations)
-# BREVO_API_KEY=xkeysib-...               # Brevo transactional API key (optional — skipped if absent)
-# EMAIL_FROM=noreply@appstrate.io          # Sender email address
-# EMAIL_FROM_NAME=Appstrate                # Sender display name
-
 # Execution Adapter (pi is the default and only active adapter)
 EXECUTION_ADAPTER=pi
 
@@ -643,7 +636,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 - Variable substitution (`{{variable}}`) in sidecar proxy for credentials injection
 - Drizzle migrations generated and applied (24 tables)
 - NOTIFY triggers installed at startup for executions + execution_logs
-- Invitation magic links: create invitation, send email (Brevo), accept (new user auto-signup + existing user org join), expire/cancel
+- Invitation magic links: create invitation, copy invite link, accept (new user auto-signup + existing user org join), expire/cancel
 - Public `/invite/:token/info` and `/invite/:token/accept` endpoints (no auth required)
 - Welcome page `/api/welcome/setup` for post-invite profile setup (displayName + password)
 - Expired invitations cleanup at startup via `expireOldInvitations()`

@@ -46,7 +46,8 @@ export function OrgSettingsPage() {
 
   const orgId = currentOrg?.id;
 
-  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const {
     data: orgData,
@@ -83,7 +84,7 @@ export function OrgSettingsPage() {
 
   const addMemberMutation = useMutation({
     mutationFn: async (email: string) => {
-      return api<{ invited?: boolean; added?: boolean }>(`/orgs/${orgId}/members`, {
+      return api<{ invited?: boolean; added?: boolean; token?: string }>(`/orgs/${orgId}/members`, {
         method: "POST",
         body: JSON.stringify({ email }),
       });
@@ -92,9 +93,9 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
       setInviteEmail("");
       setInviteError(null);
-      if (data?.invited) {
-        setInviteSuccess(t("orgSettings.invitationSent"));
-        setTimeout(() => setInviteSuccess(null), 5000);
+      if (data?.invited && data.token) {
+        setInviteLink(`${window.location.origin}/invite/${data.token}`);
+        setLinkCopied(false);
       }
     },
     onError: (err: Error) => {
@@ -242,30 +243,18 @@ export function OrgSettingsPage() {
         <>
           {/* Organisation info */}
           <div className="section-title">{t("orgSettings.orgTitle")}</div>
-          <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+          <div className="service-card service-card-spaced">
             <div className="service-card-header">
               <div className="service-info">
                 {editingName ? (
-                  <form
-                    onSubmit={handleSaveName}
-                    style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
-                  >
+                  <form onSubmit={handleSaveName} className="org-edit-form">
                     <input
                       type="text"
+                      className="inline-input"
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
                       placeholder={currentOrg.name}
                       autoFocus
-                      style={{
-                        padding: "0.375rem 0.5rem",
-                        fontSize: "0.875rem",
-                        background: "var(--bg)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "6px",
-                        color: "var(--text)",
-                        outline: "none",
-                        fontFamily: "inherit",
-                      }}
                     />
                     <button
                       className="primary"
@@ -301,13 +290,13 @@ export function OrgSettingsPage() {
           {/* Danger zone */}
           {isOrgOwner && (
             <>
-              <div className="section-title" style={{ marginTop: "2rem" }}>
+              <div className="section-title section-title-mt-lg">
                 {t("orgSettings.dangerZone")}
               </div>
-              <div className="service-card" style={{ borderColor: "var(--danger, #e53e3e)" }}>
-                <div className="service-card-header" style={{ marginBottom: 0 }}>
-                  <div className="service-info">
-                    <h3 style={{ fontSize: "0.875rem" }}>{t("orgSettings.deleteOrg")}</h3>
+              <div className="service-card service-card-danger">
+                <div className="service-card-header service-card-header-flush">
+                  <div className="service-info service-info-sm">
+                    <h3>{t("orgSettings.deleteOrg")}</h3>
                     <span className="service-provider">{t("orgSettings.deleteOrgDesc")}</span>
                   </div>
                   <button
@@ -331,16 +320,8 @@ export function OrgSettingsPage() {
       {tab === "members" && (
         <>
           {/* Add member form */}
-          <form
-            onSubmit={handleInvite}
-            style={{
-              display: "flex",
-              gap: "0.5rem",
-              marginBottom: "1rem",
-              alignItems: "flex-start",
-            }}
-          >
-            <div style={{ flex: 1 }}>
+          <form onSubmit={handleInvite} className="invite-form">
+            <div className="invite-form-field">
               <input
                 type="email"
                 value={inviteEmail}
@@ -350,33 +331,35 @@ export function OrgSettingsPage() {
                 }}
                 placeholder="email@example.com"
                 required
-                style={{
-                  width: "100%",
-                  padding: "0.5rem 0.75rem",
-                  fontSize: "0.875rem",
-                  fontFamily: "inherit",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "6px",
-                  color: "var(--text)",
-                  outline: "none",
-                }}
               />
-              {inviteError && (
-                <p className="form-error" style={{ marginTop: "0.25rem" }}>
-                  {inviteError}
-                </p>
-              )}
-              {inviteSuccess && (
-                <p
-                  style={{
-                    marginTop: "0.25rem",
-                    color: "var(--success, #48bb78)",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  {inviteSuccess}
-                </p>
+              {inviteError && <p className="form-error">{inviteError}</p>}
+              {inviteLink && (
+                <div className="invite-link-box">
+                  <input
+                    type="text"
+                    readOnly
+                    value={inviteLink}
+                    className="invite-link-input"
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteLink);
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2000);
+                    }}
+                  >
+                    {linkCopied ? t("btn.copied") : t("btn.copyLink")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-dismiss"
+                    onClick={() => setInviteLink(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
               )}
             </div>
             <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
@@ -392,9 +375,9 @@ export function OrgSettingsPage() {
 
               return (
                 <div key={member.userId} className="service-card">
-                  <div className="service-card-header" style={{ marginBottom: 0 }}>
-                    <div className="service-info">
-                      <h3 style={{ fontSize: "0.875rem" }}>{label}</h3>
+                  <div className="service-card-header service-card-header-flush">
+                    <div className="service-info service-info-sm">
+                      <h3>{label}</h3>
                       {member.email && <span className="service-provider">{member.email}</span>}
                     </div>
                     <span
@@ -404,32 +387,15 @@ export function OrgSettingsPage() {
                     </span>
                   </div>
                   {isOrgAdmin && !isOwner && (
-                    <div
-                      className="service-card-actions"
-                      style={{
-                        marginTop: "0.75rem",
-                        paddingTop: "0.75rem",
-                        borderTop: "1px solid var(--border)",
-                      }}
-                    >
+                    <div className="service-card-actions service-card-actions-bordered">
                       {isOrgOwner && (
                         <select
+                          className="inline-select"
                           value={member.role}
                           onChange={(e) =>
                             handleRoleChange(member.userId, e.target.value as OrgRole)
                           }
                           disabled={changeRoleMutation.isPending}
-                          style={{
-                            padding: "0.375rem 0.5rem",
-                            fontSize: "0.8rem",
-                            fontFamily: "inherit",
-                            background: "var(--bg)",
-                            border: "1px solid var(--border)",
-                            borderRadius: "6px",
-                            color: "var(--text)",
-                            outline: "none",
-                            cursor: "pointer",
-                          }}
                         >
                           <option value="member">{t("orgSettings.roleMember")}</option>
                           <option value="admin">{t("orgSettings.roleAdmin")}</option>
@@ -437,9 +403,9 @@ export function OrgSettingsPage() {
                         </select>
                       )}
                       <button
+                        className="ml-auto"
                         onClick={() => handleRemove(member)}
                         disabled={removeMemberMutation.isPending}
-                        style={{ marginLeft: "auto" }}
                       >
                         {t("btn.remove")}
                       </button>
@@ -453,15 +419,15 @@ export function OrgSettingsPage() {
           {/* Pending invitations */}
           {invitations.length > 0 && (
             <>
-              <div className="section-title" style={{ marginTop: "1.5rem" }}>
+              <div className="section-title section-title-mt">
                 {t("orgSettings.pendingInvitations")}
               </div>
               <div className="services-grid">
                 {invitations.map((inv) => (
                   <div key={inv.id} className="service-card">
-                    <div className="service-card-header" style={{ marginBottom: 0 }}>
-                      <div className="service-info">
-                        <h3 style={{ fontSize: "0.875rem" }}>{inv.email}</h3>
+                    <div className="service-card-header service-card-header-flush">
+                      <div className="service-info service-info-sm">
+                        <h3>{inv.email}</h3>
                         <span className="service-provider">
                           {inv.role === "admin"
                             ? t("orgSettings.roleAdmin")
@@ -470,16 +436,8 @@ export function OrgSettingsPage() {
                       </div>
                       <span className="badge badge-pending">{t("orgSettings.invited")}</span>
                     </div>
-                    <div
-                      className="service-card-actions"
-                      style={{
-                        marginTop: "0.75rem",
-                        paddingTop: "0.75rem",
-                        borderTop: "1px solid var(--border)",
-                        display: "flex",
-                        justifyContent: "flex-end",
-                      }}
-                    >
+                    <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
+                      <CopyLinkButton token={inv.token} />
                       <button
                         onClick={() => cancelInvitationMutation.mutate(inv.id)}
                         disabled={cancelInvitationMutation.isPending}
@@ -543,6 +501,24 @@ export function OrgSettingsPage() {
   );
 }
 
+function CopyLinkButton({ token }: { token: string }) {
+  const { t } = useTranslation(["common"]);
+  const [copied, setCopied] = useState(false);
+  const link = `${window.location.origin}/invite/${token}`;
+
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(link);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+    >
+      {copied ? t("btn.copied") : t("btn.copyLink")}
+    </button>
+  );
+}
+
 function ProvidersTab({
   providers,
   isLoading,
@@ -572,13 +548,7 @@ function ProvidersTab({
 
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          marginBottom: "1rem",
-        }}
-      >
+      <div className="tab-toolbar">
         <button className="primary" onClick={onCreate}>
           {t("providers.addProvider")}
         </button>
@@ -592,19 +562,12 @@ function ProvidersTab({
               <div key={p.id} className="service-card">
                 <div className="service-card-header">
                   <div className="service-info">
-                    <h3
-                      style={{
-                        fontSize: "0.875rem",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.5rem",
-                      }}
-                    >
+                    <h3 className="provider-name">
                       {p.iconUrl && (
                         <img
                           src={p.iconUrl}
                           alt=""
-                          style={{ width: 20, height: 20, borderRadius: 4 }}
+                          className="provider-icon"
                           onError={(e) => {
                             (e.target as HTMLImageElement).style.display = "none";
                           }}
@@ -612,29 +575,22 @@ function ProvidersTab({
                       )}
                       {p.displayName}
                     </h3>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "0.375rem",
-                        marginTop: "0.25rem",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <span className="badge badge-pending" style={{ fontSize: "0.7rem" }}>
+                    <div className="provider-badges">
+                      <span className="badge badge-pending">
                         {authModeLabel[p.authMode] ?? p.authMode}
                       </span>
                       {isBuiltIn && (
-                        <span className="badge" style={{ fontSize: "0.7rem", opacity: 0.6 }}>
+                        <span className="badge badge-dim">
                           {t("providers.builtIn")}
                         </span>
                       )}
                       {p.source === "custom" && (
-                        <span className="badge" style={{ fontSize: "0.7rem", opacity: 0.6 }}>
+                        <span className="badge badge-dim">
                           {t("providers.custom")}
                         </span>
                       )}
                       {p.usedByFlows != null && p.usedByFlows > 0 && (
-                        <span className="badge badge-success" style={{ fontSize: "0.7rem" }}>
+                        <span className="badge badge-success">
                           {t("providers.usedByFlows", { count: p.usedByFlows })}
                         </span>
                       )}
@@ -642,17 +598,7 @@ function ProvidersTab({
                   </div>
                 </div>
                 {!isBuiltIn && (
-                  <div
-                    className="service-card-actions"
-                    style={{
-                      marginTop: "0.75rem",
-                      paddingTop: "0.75rem",
-                      borderTop: "1px solid var(--border)",
-                      display: "flex",
-                      gap: "0.5rem",
-                      justifyContent: "flex-end",
-                    }}
-                  >
+                  <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
                     <button onClick={() => onEdit(p)}>{t("btn.edit", { ns: "common" })}</button>
                     <button
                       onClick={() => onDelete(p)}

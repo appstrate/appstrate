@@ -76,6 +76,7 @@ export interface OrgInvitation {
   id: string;
   email: string;
   role: OrgRole;
+  token: string;
   expiresAt: string;
   createdAt: string;
 }
