@@ -4,7 +4,7 @@ import { FormField } from "../form-field";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
 interface MetadataState {
-  name: string;
+  id: string;
   displayName: string;
   description: string;
   tags: string[];
@@ -25,7 +25,7 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
     if (nameEdited) {
       update({ displayName: v });
     } else {
-      update({ displayName: v, name: toSlug(v) });
+      update({ displayName: v, id: toSlug(v) });
     }
   };
 
@@ -61,16 +61,16 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           id="meta-name"
           label={t("editor.metaName")}
           required
-          value={value.name}
+          value={value.id}
           onChange={(v) => {
             setNameEdited(true);
-            update({ name: toLiveSlug(v) });
+            update({ id: toLiveSlug(v) });
           }}
-          onBlur={() => update({ name: toSlug(value.name) })}
+          onBlur={() => update({ id: toSlug(value.id) })}
           placeholder={t("editor.metaNamePlaceholder")}
           description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
         />
-        {isEdit && <input type="hidden" value={value.name} />}
+        {isEdit && <input type="hidden" value={value.id} />}
         <div className="form-group">
           <label htmlFor="meta-description">{t("editor.metaDescription")}</label>
           <textarea

@@ -34,52 +34,31 @@ const serviceRequirementSchema = z.object({
     .string()
     .min(1)
     .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
-  name: z.string().optional(),
   provider: z.string(),
   scopes: z.array(z.string()).optional().default([]),
-  description: z.string().optional(),
   connectionMode: z.enum(["user", "admin"]).optional().default("user"),
-  schema: jsonSchemaObjectSchema.optional(),
-  authorized_uris: z.array(z.string()).optional(),
-  allow_all_uris: z.boolean().optional(),
 });
 
-const skillRequirementSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
-  name: z.string().optional(),
-  description: z.string().optional(),
-});
-
-const extensionRequirementSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
-  name: z.string().optional(),
-  description: z.string().optional(),
-});
+const slugString = z
+  .string()
+  .min(1)
+  .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)");
 
 const manifestSchema = z.looseObject({
   $schema: z.string().optional(),
-  version: z.string(),
+  schemaVersion: z.string(),
   metadata: z.object({
-    name: z
-      .string()
-      .min(1)
-      .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
+    id: slugString,
     displayName: z.string().min(1),
-    description: z.string().optional(),
+    description: z.string(),
     author: z.string(),
     license: z.string().optional(),
     tags: z.array(z.string()).optional(),
   }),
   requires: z.object({
     services: z.array(serviceRequirementSchema),
-    skills: z.array(skillRequirementSchema).optional().default([]),
-    extensions: z.array(extensionRequirementSchema).optional().default([]),
+    skills: z.array(slugString).optional().default([]),
+    extensions: z.array(slugString).optional().default([]),
   }),
   input: z
     .object({
@@ -99,7 +78,6 @@ const manifestSchema = z.looseObject({
   execution: z
     .object({
       timeout: z.number().optional(),
-      maxTokens: z.number().optional(),
       outputRetries: z.number().min(0).max(5).optional(),
     })
     .optional(),

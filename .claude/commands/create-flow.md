@@ -39,10 +39,10 @@ The manifest defines everything about the flow. Follow this structure exactly:
 ```json
 {
   "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
-  "version": "1.0.0",
+  "schemaVersion": "1.0.0",
 
   "metadata": {
-    "name": "my-flow-name",
+    "id": "my-flow-name",
     "displayName": "Human-Readable Name",
     "description": "One-line description of what this flow does",
     "author": "appstrate",
@@ -51,85 +51,86 @@ The manifest defines everything about the flow. Follow this structure exactly:
   },
 
   "requires": {
-    "services": [],
-    "tools": []
+    "services": []
   },
 
   "execution": {
-    "timeout": 300,
-    "maxTokens": 50000
+    "timeout": 300
   }
 }
 ```
 
 ### Manifest Rules
 
-**metadata.name**: Kebab-case, unique across all flows. This becomes the flow ID. Examples: `email-summary`, `slack-digest`, `invoice-processor`.
+**metadata.id**: Kebab-case slug, unique across all flows. This becomes the flow ID. Examples: `email-summary`, `slack-digest`, `invoice-processor`.
 
 **requires.services[]**: Each service the agent needs OAuth/API tokens for:
 ```json
 {
   "id": "gmail",
   "provider": "google-mail",
-  "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-  "description": "Lecture des mails"
+  "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
 }
 ```
 - `id`: Short name used in env vars. The token is injected as `TOKEN_{ID_UPPERCASED}` (hyphens become underscores: `brevo-api-key` → `TOKEN_BREVO_API_KEY`)
 - `provider`: Must match a configured provider ID. Known providers: `google-mail`, `google-calendar`, `clickup`, `brevo-api-key`
 - `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
-- `description`: Shown in the UI to explain why this service is needed
+- `connectionMode` (optional): `"user"` (default) or `"admin"`. Admin mode means an admin binds their connection for all users.
 
-**requires.tools[]**: Platform tools the agent can use:
-```json
-{ "id": "web-search", "type": "static", "description": "Web search for context enrichment" }
-```
-Currently the only available tool is `web-search` (static). Leave as empty array `[]` if not needed.
+**requires.skills[]** (optional): Array of skill IDs (strings). Example: `["greeting-style", "web-research"]`. Skills must exist in the org library or as built-in skills.
 
-**input.schema** (optional): Per-execution user input. The user fills a form before each run:
+**requires.extensions[]** (optional): Array of extension IDs (strings). Example: `["web-search", "web-fetch"]`. Extensions must exist in the org library or as built-in extensions.
+
+**input.schema** (optional): Per-execution user input. The user fills a form before each run. Uses JSON Schema Object format (`type: "object"`, `properties`, `required`):
 ```json
 "input": {
   "schema": {
-    "topic": {
-      "type": "string",
-      "description": "Sujet a rechercher",
-      "required": true,
-      "placeholder": "ex: intelligence artificielle, design..."
+    "type": "object",
+    "properties": {
+      "topic": {
+        "type": "string",
+        "description": "Sujet a rechercher",
+        "placeholder": "ex: intelligence artificielle, design..."
+      },
+      "date_range": {
+        "type": "number",
+        "description": "Nombre de jours en arriere",
+        "default": 7
+      }
     },
-    "date_range": {
-      "type": "number",
-      "description": "Nombre de jours en arriere",
-      "default": 7
-    }
+    "required": ["topic"]
   }
 }
 ```
-Field types: `string`, `number`, `boolean`, `array`, `object`. Values are automatically injected as a structured `## User Input` section before the prompt, with field descriptions and types from the schema.
+Field types: `string`, `number`, `boolean`, `array`, `object`, `file`. Values are automatically injected as a structured `## User Input` section before the prompt, with field descriptions and types from the schema.
 
 **config.schema** (optional): User-configurable parameters that persist between runs:
 ```json
 "config": {
   "schema": {
-    "max_items": {
-      "type": "number",
-      "default": 20,
-      "description": "Maximum items to process per run"
+    "type": "object",
+    "properties": {
+      "max_items": {
+        "type": "number",
+        "default": 20,
+        "description": "Maximum items to process per run"
+      },
+      "target_id": {
+        "type": "string",
+        "description": "Target list/folder/workspace ID"
+      },
+      "language": {
+        "type": "string",
+        "default": "fr",
+        "enum": ["fr", "en"],
+        "description": "Output language"
+      }
     },
-    "target_id": {
-      "type": "string",
-      "required": true,
-      "description": "Target list/folder/workspace ID"
-    },
-    "language": {
-      "type": "string",
-      "default": "fr",
-      "enum": ["fr", "en"],
-      "description": "Output language"
-    }
+    "required": ["target_id"]
   }
 }
 ```
-Supports `default`, `required`, `enum`. Values are automatically injected as a structured `## Configuration` section before the prompt, with field descriptions and types from the schema.
+Supports `default`, `enum`. Required fields are declared in the top-level `required` array. Values are automatically injected as a structured `## Configuration` section before the prompt, with field descriptions and types from the schema.
 
 **Execution-level state** (automatic): The agent can include a `state` object in its JSON output. The platform persists it on the execution record. Before the next run, the latest execution's state is injected as `## Previous State`. The agent can also fetch historical executions on demand via `GET /internal/execution-history` (authenticated with `$EXECUTION_TOKEN`, documented in `## Execution History API` section). No manifest declaration needed — state is free-form.
 
@@ -137,20 +138,22 @@ Supports `default`, `required`, `enum`. Values are automatically injected as a s
 ```json
 "output": {
   "schema": {
-    "summary": {
-      "type": "string",
-      "description": "Execution summary",
-      "required": true
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string",
+        "description": "Execution summary"
+      },
+      "items_processed": {
+        "type": "number",
+        "description": "Count of items processed"
+      },
+      "results": {
+        "type": "array",
+        "description": "Processed items with details"
+      }
     },
-    "items_processed": {
-      "type": "number",
-      "description": "Count of items processed"
-    },
-    "results": {
-      "type": "array",
-      "description": "Processed items with details",
-      "required": true
-    }
+    "required": ["summary", "results"]
   }
 }
 ```
@@ -158,10 +161,7 @@ When defined, the platform validates the agent's JSON output. On mismatch, it se
 
 **execution**: Resource limits:
 - `timeout`: Seconds before the container is killed (120-600, typically 180-300)
-- `maxTokens`: Token budget for the agent (10000-100000)
 - `outputRetries`: Number of retry attempts for output validation (0-5, default 2)
-
-Scale these to flow complexity: simple read-only = 180s/30000, complex multi-service = 300-600s/100000.
 
 ## Step 3: Write prompt.md
 
@@ -362,7 +362,7 @@ Always use the single-folder structure (`{flow-name}/manifest.json`, `{flow-name
 The ZIP must be under 10 MB. The importer validates:
 - `manifest.json` exists and is valid (Zod schema validation)
 - `prompt.md` exists
-- `metadata.name` doesn't collide with an existing flow
+- `metadata.id` doesn't collide with an existing flow
 - Skills in `skills/{id}/SKILL.md` are extracted automatically
 
 ### Cleanup
@@ -403,10 +403,10 @@ If the flow needs a service not in this list, tell the user they need to:
 ```json
 {
   "$schema": "https://appstrate.dev/schemas/manifest-v1.json",
-  "version": "1.0.0",
+  "schemaVersion": "1.0.0",
 
   "metadata": {
-    "name": "email-to-tickets",
+    "id": "email-to-tickets",
     "displayName": "Email -> Tickets",
     "description": "Reads recent emails and creates tickets for actionable items",
     "author": "appstrate",
@@ -419,74 +419,78 @@ If the flow needs a service not in this list, tell the user they need to:
       {
         "id": "gmail",
         "provider": "google-mail",
-        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-        "description": "Read emails"
+        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
       },
       {
         "id": "clickup",
         "provider": "clickup",
-        "scopes": ["task:write"],
-        "description": "Create tickets"
+        "scopes": ["task:write"]
       }
     ],
-    "tools": [
-      { "id": "web-search", "type": "static", "description": "Web search for context" }
-    ]
+    "skills": [],
+    "extensions": ["web-search"]
   },
 
   "input": {
     "schema": {
-      "focus_topic": {
-        "type": "string",
-        "description": "Optional topic to focus on",
-        "placeholder": "e.g. billing, support..."
+      "type": "object",
+      "properties": {
+        "focus_topic": {
+          "type": "string",
+          "description": "Optional topic to focus on",
+          "placeholder": "e.g. billing, support..."
+        }
       }
     }
   },
 
   "config": {
     "schema": {
-      "max_emails": {
-        "type": "number",
-        "default": 20,
-        "description": "Max emails to process"
+      "type": "object",
+      "properties": {
+        "max_emails": {
+          "type": "number",
+          "default": 20,
+          "description": "Max emails to process"
+        },
+        "clickup_list_id": {
+          "type": "string",
+          "description": "ClickUp list ID for ticket creation"
+        },
+        "language": {
+          "type": "string",
+          "default": "fr",
+          "enum": ["fr", "en"],
+          "description": "Output language"
+        }
       },
-      "clickup_list_id": {
-        "type": "string",
-        "required": true,
-        "description": "ClickUp list ID for ticket creation"
-      },
-      "language": {
-        "type": "string",
-        "default": "fr",
-        "enum": ["fr", "en"],
-        "description": "Output language"
-      }
+      "required": ["clickup_list_id"]
     }
   },
 
   "output": {
     "schema": {
-      "summary": {
-        "type": "string",
-        "description": "Execution summary",
-        "required": true
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Execution summary"
+        },
+        "tickets_created": {
+          "type": "array",
+          "description": "Created tickets with title, URL, priority"
+        },
+        "emails_processed": {
+          "type": "number",
+          "description": "Total emails processed"
+        }
       },
-      "tickets_created": {
-        "type": "array",
-        "description": "Created tickets with title, URL, priority",
-        "required": true
-      },
-      "emails_processed": {
-        "type": "number",
-        "description": "Total emails processed"
-      }
+      "required": ["summary", "tickets_created"]
     }
   },
 
   "execution": {
     "timeout": 300,
-    "maxTokens": 100000,
     "outputRetries": 2
   }
 }

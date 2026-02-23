@@ -49,9 +49,17 @@ export async function initFlowService(): Promise<void> {
       }
 
       const manifest = validation.manifest as FlowManifest;
-      const skills = manifest.requires.skills ?? [];
-      const extensions = manifest.requires.extensions ?? [];
-      const flowId = manifest.metadata.name;
+      const flowId = manifest.metadata.id;
+
+      // Resolve skill/extension IDs to SkillMeta using built-in library
+      const skills = (manifest.requires.skills ?? []).map((id) => {
+        const builtIn = getBuiltInSkills().get(id);
+        return { id, name: builtIn?.name, description: builtIn?.description };
+      });
+      const extensions = (manifest.requires.extensions ?? []).map((id) => {
+        const builtIn = getBuiltInExtensions().get(id);
+        return { id, name: builtIn?.name, description: builtIn?.description };
+      });
 
       flows.set(flowId, {
         id: flowId,
@@ -109,26 +117,26 @@ function dbRowToLoadedFlow(row: DbFlowRow): LoadedFlow {
     description: fe.org_extensions?.description ?? undefined,
   }));
 
-  // Built-in skills/extensions declared in manifest
+  // Built-in skills/extensions declared in manifest (IDs are strings)
   const manifestSkills = (manifest.requires.skills ?? [])
-    .filter((s) => isBuiltInSkill(s.id))
-    .map((s) => {
-      const builtIn = getBuiltInSkills().get(s.id);
+    .filter((id) => isBuiltInSkill(id))
+    .map((id) => {
+      const builtIn = getBuiltInSkills().get(id);
       return {
-        id: s.id,
-        name: builtIn?.name ?? s.name,
-        description: builtIn?.description ?? s.description,
+        id,
+        name: builtIn?.name,
+        description: builtIn?.description,
       };
     });
 
   const manifestExtensions = (manifest.requires.extensions ?? [])
-    .filter((e) => isBuiltInExtension(e.id))
-    .map((e) => {
-      const builtIn = getBuiltInExtensions().get(e.id);
+    .filter((id) => isBuiltInExtension(id))
+    .map((id) => {
+      const builtIn = getBuiltInExtensions().get(id);
       return {
-        id: e.id,
-        name: builtIn?.name ?? e.name,
-        description: builtIn?.description ?? e.description,
+        id,
+        name: builtIn?.name,
+        description: builtIn?.description,
       };
     });
 

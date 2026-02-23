@@ -153,9 +153,9 @@ function makeFlow(overrides: {
     extensions: [],
     source: "built-in",
     manifest: {
-      version: "1.0.0",
+      schemaVersion: "1.0.0",
       metadata: {
-        name: "test-flow",
+        id: "test-flow",
         displayName: "Test Flow",
         description: "A test flow",
         author: "test",

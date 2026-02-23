@@ -131,8 +131,6 @@
   "editor.execution": "Exécution",
   "editor.execTimeout": "Timeout",
   "editor.execTimeoutDesc": "En secondes (défaut: 300)",
-  "editor.execMaxTokens": "Max tokens",
-  "editor.execMaxTokensDesc": "Défaut: 8192",
   "editor.execRetries": "Retries de validation output",
   "editor.execRetriesDesc": "0-5 (défaut: 2)",
   "editor.inputTitle": "Entrées (input)",

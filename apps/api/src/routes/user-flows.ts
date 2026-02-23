@@ -119,7 +119,7 @@ export function createUserFlowsRouter() {
       return c.json({ error: "VALIDATION_ERROR", message: "Le prompt ne peut pas etre vide" }, 400);
     }
 
-    const flowId = (manifest.metadata as { name: string }).name;
+    const flowId = (manifest.metadata as { id: string }).id;
     const orgId = c.get("orgId");
     const existingIds = await getAllFlowIds(orgId);
 
@@ -186,12 +186,12 @@ export function createUserFlowsRouter() {
     }
 
     // Ensure ID immutability
-    const newId = (manifest.metadata as { name: string }).name;
+    const newId = (manifest.metadata as { id: string }).id;
     if (newId !== flowId) {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: `metadata.name ne peut pas changer (actuel: '${flowId}', recu: '${newId}')`,
+          message: `metadata.id ne peut pas changer (actuel: '${flowId}', recu: '${newId}')`,
         },
         400,
       );
@@ -276,13 +276,13 @@ export function createUserFlowsRouter() {
 
     const { manifest, prompt, files } = parsed;
 
-    // Ensure metadata.name matches the flow ID (immutable)
-    const zipFlowId = (manifest.metadata as { name: string }).name;
+    // Ensure metadata.id matches the flow ID (immutable)
+    const zipFlowId = (manifest.metadata as { id: string }).id;
     if (zipFlowId !== flowId) {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: `metadata.name dans le ZIP ('${zipFlowId}') ne correspond pas au flow ('${flowId}')`,
+          message: `metadata.id dans le ZIP ('${zipFlowId}') ne correspond pas au flow ('${flowId}')`,
         },
         400,
       );

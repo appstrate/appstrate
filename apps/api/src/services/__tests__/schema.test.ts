@@ -12,18 +12,18 @@ import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
-  version: "1.0.0",
+  schemaVersion: "1.0.0",
   metadata: {
-    name: "test-flow",
+    id: "test-flow",
     displayName: "Test Flow",
     description: "A test flow",
     author: "test",
     tags: ["test"],
   },
   requires: {
-    services: [{ id: "gmail", provider: "google-mail", description: "Read emails" }],
-    skills: [{ id: "greeting-style", name: "Greeting Style", description: "Format greetings" }],
-    extensions: [{ id: "web-search", name: "Web Search", description: "Search" }],
+    services: [{ id: "gmail", provider: "google-mail" }],
+    skills: ["greeting-style"],
+    extensions: ["web-search"],
   },
   config: {
     schema: {
@@ -63,7 +63,7 @@ const VALID_MANIFEST = {
       },
     },
   },
-  execution: { timeout: 300, maxTokens: 100000, outputRetries: 2 },
+  execution: { timeout: 300, outputRetries: 2 },
 };
 
 const CONFIG_SCHEMA: JSONSchemaObject = {
@@ -109,9 +109,9 @@ describe("validateManifest", () => {
 
   test("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
-      version: "1.0.0",
+      schemaVersion: "1.0.0",
       metadata: {
-        name: "minimal",
+        id: "minimal",
         displayName: "Minimal",
         description: "Minimal flow",
         author: "test",
@@ -132,21 +132,21 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("rejects manifest with invalid metadata.name (not a slug)", () => {
+  test("rejects manifest with invalid metadata.id (not a slug)", () => {
     const bad = {
       ...VALID_MANIFEST,
-      metadata: { ...VALID_MANIFEST.metadata, name: "Invalid Name!" },
+      metadata: { ...VALID_MANIFEST.metadata, id: "Invalid Name!" },
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain("metadata.name");
+    expect(result.errors[0]).toContain("metadata.id");
   });
 
   test("rejects manifest missing required metadata fields", () => {
     const bad = {
-      version: "1.0.0",
-      metadata: { name: "test" },
+      schemaVersion: "1.0.0",
+      metadata: { id: "test" },
       requires: { services: [] },
     };
     const result = validateManifest(bad);
