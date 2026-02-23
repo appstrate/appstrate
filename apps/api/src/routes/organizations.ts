@@ -19,9 +19,6 @@ import {
   createInvitation,
   getOrgInvitations,
   cancelInvitation,
-  sendInvitationEmail,
-  getInviterName,
-  getOrgName,
 } from "../services/invitations.ts";
 
 const router = new Hono<AppEnv>();
@@ -114,6 +111,7 @@ router.get("/:orgId", async (c) => {
       id: inv.id,
       email: inv.email,
       role: inv.role,
+      token: inv.token,
       expiresAt: inv.expiresAt?.toISOString(),
       createdAt: inv.createdAt?.toISOString(),
     })),
@@ -225,7 +223,7 @@ router.post("/:orgId/members", async (c) => {
     return c.json({ userId: targetUser.id, role, added: true }, 201);
   }
 
-  // User doesn't exist — create invitation and send email
+  // User doesn't exist — create invitation
   try {
     const invitation = await createInvitation({
       email: body.email.trim(),
@@ -234,16 +232,7 @@ router.post("/:orgId/members", async (c) => {
       invitedBy: user.id,
     });
 
-    // Fire-and-forget: send invitation email
-    const [orgName, inviterName] = await Promise.all([getOrgName(orgId), getInviterName(user.id)]);
-    sendInvitationEmail({
-      email: invitation.email,
-      token: invitation.token,
-      orgName,
-      inviterName,
-    });
-
-    return c.json({ invited: true, email: invitation.email, role }, 201);
+    return c.json({ invited: true, email: invitation.email, role, token: invitation.token }, 201);
   } catch (err) {
     return c.json(
       {

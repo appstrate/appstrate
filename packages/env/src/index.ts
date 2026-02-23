@@ -43,11 +43,6 @@ const envSchema = z.object({
   LLM_PROVIDER: z.string().default("anthropic"),
   LLM_MODEL_ID: z.string().default("claude-sonnet-4-5-20250929"),
 
-  // Email
-  BREVO_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().default("noreply@appstrate.io"),
-  EMAIL_FROM_NAME: z.string().default("Appstrate"),
-
   // LLM API keys (passthrough to containers)
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),

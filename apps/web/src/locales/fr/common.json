@@ -23,6 +23,8 @@
   "btn.connect": "Connecter",
   "btn.disconnect": "Déconnecter",
   "btn.reconnect": "Reconnecter",
+  "btn.copyLink": "Copier le lien",
+  "btn.copied": "Copié !",
   "error.generic": "Une erreur est survenue.",
   "error.unexpected": "Une erreur inattendue est survenue.",
   "error.unknown": "Erreur inconnue",

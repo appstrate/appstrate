@@ -71,9 +71,6 @@ services:
       - DATA_DIR=${DATA_DIR:-./data}
       - STORAGE_DIR=${STORAGE_DIR:-./storage}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
-      - BREVO_API_KEY=${BREVO_API_KEY:-}
-      - EMAIL_FROM=${EMAIL_FROM:-noreply@appstrate.io}
-      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Appstrate}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
