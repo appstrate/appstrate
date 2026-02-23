@@ -111,9 +111,7 @@ export function InviteAcceptPage() {
           <h1 className="login-title">
             <span>App</span>strate
           </h1>
-          <p className="form-error" style={{ textAlign: "center", marginBottom: "1rem" }}>
-            {error}
-          </p>
+          <p className="form-error form-error-centered">{error}</p>
           <button className="primary login-btn" onClick={() => navigate("/")}>
             {t("invite.goHome")}
           </button>
@@ -128,56 +126,23 @@ export function InviteAcceptPage() {
         <h1 className="login-title">
           <span>App</span>strate
         </h1>
-        <p
-          style={{
-            textAlign: "center",
-            color: "var(--text-secondary)",
-            marginBottom: "1.5rem",
-            fontSize: "0.9rem",
-            lineHeight: 1.5,
-          }}
-        >
+        <p className="auth-subtitle">
           {t("invite.description", {
             inviter: info?.inviterName,
             org: info?.orgName,
           })}
         </p>
 
-        <div
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: "8px",
-            padding: "1rem",
-            marginBottom: "1.5rem",
-          }}
-        >
-          <div
-            style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}
-          >
-            {t("invite.emailLabel")}
-          </div>
-          <div style={{ fontSize: "0.9rem" }}>{info?.email}</div>
-          <div
-            style={{
-              fontSize: "0.8rem",
-              color: "var(--text-secondary)",
-              marginTop: "0.75rem",
-              marginBottom: "0.25rem",
-            }}
-          >
-            {t("invite.roleLabel")}
-          </div>
-          <div style={{ fontSize: "0.9rem" }}>
+        <div className="invite-info-card">
+          <div className="invite-info-label">{t("invite.emailLabel")}</div>
+          <div className="invite-info-value">{info?.email}</div>
+          <div className="invite-info-label invite-info-label-spaced">{t("invite.roleLabel")}</div>
+          <div className="invite-info-value">
             {info?.role === "admin" ? t("orgSettings.roleAdmin") : t("orgSettings.roleMember")}
           </div>
         </div>
 
-        {error && (
-          <p className="form-error" style={{ marginBottom: "1rem" }}>
-            {error}
-          </p>
-        )}
+        {error && <p className="form-error form-error-spaced">{error}</p>}
 
         <button className="primary login-btn" onClick={handleAccept} disabled={accepting}>
           {accepting ? <Spinner /> : t("invite.accept")}

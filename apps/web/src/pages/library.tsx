@@ -90,7 +90,7 @@ function LibraryTab({ type }: { type: LibraryType }) {
               type="file"
               accept=".zip"
               onChange={handleUpload}
-              style={{ display: "none" }}
+              className="hidden"
               disabled={upload.isPending}
             />
           </label>

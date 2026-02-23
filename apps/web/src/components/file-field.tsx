@@ -162,7 +162,7 @@ export function FileField({
         accept={accept}
         multiple={multiple}
         onChange={handleInputChange}
-        style={{ display: "none" }}
+        className="hidden"
       />
     </div>
   );

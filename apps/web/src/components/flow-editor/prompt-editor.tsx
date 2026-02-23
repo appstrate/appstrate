@@ -34,9 +34,7 @@ export function PromptEditor({ value, onChange }: PromptEditorProps) {
           tabSize: 2,
         }}
       />
-      <div className="hint" style={{ marginTop: "0.5rem" }}>
-        {t("editor.promptHint")}
-      </div>
+      <div className="hint">{t("editor.promptHint")}</div>
     </div>
   );
 }

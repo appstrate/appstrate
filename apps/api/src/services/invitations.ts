@@ -1,5 +1,5 @@
 import { db } from "../lib/db.ts";
-import { orgInvitations } from "@appstrate/db/schema";
+import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 
 function generateToken(): string {
@@ -83,6 +83,25 @@ export async function cancelInvitation(invitationId: string) {
     .where(eq(orgInvitations.id, invitationId));
 }
 
+export async function getOrgName(orgId: string): Promise<string> {
+  const [row] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return row?.name ?? "Organisation";
+}
+
+export async function getInviterName(userId: string): Promise<string> {
+  const [row] = await db
+    .select({ displayName: profiles.displayName, name: user.name })
+    .from(user)
+    .leftJoin(profiles, eq(profiles.id, user.id))
+    .where(eq(user.id, userId))
+    .limit(1);
+  return row?.displayName || row?.name || "Un membre";
+}
+
 export async function expireOldInvitations() {
   const result = await db
     .update(orgInvitations)
@@ -92,4 +111,3 @@ export async function expireOldInvitations() {
 
   return result.length;
 }
-

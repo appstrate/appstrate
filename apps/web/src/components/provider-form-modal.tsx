@@ -201,10 +201,7 @@ function ProviderFormBody({
         </>
       }
     >
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-      >
+      <form onSubmit={handleSubmit} className="provider-form">
         {/* General section */}
         <div className="form-group">
           <label htmlFor="pf-displayName">{t("providers.form.displayName")}</label>
@@ -256,8 +253,8 @@ function ProviderFormBody({
           </select>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <div className="form-group" style={{ flex: 1 }}>
+        <div className="form-row">
+          <div className="form-group flex-1">
             <label htmlFor="pf-iconUrl">{t("providers.form.iconUrl")}</label>
             <input
               id="pf-iconUrl"
@@ -267,7 +264,7 @@ function ProviderFormBody({
               placeholder="https://..."
             />
           </div>
-          <div className="form-group" style={{ flex: 1 }}>
+          <div className="form-group flex-1">
             <label htmlFor="pf-docsUrl">{t("providers.form.docsUrl")}</label>
             <input
               id="pf-docsUrl"
@@ -293,7 +290,7 @@ function ProviderFormBody({
         {/* OAuth2 section */}
         {form.authMode === "oauth2" && (
           <>
-            <div className="section-title" style={{ marginTop: "0.5rem" }}>
+            <div className="section-title section-title-mt-sm">
               {t("providers.form.sectionOAuth2")}
             </div>
 
@@ -368,8 +365,8 @@ function ProviderFormBody({
               <div className="hint">{t("providers.form.scopesHint")}</div>
             </div>
 
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <div className="form-group" style={{ flex: 1 }}>
+            <div className="form-row">
+              <div className="form-group flex-1">
                 <label htmlFor="pf-scopeSep">{t("providers.form.scopeSeparator")}</label>
                 <select
                   id="pf-scopeSep"
@@ -382,25 +379,16 @@ function ProviderFormBody({
                   <option value="+">{t("providers.form.scopeSepPlus")}</option>
                 </select>
               </div>
-              <div
-                className="form-group"
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "flex-end",
-                  gap: "0.5rem",
-                  paddingBottom: "0.25rem",
-                }}
-              >
+              <div className="form-group flex-1 form-group-inline-end">
                 <input
                   id="pf-pkce"
                   type="checkbox"
                   checked={form.pkceEnabled}
                   onChange={(e) => setField("pkceEnabled", e.target.checked)}
                   disabled={isBuiltIn}
-                  style={{ width: "auto" }}
+                  className="checkbox-auto"
                 />
-                <label htmlFor="pf-pkce" style={{ margin: 0 }}>
+                <label htmlFor="pf-pkce" className="label-inline">
                   {t("providers.form.pkceEnabled")}
                 </label>
               </div>
@@ -409,15 +397,13 @@ function ProviderFormBody({
             {/* Available scopes section */}
             {!isBuiltIn && (
               <>
-                <div className="section-title" style={{ marginTop: "0.5rem" }}>
+                <div className="section-title section-title-mt-sm">
                   {t("providers.form.sectionAvailableScopes")}
                 </div>
-                <div className="hint" style={{ marginBottom: "0.5rem" }}>
-                  {t("providers.form.availableScopesHint")}
-                </div>
+                <div className="hint hint-spaced">{t("providers.form.availableScopesHint")}</div>
                 {availableScopes.map((scope, idx) => (
                   <div key={idx} className="field-card">
-                    <div style={{ display: "flex", gap: "0.375rem", alignItems: "center" }}>
+                    <div className="scope-row">
                       <input
                         type="text"
                         placeholder={t("providers.form.scopeValue")}
@@ -427,7 +413,7 @@ function ProviderFormBody({
                           next[idx] = { ...next[idx], value: e.target.value };
                           setAvailableScopes(next);
                         }}
-                        style={{ flex: 2 }}
+                        className="flex-2"
                       />
                       <input
                         type="text"
@@ -438,7 +424,7 @@ function ProviderFormBody({
                           next[idx] = { ...next[idx], label: e.target.value };
                           setAvailableScopes(next);
                         }}
-                        style={{ flex: 1 }}
+                        className="flex-1"
                       />
                       <button
                         type="button"
@@ -465,12 +451,12 @@ function ProviderFormBody({
             {/* Read-only display for built-in providers */}
             {isBuiltIn && provider?.availableScopes && provider.availableScopes.length > 0 && (
               <>
-                <div className="section-title" style={{ marginTop: "0.5rem" }}>
+                <div className="section-title section-title-mt-sm">
                   {t("providers.form.sectionAvailableScopes")}
                 </div>
                 <div className="scope-options">
                   {provider.availableScopes.map((scope) => (
-                    <div key={scope.value} className="scope-option" style={{ cursor: "default" }}>
+                    <div key={scope.value} className="scope-option">
                       <div className="scope-option-info">
                         <span className="scope-label">{scope.label}</span>
                         <span className="scope-value">{scope.value}</span>
@@ -486,7 +472,7 @@ function ProviderFormBody({
         {/* API Key section */}
         {form.authMode === "api_key" && (
           <>
-            <div className="section-title" style={{ marginTop: "0.5rem" }}>
+            <div className="section-title section-title-mt-sm">
               {t("providers.form.sectionApiKey")}
             </div>
 
@@ -543,7 +529,7 @@ function ProviderFormBody({
         {/* Authorized URIs section */}
         {!isBuiltIn && (
           <>
-            <div className="section-title" style={{ marginTop: "0.5rem" }}>
+            <div className="section-title section-title-mt-sm">
               {t("providers.form.sectionUris")}
             </div>
 

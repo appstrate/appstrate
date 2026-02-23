@@ -103,7 +103,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           ref={inputRef}
           type="file"
           accept=".zip"
-          style={{ display: "none" }}
+          className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) handleFile(f);

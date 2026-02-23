@@ -290,9 +290,7 @@ export function OrgSettingsPage() {
           {/* Danger zone */}
           {isOrgOwner && (
             <>
-              <div className="section-title section-title-mt-lg">
-                {t("orgSettings.dangerZone")}
-              </div>
+              <div className="section-title section-title-mt-lg">{t("orgSettings.dangerZone")}</div>
               <div className="service-card service-card-danger">
                 <div className="service-card-header service-card-header-flush">
                   <div className="service-info service-info-sm">
@@ -352,11 +350,7 @@ export function OrgSettingsPage() {
                   >
                     {linkCopied ? t("btn.copied") : t("btn.copyLink")}
                   </button>
-                  <button
-                    type="button"
-                    className="btn-dismiss"
-                    onClick={() => setInviteLink(null)}
-                  >
+                  <button type="button" className="btn-dismiss" onClick={() => setInviteLink(null)}>
                     ✕
                   </button>
                 </div>
@@ -580,14 +574,10 @@ function ProvidersTab({
                         {authModeLabel[p.authMode] ?? p.authMode}
                       </span>
                       {isBuiltIn && (
-                        <span className="badge badge-dim">
-                          {t("providers.builtIn")}
-                        </span>
+                        <span className="badge badge-dim">{t("providers.builtIn")}</span>
                       )}
                       {p.source === "custom" && (
-                        <span className="badge badge-dim">
-                          {t("providers.custom")}
-                        </span>
+                        <span className="badge badge-dim">{t("providers.custom")}</span>
                       )}
                       {p.usedByFlows != null && p.usedByFlows > 0 && (
                         <span className="badge badge-success">

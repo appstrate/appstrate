@@ -65,10 +65,7 @@ export function ResourceSection({
 
   return (
     <div className="editor-section">
-      <div
-        className="editor-section-header"
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
-      >
+      <div className="editor-section-header editor-section-header-actions">
         {title}
         <label className="btn-upload btn-upload-sm">
           {upload.isPending ? <Spinner /> : t("editor.importZip")}
@@ -77,7 +74,7 @@ export function ResourceSection({
             accept=".zip"
             ref={fileInputRef}
             onChange={handleUpload}
-            style={{ display: "none" }}
+            className="hidden"
             disabled={upload.isPending}
           />
         </label>

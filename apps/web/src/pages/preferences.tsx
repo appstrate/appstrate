@@ -64,24 +64,14 @@ function GeneralTab({
   return (
     <>
       <div className="section-title">{t("preferences.language")}</div>
-      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
-        <div className="service-card-header" style={{ marginBottom: 0 }}>
+      <div className="service-card service-card-spaced">
+        <div className="service-card-header service-card-header-flush">
           <div className="service-info">
             <select
+              className="language-select"
               value={language}
               onChange={(e) => onLanguageChange(e.target.value)}
               disabled={languagePending}
-              style={{
-                padding: "0.5rem 0.75rem",
-                fontSize: "0.875rem",
-                fontFamily: "inherit",
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: "6px",
-                color: "var(--text)",
-                outline: "none",
-                cursor: "pointer",
-              }}
             >
               <option value="fr">{t("preferences.langFr")}</option>
               <option value="en">{t("preferences.langEn")}</option>
@@ -96,7 +86,7 @@ function GeneralTab({
 
       <div className="section-title">{t("preferences.notifications")}</div>
       <div className="service-card">
-        <div className="service-card-header" style={{ marginBottom: 0 }}>
+        <div className="service-card-header service-card-header-flush">
           <div className="service-info">
             <span className="service-provider">{t("preferences.notificationsHint")}</span>
           </div>
@@ -128,8 +118,8 @@ function DisplayNameForm() {
   };
 
   return (
-    <div className="service-card" style={{ marginBottom: "1.5rem" }}>
-      <form onSubmit={handleSubmit} style={{ padding: "0.25rem 0" }}>
+    <div className="service-card service-card-spaced">
+      <form onSubmit={handleSubmit} className="form-compact">
         <div className="form-group">
           <label>{t("preferences.displayName")}</label>
           <input
@@ -194,8 +184,8 @@ function PasswordChangeForm() {
     !submitting;
 
   return (
-    <div className="service-card" style={{ marginBottom: "1.5rem" }}>
-      <form onSubmit={handleSubmit} style={{ padding: "0.25rem 0" }}>
+    <div className="service-card service-card-spaced">
+      <form onSubmit={handleSubmit} className="form-compact">
         <div className="form-group">
           <label>{t("preferences.currentPassword")}</label>
           <input

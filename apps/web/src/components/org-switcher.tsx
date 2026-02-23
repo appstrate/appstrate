@@ -30,28 +30,10 @@ export function OrgSwitcher() {
   }
 
   return (
-    <div className="user-menu" ref={ref} style={{ marginRight: "0.5rem" }}>
+    <div className="user-menu org-switcher" ref={ref}>
       <button
+        className="org-switcher-trigger"
         onClick={() => setOpen(!open)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.375rem",
-          padding: "0.25rem 0.625rem",
-          fontSize: "0.8rem",
-          fontWeight: 500,
-          fontFamily: "inherit",
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "6px",
-          color: "var(--text)",
-          cursor: "pointer",
-          transition: "border-color 0.15s",
-          whiteSpace: "nowrap",
-          maxWidth: "180px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
         aria-label={t("orgSwitcher.ariaLabel")}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -65,13 +47,13 @@ export function OrgSwitcher() {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ flexShrink: 0 }}
+          className="flex-shrink-0"
         >
           <path d="M18 21a8 8 0 0 0-16 0" />
           <circle cx="10" cy="8" r="5" />
           <path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3" />
         </svg>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{currentOrg.name}</span>
+        <span className="text-ellipsis">{currentOrg.name}</span>
         <svg
           width="10"
           height="10"
@@ -81,7 +63,7 @@ export function OrgSwitcher() {
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ flexShrink: 0, opacity: 0.5 }}
+          className="flex-shrink-0 opacity-50"
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -89,10 +71,9 @@ export function OrgSwitcher() {
 
       {open && (
         <div
-          className="user-menu-dropdown"
+          className="user-menu-dropdown org-switcher-dropdown"
           role="listbox"
           aria-label={t("orgSwitcher.ariaLabelList")}
-          style={{ minWidth: "220px" }}
         >
           {orgs.map((org) => {
             const isActive = org.id === currentOrg.id;
@@ -101,32 +82,13 @@ export function OrgSwitcher() {
                 key={org.id}
                 role="option"
                 aria-selected={isActive}
+                className={`org-switcher-option${isActive ? " active" : ""}`}
                 onClick={() => {
                   if (!isActive) switchOrg(org.id);
                   setOpen(false);
                 }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
-                  textAlign: "left",
-                  fontSize: "0.8rem",
-                  padding: "0.5rem",
-                  border: "none",
-                  borderRadius: "4px",
-                  background: isActive ? "var(--bg)" : "none",
-                  color: isActive ? "var(--text)" : "var(--text-muted)",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontWeight: isActive ? 500 : 400,
-                }}
               >
-                <span
-                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                >
-                  {org.name}
-                </span>
+                <span className="text-ellipsis-nowrap">{org.name}</span>
                 {isActive && (
                   <svg
                     width="14"
@@ -137,7 +99,7 @@ export function OrgSwitcher() {
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    style={{ flexShrink: 0, marginLeft: "0.5rem" }}
+                    className="org-switcher-check"
                   >
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
@@ -146,52 +108,14 @@ export function OrgSwitcher() {
             );
           })}
 
-          <div
-            style={{
-              borderTop: "1px solid var(--border)",
-              marginTop: "0.375rem",
-              paddingTop: "0.375rem",
-            }}
-          >
-            <Link
-              to="/org-settings"
-              onClick={() => setOpen(false)}
-              style={{
-                display: "block",
-                fontSize: "0.8rem",
-                padding: "0.375rem 0.5rem",
-                color: "var(--text-muted)",
-                textDecoration: "none",
-                borderRadius: "4px",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.color = "var(--text)";
-                (e.currentTarget as HTMLElement).style.background = "var(--bg)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
-                (e.currentTarget as HTMLElement).style.background = "none";
-              }}
-            >
+          <div className="org-switcher-divider">
+            <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
               {t("orgSwitcher.settings")}
             </Link>
             <Link
               to="/create-org"
+              className="org-switcher-link org-switcher-link-primary"
               onClick={() => setOpen(false)}
-              style={{
-                display: "block",
-                fontSize: "0.8rem",
-                padding: "0.375rem 0.5rem",
-                color: "var(--primary)",
-                textDecoration: "none",
-                borderRadius: "4px",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = "rgba(59, 130, 246, 0.08)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.background = "none";
-              }}
             >
               {t("orgSwitcher.create")}
             </Link>
