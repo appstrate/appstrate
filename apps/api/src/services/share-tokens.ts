@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import { supabase } from "../lib/supabase.ts";
+import { eq, and, isNull, gt } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { shareTokens } from "@appstrate/db/schema";
 
 const DEFAULT_EXPIRES_DAYS = 7;
 
@@ -10,34 +12,51 @@ export async function createShareToken(
   expiresInDays = DEFAULT_EXPIRES_DAYS,
 ) {
   const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
 
-  const { data, error } = await supabase
-    .from("share_tokens")
-    .insert({ token, flow_id: flowId, created_by: createdBy, org_id: orgId, expires_at: expiresAt })
-    .select()
-    .single();
+  const [row] = await db
+    .insert(shareTokens)
+    .values({ token, flowId, createdBy, orgId, expiresAt })
+    .returning();
 
-  if (error) throw new Error(`Failed to create share token: ${error.message}`);
-  return data!;
+  return row;
 }
 
 export async function getShareToken(token: string) {
-  const { data } = await supabase.from("share_tokens").select("*").eq("token", token).single();
-  return data ?? null;
+  const rows = await db.select().from(shareTokens).where(eq(shareTokens.token, token)).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function consumeShareToken(token: string) {
-  const { data } = await supabase.rpc("consume_share_token", { p_token: token });
-  if (!data || (Array.isArray(data) && data.length === 0)) return null;
-  const row = Array.isArray(data) ? data[0] : data;
-  return row as { id: string; flow_id: string; created_by: string; org_id: string };
+  const result = await db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(shareTokens)
+      .where(
+        and(
+          eq(shareTokens.token, token),
+          isNull(shareTokens.consumedAt),
+          gt(shareTokens.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    if (rows.length === 0) return null;
+
+    const row = rows[0]!;
+    await tx.update(shareTokens).set({ consumedAt: new Date() }).where(eq(shareTokens.id, row.id));
+
+    return {
+      id: row.id,
+      flowId: row.flowId,
+      createdBy: row.createdBy,
+      orgId: row.orgId,
+    };
+  });
+
+  return result;
 }
 
 export async function linkExecutionToToken(tokenId: string, executionId: string) {
-  const { error } = await supabase
-    .from("share_tokens")
-    .update({ execution_id: executionId })
-    .eq("id", tokenId);
-  if (error) throw new Error(`Failed to link execution to token: ${error.message}`);
+  await db.update(shareTokens).set({ executionId }).where(eq(shareTokens.id, tokenId));
 }

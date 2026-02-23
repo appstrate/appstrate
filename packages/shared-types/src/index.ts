@@ -1,24 +1,52 @@
-export type { Database, Tables, TablesInsert, TablesUpdate, Json } from "./database.ts";
-import type { Tables } from "./database.ts";
+export type {
+  User,
+  NewUser,
+  Session,
+  Organization as OrganizationRow,
+  NewOrganization,
+  OrganizationMember as OrganizationMemberRow,
+  NewOrganizationMember,
+  Profile,
+  NewProfile,
+  FlowConfig,
+  Flow as FlowRow,
+  NewFlow,
+  FlowVersion,
+  Execution,
+  NewExecution,
+  ExecutionLog,
+  NewExecutionLog,
+  FlowSchedule,
+  NewFlowSchedule,
+  ScheduleRun,
+  ShareToken,
+  NewShareToken,
+  FlowAdminConnection,
+  OrgSkill as OrgSkillRow,
+  OrgExtension as OrgExtensionRow,
+  ProviderConfig as ProviderConfigRow,
+  NewProviderConfig,
+  ServiceConnection,
+  NewServiceConnection,
+  OAuthState,
+  NewOAuthState,
+} from "@appstrate/db/schema";
 
-// --- Execution Types (derived from DB) ---
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export type ExecutionStatus = "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+// --- Execution Types ---
 
-export type Execution = Tables<"executions">;
-export type ExecutionLog = Tables<"execution_logs">;
+export type ExecutionStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "failed"
+  | "timeout"
+  | "cancelled";
 
-// --- Flow DB Row Type ---
+// --- Schedule Types ---
 
-export type FlowRow = Tables<"flows">;
-
-// --- Schedule Types (derived from DB) ---
-
-export type Schedule = Tables<"flow_schedules">;
-
-// --- Profile Types (derived from DB) ---
-
-export type Profile = Tables<"profiles">;
+export type { FlowSchedule as Schedule } from "@appstrate/db/schema";
 
 // --- Organization Types ---
 
@@ -52,11 +80,11 @@ export interface JSONSchemaProperty {
   default?: unknown;
   enum?: unknown[];
   format?: string;
-  placeholder?: string; // custom extension
-  accept?: string; // file fields: allowed extensions e.g. ".pdf,.csv,.txt"
-  maxSize?: number; // file fields: max size per file in bytes
-  multiple?: boolean; // file fields: allow multiple files
-  maxFiles?: number; // file fields: max number of files (when multiple)
+  placeholder?: string;
+  accept?: string;
+  maxSize?: number;
+  multiple?: boolean;
+  maxFiles?: number;
 }
 
 export interface JSONSchemaObject {
@@ -87,7 +115,6 @@ export interface ServiceStatus {
   adminProvided?: boolean;
   adminUserId?: string;
   adminDisplayName?: string;
-  // Scope validation
   scopesRequired?: string[];
   scopesGranted?: string[];
   scopesSufficient?: boolean;
@@ -134,7 +161,7 @@ export interface FlowDetail {
     current: Record<string, unknown>;
   };
   runningExecutions: number;
-  lastExecution: Partial<Execution> | null;
+  lastExecution: Partial<import("@appstrate/db/schema").Execution> | null;
   updatedAt?: string | null;
   prompt?: string;
   executionSettings?: { timeout?: number; outputRetries?: number } | null;

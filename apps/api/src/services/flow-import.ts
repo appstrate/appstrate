@@ -1,4 +1,7 @@
 import { unzipSync } from "fflate";
+import { eq, and } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { orgSkills, orgExtensions } from "@appstrate/db/schema";
 import { validateManifest } from "./schema.ts";
 import { insertUserFlow } from "./user-flows.ts";
 import { createVersionAndUpload } from "./flow-versions.ts";
@@ -11,7 +14,6 @@ import {
   uploadLibraryPackage,
 } from "./library.ts";
 import { logger } from "../lib/logger.ts";
-import { supabase } from "../lib/supabase.ts";
 
 const MAX_ZIP_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -138,9 +140,7 @@ export function parseFlowZip(zipBuffer: Buffer): ParsedFlowZip {
   (manifest.requires as Record<string, unknown>).skills = [...manifestSkillIds];
 
   // Merge ZIP-detected .ts extensions with manifest-declared extensions (string IDs)
-  const manifestExtIds = new Set<string>(
-    ((requires.extensions ?? []) as string[]).filter(Boolean),
-  );
+  const manifestExtIds = new Set<string>(((requires.extensions ?? []) as string[]).filter(Boolean));
 
   const extPrefix = root + "extensions/";
   for (const [path] of Object.entries(files)) {
@@ -213,14 +213,13 @@ export async function upsertSkillsAndExtensionsFromFiles(
     const { name, description } = extractSkillMeta(content);
 
     // Check if skill already exists in org
-    const { data: existing } = await supabase
-      .from("org_skills")
-      .select("id")
-      .eq("org_id", orgId)
-      .eq("id", skillId)
-      .single();
+    const existing = await db
+      .select({ id: orgSkills.id })
+      .from(orgSkills)
+      .where(and(eq(orgSkills.orgId, orgId), eq(orgSkills.id, skillId)))
+      .limit(1);
 
-    if (existing) {
+    if (existing.length > 0) {
       // Reuse existing — don't overwrite content
       skillsMatched++;
     } else {
@@ -260,14 +259,13 @@ export async function upsertSkillsAndExtensionsFromFiles(
     const content = new TextDecoder().decode(extFiles[tsFilename]!);
 
     // Check if extension already exists in org
-    const { data: existing } = await supabase
-      .from("org_extensions")
-      .select("id")
-      .eq("org_id", orgId)
-      .eq("id", extId)
-      .single();
+    const existing = await db
+      .select({ id: orgExtensions.id })
+      .from(orgExtensions)
+      .where(and(eq(orgExtensions.orgId, orgId), eq(orgExtensions.id, extId)))
+      .limit(1);
 
-    if (existing) {
+    if (existing.length > 0) {
       extensionsMatched++;
     } else {
       await upsertOrgExtension(orgId, {

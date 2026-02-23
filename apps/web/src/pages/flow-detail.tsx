@@ -67,7 +67,7 @@ export function FlowDetailPage() {
   const { data: schedules } = useSchedules(flowId);
   const { data: providers } = useProviders();
   const profileMap = useProfiles(
-    (executions ?? []).map((e) => e.user_id).filter((id): id is string => !!id),
+    (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
   const runFlow = useRunFlow(flowId!);
   const deleteFlow = useDeleteFlow();
@@ -413,11 +413,11 @@ export function FlowDetailPage() {
           ) : (
             <div className="exec-list">
               {executions.map((exec) => {
-                const date = exec.started_at ? formatDateField(exec.started_at) : "";
+                const date = exec.startedAt ? formatDateField(exec.startedAt) : "";
                 const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
                 const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
 
-                const userName = exec.user_id ? profileMap.get(exec.user_id) : undefined;
+                const userName = exec.userId ? profileMap.get(exec.userId) : undefined;
 
                 return (
                   <Link
@@ -431,11 +431,11 @@ export function FlowDetailPage() {
                     )}
                     <span className="exec-date">{date}</span>
                     {duration && <span className="exec-duration">{duration}</span>}
-                    {exec.tokens_used != null && (
-                      <span className="exec-tokens">{exec.tokens_used.toLocaleString()} tok</span>
+                    {exec.tokensUsed != null && (
+                      <span className="exec-tokens">{exec.tokensUsed.toLocaleString()} tok</span>
                     )}
                     {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
-                    {exec.schedule_id && <span className="tag">cron</span>}
+                    {exec.scheduleId && <span className="tag">cron</span>}
                   </Link>
                 );
               })}

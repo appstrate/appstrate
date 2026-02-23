@@ -16,7 +16,9 @@ import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.
 import { extractSkillMeta } from "../services/skill-utils.ts";
 import { unzipAndNormalize } from "../services/flow-package.ts";
 import { requireAdmin } from "../middleware/guards.ts";
-import { supabase } from "../lib/supabase.ts";
+import { inArray } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { profiles } from "@appstrate/db/schema";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -27,12 +29,12 @@ async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
   const userIds = [...new Set(items.map((i) => i.createdBy).filter(Boolean))] as string[];
   if (userIds.length === 0) return items;
 
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, display_name")
-    .in("id", userIds);
+  const rows = await db
+    .select({ id: profiles.id, displayName: profiles.displayName })
+    .from(profiles)
+    .where(inArray(profiles.id, userIds));
 
-  const nameMap = new Map((profiles ?? []).map((p) => [p.id, p.display_name]));
+  const nameMap = new Map(rows.map((p) => [p.id, p.displayName]));
 
   return items.map((item) => ({
     ...item,

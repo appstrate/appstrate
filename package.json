@@ -16,7 +16,8 @@
     "check": "turbo check",
     "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
     "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
-    "gen:types": "bunx supabase gen types typescript --linked > packages/shared-types/src/database.ts",
+    "db:generate": "cd packages/db && bunx drizzle-kit generate",
+    "db:migrate": "cd packages/db && bunx drizzle-kit migrate",
     "docker:dev": "docker compose -f docker-compose.yml up -d",
     "docker:prod": "docker compose -f docker-compose.prod.yml up -d"
   },

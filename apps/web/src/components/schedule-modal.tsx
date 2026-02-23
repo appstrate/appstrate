@@ -103,7 +103,7 @@ function ScheduleForm({
   const cronPresets = getCronPresets(t);
 
   const [name, setName] = useState(schedule?.name ?? "");
-  const [cronExpression, setCronExpression] = useState(schedule?.cron_expression ?? "0 9 * * *");
+  const [cronExpression, setCronExpression] = useState(schedule?.cronExpression ?? "0 9 * * *");
   const [timezone, setTimezone] = useState(schedule?.timezone ?? "UTC");
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [confirmDelete, setConfirmDelete] = useState(false);

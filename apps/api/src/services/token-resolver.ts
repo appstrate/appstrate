@@ -4,7 +4,7 @@
  */
 
 import { getCredentials } from "@appstrate/connect";
-import { supabase } from "../lib/supabase.ts";
+import { db } from "../lib/db.ts";
 import { logger } from "../lib/logger.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 
@@ -24,7 +24,7 @@ export async function buildServiceTokens(
     const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
 
     if (tokenUserId) {
-      const result = await getCredentials(supabase, orgId, tokenUserId, svc.provider);
+      const result = await getCredentials(db, orgId, tokenUserId, svc.provider);
       const token = result
         ? (result.credentials.access_token ?? result.credentials.api_key ?? null)
         : null;

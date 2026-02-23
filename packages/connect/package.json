@@ -6,10 +6,12 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "lint:fix": "prettier --write src/"
   },
   "dependencies": {
+    "@appstrate/db": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
-    "@supabase/supabase-js": "^2.95.3"
+    "drizzle-orm": "^0.39.3"
   }
 }

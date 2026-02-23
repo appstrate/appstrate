@@ -229,7 +229,7 @@ export function createUserFlowsRouter() {
       // Storage upload failure is non-fatal
     }
 
-    return c.json({ flowId, message: "Flow mis a jour", updatedAt: updated.updated_at });
+    return c.json({ flowId, message: "Flow mis a jour", updatedAt: updated.updatedAt });
   });
 
   // PUT /api/flows/:id/package — upload a new ZIP for an existing user flow (retro-compat)
@@ -310,7 +310,7 @@ export function createUserFlowsRouter() {
       // Storage upload failure is non-fatal
     }
 
-    return c.json({ flowId, message: "Package mis a jour", updatedAt: updated.updated_at });
+    return c.json({ flowId, message: "Package mis a jour", updatedAt: updated.updatedAt });
   });
 
   // PUT /api/flows/:id/skills — set skill references for a flow

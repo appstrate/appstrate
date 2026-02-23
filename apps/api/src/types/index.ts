@@ -1,9 +1,5 @@
 // Re-export shared types used by both API and frontend
 export type {
-  Database,
-  Tables,
-  TablesInsert,
-  TablesUpdate,
   Json,
   ExecutionStatus,
   Execution,
@@ -55,6 +51,7 @@ export interface FlowRequirements {
 export interface FlowServiceRequirement {
   id: string;
   provider: string;
+  description?: string;
   scopes?: string[];
   connectionMode?: "user" | "admin";
 }
@@ -102,7 +99,7 @@ export interface LoadedFlow {
 // Hono context env — shared across all routers
 export type AppEnv = {
   Variables: {
-    user: { id: string };
+    user: { id: string; email: string; name: string };
     flow: LoadedFlow;
     orgId: string;
     orgRole: import("@appstrate/shared-types").OrgRole;

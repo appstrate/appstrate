@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { supabase } from "../lib/supabase.ts";
+import { eq } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getFlow } from "../services/flow-service.ts";
@@ -34,13 +36,19 @@ async function verifyExecutionToken(c: Context): Promise<
     };
   }
 
-  const { data: execution, error } = await supabase
-    .from("executions")
-    .select("flow_id, user_id, org_id, status")
-    .eq("id", executionId)
-    .single();
+  const rows = await db
+    .select({
+      flowId: executions.flowId,
+      userId: executions.userId,
+      orgId: executions.orgId,
+      status: executions.status,
+    })
+    .from(executions)
+    .where(eq(executions.id, executionId))
+    .limit(1);
 
-  if (error || !execution) {
+  const execution = rows[0];
+  if (!execution) {
     return {
       ok: false,
       response: c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404),
@@ -57,7 +65,12 @@ async function verifyExecutionToken(c: Context): Promise<
   return {
     ok: true,
     executionId,
-    execution: execution as { flow_id: string; user_id: string; org_id: string; status: string },
+    execution: {
+      flow_id: execution.flowId,
+      user_id: execution.userId,
+      org_id: execution.orgId,
+      status: execution.status,
+    },
   };
 }
 
@@ -91,7 +104,7 @@ export function createInternalRouter() {
     }
 
     try {
-      const executions = await getRecentExecutions(
+      const recentExecutions = await getRecentExecutions(
         execution.flow_id,
         execution.user_id,
         execution.org_id,
@@ -102,7 +115,7 @@ export function createInternalRouter() {
         },
       );
 
-      return c.json({ executions });
+      return c.json({ executions: recentExecutions });
     } catch (err) {
       logger.error("Failed to fetch execution history", {
         executionId,
@@ -160,7 +173,7 @@ export function createInternalRouter() {
 
       // Unified credential resolution — all services resolve via provider
       const result = await resolveCredentialsForProxy(
-        supabase,
+        db,
         tokenOrgId,
         tokenUserId,
         service.provider,

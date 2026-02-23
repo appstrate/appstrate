@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq, and } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { providerConfigs } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
-import type { ProviderConfig, TablesInsert, Json, AvailableScope } from "@appstrate/shared-types";
+import type { ProviderConfig, AvailableScope } from "@appstrate/shared-types";
 import { requireAdmin } from "../middleware/guards.ts";
-import { supabase } from "../lib/supabase.ts";
+import { logger } from "../lib/logger.ts";
 import { getBuiltInProviders, isBuiltInProvider, encrypt } from "@appstrate/connect";
-import type { ProviderConfigRow, AuthMode } from "@appstrate/connect";
+import type { AuthMode } from "@appstrate/connect";
 import { listFlows } from "../services/flow-service.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -46,35 +49,35 @@ const createProviderSchema = z.object({
 const updateProviderSchema = createProviderSchema.omit({ id: true }).partial();
 
 function rowToProviderConfig(
-  row: ProviderConfigRow,
+  row: typeof providerConfigs.$inferSelect,
   source: ProviderConfig["source"],
 ): ProviderConfig {
   return {
     id: row.id,
-    displayName: row.display_name,
-    authMode: row.auth_mode,
+    displayName: row.displayName,
+    authMode: row.authMode,
     source,
-    hasClientId: !!row.client_id_encrypted,
-    hasClientSecret: !!row.client_secret_encrypted,
-    authorizationUrl: row.authorization_url ?? undefined,
-    tokenUrl: row.token_url ?? undefined,
-    refreshUrl: row.refresh_url ?? undefined,
-    defaultScopes: row.default_scopes ?? undefined,
-    scopeSeparator: row.scope_separator ?? undefined,
-    pkceEnabled: row.pkce_enabled ?? undefined,
-    authorizationParams: (row.authorization_params as Record<string, string>) ?? undefined,
-    tokenParams: (row.token_params as Record<string, string>) ?? undefined,
-    credentialSchema: (row.credential_schema as unknown as Record<string, unknown>) ?? undefined,
-    credentialFieldName: row.credential_field_name ?? undefined,
-    credentialHeaderName: row.credential_header_name ?? undefined,
-    credentialHeaderPrefix: row.credential_header_prefix ?? undefined,
-    iconUrl: row.icon_url ?? undefined,
+    hasClientId: !!row.clientIdEncrypted,
+    hasClientSecret: !!row.clientSecretEncrypted,
+    authorizationUrl: row.authorizationUrl ?? undefined,
+    tokenUrl: row.tokenUrl ?? undefined,
+    refreshUrl: row.refreshUrl ?? undefined,
+    defaultScopes: row.defaultScopes ?? undefined,
+    scopeSeparator: row.scopeSeparator ?? undefined,
+    pkceEnabled: row.pkceEnabled ?? undefined,
+    authorizationParams: (row.authorizationParams as Record<string, string>) ?? undefined,
+    tokenParams: (row.tokenParams as Record<string, string>) ?? undefined,
+    credentialSchema: (row.credentialSchema as unknown as Record<string, unknown>) ?? undefined,
+    credentialFieldName: row.credentialFieldName ?? undefined,
+    credentialHeaderName: row.credentialHeaderName ?? undefined,
+    credentialHeaderPrefix: row.credentialHeaderPrefix ?? undefined,
+    iconUrl: row.iconUrl ?? undefined,
     categories: row.categories ?? undefined,
-    docsUrl: row.docs_url ?? undefined,
-    authorizedUris: row.authorized_uris?.length ? row.authorized_uris : undefined,
-    allowAllUris: row.allow_all_uris ?? undefined,
-    availableScopes: (row.available_scopes as unknown as AvailableScope[])?.length
-      ? (row.available_scopes as unknown as AvailableScope[])
+    docsUrl: row.docsUrl ?? undefined,
+    authorizedUris: row.authorizedUris?.length ? row.authorizedUris : undefined,
+    allowAllUris: row.allowAllUris ?? undefined,
+    availableScopes: (row.availableScopes as unknown as AvailableScope[])?.length
+      ? (row.availableScopes as unknown as AvailableScope[])
       : undefined,
   };
 }
@@ -91,14 +94,7 @@ export function createProvidersRouter() {
     const builtIn = getBuiltInProviders();
 
     // Fetch all DB configs for this org
-    const { data: rows, error } = await supabase
-      .from("provider_configs")
-      .select("*")
-      .eq("org_id", orgId);
-
-    if (error) {
-      return c.json({ error: "DB_ERROR", message: error.message }, 500);
-    }
+    const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
 
     // Count provider usage across all flows (built-in + user)
     const allFlows = await listFlows(orgId);
@@ -143,7 +139,7 @@ export function createProvidersRouter() {
     }
 
     // Custom providers (DB only, IDs different from built-in)
-    for (const row of (rows ?? []) as unknown as ProviderConfigRow[]) {
+    for (const row of rows) {
       if (!builtIn.has(row.id)) {
         const cfg = rowToProviderConfig(row, "custom");
         cfg.usedByFlows = providerUsage.get(row.id) ?? 0;
@@ -178,51 +174,51 @@ export function createProvidersRouter() {
     }
 
     // Check ID doesn't already exist in DB for this org
-    const { data: existing } = await supabase
-      .from("provider_configs")
-      .select("id")
-      .eq("org_id", orgId)
-      .eq("id", data.id)
-      .single();
+    const existing = await db
+      .select({ id: providerConfigs.id })
+      .from(providerConfigs)
+      .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, data.id)))
+      .limit(1);
 
-    if (existing) {
+    if (existing.length > 0) {
       return c.json(
         { error: "NAME_COLLISION", message: `Provider '${data.id}' already exists` },
         400,
       );
     }
 
-    const row: TablesInsert<"provider_configs"> = {
-      id: data.id,
-      org_id: orgId,
-      display_name: data.displayName,
-      auth_mode: data.authMode,
-      authorization_url: data.authorizationUrl ?? null,
-      token_url: data.tokenUrl ?? null,
-      refresh_url: data.refreshUrl ?? null,
-      default_scopes: data.defaultScopes ?? [],
-      scope_separator: data.scopeSeparator ?? " ",
-      pkce_enabled: data.pkceEnabled ?? true,
-      authorization_params: (data.authorizationParams ?? {}) as Json,
-      token_params: (data.tokenParams ?? {}) as Json,
-      credential_schema: (data.credentialSchema ?? null) as Json,
-      credential_field_name: data.credentialFieldName ?? null,
-      credential_header_name: data.credentialHeaderName ?? null,
-      credential_header_prefix: data.credentialHeaderPrefix ?? null,
-      icon_url: data.iconUrl ?? null,
-      categories: data.categories ?? [],
-      docs_url: data.docsUrl ?? null,
-      client_id_encrypted: data.clientId ? encrypt(data.clientId) : null,
-      client_secret_encrypted: data.clientSecret ? encrypt(data.clientSecret) : null,
-      authorized_uris: data.authorizedUris ?? [],
-      allow_all_uris: data.allowAllUris ?? false,
-      available_scopes: (data.availableScopes ?? []) as unknown as Json,
-    };
-
-    const { error } = await supabase.from("provider_configs").insert(row);
-
-    if (error) {
-      return c.json({ error: "DB_ERROR", message: error.message }, 500);
+    try {
+      await db.insert(providerConfigs).values({
+        id: data.id,
+        orgId,
+        displayName: data.displayName,
+        authMode: data.authMode as AuthMode,
+        authorizationUrl: data.authorizationUrl ?? null,
+        tokenUrl: data.tokenUrl ?? null,
+        refreshUrl: data.refreshUrl ?? null,
+        defaultScopes: data.defaultScopes ?? [],
+        scopeSeparator: data.scopeSeparator ?? " ",
+        pkceEnabled: data.pkceEnabled ?? true,
+        authorizationParams: data.authorizationParams ?? {},
+        tokenParams: data.tokenParams ?? {},
+        credentialSchema: data.credentialSchema ?? null,
+        credentialFieldName: data.credentialFieldName ?? null,
+        credentialHeaderName: data.credentialHeaderName ?? null,
+        credentialHeaderPrefix: data.credentialHeaderPrefix ?? null,
+        iconUrl: data.iconUrl ?? null,
+        categories: data.categories ?? [],
+        docsUrl: data.docsUrl ?? null,
+        clientIdEncrypted: data.clientId ? encrypt(data.clientId) : null,
+        clientSecretEncrypted: data.clientSecret ? encrypt(data.clientSecret) : null,
+        authorizedUris: data.authorizedUris ?? [],
+        allowAllUris: data.allowAllUris ?? false,
+        availableScopes: data.availableScopes ?? [],
+      });
+    } catch (err) {
+      logger.error("Provider create failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "INTERNAL_ERROR", message: "Failed to create provider" }, 500);
     }
 
     return c.json({ id: data.id }, 201);
@@ -253,25 +249,23 @@ export function createProvidersRouter() {
     const data = parsed.data;
 
     // Fetch existing row
-    const { data: existingRow } = await supabase
-      .from("provider_configs")
-      .select("*")
-      .eq("org_id", orgId)
-      .eq("id", providerId)
-      .single();
+    const existingRows = await db
+      .select()
+      .from(providerConfigs)
+      .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+      .limit(1);
 
-    const existing = existingRow as ProviderConfigRow | null;
-
+    const existing = existingRows[0];
     if (!existing) {
       return c.json({ error: "NOT_FOUND", message: `Provider '${providerId}' not found` }, 404);
     }
 
-    const displayName = data.displayName ?? existing.display_name;
-    const authMode = (data.authMode as AuthMode) ?? existing.auth_mode;
+    const displayName = data.displayName ?? existing.displayName;
+    const authMode = (data.authMode as AuthMode) ?? existing.authMode;
 
     // Handle secrets: encrypt if provided, preserve existing if omitted/empty
-    let clientIdEncrypted: string | null = existing.client_id_encrypted ?? null;
-    let clientSecretEncrypted: string | null = existing.client_secret_encrypted ?? null;
+    let clientIdEncrypted: string | null = existing.clientIdEncrypted ?? null;
+    let clientSecretEncrypted: string | null = existing.clientSecretEncrypted ?? null;
 
     if (data.clientId && data.clientId.length > 0) {
       clientIdEncrypted = encrypt(data.clientId);
@@ -280,44 +274,42 @@ export function createProvidersRouter() {
       clientSecretEncrypted = encrypt(data.clientSecret);
     }
 
-    const row: TablesInsert<"provider_configs"> = {
-      id: providerId,
-      org_id: orgId,
-      display_name: displayName,
-      auth_mode: authMode,
-      authorization_url: data.authorizationUrl ?? existing.authorization_url ?? null,
-      token_url: data.tokenUrl ?? existing.token_url ?? null,
-      refresh_url: data.refreshUrl ?? existing.refresh_url ?? null,
-      default_scopes: data.defaultScopes ?? existing.default_scopes ?? [],
-      scope_separator: data.scopeSeparator ?? existing.scope_separator ?? " ",
-      pkce_enabled: data.pkceEnabled ?? existing.pkce_enabled ?? true,
-      authorization_params: (data.authorizationParams ??
-        existing.authorization_params ??
-        {}) as Json,
-      token_params: (data.tokenParams ?? existing.token_params ?? {}) as Json,
-      credential_schema: (data.credentialSchema ?? existing.credential_schema ?? null) as Json,
-      credential_field_name: data.credentialFieldName ?? existing.credential_field_name ?? null,
-      credential_header_name: data.credentialHeaderName ?? existing.credential_header_name ?? null,
-      credential_header_prefix:
-        data.credentialHeaderPrefix ?? existing.credential_header_prefix ?? null,
-      icon_url: data.iconUrl ?? existing.icon_url ?? null,
-      categories: data.categories ?? existing.categories ?? [],
-      docs_url: data.docsUrl ?? existing.docs_url ?? null,
-      client_id_encrypted: clientIdEncrypted,
-      client_secret_encrypted: clientSecretEncrypted,
-      authorized_uris: data.authorizedUris ?? existing.authorized_uris ?? [],
-      allow_all_uris: data.allowAllUris ?? existing.allow_all_uris ?? false,
-      available_scopes: (data.availableScopes ??
-        (existing as unknown as Record<string, unknown>).available_scopes ??
-        []) as unknown as Json,
-    };
-
-    const { error } = await supabase
-      .from("provider_configs")
-      .upsert(row, { onConflict: "org_id,id" });
-
-    if (error) {
-      return c.json({ error: "DB_ERROR", message: error.message }, 500);
+    try {
+      await db
+        .update(providerConfigs)
+        .set({
+          displayName,
+          authMode,
+          authorizationUrl: data.authorizationUrl ?? existing.authorizationUrl ?? null,
+          tokenUrl: data.tokenUrl ?? existing.tokenUrl ?? null,
+          refreshUrl: data.refreshUrl ?? existing.refreshUrl ?? null,
+          defaultScopes: data.defaultScopes ?? existing.defaultScopes ?? [],
+          scopeSeparator: data.scopeSeparator ?? existing.scopeSeparator ?? " ",
+          pkceEnabled: data.pkceEnabled ?? existing.pkceEnabled ?? true,
+          authorizationParams: data.authorizationParams ?? existing.authorizationParams ?? {},
+          tokenParams: data.tokenParams ?? existing.tokenParams ?? {},
+          credentialSchema: data.credentialSchema ?? existing.credentialSchema ?? null,
+          credentialFieldName: data.credentialFieldName ?? existing.credentialFieldName ?? null,
+          credentialHeaderName: data.credentialHeaderName ?? existing.credentialHeaderName ?? null,
+          credentialHeaderPrefix:
+            data.credentialHeaderPrefix ?? existing.credentialHeaderPrefix ?? null,
+          iconUrl: data.iconUrl ?? existing.iconUrl ?? null,
+          categories: data.categories ?? existing.categories ?? [],
+          docsUrl: data.docsUrl ?? existing.docsUrl ?? null,
+          clientIdEncrypted,
+          clientSecretEncrypted,
+          authorizedUris: data.authorizedUris ?? existing.authorizedUris ?? [],
+          allowAllUris: data.allowAllUris ?? existing.allowAllUris ?? false,
+          availableScopes: data.availableScopes ?? existing.availableScopes ?? [],
+          updatedAt: new Date(),
+        })
+        .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)));
+    } catch (err) {
+      logger.error("Provider update failed", {
+        providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "INTERNAL_ERROR", message: "Failed to update provider" }, 500);
     }
 
     return c.json({ id: providerId });
@@ -360,14 +352,16 @@ export function createProvidersRouter() {
       );
     }
 
-    const { error } = await supabase
-      .from("provider_configs")
-      .delete()
-      .eq("org_id", orgId)
-      .eq("id", providerId);
-
-    if (error) {
-      return c.json({ error: "DB_ERROR", message: error.message }, 500);
+    try {
+      await db
+        .delete(providerConfigs)
+        .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)));
+    } catch (err) {
+      logger.error("Provider delete failed", {
+        providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "INTERNAL_ERROR", message: "Failed to delete provider" }, 500);
     }
 
     return c.body(null, 204);

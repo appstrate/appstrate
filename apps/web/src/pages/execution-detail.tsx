@@ -48,7 +48,7 @@ export function ExecutionDetailPage() {
   const orgId = useCurrentOrgId();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
-  const profileMap = useProfiles(execution?.user_id ? [execution.user_id] : []);
+  const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
 
   const status = liveStatus || execution?.status;
@@ -58,16 +58,17 @@ export function ExecutionDetailPage() {
 
   const qc = useQueryClient();
 
-  // Subscribe to new log INSERTs via Supabase Realtime while execution is running
+  // Subscribe to new log INSERTs via SSE while execution is running
   useExecutionLogsRealtime(
     isRunning ? execId : null,
     useCallback(
-      (newLog: ExecutionLog) => {
+      (newLog: Record<string, unknown>) => {
+        const log = newLog as unknown as ExecutionLog;
         qc.setQueryData<ExecutionLog[]>(["execution-logs", orgId, execId], (prev) => {
-          if (!prev) return [newLog];
-          // Deduplicate: skip if already present (race between REST fetch and Realtime)
-          if (prev.some((l) => l.id === newLog.id)) return prev;
-          return [...prev, newLog];
+          if (!prev) return [log];
+          // Deduplicate: skip if already present (race between REST fetch and SSE)
+          if (prev.some((l) => l.id === log.id)) return prev;
+          return [...prev, log];
         });
       },
       [qc, orgId, execId],
@@ -116,15 +117,15 @@ export function ExecutionDetailPage() {
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (!isRunning || !execution?.started_at) return;
-    const start = new Date(execution.started_at).getTime();
+    if (!isRunning || !execution?.startedAt) return;
+    const start = new Date(execution.startedAt).getTime();
     const tick = () => setElapsed(Date.now() - start);
     tick();
     const id = setInterval(tick, 100);
     return () => clearInterval(id);
-  }, [isRunning, execution?.started_at]);
+  }, [isRunning, execution?.startedAt]);
 
-  // Subscribe to Supabase Realtime for instant local status feedback
+  // Subscribe to SSE for instant local status feedback
   useExecutionRealtime(
     isRunning ? execId : null,
     useCallback(
@@ -150,10 +151,10 @@ export function ExecutionDetailPage() {
   if (error || !execution) return <ErrorState message={error?.message} />;
 
   const displayStatus = status || execution.status;
-  const date = execution.started_at ? formatDateField(execution.started_at) : "";
+  const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
   const time = execution.duration ?? elapsed;
   const duration = isRunning ? `${(time / 1000).toFixed(1)}s` : "";
-  const userName = execution.user_id ? profileMap.get(execution.user_id) : undefined;
+  const userName = execution.userId ? profileMap.get(execution.userId) : undefined;
 
   return (
     <>
@@ -170,8 +171,8 @@ export function ExecutionDetailPage() {
         {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
         <span className="exec-meta">{date}</span>
         {duration && <span className="exec-meta">{duration}</span>}
-        {!isRunning && execution.tokens_used != null && (
-          <span className="exec-meta">{execution.tokens_used.toLocaleString()} tokens</span>
+        {!isRunning && execution.tokensUsed != null && (
+          <span className="exec-meta">{execution.tokensUsed.toLocaleString()} tokens</span>
         )}
         {!isRunning && (execution as Record<string, unknown>).cost_usd != null && (
           <span className="exec-meta">

@@ -1,7 +1,9 @@
 import { randomBytes, createHash } from "node:crypto";
+import { eq, and, gt } from "drizzle-orm";
+import { oauthStates } from "@appstrate/db/schema";
+import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import type { SupabaseClient } from "./registry.ts";
 import { parseTokenResponse } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
@@ -29,19 +31,19 @@ export interface InitiateOAuthResult {
  * Creates a PKCE challenge (if supported), stores state in DB, and returns the auth URL.
  */
 export async function initiateOAuth(
-  supabase: SupabaseClient,
+  db: Db,
   orgId: string,
   userId: string,
   providerId: string,
   redirectUri: string,
   requestedScopes?: string[],
 ): Promise<InitiateOAuthResult> {
-  const provider = await getProviderOrThrow(supabase, orgId, providerId, "oauth2");
+  const provider = await getProviderOrThrow(db, orgId, providerId, "oauth2");
   if (!provider.authorizationUrl) {
     throw new Error(`Provider '${providerId}' has no authorization URL configured`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(supabase, orgId, providerId);
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId);
 
   // Generate PKCE values
   const state = crypto.randomUUID();
@@ -49,24 +51,21 @@ export async function initiateOAuth(
   const codeChallenge = sha256Base64Url(codeVerifier);
 
   // Merge default + requested scopes
-  const allScopes = [
-    ...(provider.defaultScopes ?? []),
-    ...(requestedScopes ?? []),
-  ];
+  const allScopes = [...(provider.defaultScopes ?? []), ...(requestedScopes ?? [])];
   const uniqueScopes = [...new Set(allScopes)];
   const scopeString = uniqueScopes.join(provider.scopeSeparator ?? " ");
 
   // Store OAuth state in DB
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  await supabase.from("oauth_states").insert({
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await db.insert(oauthStates).values({
     state,
-    org_id: orgId,
-    user_id: userId,
-    provider_id: providerId,
-    code_verifier: codeVerifier,
-    scopes_requested: uniqueScopes,
-    redirect_uri: redirectUri,
-    expires_at: expiresAt,
+    orgId,
+    userId,
+    providerId,
+    codeVerifier,
+    scopesRequested: uniqueScopes,
+    redirectUri,
+    expiresAt,
   });
 
   // Build authorization URL
@@ -106,52 +105,53 @@ export interface OAuthCallbackResult {
  * Exchanges the authorization code for tokens using PKCE.
  */
 export async function handleOAuthCallback(
-  supabase: SupabaseClient,
+  db: Db,
   code: string,
   state: string,
 ): Promise<OAuthCallbackResult> {
-  // Look up the OAuth state (filter expired states at DB level)
-  const { data: rawRow, error: stateError } = await supabase
-    .from("oauth_states")
-    .select("*")
-    .eq("state", state)
-    .gt("expires_at", new Date().toISOString())
-    .single();
+  // Look up the OAuth state
+  const rows = await db
+    .select()
+    .from(oauthStates)
+    .where(and(eq(oauthStates.state, state), gt(oauthStates.expiresAt, new Date())))
+    .limit(1);
 
-  if (stateError && !rawRow) {
-    throw new Error(`OAuth state lookup failed: ${extractErrorMessage(stateError)}`);
-  }
-  if (!rawRow) {
+  if (rows.length === 0) {
     throw new Error("Invalid or expired OAuth state");
   }
 
-  // Map snake_case DB columns to camelCase
+  const rawRow = rows[0]!;
+
+  // Map to OAuthStateRecord
   const stateRow: OAuthStateRecord = {
-    state: rawRow.state as string,
-    orgId: rawRow.org_id as string,
-    userId: rawRow.user_id as string,
-    providerId: rawRow.provider_id as string,
-    codeVerifier: rawRow.code_verifier as string,
-    scopesRequested: rawRow.scopes_requested as string[],
-    redirectUri: rawRow.redirect_uri as string,
-    createdAt: rawRow.created_at as string,
-    expiresAt: rawRow.expires_at as string,
+    state: rawRow.state,
+    orgId: rawRow.orgId,
+    userId: rawRow.userId,
+    providerId: rawRow.providerId,
+    codeVerifier: rawRow.codeVerifier,
+    scopesRequested: (rawRow.scopesRequested as string[]) ?? [],
+    redirectUri: rawRow.redirectUri,
+    createdAt: rawRow.createdAt?.toISOString() ?? "",
+    expiresAt: rawRow.expiresAt.toISOString(),
   };
 
   // Check expiration
   if (new Date(stateRow.expiresAt) < new Date()) {
-    // Clean up expired state
-    await supabase.from("oauth_states").delete().eq("state", state);
+    await db.delete(oauthStates).where(eq(oauthStates.state, state));
     throw new Error("OAuth state has expired");
   }
 
   // Resolve the provider
-  const provider = await getProviderOrThrow(supabase, stateRow.orgId, stateRow.providerId);
+  const provider = await getProviderOrThrow(db, stateRow.orgId, stateRow.providerId);
   if (!provider.tokenUrl) {
     throw new Error(`Provider '${stateRow.providerId}' has no token URL configured`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(supabase, stateRow.orgId, stateRow.providerId);
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(
+    db,
+    stateRow.orgId,
+    stateRow.providerId,
+  );
 
   // Exchange code for tokens
   const tokenBody = new URLSearchParams({
@@ -160,9 +160,7 @@ export async function handleOAuthCallback(
     redirect_uri: stateRow.redirectUri,
     client_id: oauthCreds.clientId,
     client_secret: oauthCreds.clientSecret,
-    ...(provider.pkceEnabled !== false
-      ? { code_verifier: stateRow.codeVerifier }
-      : {}),
+    ...(provider.pkceEnabled !== false ? { code_verifier: stateRow.codeVerifier } : {}),
     ...(provider.tokenParams ?? {}),
   });
 
@@ -175,7 +173,9 @@ export async function handleOAuthCallback(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new Error(`Token exchange network error for '${stateRow.providerId}': ${extractErrorMessage(err)}`);
+    throw new Error(
+      `Token exchange network error for '${stateRow.providerId}': ${extractErrorMessage(err)}`,
+    );
   }
 
   if (!tokenResponse.ok) {
@@ -197,7 +197,7 @@ export async function handleOAuthCallback(
   );
 
   // Clean up the OAuth state
-  await supabase.from("oauth_states").delete().eq("state", state);
+  await db.delete(oauthStates).where(eq(oauthStates.state, state));
 
   return {
     providerId: stateRow.providerId,
