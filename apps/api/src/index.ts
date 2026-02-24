@@ -9,6 +9,7 @@ import { db, closeDb } from "./lib/db.ts";
 import { auth } from "./lib/auth.ts";
 import { oauthStates, scheduleRuns } from "@appstrate/db/schema";
 import { expireOldInvitations } from "./services/invitations.ts";
+import { validateApiKey, cleanupExpiredKeys } from "./services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./lib/logger.ts";
 import { initRealtime } from "./services/realtime.ts";
@@ -29,6 +30,7 @@ import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
+import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
@@ -36,6 +38,8 @@ import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
+import { swaggerUI } from "@hono/swagger-ui";
+import { openApiSpec } from "./openapi/index.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -50,6 +54,10 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);
+
+// OpenAPI docs — public (before auth middleware)
+app.get("/api/openapi.json", (c) => c.json(openApiSpec));
+app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -66,7 +74,7 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
-// Auth middleware: verify Better Auth session (cookie-based)
+// Auth middleware: verify Bearer API key OR Better Auth session (cookie-based)
 app.use("*", async (c, next) => {
   const path = c.req.path;
   if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
@@ -76,7 +84,26 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/realtime/")) return next();
   // OAuth callback is a redirect from the provider — no session
   if (path === "/auth/callback") return next();
+  // OpenAPI docs are public
+  if (path === "/api/docs" || path === "/api/openapi.json") return next();
 
+  // Try Bearer API key first
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ask_")) {
+    const rawKey = authHeader.slice(7); // "Bearer ".length
+    const keyInfo = await validateApiKey(rawKey);
+    if (!keyInfo) {
+      return c.json({ error: "UNAUTHORIZED", message: "Invalid or expired API key" }, 401);
+    }
+    c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
+    c.set("orgId", keyInfo.orgId);
+    c.set("orgRole", "admin");
+    c.set("authMethod", "api_key");
+    c.set("apiKeyId", keyInfo.keyId);
+    return next();
+  }
+
+  // Fallback: cookie session
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) {
     return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing session" }, 401);
@@ -86,6 +113,7 @@ app.use("*", async (c, next) => {
     email: session.user.email ?? "",
     name: session.user.name ?? "",
   });
+  c.set("authMethod", "session");
   return next();
 });
 
@@ -99,6 +127,8 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/auth/")) return next();
   if (path.startsWith("/api/realtime/")) return next();
   if (path === "/auth/callback") return next();
+  // OpenAPI docs are public
+  if (path === "/api/docs" || path === "/api/openapi.json") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
   // Allow /api/orgs/:orgId/* routes (they handle their own auth)
   if (path.startsWith("/api/orgs/")) return next();
@@ -107,6 +137,8 @@ app.use("*", async (c, next) => {
   if (path === "/api/profiles/batch") return next();
   // Welcome setup is user-scoped, not org-scoped
   if (path === "/api/welcome/setup") return next();
+  // API key auth already resolved orgId
+  if (c.get("authMethod") === "api_key") return next();
 
   return requireOrgContext()(c, next);
 });
@@ -213,6 +245,18 @@ try {
   });
 }
 
+// Clean up expired API keys
+try {
+  const expiredKeyCount = await cleanupExpiredKeys();
+  if (expiredKeyCount > 0) {
+    logger.info("Revoked expired API keys", { count: expiredKeyCount });
+  }
+} catch (err) {
+  logger.warn("Could not clean up expired API keys", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
 // Clean up old schedule_runs rows (retention: 30 days)
 try {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -272,6 +316,7 @@ app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
 app.route("/api/providers", createProvidersRouter());
+app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/auth", authRouter);

@@ -44,7 +44,9 @@ function consume(key: string, maxTokens: number, refillPerMinute: number): boole
 export function rateLimit(maxPerMinute: number) {
   return async (c: Context<AppEnv>, next: Next) => {
     const user = c.get("user");
-    const key = `${c.req.method}:${c.req.path}:${user.id}`;
+    const apiKeyId = c.get("apiKeyId");
+    const identity = apiKeyId ? `apikey:${apiKeyId}` : user.id;
+    const key = `${c.req.method}:${c.req.path}:${identity}`;
 
     if (!consume(key, maxPerMinute, maxPerMinute)) {
       return c.json(

@@ -2746,8 +2746,21 @@ button:disabled {
 
 .tab-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.tab-toolbar .btn-link {
+  margin-right: auto;
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.tab-toolbar .btn-link:hover {
+  text-decoration: underline;
 }
 
 .provider-name {

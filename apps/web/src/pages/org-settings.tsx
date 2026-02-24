@@ -6,7 +6,9 @@ import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useCreateProvider, useUpdateProvider, useDeleteProvider } from "../hooks/use-mutations";
+import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
 import { ProviderFormModal } from "../components/provider-form-modal";
+import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import type {
@@ -14,6 +16,7 @@ import type {
   OrgRole,
   OrgInvitation,
   ProviderConfig,
+  ApiKeyInfo,
 } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
@@ -24,7 +27,7 @@ export function OrgSettingsPage() {
 
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
-  const validTabs = ["general", "members", "providers"] as const;
+  const validTabs = ["general", "members", "providers", "api-keys"] as const;
   type Tab = (typeof validTabs)[number];
   const [tab, setTab] = useState<Tab>(
     validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
@@ -43,6 +46,11 @@ export function OrgSettingsPage() {
   const createProviderMutation = useCreateProvider();
   const updateProviderMutation = useUpdateProvider();
   const deleteProviderMutation = useDeleteProvider();
+
+  // API Keys
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const { data: apiKeysData, isLoading: apiKeysLoading, error: apiKeysError } = useApiKeys();
+  const revokeApiKeyMutation = useRevokeApiKey();
 
   const orgId = currentOrg?.id;
 
@@ -236,6 +244,14 @@ export function OrgSettingsPage() {
           onClick={() => setTab("providers")}
         >
           {t("orgSettings.tabProviders")}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "api-keys"}
+          className={`tab ${tab === "api-keys" ? "active" : ""}`}
+          onClick={() => setTab("api-keys")}
+        >
+          {t("orgSettings.tabApiKeys")}
         </button>
       </div>
 
@@ -475,6 +491,19 @@ export function OrgSettingsPage() {
         />
       )}
 
+      {tab === "api-keys" && (
+        <ApiKeysTab
+          apiKeys={apiKeysData}
+          isLoading={apiKeysLoading}
+          error={apiKeysError}
+          onCreate={() => setApiKeyModalOpen(true)}
+          onRevoke={(key) => {
+            if (!confirm(t("apiKeys.revokeConfirm", { name: key.name }))) return;
+            revokeApiKeyMutation.mutate(key.id);
+          }}
+        />
+      )}
+
       <ProviderFormModal
         open={providerModalOpen}
         onClose={() => setProviderModalOpen(false)}
@@ -491,6 +520,8 @@ export function OrgSettingsPage() {
           }
         }}
       />
+
+      <ApiKeyCreateModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
     </>
   );
 }
@@ -609,6 +640,97 @@ function ProvidersTab({
         </div>
       ) : (
         <EmptyState message={t("providers.empty", { defaultValue: "No providers configured." })} />
+      )}
+    </>
+  );
+}
+
+function ApiKeysTab({
+  apiKeys,
+  isLoading,
+  error,
+  onCreate,
+  onRevoke,
+}: {
+  apiKeys: ApiKeyInfo[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  onCreate: () => void;
+  onRevoke: (key: ApiKeyInfo) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
+  const formatDate = (iso: string | null) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const isExpired = (expiresAt: string | null) =>
+    expiresAt ? new Date(expiresAt) < new Date() : false;
+
+  return (
+    <>
+      <div className="tab-toolbar">
+        <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn-link">
+          {t("apiKeys.swaggerLink")}
+        </a>
+        <button className="primary" onClick={onCreate}>
+          {t("apiKeys.createBtn")}
+        </button>
+      </div>
+
+      {apiKeys && apiKeys.length > 0 ? (
+        <div className="services-grid">
+          {apiKeys.map((key) => {
+            const expired = isExpired(key.expiresAt);
+            return (
+              <div key={key.id} className="service-card">
+                <div className="service-card-header">
+                  <div className="service-info">
+                    <h3>{key.name}</h3>
+                    <div className="provider-badges">
+                      <span className="badge badge-dim">{key.keyPrefix}...</span>
+                      {expired ? (
+                        <span className="badge badge-failed">{t("apiKeys.expired")}</span>
+                      ) : (
+                        <span className="badge badge-success">{t("apiKeys.active")}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="service-card-body">
+                  <span className="service-provider">
+                    {key.expiresAt
+                      ? t("apiKeys.expiresOn", { date: formatDate(key.expiresAt) })
+                      : t("apiKeys.neverExpires")}
+                  </span>
+                  {key.lastUsedAt && (
+                    <span className="service-provider">
+                      {t("apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
+                    </span>
+                  )}
+                  {key.createdByName && (
+                    <span className="service-provider">
+                      {t("apiKeys.createdByLabel", { name: key.createdByName })}
+                    </span>
+                  )}
+                </div>
+                <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
+                  <button onClick={() => onRevoke(key)}>{t("apiKeys.revoke")}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} compact />
       )}
     </>
   );

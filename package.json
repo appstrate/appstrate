@@ -13,15 +13,18 @@
     "lint:fix": "turbo lint:fix",
     "format": "turbo format",
     "format:check": "turbo format:check",
-    "check": "turbo check",
+    "check": "turbo check && bun scripts/verify-openapi.ts",
     "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
     "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:migrate": "cd packages/db && bunx drizzle-kit migrate",
     "docker:dev": "docker compose -f docker-compose.yml up -d",
-    "docker:prod": "docker compose -f docker-compose.prod.yml up -d"
+    "docker:prod": "docker compose -f docker-compose.prod.yml up -d",
+    "verify:openapi": "bun scripts/verify-openapi.ts"
   },
   "devDependencies": {
+    "@readme/openapi-parser": "^5.5.0",
+    "@redocly/openapi-core": "^2.19.1",
     "@types/bun": "latest",
     "prettier": "^3.8.1",
     "turbo": "^2"

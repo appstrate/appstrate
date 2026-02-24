@@ -19,6 +19,7 @@ export type {
   OrganizationWithRole,
   ProviderConfig,
   OrgInvitation,
+  ApiKeyInfo,
 } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
@@ -104,5 +105,7 @@ export type AppEnv = {
     flow: LoadedFlow;
     orgId: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
+    authMethod?: "session" | "api_key";
+    apiKeyId?: string;
   };
 };
