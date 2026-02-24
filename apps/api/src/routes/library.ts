@@ -14,6 +14,7 @@ import {
 } from "../services/library.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { extractSkillMeta } from "../services/skill-utils.ts";
+import { validateExtensionSource } from "../services/extension-validation.ts";
 import { unzipAndNormalize } from "../services/flow-package.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { inArray } from "drizzle-orm";
@@ -167,7 +168,13 @@ async function parseLibraryUpload(
     if (!description) description = meta.description || undefined;
   }
 
-  return { id: body.id, name, description, content: body.content };
+  // Synthesize normalizedFiles so the ZIP is uploaded to storage (same as multipart path)
+  const encoded = new TextEncoder().encode(body.content);
+  const fileName =
+    opts.requiredFile ?? (opts.contentFileExt ? `${body.id}${opts.contentFileExt}` : "content");
+  const normalizedFiles: Record<string, Uint8Array> = { [fileName]: encoded };
+
+  return { id: body.id, name, description, content: body.content, normalizedFiles };
 }
 
 export function createLibraryRouter() {
@@ -257,12 +264,18 @@ export function createLibraryRouter() {
 
     const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
 
+    const finalContent = body.content ?? existing.content;
     const skill = await upsertOrgSkill(orgId, {
       id: skillId,
       name: body.name ?? existing.name ?? undefined,
       description: body.description ?? existing.description ?? undefined,
-      content: body.content ?? existing.content,
+      content: finalContent,
       createdBy: existing.createdBy ?? user.id,
+    });
+
+    // Update storage ZIP so container packaging stays in sync
+    await uploadLibraryPackage("skills", orgId, skillId, {
+      "SKILL.md": new TextEncoder().encode(finalContent),
     });
 
     return c.json({ skill: { id: skill.id, name: skill.name, description: skill.description } });
@@ -329,6 +342,19 @@ export function createLibraryRouter() {
       );
     }
 
+    const validation = validateExtensionSource(parsed.content);
+    if (!validation.valid) {
+      return c.json(
+        {
+          error: "VALIDATION_ERROR",
+          message: validation.errors[0],
+          details: validation.errors,
+          warnings: validation.warnings,
+        },
+        400,
+      );
+    }
+
     const ext = await upsertOrgExtension(orgId, {
       id: parsed.id,
       name: parsed.name,
@@ -341,7 +367,13 @@ export function createLibraryRouter() {
       await uploadLibraryPackage("extensions", orgId, parsed.id, parsed.normalizedFiles);
     }
 
-    return c.json({ extension: { id: ext.id, name: ext.name, description: ext.description } }, 201);
+    return c.json(
+      {
+        extension: { id: ext.id, name: ext.name, description: ext.description },
+        ...(validation.warnings.length > 0 ? { warnings: validation.warnings } : {}),
+      },
+      201,
+    );
   });
 
   router.get("/extensions/:id", async (c) => {
@@ -378,16 +410,40 @@ export function createLibraryRouter() {
 
     const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
 
+    let extWarnings: string[] = [];
+    if (body.content) {
+      const validation = validateExtensionSource(body.content);
+      if (!validation.valid) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: validation.errors[0],
+            details: validation.errors,
+            warnings: validation.warnings,
+          },
+          400,
+        );
+      }
+      extWarnings = validation.warnings;
+    }
+
+    const finalContent = body.content ?? existing.content;
     const ext = await upsertOrgExtension(orgId, {
       id: extId,
       name: body.name ?? existing.name ?? undefined,
       description: body.description ?? existing.description ?? undefined,
-      content: body.content ?? existing.content,
+      content: finalContent,
       createdBy: existing.createdBy ?? user.id,
+    });
+
+    // Update storage ZIP so container packaging stays in sync
+    await uploadLibraryPackage("extensions", orgId, extId, {
+      [`${extId}.ts`]: new TextEncoder().encode(finalContent),
     });
 
     return c.json({
       extension: { id: ext.id, name: ext.name, description: ext.description },
+      ...(extWarnings.length > 0 ? { warnings: extWarnings } : {}),
     });
   });
 

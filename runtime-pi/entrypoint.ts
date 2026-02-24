@@ -12,6 +12,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import { wrapExtensionFactory } from "./extension-wrapper.ts";
 
 // --- Helpers ---
 
@@ -71,7 +72,7 @@ async function loadExtensionsFromDir(dir: string, label: string) {
         emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
         continue;
       }
-      extensionFactories.push(factory);
+      extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
       loadedExtensionIds.add(id);
       emit({ type: "text_delta", text: `Loaded extension (${label}): ${entry}\n` });
     } catch (err) {
