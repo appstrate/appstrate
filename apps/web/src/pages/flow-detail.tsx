@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
@@ -34,7 +34,7 @@ import { ShareDropdown } from "../components/share-dropdown";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { truncate, formatDateField } from "../lib/markdown";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import type { Schedule, JSONSchemaObject } from "@appstrate/shared-types";
 
@@ -103,7 +103,7 @@ export function FlowDetailPage() {
 
   if (isLoading) return <LoadingState />;
 
-  if (error || !detail) return <ErrorState message={error?.message} />;
+  if (error || !detail) return <Navigate to="/" replace />;
 
   // Look up provider's credentialSchema for custom credential modal
   const customCredProviderDef = customCredService
