@@ -523,7 +523,11 @@ function ProfilesTab() {
                     <>
                       <h3>
                         {profile.name}
-                        {profile.isDefault && <span className="tag">{t("profiles.default")}</span>}
+                        {profile.isDefault && (
+                          <span className="tag" style={{ marginLeft: "0.4rem" }}>
+                            {t("profiles.default")}
+                          </span>
+                        )}
                       </h3>
                       <span className="service-provider">
                         {t("profiles.connections", { count: profile.connectionCount })}
