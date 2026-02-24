@@ -452,7 +452,7 @@ export function OrgSettingsPage() {
                         onClick={() => cancelInvitationMutation.mutate(inv.id)}
                         disabled={cancelInvitationMutation.isPending}
                       >
-                        {t("btn.cancel", { ns: "common" })}
+                        {t("btn.cancel")}
                       </button>
                     </div>
                   </div>
@@ -620,7 +620,7 @@ function ProvidersTab({
                 </div>
                 {!isBuiltIn && (
                   <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
-                    <button onClick={() => onEdit(p)}>{t("btn.edit", { ns: "common" })}</button>
+                    <button onClick={() => onEdit(p)}>{t("btn.edit")}</button>
                     <button
                       onClick={() => onDelete(p)}
                       disabled={!!p.usedByFlows && p.usedByFlows > 0}
@@ -630,7 +630,7 @@ function ProvidersTab({
                           : undefined
                       }
                     >
-                      {t("btn.delete", { ns: "common" })}
+                      {t("btn.delete")}
                     </button>
                   </div>
                 )}

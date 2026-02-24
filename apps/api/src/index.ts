@@ -15,6 +15,7 @@ import { logger } from "./lib/logger.ts";
 import { initRealtime } from "./services/realtime.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { initBuiltInProviders } from "@appstrate/connect";
+import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { initBuiltInLibrary } from "./services/builtin-library.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
@@ -32,6 +33,7 @@ import { createLibraryRouter } from "./routes/library.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createInternalRouter } from "./routes/internal.ts";
+import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -114,6 +116,15 @@ app.use("*", async (c, next) => {
     name: session.user.name ?? "",
   });
   c.set("authMethod", "session");
+
+  // Ensure the user has a default connection profile
+  ensureDefaultProfile(session.user.id).catch((err) => {
+    logger.warn("Failed to ensure default profile", {
+      userId: session.user.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   return next();
 });
 
@@ -317,6 +328,7 @@ app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
+app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/auth", authRouter);

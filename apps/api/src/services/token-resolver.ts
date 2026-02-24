@@ -10,21 +10,20 @@ import type { FlowServiceRequirement } from "../types/index.ts";
 
 /**
  * Build a map of service tokens for all required services.
+ * serviceProfiles maps serviceId → profileId.
  */
 export async function buildServiceTokens(
   services: FlowServiceRequirement[],
-  adminConns: Record<string, string>,
-  orgId: string,
-  userId: string,
+  serviceProfiles: Record<string, string>,
+  _orgId: string,
 ): Promise<Record<string, string>> {
   const tokens: Record<string, string> = {};
 
   for (const svc of services) {
-    const mode = svc.connectionMode ?? "user";
-    const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
+    const profileId = serviceProfiles[svc.id];
 
-    if (tokenUserId) {
-      const result = await getCredentials(db, orgId, tokenUserId, svc.provider);
+    if (profileId) {
+      const result = await getCredentials(db, profileId, svc.provider);
       let token = result
         ? (result.credentials.access_token ?? result.credentials.api_key ?? null)
         : null;
@@ -39,7 +38,7 @@ export async function buildServiceTokens(
         logger.warn("No token resolved for service", {
           serviceId: svc.id,
           provider: svc.provider,
-          userId: tokenUserId,
+          profileId,
         });
       }
     }

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentProfileId } from "./use-current-profile";
 import type { FlowListItem, FlowDetail } from "@appstrate/shared-types";
 
 export function useFlows() {
@@ -16,10 +17,12 @@ export function useFlows() {
 
 export function useFlowDetail(flowId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const profileId = useCurrentProfileId();
   return useQuery({
-    queryKey: ["flow", orgId, flowId],
+    queryKey: ["flow", orgId, flowId, profileId],
     queryFn: async () => {
-      const data = await api<FlowDetail>(`/flows/${flowId}`);
+      const qs = profileId ? `?profileId=${profileId}` : "";
+      const data = await api<FlowDetail>(`/flows/${flowId}${qs}`);
       return data;
     },
     enabled: !!flowId,

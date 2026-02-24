@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useOrg } from "../hooks/use-org";
+import { useClickOutside } from "../hooks/use-click-outside";
 import { Spinner } from "./spinner";
 
 export function OrgSwitcher() {
@@ -9,17 +10,8 @@ export function OrgSwitcher() {
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(ref, open, close);
 
   if (loading) {
     return <Spinner />;
@@ -109,6 +101,9 @@ export function OrgSwitcher() {
           })}
 
           <div className="org-switcher-divider">
+            <Link to="/connectors" className="org-switcher-link" onClick={() => setOpen(false)}>
+              {t("orgSwitcher.connectors")}
+            </Link>
             <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
               {t("orgSwitcher.settings")}
             </Link>

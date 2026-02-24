@@ -18,6 +18,11 @@ import { listFlowVersions } from "../services/flow-versions.ts";
 import { getFlowPackage } from "../services/flow-package.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
+import {
+  getEffectiveProfileId,
+  setFlowProfileOverride,
+  removeFlowProfileOverride,
+} from "../services/connection-profiles.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -56,13 +61,18 @@ export function createFlowsRouter() {
     const orgId = c.get("orgId");
     const m = flow.manifest;
 
-    // Fetch admin connections and resolve service statuses
-    const adminConns = await getAdminConnections(orgId, flow.id);
+    // Fetch admin connections and user's effective profile
+    const queryProfileId = c.req.query("profileId");
+    const [adminConns, userProfileId] = await Promise.all([
+      getAdminConnections(orgId, flow.id),
+      queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(user.id, flow.id),
+    ]);
+
     const serviceStatuses = await resolveServiceStatuses(
       m.requires.services,
       adminConns,
       orgId,
-      user.id,
+      userProfileId,
     );
 
     // Get config (global), last execution (per-user), running count (per-user)
@@ -193,7 +203,7 @@ export function createFlowsRouter() {
     return c.json({ versions });
   });
 
-  // POST /api/flows/:id/services/:serviceId/bind — bind admin's connection to a service
+  // POST /api/flows/:id/services/:serviceId/bind — bind a profile's connection to a service
   router.post("/:id/services/:serviceId/bind", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
@@ -217,9 +227,19 @@ export function createFlowsRouter() {
       );
     }
 
-    // Verify admin has a connection for this provider
+    // Get profile from body or default
+    let profileId: string | undefined;
+    try {
+      const body = await c.req.json<{ profileId?: string }>();
+      profileId = body.profileId;
+    } catch {
+      // No body — use default profile
+    }
+    const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
+
+    // Verify the profile has a connection for this provider
     const orgId = c.get("orgId");
-    const conn = await getConnectionStatus(svc.provider, orgId, user.id);
+    const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
     if (conn.status !== "connected") {
       return c.json(
         {
@@ -230,7 +250,7 @@ export function createFlowsRouter() {
       );
     }
 
-    await bindAdminConnection(orgId, flow.id, serviceId, user.id);
+    await bindAdminConnection(orgId, flow.id, serviceId, effectiveProfileId);
     return c.json({ bound: true });
   });
 
@@ -249,6 +269,26 @@ export function createFlowsRouter() {
 
     await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
     return c.json({ unbound: true });
+  });
+
+  // PUT /api/flows/:id/profile — set flow profile override
+  router.put("/:id/profile", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    const body = await c.req.json<{ profileId: string }>();
+    if (!body.profileId) {
+      return c.json({ error: "VALIDATION_ERROR", message: "profileId is required" }, 400);
+    }
+    await setFlowProfileOverride(user.id, flow.id, body.profileId);
+    return c.json({ success: true });
+  });
+
+  // DELETE /api/flows/:id/profile — remove flow profile override
+  router.delete("/:id/profile", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const user = c.get("user");
+    await removeFlowProfileOverride(user.id, flow.id);
+    return c.json({ success: true });
   });
 
   // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)

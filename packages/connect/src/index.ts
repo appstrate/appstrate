@@ -2,10 +2,10 @@
 export type {
   AuthMode,
   ProviderDefinition,
+  ProviderSnapshot,
   ConnectionRecord,
   DecryptedCredentials,
   OAuthStateRecord,
-
   ScopeValidationResult,
 } from "./types.ts";
 // Encryption
@@ -40,7 +40,6 @@ export { refreshIfNeeded } from "./token-refresh.ts";
 // Credentials
 export {
   getConnection,
-  hasConnection,
   listConnections,
   getCredentials,
   resolveCredentialsForProxy,

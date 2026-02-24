@@ -16,6 +16,7 @@ import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
+import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 
 export function createShareRouter() {
   const router = new Hono();
@@ -118,23 +119,31 @@ export function createShareRouter() {
       size: f.size,
     }));
 
+    // Resolve service profiles
+    const serviceProfiles = await resolveServiceProfiles(
+      flow.manifest.requires.services,
+      userId,
+      flowId,
+      orgId,
+    );
+
     // Validate service dependencies before execution
-    const adminConns = await getAdminConnections(orgId, flowId);
     const depError = await validateFlowDependencies(
       flow.manifest.requires.services,
-      adminConns,
+      serviceProfiles,
       orgId,
-      userId,
     );
     if (depError) {
       return c.json(depError, 400);
     }
 
+    const userProfileId = await getEffectiveProfileId(userId, flowId);
+
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow,
-      adminConns,
+      serviceProfiles,
       orgId,
       userId,
       input: parsedInput,
@@ -150,6 +159,7 @@ export function createShareRouter() {
       parsedInput ?? null,
       undefined,
       flowVersionId ?? undefined,
+      userProfileId,
     );
     await linkExecutionToToken(tokenId, executionId);
 

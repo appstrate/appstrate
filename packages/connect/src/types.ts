@@ -35,18 +35,31 @@ export interface ProviderDefinition {
   docsUrl?: string;
 }
 
+export interface ProviderSnapshot {
+  authMode: AuthMode;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  clientIdEncrypted?: string;
+  clientSecretEncrypted?: string;
+  scopeSeparator?: string;
+  credentialFieldName?: string;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  authorizedUris?: string[];
+  allowAllUris?: boolean;
+}
+
 export interface ConnectionRecord {
   id: string;
-  orgId: string;
-  userId: string;
+  profileId: string;
   providerId: string;
-  flowId: string | null;
   authMode: AuthMode;
   credentialsEncrypted: string;
   scopesGranted: string[];
   expiresAt: string | null;
   rawTokenResponse: Record<string, unknown> | null;
-  connectionConfig: Record<string, unknown>;
+  providerSnapshot: ProviderSnapshot;
+  configHash: string;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -65,6 +78,7 @@ export interface OAuthStateRecord {
   state: string;
   orgId: string;
   userId: string;
+  profileId: string;
   providerId: string;
   codeVerifier: string;
   scopesRequested: string[];

@@ -8,6 +8,7 @@
   "userMenu.preferences": "Préférences",
   "orgSwitcher.ariaLabel": "Changer d'organisation",
   "orgSwitcher.ariaLabelList": "Organisations",
+  "orgSwitcher.connectors": "Connecteurs",
   "orgSwitcher.settings": "Paramètres de l'organisation",
   "orgSwitcher.create": "+ Nouvelle organisation",
   "btn.cancel": "Annuler",

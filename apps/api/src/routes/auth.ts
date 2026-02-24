@@ -11,14 +11,15 @@ import {
   disconnectProvider,
   getProviderAuthMode,
 } from "../services/connection-manager.ts";
+import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 
 const router = new Hono<AppEnv>();
 
-// GET /auth/connections — list connections for current user
+// GET /auth/connections — list connections for current user's profile
 router.get("/connections", async (c) => {
   const user = c.get("user");
-  const orgId = c.get("orgId");
-  const connections = await listUserConnections(orgId, user.id);
+  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+  const connections = await listUserConnections(profileId);
   return c.json({ connections });
 });
 
@@ -30,14 +31,17 @@ router.post("/connect/:provider", async (c) => {
 
   try {
     let scopes: string[] | undefined;
+    let profileId: string | undefined;
     try {
-      const body = await c.req.json<{ scopes?: string[] }>();
+      const body = await c.req.json<{ scopes?: string[]; profileId?: string }>();
       scopes = body.scopes;
+      profileId = body.profileId;
     } catch {
-      // No body or invalid JSON — OK, scopes are optional
+      // No body or invalid JSON — OK, scopes and profileId are optional
     }
 
-    const result = await initiateConnection(provider, orgId, user.id, scopes);
+    const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
+    const result = await initiateConnection(provider, orgId, user.id, effectiveProfileId, scopes);
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create connect session";
@@ -51,11 +55,12 @@ router.post("/connect/:provider/api-key", async (c) => {
   const user = c.get("user");
   const orgId = c.get("orgId");
   try {
-    const body = await c.req.json<{ apiKey?: string }>();
+    const body = await c.req.json<{ apiKey?: string; profileId?: string }>();
     if (!body.apiKey || !body.apiKey.trim()) {
       return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
     }
-    await saveApiKeyConnection(provider, body.apiKey.trim(), orgId, user.id);
+    const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
+    await saveApiKeyConnection(provider, body.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create API key connection";
@@ -69,7 +74,7 @@ router.post("/connect/:provider/credentials", async (c) => {
   const user = c.get("user");
   const orgId = c.get("orgId");
   try {
-    const body = await c.req.json<{ credentials?: Record<string, string> }>();
+    const body = await c.req.json<{ credentials?: Record<string, string>; profileId?: string }>();
     if (!body.credentials || typeof body.credentials !== "object") {
       return c.json({ error: "VALIDATION_ERROR", message: "Field 'credentials' is required" }, 400);
     }
@@ -78,7 +83,8 @@ router.post("/connect/:provider/credentials", async (c) => {
     const authMode = await getProviderAuthMode(provider, orgId);
     const mode = authMode === "basic" ? "basic" : "custom";
 
-    await saveCredentialsConnection(provider, mode, body.credentials, orgId, user.id);
+    const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
+    await saveCredentialsConnection(provider, mode, body.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to save credentials";
@@ -123,7 +129,8 @@ router.get("/callback", async (c) => {
 router.get("/integrations", async (c) => {
   const user = c.get("user");
   const orgId = c.get("orgId");
-  const integrations = await getIntegrationsWithStatus(orgId, user.id);
+  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+  const integrations = await getIntegrationsWithStatus(profileId, orgId);
   return c.json({ integrations });
 });
 
@@ -131,9 +138,9 @@ router.get("/integrations", async (c) => {
 router.delete("/connections/:provider", async (c) => {
   const provider = c.req.param("provider");
   const user = c.get("user");
-  const orgId = c.get("orgId");
   try {
-    await disconnectProvider(provider, orgId, user.id);
+    const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+    await disconnectProvider(provider, profileId);
     return c.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete connection";

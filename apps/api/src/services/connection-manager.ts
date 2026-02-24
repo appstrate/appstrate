@@ -1,14 +1,25 @@
 /**
  * Connection Manager — thin service wrapper over @appstrate/connect.
  * Single source for connection operations.
+ * All functions operate on profileId (no more orgId/userId for credential access).
  */
 
 import { db } from "../lib/db.ts";
 import { logger } from "../lib/logger.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
-import type { ServiceStatus } from "@appstrate/shared-types";
-import { eq } from "drizzle-orm";
-import { profiles } from "@appstrate/db/schema";
+import type {
+  ServiceStatus,
+  UserConnectionItem,
+  ProviderDisplayInfo,
+} from "@appstrate/shared-types";
+
+import { eq, inArray } from "drizzle-orm";
+import {
+  serviceConnections,
+  connectionProfiles,
+  organizationMembers,
+  organizations,
+} from "@appstrate/db/schema";
 
 import { getEnv } from "@appstrate/env";
 import {
@@ -20,6 +31,8 @@ import {
   deleteConnection as deleteConnectionRaw,
   listProviders,
   getProviderAuthMode as getProviderAuthModeRaw,
+  getProvider,
+  getBuiltInProviders,
   validateScopes,
   type ConnectionRecord,
   type ProviderDefinition,
@@ -27,6 +40,25 @@ import {
   type OAuthCallbackResult,
   type ScopeValidationResult,
 } from "@appstrate/connect";
+import { computeConfigHash, buildProviderSnapshot } from "./connection-profiles.ts";
+
+// ─── Helpers ────────────────────────────────────────────────
+
+/** Load provider definition and compute snapshot + configHash in one shot. */
+async function getProviderSnapshot(
+  orgId: string,
+  providerId: string,
+): Promise<{
+  snapshot: ReturnType<typeof buildProviderSnapshot>;
+  configHash: string;
+}> {
+  const providerDef = await getProvider(db, orgId, providerId);
+  if (!providerDef) throw new Error(`Provider '${providerId}' not found`);
+  return {
+    snapshot: buildProviderSnapshot(providerDef),
+    configHash: computeConfigHash(providerDef),
+  };
+}
 
 // Re-export types for consumers
 export type {
@@ -41,7 +73,7 @@ export type {
 
 export interface ConnectionStatus {
   provider: string;
-  status: "connected" | "not_connected";
+  status: "connected" | "not_connected" | "needs_reconnection";
   connectionId?: string;
   connectedAt?: string;
   scopesGranted?: string[];
@@ -49,11 +81,27 @@ export interface ConnectionStatus {
 
 export async function getConnectionStatus(
   provider: string,
-  orgId: string,
-  userId: string,
+  profileId: string,
+  orgId?: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, orgId, userId, provider);
+  const conn = await getConnection(db, profileId, provider);
   if (conn) {
+    // Check configHash if orgId is provided
+    if (orgId) {
+      const providerDef = await getProvider(db, orgId, provider);
+      if (providerDef) {
+        const currentHash = computeConfigHash(providerDef);
+        if (currentHash !== conn.configHash) {
+          return {
+            provider,
+            status: "needs_reconnection",
+            connectionId: conn.id,
+            connectedAt: conn.createdAt,
+            scopesGranted: conn.scopesGranted,
+          };
+        }
+      }
+    }
     return {
       provider,
       status: "connected",
@@ -71,27 +119,30 @@ export async function initiateConnection(
   provider: string,
   orgId: string,
   userId: string,
+  profileId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
   const apiEnv = getEnv();
   const redirectUri = apiEnv.OAUTH_CALLBACK_URL ?? `http://localhost:${apiEnv.PORT}/auth/callback`;
-  return initiateOAuth(db, orgId, userId, provider, redirectUri, requestedScopes);
+  return initiateOAuth(db, orgId, userId, profileId, provider, redirectUri, requestedScopes);
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
   const result = await handleOAuthCallback(db, code, state);
 
-  // Save the connection
+  const { snapshot, configHash } = await getProviderSnapshot(result.orgId, result.providerId);
+
   await saveConnection(
     db,
-    result.orgId,
-    result.userId,
+    result.profileId,
     result.providerId,
     "oauth2",
     {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
     },
+    snapshot,
+    configHash,
     {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
@@ -101,7 +152,7 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
 
   logger.info("OAuth connection established", {
     providerId: result.providerId,
-    userId: result.userId,
+    profileId: result.profileId,
     scopes: result.scopesGranted,
   });
 
@@ -113,12 +164,22 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
 export async function saveApiKeyConnection(
   provider: string,
   apiKey: string,
+  profileId: string,
   orgId: string,
-  userId: string,
 ): Promise<void> {
-  await saveConnection(db, orgId, userId, provider, "api_key", { api_key: apiKey });
+  const { snapshot, configHash } = await getProviderSnapshot(orgId, provider);
 
-  logger.info("API key connection saved", { provider, userId });
+  await saveConnection(
+    db,
+    profileId,
+    provider,
+    "api_key",
+    { api_key: apiKey },
+    snapshot,
+    configHash,
+  );
+
+  logger.info("API key connection saved", { provider, profileId });
 }
 
 // ─── Generic Credentials Connection ──────────────────────────
@@ -127,21 +188,20 @@ export async function saveCredentialsConnection(
   provider: string,
   authMode: "basic" | "custom",
   credentials: Record<string, string>,
+  profileId: string,
   orgId: string,
-  userId: string,
 ): Promise<void> {
-  await saveConnection(db, orgId, userId, provider, authMode, credentials);
+  const { snapshot, configHash } = await getProviderSnapshot(orgId, provider);
 
-  logger.info("Credentials connection saved", { provider, authMode, userId });
+  await saveConnection(db, profileId, provider, authMode, credentials, snapshot, configHash);
+
+  logger.info("Credentials connection saved", { provider, authMode, profileId });
 }
 
 // ─── Connections List ────────────────────────────────────────
 
-export async function listUserConnections(
-  orgId: string,
-  userId: string,
-): Promise<ConnectionStatus[]> {
-  const connections = await listConnectionsRaw(db, orgId, userId);
+export async function listUserConnections(profileId: string): Promise<ConnectionStatus[]> {
+  const connections = await listConnectionsRaw(db, profileId);
   return connections.map((c) => ({
     provider: c.providerId,
     status: "connected" as const,
@@ -153,13 +213,9 @@ export async function listUserConnections(
 
 // ─── Delete Connection ───────────────────────────────────────
 
-export async function disconnectProvider(
-  provider: string,
-  orgId: string,
-  userId: string,
-): Promise<void> {
-  await deleteConnectionRaw(db, orgId, userId, provider);
-  logger.info("Connection deleted", { provider, userId });
+export async function disconnectProvider(provider: string, profileId: string): Promise<void> {
+  await deleteConnectionRaw(db, profileId, provider);
+  logger.info("Connection deleted", { provider, profileId });
 }
 
 // ─── Provider Info ───────────────────────────────────────────
@@ -176,40 +232,34 @@ export interface IntegrationWithStatus {
   provider: string;
   displayName: string;
   logo: string;
-  status: "connected" | "not_connected";
+  status: "connected" | "not_connected" | "needs_reconnection";
   authMode?: string;
   connectionId?: string;
   connectedAt?: string;
 }
 
-/** Get user profile display name. */
-async function getUserProfile(userId: string): Promise<{ displayName: string | null } | null> {
-  const rows = await db
-    .select({ displayName: profiles.displayName })
-    .from(profiles)
-    .where(eq(profiles.id, userId))
-    .limit(1);
-  if (!rows[0]) return null;
-  return { displayName: rows[0].displayName };
-}
-
 export async function getIntegrationsWithStatus(
+  profileId: string,
   orgId: string,
-  userId: string,
 ): Promise<IntegrationWithStatus[]> {
   const [providers, connections] = await Promise.all([
     listProviders(db, orgId),
-    listConnectionsRaw(db, orgId, userId),
+    listConnectionsRaw(db, profileId),
   ]);
 
   return providers.map((provider) => {
     const conn = connections.find((c) => c.providerId === provider.id);
+    let status: "connected" | "not_connected" | "needs_reconnection" = "not_connected";
+    if (conn) {
+      const currentHash = computeConfigHash(provider);
+      status = currentHash !== conn.configHash ? "needs_reconnection" : "connected";
+    }
     return {
       uniqueKey: provider.id,
       provider: provider.id,
       displayName: provider.displayName,
       logo: provider.iconUrl ?? "",
-      status: conn ? ("connected" as const) : ("not_connected" as const),
+      status,
       authMode: provider.authMode === "api_key" ? "API_KEY" : "OAUTH2",
       connectionId: conn?.id,
       connectedAt: conn?.createdAt,
@@ -239,13 +289,13 @@ function buildScopeInfo(
 
 /**
  * Resolve service statuses for a flow's required services.
- * Used by flow detail and public share routes.
+ * Uses profileId for both user and admin connections (via serviceProfiles map).
  */
 export async function resolveServiceStatuses(
   services: FlowServiceRequirement[],
   adminConns: Record<string, string>,
   orgId: string,
-  userId?: string,
+  userProfileId?: string,
 ): Promise<ServiceStatus[]> {
   return Promise.all(
     services.map(async (svc) => {
@@ -261,20 +311,15 @@ export async function resolveServiceStatuses(
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
 
       if (mode === "admin") {
-        const adminUserId = adminConns[svc.id];
-        if (adminUserId) {
-          const [conn, adminProfile] = await Promise.all([
-            getConnectionStatus(svc.provider, orgId, adminUserId),
-            getUserProfile(adminUserId),
-          ]);
+        const adminProfileId = adminConns[svc.id];
+        if (adminProfileId) {
+          const conn = await getConnectionStatus(svc.provider, adminProfileId, orgId);
           return {
             ...base,
             status: conn.status,
             authMode: authModeLabel,
             connectionMode: "admin" as const,
             adminProvided: true,
-            adminUserId,
-            adminDisplayName: adminProfile?.displayName ?? undefined,
             ...buildScopeInfo(conn.scopesGranted, scopesRequired, conn.status === "connected"),
           };
         }
@@ -288,8 +333,8 @@ export async function resolveServiceStatuses(
         };
       }
 
-      const conn = userId
-        ? await getConnectionStatus(svc.provider, orgId, userId)
+      const conn = userProfileId
+        ? await getConnectionStatus(svc.provider, userProfileId, orgId)
         : { status: "not_connected" as const };
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {
@@ -301,6 +346,109 @@ export async function resolveServiceStatuses(
       };
     }),
   );
+}
+
+// ─── All User Connections (cross-profile) ───────────────────
+
+export async function listAllUserConnections(userId: string): Promise<{
+  connections: UserConnectionItem[];
+  providerInfo: Record<string, ProviderDisplayInfo>;
+}> {
+  // 1. Fetch connections with configHash
+  const rows = await db
+    .select({
+      connectionId: serviceConnections.id,
+      providerId: serviceConnections.providerId,
+      authMode: serviceConnections.authMode,
+      scopesGranted: serviceConnections.scopesGranted,
+      connectedAt: serviceConnections.createdAt,
+      configHash: serviceConnections.configHash,
+      profileId: connectionProfiles.id,
+      profileName: connectionProfiles.name,
+      isDefault: connectionProfiles.isDefault,
+    })
+    .from(serviceConnections)
+    .innerJoin(connectionProfiles, eq(serviceConnections.profileId, connectionProfiles.id))
+    .where(eq(connectionProfiles.userId, userId));
+
+  // 2. Fetch user's orgs
+  const userOrgs = await db
+    .select({
+      orgId: organizationMembers.orgId,
+      orgName: organizations.name,
+    })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
+    .where(eq(organizationMembers.userId, userId));
+
+  // 3. For each org, compute provider hashes (providerId → hash)
+  const orgHashes = new Map<string, { name: string; hashes: Map<string, string> }>();
+  for (const org of userOrgs) {
+    const providers = await listProviders(db, org.orgId);
+    const hashes = new Map<string, string>();
+    for (const p of providers) {
+      hashes.set(p.id, computeConfigHash(p));
+    }
+    orgHashes.set(org.orgId, { name: org.orgName, hashes });
+  }
+
+  // 4. Build connections with org matching
+  const connections: UserConnectionItem[] = rows.map((r) => {
+    const orgs: UserConnectionItem["orgs"] = [];
+    for (const [orgId, { name, hashes }] of orgHashes) {
+      const orgProviderHash = hashes.get(r.providerId);
+      if (orgProviderHash !== undefined) {
+        orgs.push({
+          id: orgId,
+          name,
+          status: orgProviderHash === r.configHash ? "valid" : "needs_reconnection",
+        });
+      }
+    }
+    return {
+      connectionId: r.connectionId,
+      providerId: r.providerId,
+      authMode: r.authMode,
+      scopesGranted: r.scopesGranted ?? [],
+      connectedAt: r.connectedAt?.toISOString() ?? "",
+      profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
+      orgs,
+    };
+  });
+
+  // 5. Provider display info
+  const uniqueProviderIds = [...new Set(rows.map((r) => r.providerId))];
+  const builtIn = getBuiltInProviders();
+  const providerInfo: Record<string, ProviderDisplayInfo> = {};
+  for (const pid of uniqueProviderIds) {
+    const p = builtIn.get(pid);
+    providerInfo[pid] = {
+      displayName: p?.displayName ?? pid,
+      logo: p?.iconUrl ?? "",
+    };
+  }
+
+  return { connections, providerInfo };
+}
+
+// ─── Delete All User Connections ─────────────────────────────
+
+export async function deleteAllUserConnections(userId: string): Promise<void> {
+  const profiles = await db
+    .select({ id: connectionProfiles.id })
+    .from(connectionProfiles)
+    .where(eq(connectionProfiles.userId, userId));
+
+  if (profiles.length === 0) return;
+
+  await db.delete(serviceConnections).where(
+    inArray(
+      serviceConnections.profileId,
+      profiles.map((p) => p.id),
+    ),
+  );
+
+  logger.info("All user connections deleted", { userId });
 }
 
 // ─── Scope Validation ────────────────────────────────────────

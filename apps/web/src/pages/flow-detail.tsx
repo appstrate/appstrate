@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
+import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
+import { ProfileSelector } from "../components/profile-selector";
 import { useExecutions } from "../hooks/use-executions";
 import { useProfiles } from "../hooks/use-profiles";
 import {
@@ -29,7 +31,6 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
-import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { truncate, formatDateField } from "../lib/markdown";
@@ -59,9 +60,10 @@ type Tab = "executions" | "schedules";
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { flowId } = useParams<{ flowId: string }>();
-  const { user } = useAuth();
   const { isOrgAdmin } = useOrg();
 
+  const profileId = useCurrentProfileId();
+  const pParam = profileIdParam(profileId);
   const { data: detail, isLoading, error } = useFlowDetail(flowId);
   const { data: executions } = useExecutions(flowId);
   const { data: schedules } = useSchedules(flowId);
@@ -111,7 +113,12 @@ export function FlowDetailPage() {
     (customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined) ?? undefined;
 
   const allConnected = detail.requires.services.every(
-    (s) => s.status === "connected" && s.scopesSufficient !== false,
+    (s) =>
+      (s.status === "connected" || s.status === "needs_reconnection") &&
+      s.scopesSufficient !== false,
+  );
+  const hasReconnectionNeeded = detail.requires.services.some(
+    (s) => s.status === "needs_reconnection",
   );
   const hasRequiredConfig = checkRequiredConfig(detail);
   const hasInputSchema =
@@ -155,7 +162,10 @@ export function FlowDetailPage() {
       </nav>
 
       <div className="flow-detail-header">
-        <h2>{detail.displayName}</h2>
+        <div className="header-row">
+          <h2>{detail.displayName}</h2>
+          <ProfileSelector />
+        </div>
         <p className="description">{detail.description}</p>
       </div>
 
@@ -204,16 +214,11 @@ export function FlowDetailPage() {
             };
 
             if (svc.adminProvided && isConnected) {
-              const isSelf = svc.adminUserId === user?.id;
               return (
                 <div key={svc.id} className="service admin-provided" title={svc.description}>
                   <span className="status-dot connected" />
                   {svc.name || svc.id}
-                  {!isSelf && (
-                    <span className="admin-service-badge">
-                      {svc.adminDisplayName ?? t("admin")}
-                    </span>
-                  )}
+                  <span className="admin-service-badge">{t("admin")}</span>
                   {isOrgAdmin && (
                     <button
                       type="button"
@@ -249,6 +254,7 @@ export function FlowDetailPage() {
           }
 
           // User mode (default behavior)
+          const needsReconnection = svc.status === "needs_reconnection";
           const handleServiceConnect = () => {
             if (authMode === "API_KEY") {
               setApiKeyService({ provider: svc.provider, id: svc.id });
@@ -262,10 +268,27 @@ export function FlowDetailPage() {
               connectMutation.mutate({
                 provider: svc.provider,
                 scopes: svc.scopesRequired,
+                ...pParam,
               });
             }
           };
           const hasScopeIssue = isConnected && svc.scopesSufficient === false;
+          if (needsReconnection) {
+            return (
+              <div key={svc.id} className="service needs-reconnection" title={svc.description}>
+                <span className="status-dot warning" />
+                {svc.name || svc.id}
+                <button
+                  type="button"
+                  className="btn-scope-upgrade"
+                  onClick={handleServiceConnect}
+                  disabled={connectMutation.isPending}
+                >
+                  {t("detail.reconnect", { defaultValue: "Reconnect" })}
+                </button>
+              </div>
+            );
+          }
           if (isConnected) {
             return (
               <div
@@ -291,7 +314,10 @@ export function FlowDetailPage() {
                   className="btn-unbind"
                   onClick={() => {
                     if (confirm(t("detail.disconnectConfirm", { name: svc.name || svc.id }))) {
-                      disconnectMutation.mutate(svc.provider);
+                      disconnectMutation.mutate({
+                        provider: svc.provider,
+                        ...pParam,
+                      });
                     }
                   }}
                   disabled={disconnectMutation.isPending}
@@ -321,13 +347,17 @@ export function FlowDetailPage() {
         <button
           className="primary"
           onClick={handleRun}
-          disabled={!allConnected || !hasRequiredConfig || runFlow.isPending}
+          disabled={
+            !allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending
+          }
           title={
-            !allConnected
-              ? t("detail.titleConnect")
-              : !hasRequiredConfig
-                ? t("detail.titleConfig")
-                : t("detail.titleRun")
+            hasReconnectionNeeded
+              ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
+              : !allConnected
+                ? t("detail.titleConnect")
+                : !hasRequiredConfig
+                  ? t("detail.titleConfig")
+                  : t("detail.titleRun")
           }
         >
           {runFlow.isPending && <Spinner />} {t("detail.run")}
@@ -519,7 +549,7 @@ export function FlowDetailPage() {
           if (apiKeyService) {
             const { id: serviceId, bindAfter } = apiKeyService;
             apiKeyMutation.mutate(
-              { provider: apiKeyService.provider, apiKey },
+              { provider: apiKeyService.provider, apiKey, ...pParam },
               {
                 onSuccess: () => {
                   setApiKeyService(null);
@@ -543,7 +573,7 @@ export function FlowDetailPage() {
           onSubmit={(credentials) => {
             const { provider, id: serviceId, bindAfter } = customCredService;
             credentialsMutation.mutate(
-              { provider, credentials },
+              { provider, credentials, ...pParam },
               {
                 onSuccess: () => {
                   setCustomCredService(null);

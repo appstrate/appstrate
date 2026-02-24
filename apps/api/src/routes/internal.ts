@@ -7,6 +7,7 @@ import { logger } from "../lib/logger.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getFlow } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
+import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -16,7 +17,13 @@ async function verifyExecutionToken(c: Context): Promise<
   | {
       ok: true;
       executionId: string;
-      execution: { flowId: string; userId: string; orgId: string; status: string };
+      execution: {
+        flowId: string;
+        userId: string;
+        orgId: string;
+        status: string;
+        connectionProfileId: string | null;
+      };
     }
   | { ok: false; response: Response }
 > {
@@ -42,6 +49,7 @@ async function verifyExecutionToken(c: Context): Promise<
       userId: executions.userId,
       orgId: executions.orgId,
       status: executions.status,
+      connectionProfileId: executions.connectionProfileId,
     })
     .from(executions)
     .where(eq(executions.id, executionId))
@@ -70,6 +78,7 @@ async function verifyExecutionToken(c: Context): Promise<
       userId: execution.userId,
       orgId: execution.orgId,
       status: execution.status,
+      connectionProfileId: execution.connectionProfileId,
     },
   };
 }
@@ -91,17 +100,14 @@ export function createInternalRouter() {
 
     const limit = Math.max(1, Math.min(50, parseInt(limitParam || "10", 10) || 10));
 
-    const validFields = new Set(["state", "result"]);
-    const fields = fieldsParam
-      ? (fieldsParam
-          .split(",")
-          .map((f) => f.trim())
-          .filter((f) => validFields.has(f)) as ("state" | "result")[])
-      : ["state" as const];
-
-    if (fields.length === 0) {
-      fields.push("state");
-    }
+    const validFields = ["state", "result"] as const;
+    const parsed = fieldsParam
+      ?.split(",")
+      .map((f) => f.trim())
+      .filter((f): f is "state" | "result" =>
+        validFields.includes(f as (typeof validFields)[number]),
+      );
+    const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
 
     try {
       const recentExecutions = await getRecentExecutions(
@@ -158,26 +164,32 @@ export function createInternalRouter() {
     }
 
     try {
-      // Resolve connection mode: admin connections override user connections
+      // Resolve profile for this service
       const connectionMode = service.connectionMode ?? "user";
-      const tokenOrgId = execution.orgId;
-      let tokenUserId = execution.userId;
+      let profileId: string;
 
       if (connectionMode === "admin") {
         const adminConns = await getAdminConnections(execution.orgId, execution.flowId);
-        const adminUserId = adminConns[serviceId];
-        if (adminUserId) {
-          tokenUserId = adminUserId;
+        const adminProfileId = adminConns[serviceId];
+        if (!adminProfileId) {
+          return c.json(
+            {
+              error: "TOKEN_NOT_AVAILABLE",
+              message: `No admin binding for service '${serviceId}'`,
+            },
+            404,
+          );
         }
+        profileId = adminProfileId;
+      } else {
+        // Use the connection profile snapshot from the execution, or fall back to current
+        profileId =
+          execution.connectionProfileId ??
+          (await getEffectiveProfileId(execution.userId, execution.flowId));
       }
 
-      // Unified credential resolution — all services resolve via provider
-      const result = await resolveCredentialsForProxy(
-        db,
-        tokenOrgId,
-        tokenUserId,
-        service.provider,
-      );
+      // Unified credential resolution
+      const result = await resolveCredentialsForProxy(db, profileId, service.provider);
 
       if (!result) {
         return c.json(
@@ -195,6 +207,7 @@ export function createInternalRouter() {
         provider: service.provider,
         flowId: execution.flowId,
         connectionMode,
+        profileId,
       });
 
       return c.json(result);

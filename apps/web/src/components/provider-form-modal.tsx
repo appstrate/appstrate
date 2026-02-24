@@ -193,10 +193,10 @@ function ProviderFormBody({
       actions={
         <>
           <button onClick={onClose} disabled={isPending}>
-            {t("btn.cancel", { ns: "common" })}
+            {t("btn.cancel")}
           </button>
           <button className="primary" onClick={handleSubmit} disabled={isPending}>
-            {isPending ? <Spinner /> : t("btn.save", { ns: "common" })}
+            {isPending ? <Spinner /> : t("btn.save")}
           </button>
         </>
       }

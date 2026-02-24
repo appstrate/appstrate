@@ -233,9 +233,7 @@ export function PublicShareRunPage() {
                   <div key={svc.id} className="service admin-provided" title={svc.description}>
                     <span className="status-dot connected" />
                     {svc.id}
-                    <span className="admin-service-badge">
-                      {svc.adminDisplayName ?? t("admin")}
-                    </span>
+                    <span className="admin-service-badge">{t("admin")}</span>
                   </div>
                 );
               }

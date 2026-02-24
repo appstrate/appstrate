@@ -150,8 +150,8 @@ export function ShareableRunPage() {
                       className={`status-dot ${svc.adminProvided && isConnected ? "connected" : "disconnected"}`}
                     />
                     {svc.id}
-                    {svc.adminProvided && isConnected && svc.adminDisplayName && (
-                      <span className="admin-service-badge">{svc.adminDisplayName}</span>
+                    {svc.adminProvided && isConnected && (
+                      <span className="admin-service-badge">{t("admin")}</span>
                     )}
                     {!(svc.adminProvided && isConnected) && (
                       <span className="admin-service-badge pending">{t("detail.pending")}</span>

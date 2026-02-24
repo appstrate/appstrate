@@ -1,37 +1,27 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { serviceConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { ConnectionRecord, DecryptedCredentials, AuthMode } from "./types.ts";
+import type { ConnectionRecord, DecryptedCredentials, AuthMode, ProviderSnapshot } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { refreshIfNeeded } from "./token-refresh.ts";
-import { getProvider, getCredentialFieldName, getDefaultAuthorizedUris } from "./registry.ts";
 
 /**
- * Get a connection by provider/user/org (global or flow-specific).
+ * Get a connection by profile + provider.
  */
 export async function getConnection(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
   providerId: string,
-  flowId?: string | null,
 ): Promise<ConnectionRecord | null> {
-  const conditions = [
-    eq(serviceConnections.orgId, orgId),
-    eq(serviceConnections.userId, userId),
-    eq(serviceConnections.providerId, providerId),
-  ];
-
-  if (flowId) {
-    conditions.push(eq(serviceConnections.flowId, flowId));
-  } else {
-    conditions.push(isNull(serviceConnections.flowId));
-  }
-
   const rows = await db
     .select()
     .from(serviceConnections)
-    .where(and(...conditions))
+    .where(
+      and(
+        eq(serviceConnections.profileId, profileId),
+        eq(serviceConnections.providerId, providerId),
+      ),
+    )
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -39,53 +29,30 @@ export async function getConnection(
 }
 
 /**
- * Check if a connection exists.
- */
-export async function hasConnection(
-  db: Db,
-  orgId: string,
-  userId: string,
-  providerId: string,
-  flowId?: string | null,
-): Promise<boolean> {
-  const conn = await getConnection(db, orgId, userId, providerId, flowId);
-  return conn !== null;
-}
-
-/**
- * List all connections for a user within an org.
+ * List all connections for a profile.
  */
 export async function listConnections(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
 ): Promise<ConnectionRecord[]> {
   const rows = await db
     .select()
     .from(serviceConnections)
-    .where(
-      and(
-        eq(serviceConnections.orgId, orgId),
-        eq(serviceConnections.userId, userId),
-        isNull(serviceConnections.flowId),
-      ),
-    );
+    .where(eq(serviceConnections.profileId, profileId));
 
   return rows.map(rowToConnection);
 }
 
 /**
  * Get decrypted credentials for a service.
- * Handles token refresh for OAuth2 connections.
+ * Handles token refresh for OAuth2 connections using providerSnapshot.
  */
 export async function getCredentials(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
   providerId: string,
-  flowId?: string | null,
 ): Promise<{ credentials: Record<string, string>; connection: ConnectionRecord } | null> {
-  const connection = await getConnection(db, orgId, userId, providerId, flowId);
+  const connection = await getConnection(db, profileId, providerId);
   if (!connection) return null;
 
   let decrypted: DecryptedCredentials;
@@ -93,11 +60,11 @@ export async function getCredentials(
   if (connection.authMode === "oauth2") {
     decrypted = await refreshIfNeeded(
       db,
-      orgId,
       connection.id,
       connection.providerId,
       connection.credentialsEncrypted,
       connection.expiresAt,
+      connection.providerSnapshot,
     );
   } else {
     decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
@@ -115,41 +82,37 @@ export async function getCredentials(
 
 /**
  * Resolve credentials for the sidecar proxy.
- * Returns the credentials in the format { [fieldName]: value } + authorizedUris from the provider.
+ * Reads authorizedUris and field names from providerSnapshot on the connection.
  */
 export async function resolveCredentialsForProxy(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
   providerId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, orgId, userId, providerId);
+  const result = await getCredentials(db, profileId, providerId);
   if (!result) return null;
 
-  const provider = await getProvider(db, orgId, providerId);
+  const snapshot = result.connection.providerSnapshot;
 
   let sidecarCredentials: Record<string, string>;
-  if (provider && (provider.authMode === "oauth2" || provider.authMode === "api_key")) {
-    const fieldName = getCredentialFieldName(provider);
+  if (snapshot.authMode === "oauth2" || snapshot.authMode === "api_key") {
+    const fieldName = snapshot.credentialFieldName ?? (snapshot.authMode === "api_key" ? "api_key" : "token");
     const value = result.credentials.access_token ?? result.credentials.api_key;
     if (value) {
       sidecarCredentials = { [fieldName]: value };
     } else {
-      console.warn(
-        `No access_token or api_key found for provider '${providerId}', passing all credentials`,
-      );
       sidecarCredentials = result.credentials;
     }
   } else {
     sidecarCredentials = result.credentials;
   }
 
-  const authorizedUris = provider ? getDefaultAuthorizedUris(provider) : null;
-  const allowAllUris = provider?.allowAllUris ?? false;
+  const authorizedUris = snapshot.authorizedUris?.length ? snapshot.authorizedUris : null;
+  const allowAllUris = snapshot.allowAllUris ?? false;
 
   return {
     credentials: sidecarCredentials,
@@ -163,75 +126,63 @@ export async function resolveCredentialsForProxy(
  */
 export async function saveConnection(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
   providerId: string,
   authMode: AuthMode,
   credentials: Record<string, unknown>,
+  providerSnapshot: ProviderSnapshot,
+  configHash: string,
   options?: {
-    flowId?: string | null;
     scopesGranted?: string[];
     expiresAt?: string | null;
     rawTokenResponse?: Record<string, unknown>;
-    connectionConfig?: Record<string, unknown>;
   },
 ): Promise<void> {
   const encrypted = encryptCredentials(credentials);
-  const flowId = options?.flowId ?? null;
 
   await db.transaction(async (tx) => {
     // Delete existing connection
-    const deleteConditions = [
-      eq(serviceConnections.orgId, orgId),
-      eq(serviceConnections.userId, userId),
-      eq(serviceConnections.providerId, providerId),
-    ];
-    if (flowId) {
-      deleteConditions.push(eq(serviceConnections.flowId, flowId));
-    } else {
-      deleteConditions.push(isNull(serviceConnections.flowId));
-    }
-    await tx.delete(serviceConnections).where(and(...deleteConditions));
+    await tx
+      .delete(serviceConnections)
+      .where(
+        and(
+          eq(serviceConnections.profileId, profileId),
+          eq(serviceConnections.providerId, providerId),
+        ),
+      );
 
     // Insert new connection
     await tx.insert(serviceConnections).values({
-      orgId,
-      userId,
+      profileId,
       providerId,
-      flowId,
       authMode,
       credentialsEncrypted: encrypted,
       scopesGranted: options?.scopesGranted ?? [],
       expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
       rawTokenResponse: options?.rawTokenResponse ?? null,
-      connectionConfig: options?.connectionConfig ?? {},
+      providerSnapshot,
+      configHash,
       updatedAt: new Date(),
     });
   });
 }
 
 /**
- * Delete a connection (handles NULL flow_id).
+ * Delete a connection.
  */
 export async function deleteConnection(
   db: Db,
-  orgId: string,
-  userId: string,
+  profileId: string,
   providerId: string,
-  flowId?: string | null,
 ): Promise<void> {
-  const conditions = [
-    eq(serviceConnections.orgId, orgId),
-    eq(serviceConnections.userId, userId),
-    eq(serviceConnections.providerId, providerId),
-  ];
-  if (flowId) {
-    conditions.push(eq(serviceConnections.flowId, flowId));
-  } else {
-    conditions.push(isNull(serviceConnections.flowId));
-  }
-
-  await db.delete(serviceConnections).where(and(...conditions));
+  await db
+    .delete(serviceConnections)
+    .where(
+      and(
+        eq(serviceConnections.profileId, profileId),
+        eq(serviceConnections.providerId, providerId),
+      ),
+    );
 }
 
 // --- Internal helpers ---
@@ -239,16 +190,15 @@ export async function deleteConnection(
 function rowToConnection(row: typeof serviceConnections.$inferSelect): ConnectionRecord {
   return {
     id: row.id,
-    orgId: row.orgId,
-    userId: row.userId,
+    profileId: row.profileId,
     providerId: row.providerId,
-    flowId: row.flowId ?? null,
     authMode: row.authMode as AuthMode,
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
     rawTokenResponse: (row.rawTokenResponse as Record<string, unknown>) ?? null,
-    connectionConfig: (row.connectionConfig as Record<string, unknown>) ?? {},
+    providerSnapshot: row.providerSnapshot as ProviderSnapshot,
+    configHash: row.configHash,
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     createdAt: row.createdAt?.toISOString() ?? "",
     updatedAt: row.updatedAt?.toISOString() ?? "",

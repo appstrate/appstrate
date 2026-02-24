@@ -29,11 +29,14 @@ export interface InitiateOAuthResult {
 /**
  * Initiate an OAuth2 authorization flow.
  * Creates a PKCE challenge (if supported), stores state in DB, and returns the auth URL.
+ * orgId is needed for provider config lookup during OAuth.
+ * profileId is stored in oauth_states for the callback.
  */
 export async function initiateOAuth(
   db: Db,
   orgId: string,
   userId: string,
+  profileId: string,
   providerId: string,
   redirectUri: string,
   requestedScopes?: string[],
@@ -61,6 +64,7 @@ export async function initiateOAuth(
     state,
     orgId,
     userId,
+    profileId,
     providerId,
     codeVerifier,
     scopesRequested: uniqueScopes,
@@ -93,6 +97,7 @@ export interface OAuthCallbackResult {
   providerId: string;
   orgId: string;
   userId: string;
+  profileId: string;
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
@@ -103,6 +108,7 @@ export interface OAuthCallbackResult {
 /**
  * Handle the OAuth2 callback.
  * Exchanges the authorization code for tokens using PKCE.
+ * Returns profileId from the stored oauth state.
  */
 export async function handleOAuthCallback(
   db: Db,
@@ -127,6 +133,7 @@ export async function handleOAuthCallback(
     state: rawRow.state,
     orgId: rawRow.orgId,
     userId: rawRow.userId,
+    profileId: rawRow.profileId,
     providerId: rawRow.providerId,
     codeVerifier: rawRow.codeVerifier,
     scopesRequested: (rawRow.scopesRequested as string[]) ?? [],
@@ -203,6 +210,7 @@ export async function handleOAuthCallback(
     providerId: stateRow.providerId,
     orgId: stateRow.orgId,
     userId: stateRow.userId,
+    profileId: stateRow.profileId,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
