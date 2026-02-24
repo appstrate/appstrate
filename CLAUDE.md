@@ -137,20 +137,29 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
 - **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages).
-- **Tests**: `bun test` in `apps/api/` (tests live in `services/__tests__/` and `routes/__tests__/`).
+- **Tests**: `bun test` in `apps/api/`. Framework: `bun:test` (NOT vitest/jest). Tests in `services/__tests__/` and `routes/__tests__/`. Mocking pattern: call `mock.module("../../services/foo.ts", () => ({ fn: mock(...) }))` BEFORE `const { handler } = await import("../route.ts")` — dynamic import is required so mocks take effect. No frontend tests currently.
 
 ### Frontend
 - **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `flows`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Single `styles.css` (dark theme). No CSS modules, no Tailwind, no CSS-in-JS.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
-- **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly.
+- **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly. `useGlobalExecutionSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it.
+- **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
+- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["flows", orgId]`, `["flow", orgId, flowId]`, `["executions", orgId, flowId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
+- **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
 
 ### Backend
 - **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
-- **Rate limiting**: Token bucket per `method:path:userId`. Key limits: run (20/min), import (10/min), create (10/min).
+- **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, admin connections). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
+- **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler.
+- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `flow` (set by `requireFlow()`).
+- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not built-in + no running executions.
+- **Rate limiting**: Token bucket per `method:path:userId`. Key limits: run (20/min), import (10/min), create (10/min). `rateLimitByIp()` for public unauthenticated routes.
+- **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
+- **Validation (AJV)**: `validateConfig()` and `validateInput()` use `coerceTypes: true` (e.g. `"50"` accepted as number). `validateOutput()` does NOT coerce — strict mode. Extra fields always allowed (no `additionalProperties: false`).
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 - Agent calls `$SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers for authenticated API requests.
@@ -174,6 +183,26 @@ When working on API routes, always consult the corresponding OpenAPI path file i
 
 Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
 
+## Environment Variables
+
+`getEnv()` from `@appstrate/env` (Zod-validated, cached after first call, fail-fast at startup). Key variables:
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `BETTER_AUTH_SECRET` | Yes | — | Session signing secret |
+| `CONNECTION_ENCRYPTION_KEY` | Yes | — | 32 bytes, base64-encoded. Encrypts stored credentials |
+| `DATA_DIR` | No | unset | Path to `data/` dir — if unset, built-in flows/providers/skills disabled |
+| `PLATFORM_API_URL` | No | `http://host.docker.internal:{PORT}` | How sidecar reaches the host platform |
+| `SYSTEM_PROVIDERS` | No | `"[]"` | JSON array, merged with `data/providers.json` |
+| `LLM_PROVIDER` | No | `anthropic` | Passed to agent containers |
+| `LLM_MODEL_ID` | No | `claude-sonnet-4-5-20250929` | Passed to agent containers |
+| `ANTHROPIC_API_KEY` | No | — | Passed through to agent containers (or `OPENAI_API_KEY`, etc.) |
+| `LOG_LEVEL` | No | `info` | `debug`\|`info`\|`warn`\|`error` |
+| `PORT` | No | `3010` | Server port |
+| `APP_URL` | No | `http://localhost:3010` | Public URL for OAuth callbacks |
+| `TRUSTED_ORIGINS` | No | `http://localhost:3010,http://localhost:5173` | CORS origins, comma-separated |
+
 ## Flow & Extension Gotchas
 
 - **Reference manifest**: `data/flows/pdf-explainer/manifest.json`. Validation: `services/schema.ts`.
@@ -182,20 +211,10 @@ Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** argument. Using `execute(args)` receives the toolCallId string.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
+- **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
+- **Execution lifecycle**: `pending` → `running` → `completed` | `failed` | `timeout`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
 
 ## Known Issues & Technical Debt
 
 1. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
 2. **Scheduler is in-memory**: Cron jobs run in-process via `croner`, re-loaded from DB on restart. Distributed locking via `schedule_runs` table prevents duplicates.
-
-## Detailed Specs
-
-The full product specifications are in the Obsidian vault at:
-
-```
-/Users/pierrecabriere/Library/Mobile Documents/iCloud~md~obsidian/Documents/main/projects/claude-flows/
-├── claude-flows-mvp.md              # MVP scope, architecture, milestones
-├── claude-flows-mvp-api.md          # API spec with all endpoints, payloads, SSE events, error codes
-├── claude-flows-mvp-flow-format.md  # Flow package format: manifest spec, prompt template syntax
-└── claude-flows-mvp-first-flow.md   # email-to-tickets flow: functional spec, prompt, test scenarios
-```
