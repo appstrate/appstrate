@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { refreshAuth } from "../hooks/use-auth";
+import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 
 interface InviteInfo {
@@ -72,7 +73,7 @@ export function InviteAcceptPage() {
 
       if (data.isNewUser) {
         // New user — refresh auth state (session cookie was set by backend), then go to welcome
-        localStorage.setItem("appstrate_current_org", data.orgId);
+        orgStore.getState().setId(data.orgId);
         await refreshAuth();
         navigate(`/welcome?org=${data.orgId}`);
       } else if (data.requiresLogin) {
@@ -81,7 +82,7 @@ export function InviteAcceptPage() {
       } else {
         // Existing user, already logged in — switch org and go home
         if (data.orgId) {
-          localStorage.setItem("appstrate_current_org", data.orgId);
+          orgStore.getState().setId(data.orgId);
         }
         navigate("/");
         window.location.reload();

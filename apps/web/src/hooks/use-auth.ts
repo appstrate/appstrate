@@ -1,33 +1,10 @@
-import { useSyncExternalStore, useCallback } from "react";
+import { useCallback } from "react";
+import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { api } from "../api";
+import { authStore } from "../stores/auth-store";
 import i18n from "../i18n";
 import type { Profile } from "@appstrate/shared-types";
-
-interface AuthState {
-  user: { id: string; email: string; name?: string } | null;
-  profile: Profile | null;
-  loading: boolean;
-}
-
-let _authState: AuthState = { user: null, profile: null, loading: true };
-const listeners = new Set<() => void>();
-
-function subscribe(fn: () => void) {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function getSnapshot() {
-  return _authState;
-}
-
-function setState(next: AuthState) {
-  _authState = next;
-  for (const fn of listeners) fn();
-}
 
 async function fetchProfile(): Promise<Profile | null> {
   try {
@@ -49,11 +26,19 @@ async function fetchProfile(): Promise<Profile | null> {
   }
 }
 
+function clearAuth() {
+  authStore.setState({ user: null, profile: null, loading: false });
+}
+
 function setAuthenticatedUser(
   user: { id: string; email: string; name: string },
   profile: Profile | null,
 ) {
-  setState({ user: { id: user.id, email: user.email, name: user.name }, profile, loading: false });
+  authStore.setState({
+    user: { id: user.id, email: user.email, name: user.name },
+    profile,
+    loading: false,
+  });
 }
 
 let initialized = false;
@@ -61,7 +46,6 @@ function initAuth() {
   if (initialized) return;
   initialized = true;
 
-  // Check initial session
   authClient
     .getSession()
     .then(async (result) => {
@@ -69,11 +53,11 @@ function initAuth() {
         const profile = await fetchProfile();
         setAuthenticatedUser(result.data.user, profile);
       } else {
-        setState({ user: null, profile: null, loading: false });
+        clearAuth();
       }
     })
     .catch(() => {
-      setState({ user: null, profile: null, loading: false });
+      clearAuth();
     });
 }
 
@@ -83,19 +67,18 @@ export async function refreshAuth() {
     const profile = await fetchProfile();
     setAuthenticatedUser(result.data.user, profile);
   } else {
-    setState({ user: null, profile: null, loading: false });
+    clearAuth();
   }
 }
 
 export function useAuth() {
   initAuth();
 
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const state = useStore(authStore);
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
-    // Fetch profile after login
     const profile = await fetchProfile();
     if (result.data?.user) {
       setAuthenticatedUser(result.data.user, profile);
@@ -109,7 +92,6 @@ export function useAuth() {
       name: displayName || email,
     });
     if (result.error) throw new Error(result.error.message);
-    // Fetch profile after signup
     const profile = await fetchProfile();
     if (result.data?.user) {
       setAuthenticatedUser(result.data.user, profile);
@@ -118,7 +100,7 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await authClient.signOut();
-    setState({ user: null, profile: null, loading: false });
+    clearAuth();
   }, []);
 
   const updatePassword = useCallback(async (currentPassword: string, newPassword: string) => {

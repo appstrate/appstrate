@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 
 export function WelcomePage() {
@@ -17,7 +18,7 @@ export function WelcomePage() {
 
   const finishAndRedirect = () => {
     if (orgId) {
-      localStorage.setItem("appstrate_current_org", orgId);
+      orgStore.getState().setId(orgId);
     }
     navigate("/");
     window.location.reload();
