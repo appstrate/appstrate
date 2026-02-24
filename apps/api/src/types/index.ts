@@ -1,26 +1,6 @@
-// Re-export shared types used by both API and frontend
-export type {
-  Json,
-  ExecutionStatus,
-  Execution,
-  ExecutionLog,
-  FlowRow,
-  JSONSchemaProperty,
-  JSONSchemaObject,
-  ServiceStatus,
-  FlowListItem,
-  FlowDetail,
-  Integration,
-  Schedule,
-  Profile,
-  OrgRole,
-  Organization,
-  OrganizationMember,
-  OrganizationWithRole,
-  ProviderConfig,
-  OrgInvitation,
-  ApiKeyInfo,
-} from "@appstrate/shared-types";
+// Only re-export types actually imported through this path (backend-only consumers).
+// All other shared types should be imported directly from "@appstrate/shared-types".
+export type { OrgRole } from "@appstrate/shared-types";
 
 // --- Flow Manifest Types (backend-only) ---
 

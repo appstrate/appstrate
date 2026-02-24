@@ -17,39 +17,39 @@ import {
 import { eq, and, inArray, count } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 
-export interface OrgRow {
+interface OrgResult {
   id: string;
   name: string;
   slug: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface OrgMemberRow {
-  org_id: string;
-  user_id: string;
+interface OrgMemberResult {
+  orgId: string;
+  userId: string;
   role: string;
-  joined_at: string;
+  joinedAt: string;
 }
 
-function toOrgRow(row: typeof organizations.$inferSelect): OrgRow {
+function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    created_by: row.createdBy ?? "",
-    created_at: row.createdAt?.toISOString() ?? "",
-    updated_at: row.updatedAt?.toISOString() ?? "",
+    createdBy: row.createdBy ?? "",
+    createdAt: row.createdAt?.toISOString() ?? "",
+    updatedAt: row.updatedAt?.toISOString() ?? "",
   };
 }
 
-function toOrgMemberRow(row: typeof organizationMembers.$inferSelect): OrgMemberRow {
+function toOrgMemberResult(row: typeof organizationMembers.$inferSelect): OrgMemberResult {
   return {
-    org_id: row.orgId,
-    user_id: row.userId,
+    orgId: row.orgId,
+    userId: row.userId,
     role: row.role,
-    joined_at: row.joinedAt?.toISOString() ?? "",
+    joinedAt: row.joinedAt?.toISOString() ?? "",
   };
 }
 
@@ -57,7 +57,7 @@ export async function createOrganization(
   name: string,
   slug: string,
   userId: string,
-): Promise<OrgRow> {
+): Promise<OrgResult> {
   const [org] = await db
     .insert(organizations)
     .values({ name, slug, createdBy: userId })
@@ -72,12 +72,12 @@ export async function createOrganization(
     role: "owner",
   });
 
-  return toOrgRow(org);
+  return toOrgResult(org);
 }
 
 export async function getUserOrganizations(
   userId: string,
-): Promise<(OrgRow & { role: OrgRole })[]> {
+): Promise<(OrgResult & { role: OrgRole })[]> {
   const rows = await db
     .select({
       org: organizations,
@@ -88,21 +88,21 @@ export async function getUserOrganizations(
     .where(eq(organizationMembers.userId, userId));
 
   return rows.map((row) => ({
-    ...toOrgRow(row.org),
+    ...toOrgResult(row.org),
     role: row.role as OrgRole,
   }));
 }
 
-export async function getOrgById(orgId: string): Promise<OrgRow | null> {
+export async function getOrgById(orgId: string): Promise<OrgResult | null> {
   const [row] = await db.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
 
-  return row ? toOrgRow(row) : null;
+  return row ? toOrgResult(row) : null;
 }
 
 export async function updateOrganization(
   orgId: string,
   updates: { name?: string; slug?: string },
-): Promise<OrgRow | null> {
+): Promise<OrgResult | null> {
   const [row] = await db
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })
@@ -110,23 +110,23 @@ export async function updateOrganization(
     .returning();
 
   if (!row) throw new Error("Failed to update organization");
-  return toOrgRow(row);
+  return toOrgResult(row);
 }
 
 export async function getOrgMembers(
   orgId: string,
-): Promise<(OrgMemberRow & { display_name?: string; email?: string })[]> {
+): Promise<(OrgMemberResult & { displayName?: string; email?: string })[]> {
   const rows = await db
     .select()
     .from(organizationMembers)
     .where(eq(organizationMembers.orgId, orgId))
     .orderBy(organizationMembers.joinedAt);
 
-  const members = rows.map(toOrgMemberRow);
+  const members = rows.map(toOrgMemberResult);
   if (members.length === 0) return [];
 
   // Fetch display names and emails
-  const userIds = members.map((m) => m.user_id);
+  const userIds = members.map((m) => m.userId);
   const [profileRows, userRows] = await Promise.all([
     db
       .select({ id: profiles.id, displayName: profiles.displayName })
@@ -140,19 +140,19 @@ export async function getOrgMembers(
 
   return members.map((row) => ({
     ...row,
-    display_name: profileMap.get(row.user_id) ?? undefined,
-    email: emailMap.get(row.user_id) ?? undefined,
+    displayName: profileMap.get(row.userId) ?? undefined,
+    email: emailMap.get(row.userId) ?? undefined,
   }));
 }
 
-export async function getOrgMember(orgId: string, userId: string): Promise<OrgMemberRow | null> {
+export async function getOrgMember(orgId: string, userId: string): Promise<OrgMemberResult | null> {
   const [row] = await db
     .select()
     .from(organizationMembers)
     .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
     .limit(1);
 
-  return row ? toOrgMemberRow(row) : null;
+  return row ? toOrgMemberResult(row) : null;
 }
 
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {

@@ -183,14 +183,14 @@ export interface IntegrationWithStatus {
 }
 
 /** Get user profile display name. */
-async function getUserProfile(userId: string): Promise<{ display_name: string | null } | null> {
+async function getUserProfile(userId: string): Promise<{ displayName: string | null } | null> {
   const rows = await db
     .select({ displayName: profiles.displayName })
     .from(profiles)
     .where(eq(profiles.id, userId))
     .limit(1);
   if (!rows[0]) return null;
-  return { display_name: rows[0].displayName };
+  return { displayName: rows[0].displayName };
 }
 
 export async function getIntegrationsWithStatus(
@@ -274,7 +274,7 @@ export async function resolveServiceStatuses(
             connectionMode: "admin" as const,
             adminProvided: true,
             adminUserId,
-            adminDisplayName: adminProfile?.display_name ?? undefined,
+            adminDisplayName: adminProfile?.displayName ?? undefined,
             ...buildScopeInfo(conn.scopesGranted, scopesRequired, conn.status === "connected"),
           };
         }

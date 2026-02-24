@@ -16,7 +16,7 @@ async function verifyExecutionToken(c: Context): Promise<
   | {
       ok: true;
       executionId: string;
-      execution: { flow_id: string; user_id: string; org_id: string; status: string };
+      execution: { flowId: string; userId: string; orgId: string; status: string };
     }
   | { ok: false; response: Response }
 > {
@@ -66,9 +66,9 @@ async function verifyExecutionToken(c: Context): Promise<
     ok: true,
     executionId,
     execution: {
-      flow_id: execution.flowId,
-      user_id: execution.userId,
-      org_id: execution.orgId,
+      flowId: execution.flowId,
+      userId: execution.userId,
+      orgId: execution.orgId,
       status: execution.status,
     },
   };
@@ -105,9 +105,9 @@ export function createInternalRouter() {
 
     try {
       const recentExecutions = await getRecentExecutions(
-        execution.flow_id,
-        execution.user_id,
-        execution.org_id,
+        execution.flowId,
+        execution.userId,
+        execution.orgId,
         {
           limit,
           fields,
@@ -136,7 +136,7 @@ export function createInternalRouter() {
     const serviceId = c.req.param("serviceId");
 
     // Load the flow to validate the requested service
-    const flow = await getFlow(execution.flow_id, execution.org_id);
+    const flow = await getFlow(execution.flowId, execution.orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
     }
@@ -146,7 +146,7 @@ export function createInternalRouter() {
       logger.warn("Credential request for unknown service", {
         executionId,
         serviceId,
-        flowId: execution.flow_id,
+        flowId: execution.flowId,
       });
       return c.json(
         {
@@ -160,11 +160,11 @@ export function createInternalRouter() {
     try {
       // Resolve connection mode: admin connections override user connections
       const connectionMode = service.connectionMode ?? "user";
-      const tokenOrgId = execution.org_id;
-      let tokenUserId = execution.user_id;
+      const tokenOrgId = execution.orgId;
+      let tokenUserId = execution.userId;
 
       if (connectionMode === "admin") {
-        const adminConns = await getAdminConnections(execution.org_id, execution.flow_id);
+        const adminConns = await getAdminConnections(execution.orgId, execution.flowId);
         const adminUserId = adminConns[serviceId];
         if (adminUserId) {
           tokenUserId = adminUserId;
@@ -193,7 +193,7 @@ export function createInternalRouter() {
         executionId,
         serviceId,
         provider: service.provider,
-        flowId: execution.flow_id,
+        flowId: execution.flowId,
         connectionMode,
       });
 

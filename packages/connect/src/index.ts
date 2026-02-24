@@ -5,7 +5,7 @@ export type {
   ConnectionRecord,
   DecryptedCredentials,
   OAuthStateRecord,
-  ProviderConfigRow,
+
   ScopeValidationResult,
 } from "./types.ts";
 // Encryption

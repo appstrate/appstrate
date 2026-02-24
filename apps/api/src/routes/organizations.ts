@@ -30,7 +30,7 @@ router.get("/", async (c) => {
       name: o.name,
       slug: o.slug,
       role: o.role,
-      createdAt: o.created_at,
+      createdAt: o.createdAt,
     })),
   });
 });
@@ -64,7 +64,7 @@ router.post("/", async (c) => {
       name: org.name,
       slug: org.slug,
       role: "owner",
-      createdAt: org.created_at,
+      createdAt: org.createdAt,
     },
     201,
   );
@@ -95,12 +95,12 @@ router.get("/:orgId", async (c) => {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    createdAt: org.created_at,
+    createdAt: org.createdAt,
     members: members.map((m) => ({
-      userId: m.user_id,
+      userId: m.userId,
       role: m.role,
-      joinedAt: m.joined_at,
-      displayName: m.display_name,
+      joinedAt: m.joinedAt,
+      displayName: m.displayName,
       email: m.email,
     })),
     invitations: invitations.map((inv) => ({

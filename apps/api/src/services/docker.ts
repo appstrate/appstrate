@@ -305,18 +305,6 @@ export async function createNetwork(name: string): Promise<string> {
   return data.Id;
 }
 
-export async function getContainerIp(
-  containerId: string,
-  networkName: string,
-): Promise<string | null> {
-  const res = await dockerFetch(`/containers/${containerId}/json`);
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    NetworkSettings: { Networks: Record<string, { IPAddress: string }> };
-  };
-  return data.NetworkSettings?.Networks?.[networkName]?.IPAddress ?? null;
-}
-
 /**
  * Execute a command inside a running container via Docker exec API.
  * Returns the exit code (0 = success). Uses detached mode + polling

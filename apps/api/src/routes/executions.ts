@@ -126,13 +126,13 @@ export async function executeFlowInBackground(
         await updateExecution(executionId, {
           status: "timeout",
           error: `Execution timed out after ${timeout}s`,
-          completed_at: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
           duration,
           ...(totalTokens > 0
             ? {
-                tokens_used: totalTokens,
-                token_usage: { ...accumulated } as Record<string, unknown>,
-                cost_usd: accumulated.cost_usd,
+                tokensUsed: totalTokens,
+                tokenUsage: { ...accumulated } as Record<string, unknown>,
+                costUsd: accumulated.cost_usd,
               }
             : {}),
         });
@@ -251,9 +251,9 @@ export async function executeFlowInBackground(
         status: "success",
         result,
         ...(resultState ? { state: resultState } : {}),
-        completed_at: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
         duration,
-        tokens_used:
+        tokensUsed:
           totalTokens > 0
             ? totalTokens
             : typeof result.tokensUsed === "number"
@@ -261,8 +261,8 @@ export async function executeFlowInBackground(
               : undefined,
         ...(totalTokens > 0
           ? {
-              token_usage: { ...accumulated } as Record<string, unknown>,
-              cost_usd: accumulated.cost_usd,
+              tokenUsage: { ...accumulated } as Record<string, unknown>,
+              costUsd: accumulated.cost_usd,
             }
           : {}),
       });
@@ -280,7 +280,7 @@ export async function executeFlowInBackground(
       await updateExecution(executionId, {
         status: "failed",
         error: "No result returned from adapter",
-        completed_at: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
         duration,
       });
       await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
@@ -298,7 +298,7 @@ export async function executeFlowInBackground(
     await updateExecution(executionId, {
       status: "failed",
       error: errorMessage,
-      completed_at: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
       duration,
     });
     await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
@@ -438,7 +438,7 @@ export function createExecutionsRouter() {
     const execId = c.req.param("id");
     const orgId = c.get("orgId");
     const exec = await getExecution(execId);
-    if (!exec || exec.org_id !== orgId) {
+    if (!exec || exec.orgId !== orgId) {
       return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
     }
     const logs = await listExecutionLogs(execId, orgId);
@@ -457,7 +457,7 @@ export function createExecutionsRouter() {
     }
 
     // Verify ownership (same org)
-    if (execution.org_id !== orgId) {
+    if (execution.orgId !== orgId) {
       return c.json({ error: "UNAUTHORIZED", message: "Not authorized" }, 403);
     }
 
@@ -474,7 +474,7 @@ export function createExecutionsRouter() {
     await updateExecution(execId, {
       status: "cancelled",
       error: "Cancelled by user",
-      completed_at: now,
+      completedAt: now,
     });
 
     // Log the cancellation
