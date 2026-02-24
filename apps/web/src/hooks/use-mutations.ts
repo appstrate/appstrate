@@ -71,6 +71,7 @@ export function useRunFlow(flowId: string) {
 
 function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["services"] });
+  qc.invalidateQueries({ queryKey: ["user-connections"] });
   // Invalidate all flow detail queries (service status may have changed)
   qc.invalidateQueries({ queryKey: ["flow"] });
   qc.invalidateQueries({ queryKey: ["flows"] });
@@ -79,13 +80,20 @@ function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
 export function useConnect() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (params: string | { provider: string; scopes?: string[] }) => {
+    mutationFn: async (
+      params: string | { provider: string; scopes?: string[]; profileId?: string },
+    ) => {
       const provider = typeof params === "string" ? params : params.provider;
       const scopes = typeof params === "string" ? undefined : params.scopes;
+      const profileId = typeof params === "string" ? undefined : params.profileId;
+
+      const body: Record<string, unknown> = {};
+      if (scopes) body.scopes = scopes;
+      if (profileId) body.profileId = profileId;
 
       const session = await apiFetch<{ authUrl: string }>(`/auth/connect/${provider}`, {
         method: "POST",
-        ...(scopes ? { body: JSON.stringify({ scopes }) } : {}),
+        ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
       });
       const popup = window.open(session.authUrl, "oauth", "width=600,height=700");
       if (!popup) {
@@ -113,10 +121,18 @@ export function useConnect() {
 export function useConnectApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ provider, apiKey }: { provider: string; apiKey: string }) => {
+    mutationFn: async ({
+      provider,
+      apiKey,
+      profileId,
+    }: {
+      provider: string;
+      apiKey: string;
+      profileId?: string;
+    }) => {
       return apiFetch(`/auth/connect/${provider}/api-key`, {
         method: "POST",
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
     },
     onSuccess: () => invalidateServiceRelated(qc),
@@ -127,10 +143,25 @@ export function useConnectApiKey() {
 export function useDisconnect() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (provider: string) => {
-      return apiFetch(`/auth/connections/${provider}`, { method: "DELETE" });
+    mutationFn: async (params: string | { provider: string; profileId?: string }) => {
+      const provider = typeof params === "string" ? params : params.provider;
+      const profileId = typeof params === "string" ? undefined : params.profileId;
+      const qs = profileId ? `?profileId=${profileId}` : "";
+      return apiFetch(`/auth/connections/${provider}${qs}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateServiceRelated(qc),
+    onError: onMutationError,
+  });
+}
+
+export function useDeleteAllConnections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateServiceRelated(qc);
+      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
+    },
     onError: onMutationError,
   });
 }
@@ -271,13 +302,15 @@ export function useConnectCredentials() {
     mutationFn: async ({
       provider,
       credentials,
+      profileId,
     }: {
       provider: string;
       credentials: Record<string, string>;
+      profileId?: string;
     }) => {
       return apiFetch(`/auth/connect/${provider}/credentials`, {
         method: "POST",
-        body: JSON.stringify({ credentials }),
+        body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
     },
     onSuccess: () => invalidateServiceRelated(qc),

@@ -49,6 +49,7 @@ export async function createExecution(
   input: Record<string, unknown> | null,
   scheduleId?: string,
   flowVersionId?: number,
+  connectionProfileId?: string,
 ): Promise<void> {
   await db.insert(executions).values({
     id,
@@ -58,6 +59,7 @@ export async function createExecution(
     status: "pending",
     input,
     startedAt: new Date(),
+    connectionProfileId: connectionProfileId ?? null,
     scheduleId: scheduleId ?? null,
     flowVersionId: flowVersionId ?? null,
   });
@@ -267,13 +269,15 @@ export async function getAdminConnections(
   const rows = await db
     .select({
       serviceId: flowAdminConnections.serviceId,
-      adminUserId: flowAdminConnections.adminUserId,
+      profileId: flowAdminConnections.profileId,
     })
     .from(flowAdminConnections)
     .where(and(eq(flowAdminConnections.orgId, orgId), eq(flowAdminConnections.flowId, flowId)));
   const result: Record<string, string> = {};
   for (const row of rows) {
-    result[row.serviceId] = row.adminUserId;
+    if (row.profileId) {
+      result[row.serviceId] = row.profileId;
+    }
   }
   return result;
 }
@@ -282,7 +286,7 @@ export async function bindAdminConnection(
   orgId: string,
   flowId: string,
   serviceId: string,
-  adminUserId: string,
+  profileId: string,
 ): Promise<void> {
   await db
     .insert(flowAdminConnections)
@@ -290,14 +294,14 @@ export async function bindAdminConnection(
       orgId,
       flowId,
       serviceId,
-      adminUserId,
+      profileId,
       connectedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [flowAdminConnections.flowId, flowAdminConnections.serviceId],
       set: {
         orgId,
-        adminUserId,
+        profileId,
         connectedAt: new Date(),
       },
     });

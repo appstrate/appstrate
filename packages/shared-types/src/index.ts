@@ -1,4 +1,4 @@
-export type { Profile, Execution, ExecutionLog } from "@appstrate/db/schema";
+export type { Profile, Execution, ExecutionLog, ConnectionProfile, UserFlowProfile } from "@appstrate/db/schema";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -80,18 +80,39 @@ export function getOrderedKeys(schema: JSONSchemaObject): string[] {
   return rest.length ? [...ordered, ...rest] : ordered;
 }
 
+// --- User Connection Types ---
+
+export interface UserConnectionOrg {
+  id: string;
+  name: string;
+  status: "valid" | "needs_reconnection";
+}
+
+export interface UserConnectionItem {
+  connectionId: string;
+  providerId: string;
+  authMode: string;
+  scopesGranted: string[];
+  connectedAt: string;
+  profile: { id: string; name: string; isDefault: boolean };
+  orgs: UserConnectionOrg[];
+}
+
+export interface ProviderDisplayInfo {
+  displayName: string;
+  logo: string;
+}
+
 export interface ServiceStatus {
   id: string;
   name?: string;
   provider: string;
   description: string;
-  status: "connected" | "not_connected";
+  status: "connected" | "not_connected" | "needs_reconnection";
   authMode?: string;
   connectUrl?: string;
   connectionMode?: "user" | "admin";
   adminProvided?: boolean;
-  adminUserId?: string;
-  adminDisplayName?: string;
   scopesRequired?: string[];
   scopesGranted?: string[];
   scopesSufficient?: boolean;
@@ -202,7 +223,7 @@ export interface Integration {
   provider: string;
   displayName: string;
   logo?: string;
-  status: "connected" | "not_connected";
+  status: "connected" | "not_connected" | "needs_reconnection";
   authMode?: string;
   connectedAt?: string;
 }

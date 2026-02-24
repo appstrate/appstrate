@@ -11,7 +11,6 @@ import {
   flowSchedules,
   flowConfigs,
   flows,
-  serviceConnections,
   orgInvitations,
 } from "@appstrate/db/schema";
 import { eq, and, inArray, count } from "drizzle-orm";
@@ -240,8 +239,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(flowSchedules).where(eq(flowSchedules.orgId, orgId));
     await tx.delete(flowConfigs).where(eq(flowConfigs.orgId, orgId));
     await tx.delete(flows).where(eq(flows.orgId, orgId));
-    // serviceConnections has onDelete cascade from org, but explicit is safer in a tx
-    await tx.delete(serviceConnections).where(eq(serviceConnections.orgId, orgId));
+    // serviceConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // organization_members cascades from organizations (onDelete: "cascade")
 

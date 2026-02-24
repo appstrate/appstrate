@@ -81,6 +81,19 @@ const expectedEndpoints = [
   "PUT /api/providers/{providerId}",
   "DELETE /api/providers/{providerId}",
 
+  // Connection Profiles
+  "GET /api/connection-profiles",
+  "POST /api/connection-profiles",
+  "GET /api/connection-profiles/connections",
+  "DELETE /api/connection-profiles/connections",
+  "PUT /api/connection-profiles/{profileId}",
+  "DELETE /api/connection-profiles/{profileId}",
+  "GET /api/connection-profiles/{profileId}/connections",
+
+  // Flow Profile Override
+  "PUT /api/flows/{flowId}/profile",
+  "DELETE /api/flows/{flowId}/profile",
+
   // API Keys
   "GET /api/api-keys",
   "POST /api/api-keys",

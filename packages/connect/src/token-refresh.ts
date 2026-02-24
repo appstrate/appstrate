@@ -1,9 +1,8 @@
 import { eq } from "drizzle-orm";
 import { serviceConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { DecryptedCredentials } from "./types.ts";
-import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import { encryptCredentials, decryptCredentials } from "./encryption.ts";
+import type { DecryptedCredentials, ProviderSnapshot } from "./types.ts";
+import { encryptCredentials, decryptCredentials, decrypt } from "./encryption.ts";
 import { parseTokenResponse } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
@@ -15,17 +14,15 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 /**
  * Refresh an OAuth2 token if it's about to expire.
  * Returns the (possibly refreshed) decrypted credentials.
- *
- * Handles concurrency: if a refresh is already in progress for this connection,
- * subsequent callers wait for the same promise.
+ * Uses providerSnapshot for all OAuth config (tokenUrl, clientId/Secret).
  */
 export async function refreshIfNeeded(
   db: Db,
-  orgId: string,
   connectionId: string,
   providerId: string,
   credentialsEncrypted: string,
   expiresAt: string | null,
+  providerSnapshot: ProviderSnapshot,
 ): Promise<DecryptedCredentials> {
   // If not expired (or no expiry set), return current credentials
   if (!expiresAt) {
@@ -41,7 +38,7 @@ export async function refreshIfNeeded(
   if (inflight) return inflight;
 
   // Start refresh
-  const refreshPromise = doRefresh(db, orgId, connectionId, providerId, credentialsEncrypted);
+  const refreshPromise = doRefresh(db, connectionId, providerId, credentialsEncrypted, providerSnapshot);
 
   inflightRefreshes.set(connectionId, refreshPromise);
 
@@ -54,10 +51,10 @@ export async function refreshIfNeeded(
 
 async function doRefresh(
   db: Db,
-  orgId: string,
   connectionId: string,
   providerId: string,
   credentialsEncrypted: string,
+  providerSnapshot: ProviderSnapshot,
 ): Promise<DecryptedCredentials> {
   const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
 
@@ -65,20 +62,24 @@ async function doRefresh(
     return creds;
   }
 
-  const provider = await getProviderOrThrow(db, orgId, providerId);
-  const tokenUrl = provider.refreshUrl ?? provider.tokenUrl;
+  const tokenUrl = providerSnapshot.refreshUrl ?? providerSnapshot.tokenUrl;
   if (!tokenUrl) {
-    throw new Error(`Provider '${providerId}' has no token URL for refresh`);
+    throw new Error(`Provider '${providerId}' has no token URL for refresh (from snapshot)`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId);
+  // Decrypt clientId/Secret from the snapshot
+  if (!providerSnapshot.clientIdEncrypted || !providerSnapshot.clientSecretEncrypted) {
+    throw new Error(`Provider '${providerId}' has no OAuth credentials in snapshot`);
+  }
+  const clientId = decrypt(providerSnapshot.clientIdEncrypted);
+  const clientSecret = decrypt(providerSnapshot.clientSecretEncrypted);
 
   // Perform token refresh
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: creds.refresh_token,
-    client_id: oauthCreds.clientId,
-    client_secret: oauthCreds.clientSecret,
+    client_id: clientId,
+    client_secret: clientSecret,
   });
 
   let response: Response;
@@ -107,7 +108,7 @@ async function doRefresh(
 
   const parsed = parseTokenResponse(
     { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
-    " ",
+    providerSnapshot.scopeSeparator ?? " ",
     undefined,
     creds.refresh_token,
   );
@@ -118,20 +119,16 @@ async function doRefresh(
   };
   const newExpiresAt = parsed.expiresAt;
 
-  // Update the connection in DB
+  // Update the connection in DB — propagate error so callers can log appropriately
   const newEncrypted = encryptCredentials(newCreds);
-  try {
-    await db
-      .update(serviceConnections)
-      .set({
-        credentialsEncrypted: newEncrypted,
-        expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(serviceConnections.id, connectionId));
-  } catch (updateError) {
-    console.error(`Failed to persist refreshed token for connection ${connectionId}:`, updateError);
-  }
+  await db
+    .update(serviceConnections)
+    .set({
+      credentialsEncrypted: newEncrypted,
+      expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(serviceConnections.id, connectionId));
 
   return newCreds;
 }

@@ -124,6 +124,14 @@ export const flowsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          description:
+            "Connection profile ID to use for resolving service statuses. Defaults to user's effective profile.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
@@ -350,6 +358,63 @@ export const flowsPaths = {
       responses: {
         "204": { description: "Admin connection unbound" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/flows/{flowId}/profile": {
+    put: {
+      operationId: "setFlowProfile",
+      tags: ["Flows"],
+      summary: "Set flow profile override",
+      description:
+        "Override the connection profile used for this flow. The specified profile must belong to the authenticated user.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["profileId"],
+              properties: {
+                profileId: { type: "string", format: "uuid" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Profile override set",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
+      },
+    },
+    delete: {
+      operationId: "clearFlowProfile",
+      tags: ["Flows"],
+      summary: "Clear flow profile override",
+      description: "Remove the per-flow profile override, reverting to the user's default profile.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Profile override cleared",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
       },
     },
   },

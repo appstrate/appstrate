@@ -5,11 +5,12 @@ import { db } from "../lib/db.ts";
 import { flowSchedules, scheduleRuns } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
-import { createExecution, getAdminConnections } from "./state.ts";
+import { createExecution } from "./state.ts";
 import { getConnectionStatus } from "./connection-manager.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext } from "./env-builder.ts";
 import { getFlow, flowExists } from "./flow-service.ts";
+import { resolveServiceProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -248,14 +249,19 @@ async function triggerScheduledExecution(
       return;
     }
 
-    // Validate service dependencies — skip if not connected
-    const adminConns = await getAdminConnections(orgId, flowId);
-    for (const svc of flow.manifest.requires.services) {
-      const mode = svc.connectionMode ?? "user";
-      const tokenUserId = mode === "admin" ? adminConns[svc.id] : userId;
+    // Resolve service profiles for this user + flow
+    const serviceProfiles = await resolveServiceProfiles(
+      flow.manifest.requires.services,
+      userId,
+      flowId,
+      orgId,
+    );
 
-      if (!tokenUserId) {
-        logger.warn("Admin service not bound, skipping schedule", {
+    // Validate service dependencies — skip if not connected
+    for (const svc of flow.manifest.requires.services) {
+      const profileId = serviceProfiles[svc.id];
+      if (!profileId) {
+        logger.warn("Service profile not resolved, skipping schedule", {
           serviceId: svc.id,
           scheduleId,
           flowId,
@@ -263,11 +269,11 @@ async function triggerScheduledExecution(
         return;
       }
 
-      const conn = await getConnectionStatus(svc.provider, orgId, tokenUserId);
+      const conn = await getConnectionStatus(svc.provider, profileId, orgId);
       if (conn.status !== "connected") {
         logger.warn("Service not connected, skipping schedule", {
           serviceId: svc.id,
-          userId: tokenUserId,
+          profileId,
           scheduleId,
           flowId,
         });
@@ -276,12 +282,13 @@ async function triggerScheduledExecution(
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
+    const userProfileId = await getEffectiveProfileId(userId, flowId);
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow,
-      adminConns,
+      serviceProfiles,
       orgId,
       userId,
       input,
@@ -296,6 +303,7 @@ async function triggerScheduledExecution(
       input ?? null,
       scheduleId,
       flowVersionId ?? undefined,
+      userProfileId,
     );
 
     // Link execution to the schedule run lock row

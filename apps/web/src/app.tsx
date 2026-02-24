@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { FlowList } from "./pages/flow-list";
@@ -13,6 +13,7 @@ import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OrgSettingsPage } from "./pages/org-settings";
+import { ConnectorsPage } from "./pages/connectors";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
@@ -21,6 +22,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
+import { useProfileAutoSelect } from "./hooks/use-current-profile";
+import { useClickOutside } from "./hooks/use-click-outside";
 import { Spinner } from "./components/spinner";
 
 function UserMenu({
@@ -35,15 +38,8 @@ function UserMenu({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(ref, open, close);
 
   return (
     <div className="user-menu" ref={ref}>
@@ -171,6 +167,7 @@ function MainLayout() {
 
 function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
   useGlobalExecutionSync();
+  useProfileAutoSelect();
   return <>{children}</>;
 }
 
@@ -269,6 +266,7 @@ export function App() {
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
+              <Route path="/connectors" element={<ConnectorsPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

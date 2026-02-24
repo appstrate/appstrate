@@ -1,17 +1,26 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth } from "../hooks/use-auth";
-import { useServices } from "../hooks/use-services";
-import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
-import { ApiKeyModal } from "../components/api-key-modal";
+import { useDisconnect, useDeleteAllConnections } from "../hooks/use-mutations";
+import {
+  useConnectionProfiles,
+  useAllUserConnections,
+  useCreateConnectionProfile,
+  useRenameConnectionProfile,
+  useDeleteConnectionProfile,
+} from "../hooks/use-connection-profiles";
+import { useCurrentProfileId } from "../hooks/use-current-profile";
+import { ProfileSelector } from "../components/profile-selector";
 import { formatDateField } from "../lib/markdown";
 import { LoadingState, ErrorState } from "../components/page-states";
+import type { UserConnectionItem } from "@appstrate/shared-types";
 
 export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
   const updateLanguage = useUpdateLanguage();
-  const [tab, setTab] = useState<"general" | "connectors">("general");
+  const [tab, setTab] = useState<"general" | "connectors" | "profiles">("general");
 
   return (
     <>
@@ -35,6 +44,14 @@ export function PreferencesPage() {
         >
           {t("preferences.tabConnectors")}
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === "profiles"}
+          className={`tab ${tab === "profiles" ? "active" : ""}`}
+          onClick={() => setTab("profiles")}
+        >
+          {t("preferences.tabProfiles")}
+        </button>
       </div>
 
       {tab === "general" && (
@@ -46,6 +63,8 @@ export function PreferencesPage() {
       )}
 
       {tab === "connectors" && <ConnectorsTab />}
+
+      {tab === "profiles" && <ProfilesTab />}
     </>
   );
 }
@@ -236,110 +255,311 @@ function PasswordChangeForm() {
   );
 }
 
+function groupByProvider(connections: UserConnectionItem[] | undefined) {
+  if (!connections) return {};
+  const grouped: Record<string, UserConnectionItem[]> = {};
+  for (const conn of connections) {
+    (grouped[conn.providerId] ??= []).push(conn);
+  }
+  return grouped;
+}
+
 function ConnectorsTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: integrations, isLoading, error } = useServices();
-  const connectMutation = useConnect();
+  const profileId = useCurrentProfileId();
+  const { data: userConns, isLoading } = useAllUserConnections();
   const disconnectMutation = useDisconnect();
-  const apiKeyMutation = useConnectApiKey();
+  const deleteAllMutation = useDeleteAllConnections();
 
-  const [apiKeyProvider, setApiKeyProvider] = useState<{
-    uniqueKey: string;
-    displayName: string;
-  } | null>(null);
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
+
+  const filteredConnections = useMemo(() => {
+    if (!userConns?.connections) return undefined;
+    if (!profileId) return userConns.connections;
+    return userConns.connections.filter((c) => c.profile.id === profileId);
+  }, [userConns, profileId]);
+
+  const grouped = useMemo(() => groupByProvider(filteredConnections), [filteredConnections]);
+
+  if (isLoading) return <LoadingState />;
+
+  const toggleExpand = (providerId: string) => {
+    setExpandedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
+      return next;
+    });
+  };
+
+  const providerIds = Object.keys(grouped);
+  const totalConnections = filteredConnections?.length ?? 0;
+
+  return (
+    <>
+      <div className="section-header">
+        <div className="section-title">{t("connectors.myConnections")}</div>
+        <ProfileSelector />
+      </div>
+
+      <div className="service-card service-card-spaced">
+        <div className="connectors-intro">
+          <p className="service-provider">
+            {t("connectors.description")}{" "}
+            <Link to="/connectors" className="link-inline">
+              {t("connectors.connectMore")}
+            </Link>
+          </p>
+          {totalConnections > 0 && (
+            <button
+              className="danger"
+              onClick={() => {
+                if (confirm(t("connectors.deleteAllConfirm"))) {
+                  deleteAllMutation.mutate();
+                }
+              }}
+              disabled={deleteAllMutation.isPending}
+            >
+              {deleteAllMutation.isPending
+                ? t("connectors.deletingAll")
+                : t("connectors.deleteAll")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {providerIds.length === 0 ? (
+        <div className="empty-state">
+          <p>{t("connectors.noConnections")}</p>
+          <p className="empty-hint">{t("connectors.noConnectionsHint")}</p>
+        </div>
+      ) : (
+        <div className="services-grid">
+          {providerIds.map((providerId) => {
+            const conns = grouped[providerId];
+            const info = userConns?.providerInfo[providerId];
+            const expanded = expandedProviders.has(providerId);
+
+            return (
+              <div key={providerId} className="service-card">
+                <div className="provider-group-header" onClick={() => toggleExpand(providerId)}>
+                  <div className="service-card-header service-card-header-flush">
+                    {info?.logo && (
+                      <img
+                        className="service-logo"
+                        src={info.logo}
+                        alt={info?.displayName ?? providerId}
+                      />
+                    )}
+                    <div className="service-info">
+                      <h3>{info?.displayName ?? providerId}</h3>
+                      <span className="service-provider">
+                        {t("connectors.connectionCount", { count: conns.length })}
+                      </span>
+                    </div>
+                  </div>
+                  <span className={`provider-group-toggle${expanded ? " expanded" : ""}`}>
+                    &#9654;
+                  </span>
+                </div>
+
+                {expanded && (
+                  <div className="provider-group-connections">
+                    {conns.map((conn) => (
+                      <div key={conn.connectionId} className="connection-item">
+                        <div className="connection-meta">
+                          <span>
+                            {conn.profile.name}
+                            {conn.profile.isDefault && (
+                              <span className="tag" style={{ marginLeft: "0.4rem" }}>
+                                {t("profiles.default")}
+                              </span>
+                            )}
+                          </span>
+                          <span className="connection-details">
+                            {t(`connectors.authMode.${conn.authMode}`, {
+                              defaultValue: conn.authMode,
+                            })}
+                            {conn.scopesGranted.length > 0 && ` · ${conn.scopesGranted.join(", ")}`}
+                            {conn.connectedAt && ` · ${formatDateField(conn.connectedAt)}`}
+                          </span>
+                          {conn.orgs?.length > 0 && (
+                            <span className="connection-orgs">
+                              {conn.orgs.map((org) => (
+                                <span
+                                  key={org.id}
+                                  className={`badge ${org.status === "valid" ? "badge-success" : "badge-warning"}`}
+                                  title={
+                                    org.status === "valid"
+                                      ? t("connectors.orgValid", { org: org.name })
+                                      : t("connectors.orgNeedsReconnection", { org: org.name })
+                                  }
+                                >
+                                  {org.name}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (
+                              confirm(
+                                t("connectors.deleteConfirm", {
+                                  provider: info?.displayName ?? providerId,
+                                  profile: conn.profile.name,
+                                }),
+                              )
+                            ) {
+                              disconnectMutation.mutate({
+                                provider: providerId,
+                                profileId: conn.profile.id,
+                              });
+                            }
+                          }}
+                          disabled={disconnectMutation.isPending}
+                        >
+                          {t("btn.disconnect")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+function ProfilesTab() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { data: profiles, isLoading, error } = useConnectionProfiles();
+  const createProfile = useCreateConnectionProfile();
+  const renameProfile = useRenameConnectionProfile();
+  const deleteProfile = useDeleteConnectionProfile();
+
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  if (!integrations || integrations.length === 0) {
-    return (
-      <div className="empty-state">
-        <p>{t("services.empty")}</p>
-        <p className="empty-hint">{t("services.emptyHint")}</p>
-      </div>
-    );
-  }
-
-  const handleConnect = (svc: { uniqueKey: string; displayName: string; authMode?: string }) => {
-    if (svc.authMode === "API_KEY") {
-      setApiKeyProvider({ uniqueKey: svc.uniqueKey, displayName: svc.displayName });
-    } else {
-      connectMutation.mutate(svc.uniqueKey);
+  const handleCreate = () => {
+    if (newName.trim()) {
+      createProfile.mutate(newName.trim(), {
+        onSuccess: () => setNewName(""),
+      });
     }
   };
 
   return (
     <>
-      <div className="services-grid">
-        {integrations.map((svc) => {
-          const isConnected = svc.status === "connected";
-          const connDate = svc.connectedAt ? formatDateField(svc.connectedAt) : "";
+      <div className="section-title">{t("profiles.title")}</div>
 
-          return (
-            <div key={svc.uniqueKey} className="service-card">
-              <div className="service-card-header">
-                {svc.logo && <img className="service-logo" src={svc.logo} alt={svc.displayName} />}
-                <div className="service-info">
-                  <h3>{svc.displayName}</h3>
-                  <span className="service-provider">{svc.provider}</span>
-                </div>
-              </div>
-              <div className="service-card-status">
-                <span className={`status-dot ${isConnected ? "connected" : "disconnected"}`} />
-                <span className={`badge ${isConnected ? "badge-success" : "badge-failed"}`}>
-                  {isConnected ? t("services.connected") : t("services.notConnected")}
-                </span>
-                {connDate && <span className="service-date">{connDate}</span>}
-              </div>
-              <div className="service-card-actions">
-                {isConnected ? (
-                  <>
-                    <button
-                      onClick={() => {
-                        if (confirm(t("services.disconnectConfirm", { name: svc.uniqueKey }))) {
-                          disconnectMutation.mutate(svc.uniqueKey);
-                        }
-                      }}
-                      disabled={disconnectMutation.isPending}
-                    >
-                      {t("btn.disconnect", { ns: "common" })}
-                    </button>
-                    <button
-                      onClick={() => handleConnect(svc)}
-                      disabled={connectMutation.isPending || apiKeyMutation.isPending}
-                    >
-                      {t("btn.reconnect", { ns: "common" })}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="primary"
-                    onClick={() => handleConnect(svc)}
-                    disabled={connectMutation.isPending || apiKeyMutation.isPending}
-                  >
-                    {t("btn.connect", { ns: "common" })}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div className="service-card service-card-spaced">
+        <div className="form-compact form-inline">
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder={t("profiles.namePlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newName.trim() && !createProfile.isPending) handleCreate();
+            }}
+          />
+          <button
+            className="primary"
+            onClick={handleCreate}
+            disabled={!newName.trim() || createProfile.isPending}
+          >
+            {t("profiles.create")}
+          </button>
+        </div>
       </div>
 
-      <ApiKeyModal
-        open={!!apiKeyProvider}
-        onClose={() => setApiKeyProvider(null)}
-        providerName={apiKeyProvider?.displayName ?? ""}
-        isPending={apiKeyMutation.isPending}
-        onSubmit={(apiKey) => {
-          if (apiKeyProvider) {
-            apiKeyMutation.mutate(
-              { provider: apiKeyProvider.uniqueKey, apiKey },
-              { onSuccess: () => setApiKeyProvider(null) },
-            );
-          }
-        }}
-      />
+      {profiles && profiles.length > 0 && (
+        <div className="services-grid">
+          {profiles.map((profile) => (
+            <div key={profile.id} className="service-card">
+              <div className="service-card-header">
+                <div className="service-info">
+                  {editingId === profile.id ? (
+                    <div className="form-inline">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editName.trim()) {
+                            renameProfile.mutate(
+                              { id: profile.id, name: editName.trim() },
+                              { onSuccess: () => setEditingId(null) },
+                            );
+                          }
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => {
+                          if (editName.trim()) {
+                            renameProfile.mutate(
+                              { id: profile.id, name: editName.trim() },
+                              { onSuccess: () => setEditingId(null) },
+                            );
+                          }
+                        }}
+                        disabled={!editName.trim() || renameProfile.isPending}
+                      >
+                        {t("btn.save")}
+                      </button>
+                      <button onClick={() => setEditingId(null)}>{t("btn.cancel")}</button>
+                    </div>
+                  ) : (
+                    <>
+                      <h3>
+                        {profile.name}
+                        {profile.isDefault && <span className="tag">{t("profiles.default")}</span>}
+                      </h3>
+                      <span className="service-provider">
+                        {t("profiles.connections", { count: profile.connectionCount })}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+              {editingId !== profile.id && (
+                <div className="service-card-actions">
+                  <button
+                    onClick={() => {
+                      setEditingId(profile.id);
+                      setEditName(profile.name);
+                    }}
+                  >
+                    {t("profiles.rename")}
+                  </button>
+                  {!profile.isDefault && (
+                    <button
+                      onClick={() => {
+                        if (confirm(t("profiles.deleteConfirm", { name: profile.name }))) {
+                          deleteProfile.mutate(profile.id);
+                        }
+                      }}
+                      disabled={deleteProfile.isPending}
+                    >
+                      {t("profiles.delete")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

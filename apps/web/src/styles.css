@@ -116,6 +116,10 @@ header h1 span {
   background: rgba(245, 158, 11, 0.15);
   color: var(--warning);
 }
+.badge-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+}
 
 button.danger {
   background: var(--danger);
@@ -242,6 +246,28 @@ button.danger:hover {
   background: rgba(245, 158, 11, 0.1);
 }
 
+.service.needs-reconnection {
+  border-color: var(--warning);
+  gap: 0.5rem;
+}
+.service.scope-warning {
+  border-color: var(--warning);
+  gap: 0.5rem;
+}
+
+.btn-scope-upgrade {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  cursor: pointer;
+}
+.btn-scope-upgrade:hover {
+  background: rgba(245, 158, 11, 0.25);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -254,6 +280,9 @@ button.danger:hover {
 }
 .status-dot.disconnected {
   background: var(--danger);
+}
+.status-dot.warning {
+  background: var(--warning);
 }
 
 /* Admin-provided services */
@@ -1031,6 +1060,20 @@ button:disabled {
   text-decoration: underline;
   background: none;
 }
+.link-inline {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.link-inline:hover {
+  text-decoration: underline;
+}
+.connectors-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
 
 /* User Menu */
 .user-menu {
@@ -1174,6 +1217,55 @@ button:disabled {
 .service-card-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+/* Provider group card (collapsible) */
+.provider-group-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.provider-group-toggle {
+  transition: transform 0.2s;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.provider-group-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+/* Connection list inside expanded group */
+.provider-group-connections {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.connection-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+}
+.connection-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.connection-details {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.connection-orgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
 }
 
 /* Danger button */
@@ -2850,6 +2942,25 @@ button:disabled {
 .form-compact {
   padding: 0.25rem 0;
 }
+.form-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.form-inline input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+}
+.form-inline input:focus {
+  border-color: var(--primary);
+}
 .form-error-centered {
   text-align: center;
   margin-bottom: 1rem;
@@ -3034,4 +3145,42 @@ button:disabled {
   color: var(--text);
   outline: none;
   cursor: pointer;
+}
+
+/* ─── Profile selector ─── */
+
+.profile-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profile-selector label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.profile-select {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+
+/* Flex row: title left, actions right */
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.header-row h2 {
+  margin: 0;
 }

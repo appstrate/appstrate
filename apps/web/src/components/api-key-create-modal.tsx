@@ -59,13 +59,11 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
         <p className="form-hint form-hint-warning">{t("apiKeys.createdWarning")}</p>
         <div className="api-key-display">
           <code className="api-key-value">{createdKey}</code>
-          <button onClick={handleCopy}>
-            {copied ? t("btn.copied", { ns: "common" }) : t("btn.copyLink", { ns: "common" })}
-          </button>
+          <button onClick={handleCopy}>{copied ? t("btn.copied") : t("btn.copyLink")}</button>
         </div>
         <div className="modal-actions">
           <button className="primary" onClick={handleClose}>
-            {t("btn.done", { ns: "common" })}
+            {t("btn.done")}
           </button>
         </div>
       </Modal>
@@ -81,7 +79,7 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
       actions={
         <>
           <button type="button" onClick={handleClose}>
-            {t("btn.cancel", { ns: "common" })}
+            {t("btn.cancel")}
           </button>
           <button
             className="primary"

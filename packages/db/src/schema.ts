@@ -291,6 +291,7 @@ export const executions = pgTable(
     startedAt: timestamp("started_at").defaultNow(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
+    connectionProfileId: uuid("connection_profile_id"),
     scheduleId: text("schedule_id"),
     flowVersionId: integer("flow_version_id").references(() => flowVersions.id),
   },
@@ -420,7 +421,48 @@ export const shareTokens = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 11. Flow admin connections
+// 11. Connection profiles (user-scoped, cross-org)
+// ────────────────────────────────────────────────────────────
+
+export const connectionProfiles = pgTable(
+  "connection_profiles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_connection_profiles_default").on(table.userId).where(sql`${table.isDefault} = true`),
+    index("idx_connection_profiles_user_id").on(table.userId),
+  ],
+);
+
+// ────────────────────────────────────────────────────────────
+// 12. User flow profile overrides
+// ────────────────────────────────────────────────────────────
+
+export const userFlowProfiles = pgTable(
+  "user_flow_profiles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    flowId: text("flow_id").notNull(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.flowId] })],
+);
+
+// ────────────────────────────────────────────────────────────
+// 13. Flow admin connections
 // ────────────────────────────────────────────────────────────
 
 export const flowAdminConnections = pgTable(
@@ -431,9 +473,7 @@ export const flowAdminConnections = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    adminUserId: text("admin_user_id")
-      .notNull()
-      .references(() => user.id),
+    profileId: uuid("profile_id").references(() => connectionProfiles.id, { onDelete: "set null" }),
     connectedAt: timestamp("connected_at").defaultNow(),
   },
   (table) => [
@@ -444,7 +484,7 @@ export const flowAdminConnections = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 12. Organization library: skills & extensions
+// 14. Organization library: skills & extensions
 // ────────────────────────────────────────────────────────────
 
 export const orgSkills = pgTable(
@@ -564,21 +604,17 @@ export const providerConfigs = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 14. Service connections (unified credential storage)
+// 15. Service connections (profile-scoped credential storage)
 // ────────────────────────────────────────────────────────────
 
 export const serviceConnections = pgTable(
   "service_connections",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    orgId: uuid("org_id")
+    profileId: uuid("profile_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
-    flowId: text("flow_id"),
     authMode: authModeEnum("auth_mode").notNull(),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     scopesGranted: text("scopes_granted")
@@ -586,25 +622,20 @@ export const serviceConnections = pgTable(
       .default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at"),
     rawTokenResponse: jsonb("raw_token_response"),
-    connectionConfig: jsonb("connection_config").default({}),
+    providerSnapshot: jsonb("provider_snapshot").notNull(),
+    configHash: text("config_hash").notNull(),
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_service_connections_unique").on(
-      table.orgId,
-      table.userId,
-      table.providerId,
-      sql`COALESCE(${table.flowId}, '__global__')`,
-    ),
-    index("idx_service_connections_org_user").on(table.orgId, table.userId),
-    index("idx_service_connections_provider").on(table.orgId, table.providerId),
+    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId),
+    index("idx_service_connections_profile").on(table.profileId),
   ],
 );
 
 // ────────────────────────────────────────────────────────────
-// 15. OAuth states (short-lived)
+// 16. OAuth states (short-lived)
 // ────────────────────────────────────────────────────────────
 
 export const oauthStates = pgTable(
@@ -615,6 +646,9 @@ export const oauthStates = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
     codeVerifier: text("code_verifier").notNull(),
     scopesRequested: text("scopes_requested")
@@ -667,6 +701,11 @@ export type ScheduleRun = InferSelectModel<typeof scheduleRuns>;
 
 export type ShareToken = InferSelectModel<typeof shareTokens>;
 export type NewShareToken = InferInsertModel<typeof shareTokens>;
+
+export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
+export type NewConnectionProfile = InferInsertModel<typeof connectionProfiles>;
+
+export type UserFlowProfile = InferSelectModel<typeof userFlowProfiles>;
 
 export type FlowAdminConnection = InferSelectModel<typeof flowAdminConnections>;
 

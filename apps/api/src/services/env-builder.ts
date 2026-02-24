@@ -93,7 +93,7 @@ export function buildPromptContext(params: {
 export async function buildExecutionContext(params: {
   executionId: string;
   flow: LoadedFlow;
-  adminConns: Record<string, string>;
+  serviceProfiles: Record<string, string>;
   orgId: string;
   userId: string;
   input?: Record<string, unknown>;
@@ -103,11 +103,11 @@ export async function buildExecutionContext(params: {
   flowPackage: Buffer | null;
   flowVersionId: number | null;
 }> {
-  const { executionId, flow, adminConns, orgId, userId, input, files } = params;
+  const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
 
   const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId] =
     await Promise.all([
-      buildServiceTokens(flow.manifest.requires.services, adminConns, orgId, userId),
+      buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
       getFlowConfig(orgId, flow.id),
       getLastExecutionState(flow.id, userId, orgId),
       resolveProviderDefs(db, orgId, flow.manifest.requires.services),

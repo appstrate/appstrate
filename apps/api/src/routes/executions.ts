@@ -6,7 +6,6 @@ import {
   createExecution,
   updateExecution,
   appendExecutionLog,
-  getAdminConnections,
   getExecution,
   getExecutionFull,
   getRunningExecutionsForFlow,
@@ -15,6 +14,7 @@ import {
   listExecutionLogs,
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
+import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import {
   getAdapter,
   getAdapterName,
@@ -323,13 +323,19 @@ export function createExecutionsRouter() {
     const orgId = c.get("orgId");
     const flowId = flow.id;
 
+    // Resolve service profiles (user profile + admin connections)
+    const serviceProfiles = await resolveServiceProfiles(
+      flow.manifest.requires.services,
+      user.id,
+      flowId,
+      orgId,
+    );
+
     // Validate service dependencies
-    const adminConns = await getAdminConnections(orgId, flowId);
     const depError = await validateFlowDependencies(
       flow.manifest.requires.services,
-      adminConns,
+      serviceProfiles,
       orgId,
-      user.id,
     );
     if (depError) {
       return c.json(depError, 400);
@@ -371,11 +377,14 @@ export function createExecutionsRouter() {
       size: f.size,
     }));
 
+    // Get user's effective profile for snapshot
+    const userProfileId = await getEffectiveProfileId(user.id, flowId);
+
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow,
-      adminConns,
+      serviceProfiles,
       orgId,
       userId: user.id,
       input: parsedInput,
@@ -391,6 +400,7 @@ export function createExecutionsRouter() {
       parsedInput ?? null,
       undefined,
       flowVersionId ?? undefined,
+      userProfileId,
     );
 
     // Fire-and-forget background execution
