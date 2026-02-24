@@ -114,7 +114,7 @@ export function createFlowsRouter() {
         ? {
             id: lastExec.id,
             status: lastExec.status,
-            startedAt: lastExec.started_at,
+            startedAt: lastExec.startedAt,
             duration: lastExec.duration,
           }
         : null,
@@ -190,14 +190,7 @@ export function createFlowsRouter() {
     }
 
     const versions = await listFlowVersions(flow.id);
-    return c.json({
-      versions: versions.map((v) => ({
-        id: v.id,
-        versionNumber: v.version_number,
-        createdBy: v.created_by,
-        createdAt: v.created_at,
-      })),
-    });
+    return c.json({ versions });
   });
 
   // POST /api/flows/:id/services/:serviceId/bind — bind admin's connection to a service

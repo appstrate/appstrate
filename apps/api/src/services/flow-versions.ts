@@ -4,12 +4,12 @@ import { flowVersions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { uploadFlowPackage } from "./flow-package.ts";
 
-export interface FlowVersion {
+interface FlowVersionEntry {
   id: number;
-  flow_id: string;
-  version_number: number;
-  created_by: string | null;
-  created_at: string | null;
+  flowId: string;
+  versionNumber: number;
+  createdBy: string | null;
+  createdAt: string | null;
 }
 
 /** Create a new version snapshot for a user flow. Returns the version row ID. */
@@ -47,23 +47,20 @@ export async function createFlowVersion(flowId: string, createdBy: string): Prom
 }
 
 /** List all versions for a flow, newest first. */
-export async function listFlowVersions(flowId: string): Promise<FlowVersion[]> {
+export async function listFlowVersions(flowId: string): Promise<FlowVersionEntry[]> {
   try {
     const rows = await db
-      .select({
-        id: flowVersions.id,
-        flow_id: flowVersions.flowId,
-        version_number: flowVersions.versionNumber,
-        created_by: flowVersions.createdBy,
-        created_at: flowVersions.createdAt,
-      })
+      .select()
       .from(flowVersions)
       .where(eq(flowVersions.flowId, flowId))
       .orderBy(desc(flowVersions.versionNumber));
 
     return rows.map((r) => ({
-      ...r,
-      created_at: r.created_at?.toISOString() ?? null,
+      id: r.id,
+      flowId: r.flowId,
+      versionNumber: r.versionNumber,
+      createdBy: r.createdBy,
+      createdAt: r.createdAt?.toISOString() ?? null,
     }));
   } catch (err) {
     logger.error("Failed to list flow versions", {

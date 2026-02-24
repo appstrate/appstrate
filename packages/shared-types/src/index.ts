@@ -1,36 +1,4 @@
-export type {
-  User,
-  NewUser,
-  Session,
-  Organization as OrganizationRow,
-  NewOrganization,
-  OrganizationMember as OrganizationMemberRow,
-  NewOrganizationMember,
-  Profile,
-  NewProfile,
-  FlowConfig,
-  Flow as FlowRow,
-  NewFlow,
-  FlowVersion,
-  Execution,
-  NewExecution,
-  ExecutionLog,
-  NewExecutionLog,
-  FlowSchedule,
-  NewFlowSchedule,
-  ScheduleRun,
-  ShareToken,
-  NewShareToken,
-  FlowAdminConnection,
-  OrgSkill as OrgSkillRow,
-  OrgExtension as OrgExtensionRow,
-  ProviderConfig as ProviderConfigRow,
-  NewProviderConfig,
-  ServiceConnection,
-  NewServiceConnection,
-  OAuthState,
-  NewOAuthState,
-} from "@appstrate/db/schema";
+export type { Profile, Execution, ExecutionLog } from "@appstrate/db/schema";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 

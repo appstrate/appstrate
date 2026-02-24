@@ -10,9 +10,7 @@ import {
 } from "@appstrate/db/schema";
 import type { Flow } from "@appstrate/db/schema";
 
-export type FlowRow = Flow;
-
-export async function getFlowById(id: string): Promise<FlowRow | null> {
+export async function getFlowById(id: string): Promise<Flow | null> {
   const rows = await db.select().from(flows).where(eq(flows.id, id)).limit(1);
   return rows[0] ?? null;
 }
@@ -22,7 +20,7 @@ export async function insertUserFlow(
   orgId: string,
   manifest: Record<string, unknown>,
   prompt: string,
-): Promise<FlowRow> {
+): Promise<Flow> {
   const now = new Date();
   const [row] = await db
     .insert(flows)
@@ -39,7 +37,7 @@ export async function updateUserFlow(
     prompt: string;
   },
   expectedUpdatedAt: string,
-): Promise<FlowRow | null> {
+): Promise<Flow | null> {
   const rows = await db
     .update(flows)
     .set({

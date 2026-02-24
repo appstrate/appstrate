@@ -70,24 +70,24 @@ export async function updateExecution(
     result?: Record<string, unknown>;
     state?: Record<string, unknown>;
     error?: string;
-    tokens_used?: number;
-    completed_at?: string;
+    tokensUsed?: number;
+    completedAt?: string;
     duration?: number;
-    token_usage?: Record<string, unknown>;
-    cost_usd?: number;
+    tokenUsage?: Record<string, unknown>;
+    costUsd?: number;
   },
 ): Promise<void> {
   const set: Record<string, unknown> = {};
 
   if (updates.status !== undefined) set.status = updates.status;
   if (updates.error !== undefined) set.error = updates.error;
-  if (updates.tokens_used !== undefined) set.tokensUsed = updates.tokens_used;
-  if (updates.completed_at !== undefined) set.completedAt = new Date(updates.completed_at);
+  if (updates.tokensUsed !== undefined) set.tokensUsed = updates.tokensUsed;
+  if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
   if (updates.duration !== undefined) set.duration = updates.duration;
   if (updates.result !== undefined) set.result = updates.result;
   if (updates.state !== undefined) set.state = updates.state;
-  if (updates.token_usage !== undefined) set.tokenUsage = updates.token_usage;
-  if (updates.cost_usd !== undefined) set.costUsd = String(updates.cost_usd);
+  if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
+  if (updates.costUsd !== undefined) set.costUsd = String(updates.costUsd);
 
   try {
     await db.update(executions).set(set).where(eq(executions.id, id));
@@ -176,7 +176,7 @@ export async function getLastExecution(flowId: string, userId: string, orgId: st
     .select({
       id: executions.id,
       status: executions.status,
-      started_at: executions.startedAt,
+      startedAt: executions.startedAt,
       duration: executions.duration,
     })
     .from(executions)
@@ -319,12 +319,6 @@ export async function unbindAdminConnection(
     );
 }
 
-export async function deleteAdminConnectionsForFlow(orgId: string, flowId: string): Promise<void> {
-  await db
-    .delete(flowAdminConnections)
-    .where(and(eq(flowAdminConnections.orgId, orgId), eq(flowAdminConnections.flowId, flowId)));
-}
-
 // Custom service credentials functions removed --- now handled by @appstrate/connect
 // via connection-manager.ts. The custom_service_credentials table has been
 // migrated to service_connections (migration 012).
@@ -334,9 +328,9 @@ export async function getExecution(id: string) {
     .select({
       id: executions.id,
       status: executions.status,
-      user_id: executions.userId,
-      org_id: executions.orgId,
-      flow_id: executions.flowId,
+      userId: executions.userId,
+      orgId: executions.orgId,
+      flowId: executions.flowId,
     })
     .from(executions)
     .where(eq(executions.id, id))

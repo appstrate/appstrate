@@ -1,7 +1,8 @@
 import { eq, and } from "drizzle-orm";
 import { providerConfigs } from "@appstrate/db/schema";
+import type { ProviderConfig } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { ProviderDefinition, ProviderConfigRow } from "./types.ts";
+import type { ProviderDefinition } from "./types.ts";
 import { decrypt } from "./encryption.ts";
 import { getEnv } from "@appstrate/env";
 
@@ -72,32 +73,33 @@ function ensureInit(): Map<string, ProviderDefinition> {
 // ─── Helpers ──────────────────────────────────────────────────
 
 /**
- * Convert a DB row to a ProviderDefinition.
- * Decrypts client_id and client_secret if present.
+ * Convert a Drizzle DB row to a ProviderDefinition.
  */
-function rowToDefinition(row: ProviderConfigRow): ProviderDefinition {
+function rowToDefinition(row: ProviderConfig): ProviderDefinition {
   return {
     id: row.id,
-    displayName: row.display_name,
-    authMode: row.auth_mode,
-    authorizationUrl: row.authorization_url ?? undefined,
-    tokenUrl: row.token_url ?? undefined,
-    refreshUrl: row.refresh_url ?? undefined,
-    defaultScopes: row.default_scopes ?? [],
-    scopeSeparator: row.scope_separator ?? " ",
-    pkceEnabled: row.pkce_enabled ?? true,
-    authorizationParams: row.authorization_params ?? {},
-    tokenParams: row.token_params ?? {},
-    credentialSchema: row.credential_schema ?? undefined,
-    credentialFieldName: row.credential_field_name ?? undefined,
-    credentialHeaderName: row.credential_header_name ?? undefined,
-    credentialHeaderPrefix: row.credential_header_prefix ?? undefined,
-    iconUrl: row.icon_url ?? undefined,
+    displayName: row.displayName,
+    authMode: row.authMode,
+    authorizationUrl: row.authorizationUrl ?? undefined,
+    tokenUrl: row.tokenUrl ?? undefined,
+    refreshUrl: row.refreshUrl ?? undefined,
+    defaultScopes: row.defaultScopes ?? [],
+    scopeSeparator: row.scopeSeparator ?? " ",
+    pkceEnabled: row.pkceEnabled ?? true,
+    authorizationParams: (row.authorizationParams as Record<string, string>) ?? {},
+    tokenParams: (row.tokenParams as Record<string, string>) ?? {},
+    credentialSchema: (row.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,
+    credentialFieldName: row.credentialFieldName ?? undefined,
+    credentialHeaderName: row.credentialHeaderName ?? undefined,
+    credentialHeaderPrefix: row.credentialHeaderPrefix ?? undefined,
+    iconUrl: row.iconUrl ?? undefined,
     categories: row.categories ?? [],
-    docsUrl: row.docs_url ?? undefined,
-    authorizedUris: row.authorized_uris?.length ? row.authorized_uris : undefined,
-    allowAllUris: row.allow_all_uris ?? false,
-    availableScopes: row.available_scopes?.length ? row.available_scopes : undefined,
+    docsUrl: row.docsUrl ?? undefined,
+    authorizedUris: row.authorizedUris?.length ? row.authorizedUris : undefined,
+    allowAllUris: row.allowAllUris ?? false,
+    availableScopes: (row.availableScopes as ProviderDefinition["availableScopes"])?.length
+      ? (row.availableScopes as ProviderDefinition["availableScopes"])
+      : undefined,
   };
 }
 
@@ -122,7 +124,7 @@ export async function getProvider(
     .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
     .limit(1);
 
-  if (rows.length > 0) return rowToDefinition(rows[0] as unknown as ProviderConfigRow);
+  if (rows.length > 0) return rowToDefinition(rows[0]!);
 
   return null;
 }
@@ -215,7 +217,7 @@ export async function listProviders(db: Db, orgId: string): Promise<ProviderDefi
   // Add custom providers from DB (skip if ID conflicts with built-in)
   const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
 
-  for (const row of rows as unknown as ProviderConfigRow[]) {
+  for (const row of rows) {
     if (!result.has(row.id)) {
       result.set(row.id, rowToDefinition(row));
     }
