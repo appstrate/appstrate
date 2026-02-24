@@ -49,29 +49,36 @@ bun run dev                   # turbo dev → Hono on :3010
 
 ### Key Patterns
 
+#### Execution & Containers
+
 - **Docker Engine API**: All Docker operations use `fetch()` with Bun's `unix:` socket option (`apps/api/src/services/docker.ts`). The `@ts-expect-error` on the unix option is intentional.
 - **Multiplexed streams**: Docker log streams use 8-byte frame headers `[stream_type(1), 0(3), size(4)]`. Parsed in `streamLogs()`.
 - **SSE streaming**: Execution results stream via Hono's `streamSSE()`. The container outputs JSON lines on stdout, the platform parses and re-emits as SSE events.
-- **Structured prompt injection**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is. Only the latest execution's state is injected in the prompt (lightweight). Historical executions are available on demand via the internal API.
-- **Credential isolation via sidecar proxy**: Credentials **never enter the agent container**. Each execution launches a sidecar proxy (`appstrate-sidecar`) on an isolated Docker network. The agent calls the sidecar via `curl` with `X-Service` and `X-Target` headers. The sidecar fetches credentials from `GET /internal/credentials/:serviceId`, substitutes `{{variable}}` placeholders in headers and URL, validates the URL against `authorizedUris`, and forwards the full HTTP request (any method, any body) to the target. The agent has no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, and no route to the host — only `SIDECAR_URL=http://sidecar:8080`. The sidecar also proxies execution history requests. `authorized_uris` and `allow_all_uris` are configured per provider in `provider_configs`.
+- **Adapter system**: Currently only the `pi` adapter is active (Pi Coding Agent SDK). Interface in `adapters/types.ts`, shared prompt logic in `adapters/prompt-builder.ts`.
+- **Sidecar proxy, prompt injection, output validation**: See the Container Protocol section for full details on credential isolation, `buildEnrichedPrompt()`, and Zod retry loop.
+
+#### Auth & Security
+
+- **Auth flow**: Frontend uses Better Auth React client (`createAuthClient`) → `signIn.email()` / `signUp.email()` → session cookie set automatically → sent via `credentials: "include"` on all API calls. Backend verifies session via `auth.api.getSession({ headers })`. The `X-Org-Id` header identifies the active organization. API key auth is tried first (Bearer header), then falls back to cookie session.
+- **API key authentication**: API keys (`ask_` prefix + 48 hex chars) authenticate via `Authorization: Bearer ask_...`. The key is SHA-256 hashed and looked up in the `api_keys` table. Org is resolved from the key (no `X-Org-Id` needed). Keys can have an expiration date or be permanent (`expires_at = NULL`). Expired/revoked keys are rejected. `lastUsedAt` is updated fire-and-forget on each use. Expired keys are auto-revoked at startup.
+- **Multi-tenant isolation**: Application-level security scoped by organization membership. All queries filter by `orgId`. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
 - **Connection manager**: `@appstrate/connect` handles all credential operations — OAuth2 flows (PKCE), API key storage, token refresh, and encrypted credential persistence in the `service_connections` table. Provider configurations (OAuth client IDs/secrets, auth URLs, credential schemas) are stored in `provider_configs`. Built-in providers are loaded from `data/providers.json` at boot via `initBuiltInProviders()`, then merged with `SYSTEM_PROVIDERS` env var (env entries override file entries with same ID, with a warning).
-- **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Derived from Drizzle schema (`@appstrate/db/schema`) via `InferSelectModel` + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
-- **Realtime via LISTEN/NOTIFY + SSE**: Execution status changes and log inserts trigger PostgreSQL `pg_notify()` via database triggers (installed at startup by `createNotifyTriggers()`). The backend listens on dedicated channels (`execution_update`, `execution_log_insert`) via a persistent `postgres` connection. SSE endpoints (`/api/realtime/*`) stream events to the frontend using `EventSource`. The frontend uses `useExecutionRealtime`, `useExecutionLogsRealtime`, `useFlowExecutionRealtime`, and `useAllExecutionsRealtime` hooks. A global `useGlobalExecutionSync` hook patches React Query cache directly from SSE events, avoiding full refetches.
-- **Output validation with retry**: When a flow defines `output.schema`, the platform validates the agent's result with Zod. On mismatch, it sends a retry prompt to the container (up to `execution.outputRetries` times, default 2).
+- **Invitation system (magic links)**: Admins invite users via `POST /api/orgs/:orgId/members`. If the user exists, they're added directly. If not, an `org_invitations` record is created with a 64-char token (7-day expiry), and the API returns the token for the admin to copy the invite link. Re-inviting the same email auto-cancels prior pending invitations. The invite link (`/invite/:token`) is a public frontend route. `POST /invite/:token/accept` creates the user account (via `auth.api.signUpEmail` with a random password + `signInEmail` to get a session cookie), adds them to the org, and redirects to `/welcome` for profile setup (display name + optional password). Existing users are simply added to the org. Expired invitations are cleaned up at startup.
+
+#### Flows & Library
+
 - **FlowService (dual-read)**: Built-in flows are loaded from the `data/flows/` directory at startup into an immutable `ReadonlyMap` cache. User flows are always read from the `flows` DB table on demand. `flow-service.ts` provides `getFlow()`, `listFlows()`, `getAllFlowIds()` — no mutable singleton Map, safe for horizontal scaling.
 - **Flow versioning**: Every create/update of a user flow creates a snapshot in `flow_versions` (auto-incrementing `version_number` per flow via Drizzle transaction). Executions are tagged with `flow_version_id` for audit trail. Versions are non-blocking (errors caught and logged).
+- **Flow packages (ZIP)**: User flows are stored as ZIP packages on the local filesystem (`storage/flow-packages/`). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
+- **Skills & extensions storage**: Built-in items live in `data/skills/` and `data/extensions/`. For user flows, org items are stored in both DB (`org_skills.content` / `org_extensions.content`) and as ZIP packages in storage (`storage/library-packages/{orgId}/`). Built-in items cannot be edited or deleted via the API (403). At execution time, `buildUserFlowPackage()` injects them into the container. See the Flow Manifest Format section for file format details and SDK examples.
+
+#### Infrastructure
+
+- **Realtime via LISTEN/NOTIFY + SSE**: Execution status changes and log inserts trigger PostgreSQL `pg_notify()` via database triggers (installed at startup by `createNotifyTriggers()`). The backend listens on dedicated channels (`execution_update`, `execution_log_insert`) via a persistent `postgres` connection. SSE endpoints (`/api/realtime/*`) stream events to the frontend using `EventSource`. The frontend uses `useExecutionRealtime`, `useExecutionLogsRealtime`, `useFlowExecutionRealtime`, and `useAllExecutionsRealtime` hooks. A global `useGlobalExecutionSync` hook patches React Query cache directly from SSE events, avoiding full refetches.
+- **Shared types**: Types used by both API and frontend live in `packages/shared-types/`. Derived from Drizzle schema (`@appstrate/db/schema`) via `InferSelectModel` + manual interfaces (`index.ts`). Backend re-exports them from `apps/api/src/types/index.ts`.
 - **Structured logging**: All backend logging uses `lib/logger.ts` which emits JSON to stdout (`{ level, msg, timestamp, ...data }`). No `console.*` calls.
 - **Rate limiting**: Token bucket middleware per `method:path:userId`. Applied on `POST /api/flows/:id/run` (20/min), `POST /api/flows/import` (10/min), `POST /api/flows` (10/min).
 - **Graceful shutdown**: `execution-tracker.ts` tracks in-flight executions. On SIGTERM/SIGINT: stop scheduler → reject new POST requests → wait in-flight (max 30s) → exit.
-- **Agent skills**: Flows can include `skills/{id}/SKILL.md` files with YAML frontmatter. Skills are declared in `manifest.requires.skills[]`. Built-in skills live in `data/skills/` and are always visible in the library (`source: "built-in"`). For user flows, org skills are stored in both the DB (`org_skills.content` column) and as ZIP packages in local filesystem storage (`storage/library-packages/{orgId}/skills/{id}.zip`). Both JSON body creation and ZIP upload produce the storage package. Built-in skills cannot be edited or deleted via the API (403). At execution time, `buildUserFlowPackage()` downloads skill ZIPs from storage and injects them into the container.
-- **Flow extensions**: Flows can include `extensions/{id}.ts` files that define Pi agent tools using the ExtensionFactory pattern (`export default function(pi: ExtensionAPI) { pi.registerTool(...) }`). Built-in extensions live in `data/extensions/`. For user flows, org extensions are stored in both the DB (`org_extensions.content`) and as ZIP packages in storage (`storage/library-packages/{orgId}/extensions/{id}.zip`). Declared in `manifest.requires.extensions[]`. Built-in extensions cannot be edited or deleted via the API (403).
-- **Flow packages (ZIP)**: User flows are stored as ZIP packages on the local filesystem (`storage/flow-packages/`). Each version upload contains `manifest.json`, `prompt.md`, and optional `skills/` and `extensions/` directories. The ZIP is mounted into the container and extracted by the entrypoint.
-- **Adapter system**: The platform uses an adapter pattern for execution. Currently only the `pi` adapter is active (Pi Coding Agent SDK, supports multiple LLM providers via API keys). The adapter interface is preserved in `adapters/types.ts` to allow adding future adapters. Shared prompt building logic lives in `adapters/prompt-builder.ts`.
-- **Multi-tenant isolation**: Application-level security scoped by organization membership. All queries filter by `orgId`. Admins (org role `admin` or `owner`) can manage flows, configs, and providers.
-- **OpenAPI spec**: Modular spec in `apps/api/src/openapi/` — 82 endpoints across 17 path files, assembled via spread-merge in `index.ts`. Served at `GET /api/openapi.json` (raw spec) and `GET /api/docs` (Swagger UI via `@hono/swagger-ui`). Both are public (no auth). Validated by `scripts/verify-openapi.ts` using `@readme/openapi-parser` (structural) + `@redocly/openapi-core` (best practices lint, 0 errors/warnings).
-- **API key authentication**: API keys (`ask_` prefix + 48 hex chars) authenticate via `Authorization: Bearer ask_...`. The key is SHA-256 hashed and looked up in the `api_keys` table. Org is resolved from the key (no `X-Org-Id` needed). Keys can have an expiration date or be permanent (`expires_at = NULL`). Expired/revoked keys are rejected. `lastUsedAt` is updated fire-and-forget on each use. Expired keys are auto-revoked at startup.
-- **Auth flow**: Frontend uses Better Auth React client (`createAuthClient`) → `signIn.email()` / `signUp.email()` → session cookie set automatically → sent via `credentials: "include"` on all API calls. Backend verifies session via `auth.api.getSession({ headers })`. The `X-Org-Id` header identifies the active organization. API key auth is tried first (Bearer header), then falls back to cookie session.
-- **Invitation system (magic links)**: Admins invite users via `POST /api/orgs/:orgId/members`. If the user exists, they're added directly. If not, an `org_invitations` record is created with a 64-char token (7-day expiry), and the API returns the token for the admin to copy the invite link. Re-inviting the same email auto-cancels prior pending invitations. The invite link (`/invite/:token`) is a public frontend route. `POST /invite/:token/accept` creates the user account (via `auth.api.signUpEmail` with a random password + `signInEmail` to get a session cookie), adds them to the org, and redirects to `/welcome` for profile setup (display name + optional password). Existing users are simply added to the org. Expired invitations are cleaned up at startup.
 
 ## Architecture
 
@@ -79,7 +86,6 @@ bun run dev                   # turbo dev → Hono on :3010
 User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (email/password → cookie session)
-     |                                |-- POST /api/auth/** (Better Auth handler)
      |                                |
      |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
      |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
@@ -105,24 +111,6 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |                                |-- Cron triggers → triggerScheduledExecution()
      |                                |-- Distributed lock via schedule_runs table
      |                                |-- Uses same executeFlowInBackground() path
-     |                                |
-     |   Health:                      |-- GET /health (no auth) → healthy/degraded
-     |                                |
-     |-- /flows/:id/executions/:eid-->|
-     |   (Execution Detail)           |
-     |-- GET /api/executions/:id/stream (SSE: replay DB + live via pub/sub)
-     |-- GET /api/executions/:id/logs  (REST: paginated historical logs)
-     |                                |
-     |-- POST /api/flows/import ------>|-- flow-import.ts: unzip, validate manifest, persist to DB
-     |-- DELETE /api/flows/:id ------->|-- user-flows.ts: delete user flow + cascade cleanup
-     |                                |
-     |-- /schedules (Schedules List)->|-- GET /api/schedules, CRUD per flow
-     |-- /org-settings (Org Settings)->|-- Provider CRUD, member management, invitations
-     |                                |
-     |   Invitations (magic links):   |-- POST /api/orgs/:orgId/members → invite if user not found
-     |   /invite/:token (public)      |-- GET /invite/:token/info → invitation metadata
-     |                                |-- POST /invite/:token/accept → create user or add to org
-     |   /welcome (post-signup)       |-- POST /api/welcome/setup → set displayName + password
      |                                |
      |            Docker network: appstrate-exec-{execId} (isolated bridge)
      |            ┌─────────────────────────────────────────────┐
@@ -174,7 +162,7 @@ appstrate/
 │   │   ├── eslint.config.js
 │   │   └── src/
 │   │       ├── index.ts              # Hono app entry: CORS, Better Auth handler, cookie+API-key auth middleware, health route, shutdown gate, graceful shutdown, scheduler init, NOTIFY triggers, built-in providers/library init
-│   │       ├── openapi/              # OpenAPI 3.1 spec (modular, assembled from sub-files)
+│   │       ├── openapi/              # OpenAPI 3.1 spec — source of truth for all API endpoints
 │   │       │   ├── index.ts          # Assembles all sub-modules into final spec via spread-merge
 │   │       │   ├── info.ts           # openapi version, info, servers, security defaults, tags
 │   │       │   ├── schemas.ts        # All #/components/schemas
@@ -321,7 +309,7 @@ appstrate/
 │   │   ├── drizzle.config.ts         # Drizzle Kit config (PostgreSQL, schema path, migrations dir)
 │   │   ├── drizzle/                  # Generated migration files (drizzle-kit generate)
 │   │   └── src/
-│   │       ├── schema.ts             # Full Drizzle schema: 24 tables, enums, indexes, types
+│   │       ├── schema.ts             # Full Drizzle schema: 25 tables, enums, indexes, types
 │   │       ├── client.ts             # db instance (drizzle + postgres), listenClient (LISTEN), createDb(), closeDb()
 │   │       ├── auth.ts               # Better Auth config: email/password, cookie sessions, databaseHooks (auto profile+org)
 │   │       ├── storage.ts            # Local filesystem storage: uploadFile, downloadFile, deleteFile, listFiles
@@ -362,231 +350,35 @@ appstrate/
         └── server.ts                 # Transparent HTTP proxy: credential injection, URL validation, body streaming
 ```
 
-## API Endpoints
+## API Reference
 
-### Auth (Better Auth)
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 82 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
-| Method | Path                      | Auth   | Description                                                  |
-| ------ | ------------------------- | ------ | ------------------------------------------------------------ |
-| `POST` | `/api/auth/sign-up/email` | None   | Create account (email, password, name) → sets session cookie |
-| `POST` | `/api/auth/sign-in/email` | None   | Login → sets session cookie                                  |
-| `POST` | `/api/auth/sign-out`      | Cookie | Logout → clears session cookie                               |
-| `GET`  | `/api/auth/get-session`   | Cookie | Get current session + user info                              |
+- **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
+- **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
+- **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
+- **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-### Flows
-
-| Method   | Path                      | Auth         | Description                                                                 |
-| -------- | ------------------------- | ------------ | --------------------------------------------------------------------------- |
-| `GET`    | `/api/flows`              | Cookie       | List all flows (built-in + user) with `runningExecutions` count             |
-| `GET`    | `/api/flows/:id`          | Cookie       | Flow detail with service statuses (incl. `authMode`), config, state, skills |
-| `POST`   | `/api/flows`              | Cookie+Admin | Create a user flow from JSON body: `{manifest, prompt, skillIds?, extensionIds?}`. Rate-limited 10/min |
-| `PUT`    | `/api/flows/:id`          | Cookie+Admin | Update a user flow: `{manifest, prompt, updatedAt, skillIds?, extensionIds?}`. `updatedAt` for optimistic locking |
-| `PUT`    | `/api/flows/:id/config`   | Cookie+Admin | Save flow configuration (Zod-validated against manifest schema)             |
-| `POST`   | `/api/flows/import`       | Cookie+Admin | Import flow from ZIP file (multipart/form-data)                             |
-| `GET`    | `/api/flows/:id/versions` | Cookie       | List version history for a user flow (newest first)                         |
-| `DELETE` | `/api/flows/:id`          | Cookie+Admin | Delete a user-imported flow (built-in flows cannot be deleted)              |
-
-### Executions
-
-| Method | Path                         | Auth   | Description                                                                 |
-| ------ | ---------------------------- | ------ | --------------------------------------------------------------------------- |
-| `POST` | `/api/flows/:id/run`         | Cookie | Execute flow (fire-and-forget) — returns `{ executionId }`                  |
-| `GET`  | `/api/flows/:id/executions`  | Cookie | List executions for a flow (default limit 50, org-scoped)                   |
-| `GET`  | `/api/executions/:id`        | Cookie | Get execution status/result                                                 |
-| `GET`  | `/api/executions/:id/logs`   | Cookie | Get persisted logs (pagination via `?after=lastId`)                         |
-| `GET`  | `/api/executions/:id/stream` | Cookie | SSE stream: replays all logs from DB, then streams live updates via pub/sub |
-| `POST` | `/api/executions/:id/cancel` | Cookie | Cancel a running/pending execution                                          |
-
-### Realtime (SSE)
-
-| Method | Path                                     | Auth   | Description                                              |
-| ------ | ---------------------------------------- | ------ | -------------------------------------------------------- |
-| `GET`  | `/api/realtime/executions`               | Cookie | SSE: all execution status changes (for flow list counts) |
-| `GET`  | `/api/realtime/executions/:id`           | Cookie | SSE: execution status + log events for one execution     |
-| `GET`  | `/api/realtime/flows/:flowId/executions` | Cookie | SSE: execution changes for a specific flow               |
-
-All SSE endpoints accept `?verbose=true` query parameter. Without it, large user-content fields are stripped (`result` from `execution_update`, `data` from `execution_log`) to avoid exotic JSON breaking strict parsers. The frontend always uses `verbose=true`.
-
-### Schedules
-
-| Method   | Path                       | Auth   | Description                                        |
-| -------- | -------------------------- | ------ | -------------------------------------------------- |
-| `GET`    | `/api/schedules`           | Cookie | List all schedules across all flows (org-scoped)   |
-| `GET`    | `/api/flows/:id/schedules` | Cookie | List schedules for a specific flow                 |
-| `POST`   | `/api/flows/:id/schedules` | Cookie | Create a cron schedule for a flow                  |
-| `GET`    | `/api/schedules/:id`       | Cookie | Get a single schedule                              |
-| `PUT`    | `/api/schedules/:id`       | Cookie | Update a schedule (cron, timezone, enabled, input) |
-| `DELETE` | `/api/schedules/:id`       | Cookie | Delete a schedule                                  |
-
-### Auth / Connections
-
-| Method   | Path                          | Auth   | Description                                                    |
-| -------- | ----------------------------- | ------ | -------------------------------------------------------------- |
-| `GET`    | `/auth/connections`           | Cookie | List active service connections (org + user scoped)            |
-| `GET`    | `/auth/integrations`          | Cookie | List all providers with connection status and `authMode`       |
-| `POST`   | `/auth/connect/:provider`     | Cookie | Start OAuth2 flow (returns `authorizationUrl`) or save API key |
-| `GET`    | `/auth/callback`              | None   | OAuth2 callback handler (exchanges code for tokens)            |
-| `DELETE` | `/auth/connections/:provider` | Cookie | Disconnect a service                                           |
-
-### Providers
-
-| Method   | Path                 | Auth         | Description                                      |
-| -------- | -------------------- | ------------ | ------------------------------------------------ |
-| `GET`    | `/api/providers`     | Cookie       | List all provider configs for the org            |
-| `POST`   | `/api/providers`     | Cookie+Admin | Create a provider config (OAuth2, API key, etc.) |
-| `PUT`    | `/api/providers/:id` | Cookie+Admin | Update a provider config                         |
-| `DELETE` | `/api/providers/:id` | Cookie+Admin | Delete a provider config                         |
-
-### Invitations (Magic Links)
-
-| Method   | Path                                         | Auth         | Description                                                                |
-| -------- | -------------------------------------------- | ------------ | -------------------------------------------------------------------------- |
-| `GET`    | `/invite/:token/info`                        | None         | Invitation metadata (email, orgName, role, inviterName, expiresAt)         |
-| `POST`   | `/invite/:token/accept`                      | None         | Accept invitation — auto-signup (new) or add to org (existing), set cookie |
-| `DELETE` | `/api/orgs/:orgId/invitations/:invitationId` | Cookie+Admin | Cancel a pending invitation                                                |
-
-### Welcome (Post-Invite Setup)
-
-| Method | Path                 | Auth   | Description                                              |
-| ------ | -------------------- | ------ | -------------------------------------------------------- |
-| `POST` | `/api/welcome/setup` | Cookie | Set display name and/or password after invitation signup |
-
-### Internal (container-to-host)
-
-| Method | Path                               | Auth          | Description                                                                 |
-| ------ | ---------------------------------- | ------------- | --------------------------------------------------------------------------- |
-| `GET`  | `/internal/execution-history`      | Bearer execId | Fetch historical executions for the current flow (fields: state, result)    |
-| `GET`  | `/internal/credentials/:serviceId` | Bearer execId | Fetch credentials for a service — returns `{ credentials, authorizedUris }` |
-
-### Library (Skills & Extensions)
-
-| Method   | Path                              | Auth         | Description                                                                             |
-| -------- | --------------------------------- | ------------ | --------------------------------------------------------------------------------------- |
-| `GET`    | `/api/library/skills`             | Cookie       | List all skills (built-in + org)                                                        |
-| `POST`   | `/api/library/skills`             | Cookie+Admin | Create skill. JSON: `{id, content, name?, description?}` or multipart ZIP. `name`/`description` auto-extracted from SKILL.md YAML frontmatter |
-| `GET`    | `/api/library/skills/:id`         | Cookie       | Skill detail with content                                                               |
-| `PUT`    | `/api/library/skills/:id`         | Cookie+Admin | Update skill: `{name?, description?, content?}`. Updates storage ZIP automatically      |
-| `DELETE` | `/api/library/skills/:id`         | Cookie+Admin | Delete skill (fails with 409 if referenced by flows)                                    |
-| `GET`    | `/api/library/extensions`         | Cookie       | List all extensions (built-in + org)                                                    |
-| `POST`   | `/api/library/extensions`         | Cookie+Admin | Create extension. JSON: `{id, content, name?, description?}` or multipart ZIP           |
-| `GET`    | `/api/library/extensions/:id`     | Cookie       | Extension detail with content                                                           |
-| `PUT`    | `/api/library/extensions/:id`     | Cookie+Admin | Update extension: `{name?, description?, content?}`. Updates storage ZIP automatically  |
-| `DELETE` | `/api/library/extensions/:id`     | Cookie+Admin | Delete extension (fails with 409 if referenced by flows)                                |
-
-### API Keys
-
-| Method   | Path                 | Auth             | Description                                                                          |
-| -------- | -------------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| `GET`    | `/api/api-keys`      | Cookie/Key+Admin | List active (non-revoked) API keys for the org                                       |
-| `POST`   | `/api/api-keys`      | Cookie/Key+Admin | Create an API key. Raw key returned once. `expiresAt` optional (null = never expires) |
-| `DELETE` | `/api/api-keys/:id`  | Cookie/Key+Admin | Revoke (soft-delete) an API key                                                      |
-
-### Other
-
-| Method | Path                | Auth | Description                                                           |
-| ------ | ------------------- | ---- | --------------------------------------------------------------------- |
-| `GET`  | `/health`           | None | Health check — `{ status: "healthy"\|"degraded", uptime_ms, checks }` |
-| `GET`  | `/api/openapi.json` | None | OpenAPI 3.1 spec as JSON                                              |
-| `GET`  | `/api/docs`         | None | Swagger UI (interactive API docs)                                     |
-| `GET`  | `/*`                | None | Static files from `apps/web/dist/`                                    |
-
-### SSE Events (POST /api/flows/:id/run)
-
-```
-execution_started   → {executionId, startedAt}
-dependency_check    → {services: {gmail: "ok", clickup: "ok"}}
-adapter_started     → {adapter: "pi"}
-progress            → {message: "..."}           (repeated)
-result              → {summary, tickets_created, ...}
-execution_completed → {executionId, status: "success"|"failed"|"timeout"}
-```
-
-### Error Codes
-
-`FLOW_NOT_FOUND` (404), `VALIDATION_ERROR` (400), `DEPENDENCY_NOT_SATISFIED` (400), `CONFIG_INCOMPLETE` (400), `EXECUTION_IN_PROGRESS` (409), `UNAUTHORIZED` (401), `NAME_COLLISION` (400), `MISSING_MANIFEST` (400), `INVALID_MANIFEST` (400), `ZIP_INVALID` (400), `FILE_TOO_LARGE` (400), `MISSING_PROMPT` (400), `OPERATION_NOT_ALLOWED` (403), `FLOW_IN_USE` (409), `RATE_LIMITED` (429)
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec (schemas, auth, request/response format, error codes). Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `providers`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
 
 ## Database Schema
 
-Managed via Drizzle ORM. Schema defined in `packages/db/src/schema.ts`. Migrations generated with `drizzle-kit generate` and applied with `drizzle-kit migrate`. No RLS — application-level security scopes all queries by `orgId`.
+Managed via Drizzle ORM. Full schema in `packages/db/src/schema.ts` (25 tables). Migrations via `drizzle-kit generate` + `drizzle-kit migrate`. No RLS — application-level security scopes all queries by `orgId`.
 
-```
--- Better Auth tables (managed by Better Auth, defined in schema for Drizzle awareness)
-user (id TEXT PK, name, email UNIQUE, email_verified, image, created_at, updated_at)
-session (id TEXT PK, expires_at, token UNIQUE, user_id FK→user CASCADE, ip_address, user_agent, created_at, updated_at)
-account (id TEXT PK, account_id, provider_id, user_id FK→user CASCADE, access_token, refresh_token, password, ...)
-verification (id TEXT PK, identifier, value, expires_at, created_at, updated_at)
+**Key tables and relationships:**
 
--- Organizations and membership
-organizations (id UUID PK, name, slug UNIQUE, created_by TEXT FK→user, created_at, updated_at)
-organization_members (org_id UUID FK→organizations CASCADE, user_id TEXT FK→user CASCADE, role ENUM('owner','admin','member'), joined_at, PK(org_id, user_id))
-
--- User profiles (extends user, auto-created on signup via databaseHooks)
-profiles (id TEXT PK FK→user CASCADE, display_name, language CHECK('fr','en'), created_at, updated_at)
-
--- API keys (org-scoped, for programmatic access)
-api_keys (id TEXT PK, org_id UUID FK→organizations CASCADE, name, key_hash, key_prefix, scopes TEXT[], created_by TEXT FK→user, expires_at TIMESTAMP NULL, last_used_at, revoked_at, created_at)
-  -- Indexes: org_id, key_hash, key_prefix
-  -- expires_at NULL = never expires; revoked_at != NULL = soft-deleted
-
--- Flow configuration (org-scoped)
-flow_configs (org_id UUID FK→organizations, flow_id TEXT, config JSONB, created_at, updated_at, PK(org_id, flow_id))
-
--- User-imported flows (built-in flows loaded from filesystem)
-flows (id TEXT PK, org_id UUID FK→organizations, manifest JSONB, prompt TEXT, created_at, updated_at)
-  -- CHECK: id matches kebab-case slug pattern
-
--- Flow version snapshots (audit trail)
-flow_versions (id SERIAL PK, flow_id TEXT, version_number INT, created_by TEXT FK→user, created_at)
-  -- UNIQUE(flow_id, version_number)
-
--- Execution records (org-scoped, per-user)
-executions (id TEXT PK, flow_id, user_id TEXT FK→user, org_id UUID FK→organizations, status ENUM('pending','running','success','failed','timeout','cancelled'), input JSONB, result JSONB, state JSONB, error, tokens_used, token_usage JSONB, cost_usd NUMERIC, started_at, completed_at, duration, schedule_id, flow_version_id FK→flow_versions)
-  -- Indexes: flow_id, status, user_id, org_id
-  -- NOTIFY trigger: pg_notify('execution_update', JSON payload) on INSERT/UPDATE
-
--- Execution log entries (user_id + org_id denormalized for org-scoping)
-execution_logs (id SERIAL PK, execution_id FK→executions CASCADE, user_id TEXT FK→user, org_id UUID FK→organizations, type, event, message, data JSONB, created_at)
-  -- Indexes: execution_id, (execution_id, id), user_id, org_id
-  -- NOTIFY trigger: pg_notify('execution_log_insert', JSON payload) on INSERT
-
--- Cron schedules (org-scoped, per-user)
-flow_schedules (id TEXT PK, flow_id, user_id TEXT FK→user, org_id UUID FK→organizations, name, enabled, cron_expression, timezone, input JSONB, last_run_at, next_run_at, created_at, updated_at)
-
--- Schedule run deduplication
-schedule_runs (id TEXT PK, schedule_id FK→flow_schedules CASCADE, fire_time, execution_id FK→executions, instance_id, created_at)
-  -- UNIQUE(schedule_id, fire_time)
-
--- Share tokens (one-time public execution links)
-share_tokens (id TEXT PK, token UNIQUE, flow_id, org_id UUID FK→organizations, created_by TEXT FK→user, execution_id FK→executions, consumed_at, expires_at, created_at)
-
--- Flow admin connections
-flow_admin_connections (flow_id, service_id, org_id UUID FK→organizations, admin_user_id TEXT FK→user, connected_at, PK(flow_id, service_id))
-
--- Organization invitations (magic link system)
-org_invitations (id TEXT PK, token TEXT UNIQUE, email TEXT, org_id UUID FK→organizations CASCADE, role ENUM('owner','admin','member'), status ENUM('pending','accepted','expired','cancelled'), invited_by TEXT FK→user, accepted_by TEXT FK→user, expires_at TIMESTAMP, accepted_at TIMESTAMP, created_at)
-  -- Indexes: token, org_id, email
-  -- 7-day expiry, auto-cancel on re-invite, cleaned at startup via expireOldInvitations()
-
--- Organization library
-org_skills (id TEXT, org_id UUID FK→organizations CASCADE, name, description, content TEXT, created_by TEXT FK→user, created_at, updated_at, PK(org_id, id))
-org_extensions (id TEXT, org_id UUID FK→organizations CASCADE, name, description, content TEXT, created_by TEXT FK→user, created_at, updated_at, PK(org_id, id))
-flow_skills (flow_id FK→flows CASCADE, skill_id, org_id UUID, created_at, PK(flow_id, skill_id))
-flow_extensions (flow_id FK→flows CASCADE, extension_id, org_id UUID, created_at, PK(flow_id, extension_id))
-
--- Provider configurations (connection manager)
-provider_configs (id TEXT, org_id UUID FK→organizations CASCADE, auth_mode ENUM('oauth2','api_key','basic','custom'), display_name, client_id_encrypted, client_secret_encrypted, authorization_url, token_url, refresh_url, default_scopes TEXT[], scope_separator, pkce_enabled, authorization_params JSONB, token_params JSONB, credential_schema JSONB, credential_field_name, credential_header_name, credential_header_prefix, available_scopes JSONB, authorized_uris TEXT[], allow_all_uris BOOLEAN, icon_url, categories TEXT[], docs_url, created_at, updated_at, PK(org_id, id))
-
--- Unified service connections (encrypted credential storage)
-service_connections (id UUID PK, org_id UUID FK→organizations CASCADE, user_id TEXT FK→user CASCADE, provider_id, flow_id, auth_mode ENUM, credentials_encrypted, scopes_granted TEXT[], expires_at, raw_token_response JSONB, connection_config JSONB, metadata JSONB, created_at, updated_at)
-  -- Unique: (org_id, user_id, provider_id, COALESCE(flow_id, '__global__'))
-
--- OAuth state tracking (short-lived, 10 min expiry)
-oauth_states (state TEXT PK, org_id UUID, user_id TEXT FK→user CASCADE, provider_id, code_verifier, scopes_requested TEXT[], redirect_uri, created_at, expires_at)
-```
+- **Auth**: `user`, `session`, `account`, `verification` (managed by Better Auth)
+- **Multi-tenant**: `organizations` → `organization_members` (role: owner/admin/member) → `profiles` (display_name, language)
+- **Flows**: `flows` (user-imported, org-scoped) → `flow_configs` (per org) → `flow_versions` (audit snapshots)
+- **Execution**: `executions` (status, input, result, state, cost, duration, flow_version_id) → `execution_logs` (type, event, message, data). Both have NOTIFY triggers for realtime.
+- **Scheduling**: `flow_schedules` (cron, timezone, enabled) → `schedule_runs` (distributed lock dedup)
+- **Connections**: `provider_configs` (org-scoped, auth_mode, encrypted credentials, authorized_uris) → `service_connections` (per user+provider+flow) → `oauth_states` (short-lived PKCE)
+- **Library**: `org_skills` / `org_extensions` (org-scoped) ↔ `flow_skills` / `flow_extensions` (junction)
+- **Other**: `api_keys` (org-scoped, hash+prefix), `org_invitations` (magic links, 7-day expiry), `share_tokens`, `flow_admin_connections`
 
 ## Flow Manifest Format
 
-Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `flows/pdf-explainer/manifest.json` for the reference implementation. Key sections:
+Each flow is a directory with `manifest.json` + `prompt.md` + optional `skills/`. See `data/flows/pdf-explainer/manifest.json` for the reference implementation. Key sections:
 
 - **schemaVersion**: Format version string (e.g. `"1.0.0"`)
 - **metadata**: id (kebab-case slug), displayName, description, author — **all required**. Optional: license, tags.
@@ -659,14 +451,16 @@ The adapter orchestrates a **sidecar proxy pattern** for credential isolation:
 2. Starts the sidecar container on both the default bridge (for host access) and the custom network (alias `sidecar`)
 3. Starts the agent container on the custom network only — **no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, no `ExtraHosts`**
 4. The agent calls `curl $SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers for authenticated API requests
-5. The sidecar fetches credentials, substitutes `{{variable}}` placeholders, validates URLs, and forwards the request
+5. The sidecar fetches credentials from `GET /internal/credentials/:serviceId`, substitutes `{{variable}}` placeholders in headers and URL, validates the URL against `authorizedUris`, and forwards the full HTTP request (any method, any body). `authorized_uris` and `allow_all_uris` are configured per provider in `provider_configs`.
 6. Both containers and the network are cleaned up in the `finally` block
 
-The adapter calls `buildEnrichedPrompt(ctx)` which prepends structured sections (API access with curl proxy examples, user input with schema metadata, configuration, previous state, output format) to the raw `prompt.md`. The agent container receives `FLOW_PROMPT`, `LLM_PROVIDER`, `LLM_MODEL_ID`, `SIDECAR_URL`, `CONNECTED_SERVICES` (comma-separated service IDs, no secrets), and provider API keys. For user flows, the ZIP package from local storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
+**Prompt building**: `buildPromptContext()` in `env-builder.ts` assembles a typed `PromptContext` (raw prompt, tokens, config, previousState, executionApi, input, schemas). `buildEnrichedPrompt()` in `prompt-builder.ts` generates structured sections (`## User Input`, `## Configuration`, `## Previous State`, `## Execution History API`, etc.) enriched with schema metadata (types, descriptions, required), then appends the raw `prompt.md` at the end. No Handlebars — prompts are sent as-is.
+
+**Container env vars**: `FLOW_PROMPT`, `LLM_PROVIDER`, `LLM_MODEL_ID`, `SIDECAR_URL`, `CONNECTED_SERVICES` (comma-separated service IDs, no secrets), and provider API keys. For user flows, the ZIP package from local storage is mounted into the container and extracted by the entrypoint (skills → `.pi/skills/`, extensions → loaded dynamically).
 
 **Output validation loop**: When `output.schema` is defined in the manifest, the platform validates the extracted result with Zod (`validateOutput()`). On mismatch, it builds a retry prompt via `buildRetryPrompt()` describing the errors and expected schema, then re-executes the container. This repeats up to `execution.outputRetries` times. If validation still fails, the result is accepted as-is with a warning.
 
-If `result.state` is present, the platform persists it to the `state` column of the execution record. The latest execution's state is injected into the next run as `## Previous State`. The agent can also fetch historical executions on demand via `$SIDECAR_URL/execution-history`.
+**State persistence**: If `result.state` is present, the platform persists it to the `state` column of the execution record. Only the latest execution's state is injected in the next run as `## Previous State` (lightweight). The agent can also fetch historical executions on demand via `$SIDECAR_URL/execution-history`.
 
 ## Environment Variables
 
@@ -711,43 +505,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## What's Validated
 
-- `turbo build` builds shared-types + connect + db + frontend successfully
-- `turbo check` passes for all 6 packages (tsc + eslint + prettier)
-- `turbo dev` runs API + Vite build --watch in parallel
-- `GET /api/flows` returns flows with correct structure (built-in + user sources)
-- Better Auth cookie-based auth middleware blocks unauthenticated requests to `/api/*` and `/auth/*`
-- Multi-tenant isolation via org-scoped queries (users see own org data)
-- Organization creation on first signup with owner role (via Better Auth databaseHooks)
-- Login/signup flow with email + password (cookie-based sessions)
-- Static file serving works for `apps/web/dist/`
-- OAuth2 flow with PKCE via `@appstrate/connect` (Gmail, ClickUp, Google Calendar)
-- API key connection flow (Brevo, etc.) — `authMode` detection from provider config
-- Service connections scoped per org + user
-- Provider CRUD (create, update, delete) with encrypted credential storage
-- System provider bootstrapping via `SYSTEM_PROVIDERS` env var
-- ZIP flow import with manifest validation, skill extraction, and DB persistence
-- Cron schedule CRUD with `croner` validation and distributed locking
-- Output schema validation with Zod and retry loop (unit tested)
-- PostgreSQL LISTEN/NOTIFY + SSE for real-time execution status updates and logs
-- `GET /health` returns healthy/degraded based on DB connectivity and flow count
-- Graceful shutdown: SIGTERM → stop scheduler → wait in-flight (30s) → exit
-- Structured JSON logging on all API logs (no `console.*`)
-- Rate limiting on execution and flow creation endpoints
-- Flow versioning: create/update creates snapshot, executions tagged with `flow_version_id`
-- `authorized_uris` / `allow_all_uris` URL restriction on all providers with pattern matching
-- Sidecar proxy for credential isolation — agent cannot access `EXECUTION_TOKEN` or `/internal/credentials`
-- Variable substitution (`{{variable}}`) in sidecar proxy for credentials injection
-- Drizzle migrations generated and applied (25 tables)
-- NOTIFY triggers installed at startup for executions + execution_logs
-- Invitation magic links: create invitation, copy invite link, accept (new user auto-signup + existing user org join), expire/cancel
-- Public `/invite/:token/info` and `/invite/:token/accept` endpoints (no auth required)
-- Welcome page `/api/welcome/setup` for post-invite profile setup (displayName + password)
-- Expired invitations cleanup at startup via `expireOldInvitations()`
-- OpenAPI 3.1 spec: 82 endpoints documented, modular structure in `apps/api/src/openapi/`, validated with `@readme/openapi-parser` + `@redocly/openapi-core` (0 errors, 0 warnings)
-- Swagger UI at `/api/docs` and raw spec at `/api/openapi.json` (public, no auth)
-- API key management: create (with optional expiration or never-expiring), list, revoke (soft-delete)
-- API key authentication: `Bearer ask_...` header, org resolved from key, admin-level access
-- `scripts/verify-openapi.ts`: endpoint coverage + structural validation + best practices lint
+- `turbo build` / `turbo check` / `turbo dev` all pass
+- OpenAPI 3.1 spec: 82 endpoints, validated with `@readme/openapi-parser` + `@redocly/openapi-core` (0 errors/warnings)
+- Drizzle migrations generated and applied (25 tables + NOTIFY triggers)
 
 ## Detailed Specs
 
