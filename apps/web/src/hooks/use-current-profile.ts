@@ -1,49 +1,15 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
+import { useStore } from "zustand";
+import { profileStore } from "../stores/profile-store";
 import { useConnectionProfiles } from "./use-connection-profiles";
 
-// ---------------------------------------------------------------------------
-// Module-level store for current profile ID (useSyncExternalStore pattern)
-// ---------------------------------------------------------------------------
-
-const STORAGE_KEY = "appstrate_current_profile";
-
-let _currentProfileId: string | null = localStorage.getItem(STORAGE_KEY);
-const listeners = new Set<() => void>();
-
-function subscribe(fn: () => void) {
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-  };
-}
-
-function getSnapshot(): string | null {
-  return _currentProfileId;
-}
-
 export function setCurrentProfileId(profileId: string | null) {
-  _currentProfileId = profileId;
-  if (profileId) {
-    localStorage.setItem(STORAGE_KEY, profileId);
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-  for (const fn of listeners) fn();
-}
-
-// Sync with external localStorage changes (other tabs)
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === STORAGE_KEY) {
-      _currentProfileId = e.newValue;
-      for (const fn of listeners) fn();
-    }
-  });
+  profileStore.getState().setId(profileId);
 }
 
 // Reactive hook — re-renders when profile changes
 export function useCurrentProfileId(): string | null {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useStore(profileStore, (s) => s.id);
 }
 
 /**
