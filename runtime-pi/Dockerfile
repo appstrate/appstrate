@@ -9,6 +9,7 @@ COPY package.json ./
 RUN npm install --production
 
 COPY extensions/ /runtime/extensions/
+COPY extension-wrapper.ts /runtime/extension-wrapper.ts
 COPY entrypoint.ts /runtime/entrypoint.ts
 
 RUN useradd -m -s /bin/bash pi
