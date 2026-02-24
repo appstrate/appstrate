@@ -25,6 +25,7 @@
   "btn.reconnect": "Reconnect",
   "btn.copyLink": "Copy link",
   "btn.copied": "Copied!",
+  "btn.done": "Done",
   "error.generic": "An error occurred.",
   "error.unexpected": "An unexpected error occurred.",
   "error.unknown": "Unknown error",

@@ -212,6 +212,21 @@ export interface OrgExtensionDetail extends OrgExtension {
   flows: { id: string; displayName: string }[];
 }
 
+// --- API Key Types ---
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  createdBy: string | null;
+  createdByName?: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
 // --- Integration Types ---
 
 export interface Integration {

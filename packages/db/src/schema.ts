@@ -154,6 +154,38 @@ export const orgInvitations = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
+// API Keys (org-scoped, for programmatic access)
+// ────────────────────────────────────────────────────────────
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyHash: text("key_hash").notNull(),
+    keyPrefix: text("key_prefix").notNull(),
+    scopes: text("scopes")
+      .array()
+      .default(sql`'{}'::text[]`),
+    createdBy: text("created_by").references(() => user.id),
+    expiresAt: timestamp("expires_at"),
+    lastUsedAt: timestamp("last_used_at"),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("idx_api_keys_org_id").on(table.orgId),
+    index("idx_api_keys_key_hash").on(table.keyHash),
+    index("idx_api_keys_key_prefix").on(table.keyPrefix),
+  ],
+);
+
+// ────────────────────────────────────────────────────────────
 // 2. Profiles (extends user)
 // ────────────────────────────────────────────────────────────
 
@@ -652,3 +684,6 @@ export type NewOAuthState = InferInsertModel<typeof oauthStates>;
 
 export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
 export type NewOrgInvitation = InferInsertModel<typeof orgInvitations>;
+
+export type ApiKey = InferSelectModel<typeof apiKeys>;
+export type NewApiKey = InferInsertModel<typeof apiKeys>;
