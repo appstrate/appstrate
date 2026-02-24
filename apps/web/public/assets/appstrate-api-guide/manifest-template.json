@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "id": "my-flow-id",
+    "displayName": "My Flow Name",
+    "description": "Short description of what this flow does",
+    "author": "your-name",
+    "tags": ["category1", "category2"]
+  },
+  "requires": {
+    "services": [
+      {
+        "id": "my-service",
+        "provider": "provider-id",
+        "scopes": [],
+        "connectionMode": "user"
+      }
+    ],
+    "skills": [],
+    "extensions": []
+  },
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "text_field": {
+          "type": "string",
+          "description": "A text input",
+          "placeholder": "Enter value..."
+        },
+        "number_field": {
+          "type": "number",
+          "description": "A numeric input",
+          "default": 10
+        },
+        "select_field": {
+          "type": "string",
+          "description": "A selection input",
+          "enum": ["option1", "option2", "option3"],
+          "default": "option1"
+        },
+        "boolean_field": {
+          "type": "boolean",
+          "description": "A toggle input",
+          "default": false
+        },
+        "file_field": {
+          "type": "file",
+          "description": "A file upload",
+          "accept": ".pdf,.docx",
+          "maxSize": 10485760,
+          "multiple": false
+        }
+      },
+      "required": ["text_field"]
+    }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Result summary"
+        },
+        "items": {
+          "type": "array",
+          "description": "Result items"
+        }
+      },
+      "required": ["summary"]
+    }
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "api_endpoint": {
+          "type": "string",
+          "description": "API endpoint URL",
+          "default": "https://api.example.com"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose output",
+          "default": false
+        }
+      }
+    }
+  },
+  "execution": {
+    "timeout": 300,
+    "outputRetries": 2
+  }
+}

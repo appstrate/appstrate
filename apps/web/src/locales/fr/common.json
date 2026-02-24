@@ -2,6 +2,7 @@
   "nav.flows": "Flows",
   "nav.schedules": "Planifications",
   "nav.library": "Bibliothèque",
+  "nav.downloadSkill": "Télécharger le skill",
   "userMenu.ariaLabel": "Menu utilisateur",
   "userMenu.logout": "Déconnexion",
   "userMenu.preferences": "Préférences",
