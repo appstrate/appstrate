@@ -405,6 +405,8 @@ appstrate/
 | `GET`  | `/api/realtime/executions/:id`           | Cookie | SSE: execution status + log events for one execution     |
 | `GET`  | `/api/realtime/flows/:flowId/executions` | Cookie | SSE: execution changes for a specific flow               |
 
+All SSE endpoints accept `?verbose=true` query parameter. Without it, large user-content fields are stripped (`result` from `execution_update`, `data` from `execution_log`) to avoid exotic JSON breaking strict parsers. The frontend always uses `verbose=true`.
+
 ### Schedules
 
 | Method   | Path                       | Auth   | Description                                        |

@@ -19,7 +19,7 @@ export function useExecutionRealtime(
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}`,
+      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 
@@ -53,7 +53,7 @@ export function useFlowExecutionRealtime(flowId: string | null | undefined, call
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/flows/${flowId}/executions?orgId=${encodeURIComponent(orgId)}`,
+      `/api/realtime/flows/${flowId}/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 
@@ -82,9 +82,12 @@ export function useAllExecutionsRealtime(callback: () => void) {
     const orgId = getCurrentOrgId();
     if (!orgId) return;
 
-    const es = new EventSource(`/api/realtime/executions?orgId=${encodeURIComponent(orgId)}`, {
-      withCredentials: true,
-    });
+    const es = new EventSource(
+      `/api/realtime/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      {
+        withCredentials: true,
+      },
+    );
 
     es.addEventListener("execution_update", () => {
       stableCallback();
@@ -114,7 +117,7 @@ export function useExecutionLogsRealtime(
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}`,
+      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 

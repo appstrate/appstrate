@@ -53,10 +53,13 @@ export function useGlobalExecutionSync() {
 
     (async () => {
       try {
-        const res = await fetch(`/api/realtime/executions?orgId=${encodeURIComponent(orgId)}`, {
-          credentials: "include",
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/realtime/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+          {
+            credentials: "include",
+            signal: controller.signal,
+          },
+        );
         if (!res.ok || !res.body) return;
 
         const reader = res.body.getReader();
