@@ -7,6 +7,46 @@ description: Comprehensive guide for autonomously operating the Appstrate platfo
 
 Use this skill whenever you need to interact with the Appstrate platform programmatically. This covers the full API surface: authentication, provider setup, flow management, execution, scheduling, and monitoring.
 
+## Agent Autonomy Principles
+
+**You are an autonomous agent. Gather information from the API before asking the user anything.**
+
+### Discover First, Ask Last
+
+Before performing any action or asking any question, call the relevant GET endpoints to understand the current state:
+
+1. **Need to know what flows exist?** → Call `GET /api/flows` — don't ask the user
+2. **Need to know what providers are configured?** → Call `GET /api/providers` — don't ask the user
+3. **Need to know what services are connected?** → Call `GET /auth/integrations` — don't ask the user
+4. **Need to know what skills/extensions are available?** → Call `GET /api/library/skills` and `GET /api/library/extensions` — don't ask the user
+5. **Need to know the flow's requirements?** → Call `GET /api/flows/{flowId}` — don't ask the user
+6. **Need to know if config is set?** → The flow detail response includes current `config` values — don't ask the user
+
+### Only Ask the User When You Must
+
+The user should only be asked for things that **cannot be discovered via the API**:
+
+- **API key**: The agent cannot create one programmatically without prior authentication. The user must create it in the web UI and provide it.
+- **OAuth browser flow**: The user must open a URL in their browser to authorize an OAuth2 connection. You can generate the URL via the API, but the user must visit it.
+- **Secrets and credentials**: API keys for external services (e.g., Brevo API key) are sensitive — the user must provide them.
+- **Business decisions**: Which flow to create, what the prompt should say, what service to use — these require human judgment.
+
+### Standard Discovery Sequence
+
+When starting any task involving Appstrate, run this sequence to build your understanding:
+
+```
+1. GET /api/flows                    → What flows exist? What's their status?
+2. GET /api/providers                → What providers are configured?
+3. GET /auth/integrations            → What services are connected/disconnected?
+4. GET /api/library/skills           → What skills are available?
+5. GET /api/library/extensions       → What extensions are available?
+```
+
+You do NOT need to run all 5 every time — pick the ones relevant to your task. But **always gather context before acting**.
+
+---
+
 ## Live API Documentation
 
 The complete, up-to-date API documentation is available directly from any Appstrate instance:
@@ -17,7 +57,7 @@ The complete, up-to-date API documentation is available directly from any Appstr
 Both endpoints are **public** (no authentication required). If you need to check the exact schema of a request or response, or discover endpoints not covered in this skill, fetch the OpenAPI spec:
 
 ```
-curl https://appstrate.com/api/openapi.json
+curl {BASE_URL}/api/openapi.json
 ```
 
 This is the authoritative source of truth for the API surface. Use it whenever you are unsure about a parameter, field type, or endpoint path.
@@ -40,19 +80,26 @@ Authorization: Bearer ask_abc123...
 
 For browser-based flows. Sign in via `POST /api/auth/sign-in/email` with `{ "email": "...", "password": "..." }`. The session cookie is set automatically. All subsequent requests must include `credentials: "include"` and an `X-Org-Id` header.
 
-### How to get an API key
+### Getting and Validating an API Key
 
-To make API calls (via curl, scripts, or agents), you need an API key. **You cannot create one via the API without already being authenticated.** Guide the user through these steps:
+To make API calls, you need an API key. **This is the one thing you must ask the user for**, because creating a key requires prior authentication in the web UI.
 
-1. Log in to the Appstrate web interface
-2. Go to **Organization Settings** (click the org name or settings icon in the sidebar)
-3. Navigate to the **API Keys** tab
-4. Click **Create API Key**
-5. Enter a name (e.g., "Agent access") and optionally set an expiration date (or choose "Never" for a permanent key)
-6. Copy the generated key immediately — **it is shown only once** and cannot be retrieved later
-7. The key looks like: `ask_` followed by 48 hex characters
+**If you don't have a key yet**, tell the user:
 
-Once the user provides you with the API key, you can use it in all subsequent API calls via the `Authorization: Bearer ask_...` header.
+> I need an Appstrate API key to proceed. You can create one in the web UI: **Organization Settings > API Keys > Create API Key**. The key starts with `ask_` and is shown only once.
+
+**Once you have the key, validate it immediately** — don't just trust it:
+
+```
+GET {BASE_URL}/api/flows
+Authorization: Bearer ask_...
+```
+
+- **200**: Key is valid. Proceed with your task.
+- **401**: Key is invalid, expired, or revoked. Tell the user to check their API keys in Organization Settings.
+- **403**: Key is valid but the user lacks admin permissions. Read-only operations will still work.
+
+Store the validated key and base URL for all subsequent calls.
 
 ### Choosing the right method
 
@@ -74,16 +121,22 @@ Providers define how Appstrate connects to external services (Gmail, ClickUp, Br
 | `basic`   | Username + password                                               | SMTP servers                    |
 | `custom`  | Dynamic credential schema defined per provider                    | Any custom service              |
 
-### List Providers
+### Discovering Existing Providers
+
+**Always list existing providers before creating a new one:**
 
 ```
 GET /api/providers
 Authorization: Bearer ask_...
 ```
 
-Response: Array of provider configurations with their auth mode, scopes, credential schema, and authorized URIs.
+Response: Array of provider configurations with their `id`, `displayName`, `authMode`, scopes, credential schema, and authorized URIs.
+
+**Check if the provider you need already exists.** If a provider with the right `authMode` and configuration is already present, skip creation and proceed to connecting.
 
 ### Create a Provider
+
+Only create a provider if `GET /api/providers` confirmed it doesn't exist yet:
 
 ```
 POST /api/providers
@@ -152,7 +205,9 @@ The sidecar validates every outbound request against these patterns before forwa
 
 Once a provider is configured, users connect their accounts to it. Connections are scoped per organization + user.
 
-### List Integrations (providers + connection status)
+### Check Connection Status First
+
+**Always check what's already connected before trying to connect anything:**
 
 ```
 GET /auth/integrations
@@ -161,7 +216,11 @@ Authorization: Bearer ask_...
 
 Returns all providers with their connection status (`connected`, `disconnected`, `expired`) and `authMode`.
 
+If a service is already `connected`, you don't need to do anything. If it's `disconnected` or `expired`, proceed with the appropriate connection method based on the provider's `authMode`.
+
 ### Connect via API Key
+
+For providers with `authMode: "api_key"`. You need the external service's API key from the user — this is a secret you cannot discover.
 
 ```
 POST /auth/connect/{providerId}/api-key
@@ -172,6 +231,8 @@ Content-Type: application/json
 ```
 
 ### Connect via Custom Credentials
+
+For providers with `authMode: "custom"`. First, check the provider's `credentialSchema` (from `GET /api/providers`) to know what fields are required, then ask the user only for the credential values.
 
 ```
 POST /auth/connect/{providerId}/credentials
@@ -185,6 +246,8 @@ The body must match the provider's `credentialSchema`.
 
 ### Connect via OAuth2
 
+For providers with `authMode: "oauth2"`. This requires a browser interaction from the user.
+
 ```
 POST /auth/connect/{providerId}
 Authorization: Bearer ask_...
@@ -193,7 +256,9 @@ Content-Type: application/json
 { "scopes": ["read", "write"] }
 ```
 
-Returns `{ "authUrl": "https://provider.com/authorize?..." }`. The user must visit this URL to complete the OAuth flow. After authorization, the callback at `GET /auth/callback` exchanges the code for tokens.
+Returns `{ "authUrl": "https://provider.com/authorize?..." }`. Give this URL to the user and ask them to open it in their browser. After authorization, the callback at `GET /auth/callback` exchanges the code for tokens automatically.
+
+After the user completes the OAuth flow, verify the connection by calling `GET /auth/integrations` again — the provider should now show `connected`.
 
 ### Disconnect
 
@@ -212,6 +277,8 @@ Authorization: Bearer ask_...
 ```
 
 This makes the admin's credentials available to all executions of that flow, regardless of who runs it.
+
+**Check if a binding already exists**: The flow detail (`GET /api/flows/{flowId}`) shows `services[].adminConnection` — if it's already set, the binding is done.
 
 ---
 
@@ -251,7 +318,11 @@ Returns complete flow information including:
 - `skills`: Linked skill IDs
 - `extensions`: Linked extension IDs
 
+**This is your primary source of truth for a flow.** Before running, configuring, or modifying any flow, always fetch its detail first.
+
 ### Create a Flow
+
+**First check if the flow ID already exists** via `GET /api/flows`:
 
 ```
 POST /api/flows
@@ -270,7 +341,11 @@ Returns `{ "flowId": "my-flow-id" }`. Rate-limited to 10/min.
 
 ### Update a Flow
 
+**Always fetch the current flow first** to get the `updatedAt` value (required for optimistic locking):
+
 ```
+GET /api/flows/{flowId}   → note updatedAt value
+
 PUT /api/flows/{flowId}
 Authorization: Bearer ask_...
 Content-Type: application/json
@@ -283,8 +358,6 @@ Content-Type: application/json
   "extensionIds": ["web-fetch"]
 }
 ```
-
-The `updatedAt` field is required for optimistic locking — it must match the flow's current `updatedAt` value. Get it from `GET /api/flows/{flowId}`.
 
 ### Delete a Flow
 
@@ -309,6 +382,8 @@ The ZIP must contain `manifest.json` and `prompt.md` at the root. Optional `skil
 
 ### Save Flow Configuration
 
+**First check what config is currently set** via `GET /api/flows/{flowId}` (look at `config` field and `manifest.config.schema` for what fields exist):
+
 ```
 PUT /api/flows/{flowId}/config
 Authorization: Bearer ask_...
@@ -321,6 +396,8 @@ The body is validated against the flow's `config.schema` from the manifest.
 
 ### Update Linked Skills
 
+**First check available skills** via `GET /api/library/skills`:
+
 ```
 PUT /api/flows/{flowId}/skills
 Authorization: Bearer ask_...
@@ -330,6 +407,8 @@ Content-Type: application/json
 ```
 
 ### Update Linked Extensions
+
+**First check available extensions** via `GET /api/library/extensions`:
 
 ```
 PUT /api/flows/{flowId}/extensions
@@ -444,9 +523,9 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
 
 - **`metadata.id`**: Must be a kebab-case slug (`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 - **`requires.services[].id`**: Also kebab-case. This is the service identifier used for connection binding.
-- **`requires.services[].provider`**: Must match a configured provider ID in the organization.
+- **`requires.services[].provider`**: Must match a configured provider ID in the organization. **Verify it exists** via `GET /api/providers` before referencing it in a manifest.
 - **`requires.services[].connectionMode`**: `"user"` (default) = each user connects individually. `"admin"` = admin binds once for all users.
-- **`requires.skills`** and **`requires.extensions`**: Arrays of skill/extension IDs from the library.
+- **`requires.skills`** and **`requires.extensions`**: Arrays of skill/extension IDs from the library. **Verify they exist** via `GET /api/library/skills` and `GET /api/library/extensions`.
 - **`input.schema.required`**: Array at the object level. Do NOT use `required: true` on individual properties.
 - **Field types**: `string`, `number`, `boolean`, `array`, `object`, `file`.
 - **`execution.timeout`**: In seconds. Default varies by adapter.
@@ -505,6 +584,8 @@ Returns built-in + org skills with `id`, `name`, `description`, `source`, `usedB
 
 #### Create a Skill
 
+**First check if the skill ID already exists** via `GET /api/library/skills`:
+
 ```
 POST /api/library/skills
 Authorization: Bearer ask_...
@@ -548,7 +629,7 @@ DELETE /api/library/skills/{skillId}
 Authorization: Bearer ask_...
 ```
 
-Returns 409 if still referenced by flows.
+Returns 409 if still referenced by flows. **Check which flows reference it first** via `GET /api/library/skills/{skillId}` (includes `flows` field).
 
 ### Extensions
 
@@ -601,6 +682,18 @@ DELETE /api/library/extensions/{extensionId} # Delete (409 if in use)
 ---
 
 ## Flow Execution
+
+### Pre-flight Check (Mandatory)
+
+**Before running any flow, always call `GET /api/flows/{flowId}` and verify:**
+
+1. **Services**: Every entry in `services[]` must have `status: "connected"`. If any is `disconnected` or `expired`, resolve it before running.
+2. **Admin bindings**: For services with `connectionMode: "admin"`, check `adminConnection` is set. If not, bind via `POST /api/flows/{flowId}/services/{serviceId}/bind`.
+3. **Config**: Compare `config` (current values) against `manifest.config.schema` — ensure all `required` fields have values. If not, set them via `PUT /api/flows/{flowId}/config`.
+4. **Running executions**: Check `runningExecutions` — if > 0, either wait or cancel the existing one.
+5. **Input schema**: Read `manifest.input.schema` to know what input fields are required and their types.
+
+Only ask the user for information that's not in the API response (e.g., what input values to use for this run).
 
 ### Run a Flow
 
@@ -750,6 +843,15 @@ Flows can maintain state across executions. If the agent's result includes a `st
 Flows can be scheduled to run automatically via cron expressions.
 
 ### Create a Schedule
+
+**First check existing schedules** to avoid duplicates:
+
+```
+GET /api/flows/{flowId}/schedules
+Authorization: Bearer ask_...
+```
+
+Then create:
 
 ```
 POST /api/flows/{flowId}/schedules
@@ -977,27 +1079,54 @@ GET /share/{token}/status
 | `FLOW_IN_USE`              | 409  | Cannot delete, resource referenced by flows |
 | `RATE_LIMITED`             | 429  | Too many requests                           |
 
+### Autonomous Error Recovery
+
+When you get an error, **don't ask the user what to do**. Diagnose and resolve it yourself when possible:
+
+| Error | Agent Action |
+|-------|-------------|
+| `DEPENDENCY_NOT_SATISFIED` | Call `GET /api/flows/{flowId}` → find which service has `status: "disconnected"` → call `GET /auth/integrations` to check the provider's `authMode` → if `api_key` or `custom`, ask user for credentials and connect. If `oauth2`, generate the auth URL and give it to the user. |
+| `CONFIG_INCOMPLETE` | Call `GET /api/flows/{flowId}` → read `manifest.config.schema` to find required fields → check which are missing in `config` → if fields have `default` values, set them via `PUT /api/flows/{flowId}/config`. If no defaults, ask the user for values. |
+| `NAME_COLLISION` | The resource already exists. Call `GET /api/flows` (or skills/extensions) to find it, then decide: update instead of create, or choose a different ID. |
+| `EXECUTION_IN_PROGRESS` | Call `GET /api/flows/{flowId}/executions?limit=5` → find the running execution → either poll it until completion, or cancel via `POST /api/executions/{execId}/cancel`. |
+| `FLOW_IN_USE` | Call `GET /api/library/skills/{id}` or `GET /api/library/extensions/{id}` → read the `flows` field → unlink from those flows first. |
+| `UNAUTHORIZED` | Validate the API key with `GET /api/flows`. If it fails, tell the user their key is invalid/expired and ask for a new one. |
+
 ---
 
 ## Common Workflows
 
 ### Workflow 1: Set up a new external service integration
 
-1. Create a provider: `POST /api/providers` with auth mode, credentials config, authorized URIs
-2. Connect to it: `POST /auth/connect/{providerId}/api-key` (or `/credentials` or OAuth2)
-3. Verify: `GET /auth/integrations` — check status is `connected`
+```
+1. GET /api/providers                         → Check if the provider already exists
+2. IF not found:
+   POST /api/providers                        → Create it (ask user only for auth details: clientId/secret for OAuth2, or credential schema for custom)
+3. GET /auth/integrations                     → Check if already connected
+4. IF not connected:
+   - authMode "api_key" → Ask user for the external API key → POST /auth/connect/{providerId}/api-key
+   - authMode "custom"  → Read credentialSchema from provider → Ask user for values → POST /auth/connect/{providerId}/credentials
+   - authMode "oauth2"  → POST /auth/connect/{providerId} → Give authUrl to user → Wait → Verify via GET /auth/integrations
+5. GET /auth/integrations                     → Confirm status is "connected"
+```
 
 ### Workflow 2: Create and run a flow from scratch
 
-1. (Optional) Create skills: `POST /api/library/skills`
-2. (Optional) Create extensions: `POST /api/library/extensions`
-3. Create the flow: `POST /api/flows` with manifest + prompt + skill/extension IDs
-4. Configure it: `PUT /api/flows/{flowId}/config` (if config schema exists)
-5. Connect required services: `POST /auth/connect/{providerId}/...` for each service
-6. Bind admin services: `POST /api/flows/{flowId}/services/{serviceId}/bind` (for admin-mode services)
-7. Run: `POST /api/flows/{flowId}/run` with input
-8. Poll status: `GET /api/executions/{executionId}` until status is terminal
-9. Get logs: `GET /api/executions/{executionId}/logs`
+```
+1. GET /api/flows                             → Check if the flow ID already exists
+2. GET /api/providers                         → Check which providers are available for services
+3. GET /api/library/skills                    → Check available skills
+4. GET /api/library/extensions                → Check available extensions
+5. POST /api/flows                            → Create the flow (manifest + prompt + skillIds + extensionIds)
+6. GET /api/flows/{flowId}                    → Verify creation, check service status
+7. IF services disconnected:
+   → Follow Workflow 1 for each missing service
+8. IF config has required fields:
+   PUT /api/flows/{flowId}/config             → Set config values
+9. POST /api/flows/{flowId}/run               → Run with input
+10. Poll: GET /api/executions/{executionId}   → Until status is terminal
+11. GET /api/executions/{executionId}/logs     → Get full execution log
+```
 
 ### Workflow 3: Monitor an execution to completion
 
@@ -1007,24 +1136,28 @@ GET /share/{token}/status
    GET /api/executions/{executionId}
    - If status is "pending" or "running": wait 2-5 seconds, retry
    - If status is "success": read result field
-   - If status is "failed": read error field
+   - If status is "failed": read error field + GET /api/executions/{executionId}/logs for details
    - If status is "timeout" or "cancelled": handle accordingly
 3. GET /api/executions/{executionId}/logs → full execution log
 ```
 
 ### Workflow 4: Schedule a recurring flow
 
-1. Ensure the flow exists and is configured
-2. Create schedule: `POST /api/flows/{flowId}/schedules` with cron expression
-3. Monitor: `GET /api/schedules` to see next run times
-4. Check results: `GET /api/flows/{flowId}/executions` after scheduled runs
+```
+1. GET /api/flows/{flowId}                    → Verify flow exists and is fully configured
+2. GET /api/flows/{flowId}/schedules          → Check if a schedule already exists
+3. IF no schedule exists:
+   POST /api/flows/{flowId}/schedules         → Create with cron expression
+4. GET /api/schedules                         → Verify creation and next run time
+```
 
 ### Workflow 5: Update an existing flow
 
-1. Get current state: `GET /api/flows/{flowId}` — note the `updatedAt` value
-2. Update: `PUT /api/flows/{flowId}` with new manifest, prompt, and the `updatedAt` value
-3. Update linked skills: `PUT /api/flows/{flowId}/skills` with updated skill IDs
-4. Update linked extensions: `PUT /api/flows/{flowId}/extensions` with updated extension IDs
+```
+1. GET /api/flows/{flowId}                    → Get current manifest, prompt, updatedAt, skills, extensions
+2. PUT /api/flows/{flowId}                    → Update with new manifest/prompt + the updatedAt value
+3. GET /api/flows/{flowId}                    → Verify the update was applied
+```
 
 ---
 
@@ -1059,7 +1192,7 @@ Status is `degraded` if any check fails.
 | `POST /api/flows/import`  | 10 requests/min per user |
 | `POST /api/flows`         | 10 requests/min per user |
 
-When rate-limited, the API returns HTTP 429 with `RATE_LIMITED` error code.
+When rate-limited, the API returns HTTP 429 with `RATE_LIMITED` error code. Wait 60 seconds before retrying.
 
 ---
 
@@ -1076,10 +1209,13 @@ These files are available in the same directory as this SKILL.md (`.pi/skills/ap
 
 ## Tips for Agents
 
-1. **Always check flow detail before running**: `GET /api/flows/{flowId}` tells you what services, config, and input are needed.
-2. **Poll with backoff**: When waiting for execution completion, use 2-5 second intervals with exponential backoff.
-3. **Use pagination for logs**: Pass `?after={lastId}` to `GET /api/executions/{executionId}/logs` for incremental log retrieval.
-4. **Validate input locally**: Match your input against the flow's `input.schema` before calling run to avoid 400 errors.
-5. **Handle optimistic locking on updates**: Always pass the current `updatedAt` when updating a flow to avoid conflicts.
-6. **Check provider authorized URIs**: If the agent needs to call a URL, ensure the provider's `authorizedUris` includes it.
-7. **Use state for continuity**: If your flow needs to remember data between runs, include a `state` field in the output. It will be injected as `## Previous State` in subsequent executions.
+1. **Always discover before acting**: Call GET endpoints to understand the current state before creating, updating, or asking the user anything.
+2. **Validate your API key immediately**: The first thing you do with a new key is `GET /api/flows` to verify it works.
+3. **Check flow detail before running**: `GET /api/flows/{flowId}` tells you everything — services, config, input schema, running executions.
+4. **Resolve blockers autonomously**: If a service is disconnected, figure out the `authMode` and initiate the connection. Only ask the user for secrets.
+5. **Poll with backoff**: When waiting for execution completion, use 2-5 second intervals.
+6. **Use pagination for logs**: Pass `?after={lastId}` to `GET /api/executions/{executionId}/logs` for incremental log retrieval.
+7. **Handle optimistic locking**: Always fetch the current `updatedAt` before updating a flow.
+8. **Check provider authorized URIs**: If the agent needs to call a URL, verify the provider's `authorizedUris` includes it via `GET /api/providers`.
+9. **Use state for continuity**: If your flow needs to remember data between runs, include a `state` field in the output.
+10. **Never guess, always verify**: If you're unsure whether something exists or is configured, call the API. It's free.
