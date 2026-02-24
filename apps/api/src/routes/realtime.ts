@@ -7,6 +7,19 @@ import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 
+/** Strip large user-content fields from SSE payloads for non-verbose consumers. */
+function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
+  if (evt.event === "execution_update") {
+    const { result: _result, ...rest } = evt.data;
+    return rest;
+  }
+  if (evt.event === "execution_log") {
+    const { data: _data, ...rest } = evt.data;
+    return rest;
+  }
+  return evt.data;
+}
+
 /**
  * Validate session + org membership for SSE endpoints.
  * EventSource can't send custom headers, so:
@@ -49,9 +62,12 @@ export function createRealtimeRouter() {
     const executionId = c.req.param("id");
     const subId = `exec-${executionId}-${crypto.randomUUID().slice(0, 8)}`;
 
+    const verbose = c.req.query("verbose") === "true";
+
     return streamSSE(c, async (stream) => {
       const send = (evt: RealtimeEvent) => {
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(evt.data) }).catch(() => {});
+        const payload = verbose ? evt.data : stripPayload(evt);
+        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
       };
 
       addSubscriber({
@@ -82,9 +98,12 @@ export function createRealtimeRouter() {
     const flowId = c.req.param("flowId");
     const subId = `flow-${flowId}-${crypto.randomUUID().slice(0, 8)}`;
 
+    const verbose = c.req.query("verbose") === "true";
+
     return streamSSE(c, async (stream) => {
       const send = (evt: RealtimeEvent) => {
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(evt.data) }).catch(() => {});
+        const payload = verbose ? evt.data : stripPayload(evt);
+        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
       };
 
       addSubscriber({
@@ -113,9 +132,12 @@ export function createRealtimeRouter() {
 
     const subId = `all-exec-${crypto.randomUUID().slice(0, 8)}`;
 
+    const verbose = c.req.query("verbose") === "true";
+
     return streamSSE(c, async (stream) => {
       const send = (evt: RealtimeEvent) => {
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(evt.data) }).catch(() => {});
+        const payload = verbose ? evt.data : stripPayload(evt);
+        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
       };
 
       addSubscriber({
