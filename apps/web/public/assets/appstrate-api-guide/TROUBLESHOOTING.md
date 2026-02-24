@@ -1,14 +1,18 @@
 # Troubleshooting Appstrate
 
-Guide de diagnostic et résolution des erreurs courantes lors de l'utilisation de l'API Appstrate.
+Guide de diagnostic et résolution des erreurs courantes lors de l'utilisation de l'API Appstrate. **Diagnostic autonome : toujours vérifier via l'API avant de demander quoi que ce soit à l'utilisateur.**
 
 ## Diagnostic rapide
 
-Avant toute investigation, vérifier ces points dans l'ordre :
+Avant toute investigation, exécuter ces appels dans l'ordre :
 
-1. **L'API est-elle accessible ?** → `GET https://appstrate.com/health`
-2. **L'authentification est-elle valide ?** → `GET https://appstrate.com/api/flows` (doit retourner 200)
-3. **Le flow existe-t-il ?** → `GET https://appstrate.com/api/flows/{flowId}` (doit retourner 200)
+1. **L'API est-elle accessible ?** → `GET {BASE_URL}/health` — doit retourner `{ "status": "healthy" }`
+2. **L'authentification est-elle valide ?** → `GET {BASE_URL}/api/flows` — doit retourner 200
+3. **Le flow existe-t-il ?** → `GET {BASE_URL}/api/flows/{flowId}` — doit retourner 200
+
+Si l'étape 1 échoue, le serveur est down — rien d'autre ne fonctionnera.
+Si l'étape 2 retourne 401, la clé API est invalide/expirée — demander une nouvelle clé à l'utilisateur.
+Si l'étape 3 retourne 404, vérifier l'ID du flow via `GET /api/flows` (lister tous les flows disponibles).
 
 ---
 
@@ -16,27 +20,27 @@ Avant toute investigation, vérifier ces points dans l'ordre :
 
 ### 401 Unauthorized — "Missing or invalid authentication"
 
-**Causes possibles :**
-- Clé API manquante ou mal formatée dans le header
-- Clé API expirée ou révoquée
-- Header `Authorization` mal formé
-
-**Diagnostic :**
+**Diagnostic autonome :**
 ```
-curl -v https://appstrate.com/api/flows \
-  -H "Authorization: Bearer ask_..."
+GET {BASE_URL}/api/flows
+Authorization: Bearer ask_...
 ```
 
-**Solutions :**
-1. Vérifier le format : `Authorization: Bearer ask_<48 hex chars>`
-2. Demander à l'utilisateur de vérifier que la clé est toujours active dans **Organization Settings > API Keys**
-3. Si la clé est expirée, demander à l'utilisateur d'en créer une nouvelle
+**Actions de l'agent :**
+1. Vérifier le format du header : `Authorization: Bearer ask_<48 hex chars>`
+2. Si l'appel échoue en 401, la clé est invalide, expirée ou révoquée
+3. Informer l'utilisateur : « Votre clé API est invalide ou expirée. Créez-en une nouvelle dans Organization Settings > API Keys. »
 
 ### 403 Forbidden — "Insufficient permissions"
 
-**Cause :** L'utilisateur associé à la clé API n'a pas le rôle `admin` ou `owner` dans l'organisation.
+**Diagnostic autonome :**
 
-**Solution :** Les opérations d'écriture (créer un flow, modifier un provider, etc.) nécessitent le rôle admin. Demander à l'utilisateur de vérifier son rôle dans **Organization Settings**.
+La clé API est valide mais l'utilisateur n'a pas les droits admin. Les opérations en lecture fonctionneront toujours.
+
+**Actions de l'agent :**
+1. Déterminer si l'opération nécessite vraiment le rôle admin (création de flow, modification de provider, gestion de library)
+2. Si oui, informer l'utilisateur : « Cette opération nécessite le rôle admin. Vérifiez votre rôle dans Organization Settings. »
+3. Si non, vérifier que l'appel est bien fait sur la bonne ressource
 
 ---
 
@@ -57,35 +61,39 @@ curl -v https://appstrate.com/api/flows \
 - `My_Flow` → invalide
 - `-bad-start` → invalide
 
+**Action de l'agent :** Corriger l'ID automatiquement (lowercase, remplacer les underscores/espaces par des tirets, supprimer les caractères invalides) et réessayer.
+
 ### 400 NAME_COLLISION — "Flow ID already exists"
 
-**Cause :** Un flow avec cet ID existe déjà dans l'organisation.
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/flows
+```
 
-**Solutions :**
-1. Choisir un ID différent
-2. Si c'est une mise à jour, utiliser `PUT /api/flows/{flowId}` au lieu de `POST /api/flows`
+Chercher le flow existant avec cet ID dans la réponse.
+
+**Actions de l'agent :**
+1. Si l'objectif est de mettre à jour le flow existant → utiliser `PUT /api/flows/{flowId}` au lieu de `POST`
+2. Si c'est un nouveau flow distinct → choisir un ID différent automatiquement (ex: `my-flow-v2`)
 
 ### 400 INVALID_MANIFEST — Erreurs de validation du manifest
 
 **Erreurs fréquentes dans le manifest :**
 
-| Erreur | Cause | Solution |
+| Erreur | Cause | Action de l'agent |
 |--------|-------|----------|
 | `metadata.id: Required` | Champ `id` manquant dans metadata | Ajouter `"id": "mon-flow"` dans metadata |
 | `metadata.displayName: Required` | Pas de nom d'affichage | Ajouter `"displayName": "Mon Flow"` |
 | `requires.services: Required` | Section services manquante | Ajouter `"services": []` même si vide |
-| `input.schema.required: Expected array` | `required: true` sur une propriété | Utiliser `"required": ["field1"]` au niveau de l'objet schema |
+| `input.schema.required: Expected array` | `required: true` sur une propriété | Corriger : utiliser `"required": ["field1"]` au niveau de l'objet schema |
 
-**Astuce :** Utiliser le fichier `manifest-template.json` inclus dans ce skill comme base.
+**Action de l'agent :** Corriger le manifest automatiquement et réessayer. Utiliser le fichier `manifest-template.json` comme référence.
 
 ### 400 MISSING_PROMPT — "Flow missing prompt"
 
 **Cause :** Le champ `prompt` est vide ou manquant dans le body de la requête.
 
-**Solution :** Ajouter le prompt markdown. Même un prompt minimal suffit :
-```json
-{ "prompt": "# Mon Agent\n\nTu es un agent qui..." }
-```
+**Action de l'agent :** Ajouter le prompt markdown et réessayer.
 
 ---
 
@@ -93,80 +101,93 @@ curl -v https://appstrate.com/api/flows \
 
 ### 400 DEPENDENCY_NOT_SATISFIED — "Required service not connected"
 
-**Cause :** Le flow requiert un service (ex: Gmail) mais l'utilisateur ne l'a pas connecté.
-
-**Diagnostic :**
+**Diagnostic autonome :**
 ```
-GET https://appstrate.com/api/flows/{flowId}
+GET {BASE_URL}/api/flows/{flowId}
 ```
-Vérifier le champ `services` dans la réponse. Chaque service a un `status` (`connected`, `disconnected`, `expired`).
+Vérifier le champ `services` dans la réponse. Identifier les services avec `status: "disconnected"` ou `"expired"`.
 
-**Solutions :**
-1. Lister les intégrations : `GET https://appstrate.com/auth/integrations`
-2. Connecter le service manquant via le endpoint approprié (`/auth/connect/{provider}/...`)
-3. Pour les services en mode `admin` : l'admin doit binder sa connexion → `POST /api/flows/{flowId}/services/{serviceId}/bind`
+```
+GET {BASE_URL}/auth/integrations
+```
+Vérifier le `authMode` du provider pour chaque service manquant.
+
+**Actions de l'agent (selon authMode) :**
+
+| authMode | Action |
+|----------|--------|
+| `api_key` | Demander à l'utilisateur la clé API externe → `POST /auth/connect/{providerId}/api-key` |
+| `custom` | Lire le `credentialSchema` du provider → demander les valeurs à l'utilisateur → `POST /auth/connect/{providerId}/credentials` |
+| `oauth2` | `POST /auth/connect/{providerId}` → donner l'`authUrl` à l'utilisateur → vérifier via `GET /auth/integrations` après |
+| (admin mode) | Vérifier si l'admin a une connexion active → `POST /api/flows/{flowId}/services/{serviceId}/bind` |
 
 ### 400 CONFIG_INCOMPLETE — "Required config fields missing"
 
-**Cause :** Le flow a un `config.schema` avec des champs obligatoires non remplis.
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/flows/{flowId}
+```
+Comparer `config` (valeurs actuelles) avec `manifest.config.schema` (champs attendus). Identifier les champs `required` qui sont manquants.
 
-**Diagnostic :**
-```
-GET https://appstrate.com/api/flows/{flowId}
-```
-Comparer `config` (valeurs actuelles) avec `manifest.config.schema` (champs attendus).
-
-**Solution :**
-```
-PUT https://appstrate.com/api/flows/{flowId}/config
-Content-Type: application/json
-
-{ "missingField": "value" }
-```
+**Actions de l'agent :**
+1. Si les champs manquants ont une valeur `default` dans le schema → les remplir automatiquement via `PUT /api/flows/{flowId}/config`
+2. Si les champs n'ont pas de default → demander les valeurs à l'utilisateur, puis les sauvegarder
 
 ### 400 VALIDATION_ERROR — Erreur de validation de l'input
 
-**Cause :** L'input fourni au `POST /api/flows/{flowId}/run` ne correspond pas au `input.schema` du manifest.
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/flows/{flowId}
+```
+Lire `manifest.input.schema` → vérifier les champs `required` et les types attendus.
 
-**Diagnostic :**
-1. Récupérer le schema : `GET https://appstrate.com/api/flows/{flowId}` → `manifest.input.schema`
-2. Vérifier que les champs `required` sont tous présents dans l'input
-3. Vérifier les types (string vs number vs boolean)
+**Actions de l'agent :**
+1. Comparer l'input envoyé au schema
+2. Identifier les champs manquants ou mal typés
+3. Corriger et réessayer
 
 ### Exécution en status "failed"
 
-**Diagnostic :**
+**Diagnostic autonome :**
 ```
-GET https://appstrate.com/api/executions/{executionId}
+GET {BASE_URL}/api/executions/{executionId}
 ```
-Lire le champ `error` pour le message d'erreur.
+Lire le champ `error`.
 
 ```
-GET https://appstrate.com/api/executions/{executionId}/logs
+GET {BASE_URL}/api/executions/{executionId}/logs
 ```
-Parcourir les logs pour identifier à quel moment l'exécution a échoué. Les logs de type `error` contiennent les détails.
+Parcourir les logs pour identifier le point de défaillance. Les logs de type `error` contiennent les détails.
 
-**Causes fréquentes :**
-- **Timeout** : L'agent a dépassé le délai (`execution.timeout`). Augmenter le timeout dans le manifest ou simplifier la tâche.
-- **LLM Error** : Erreur du modèle LLM (rate limit, clé API invalide). Vérifier la configuration des clés LLM côté serveur.
-- **Service API Error** : L'API externe appelée via le sidecar a renvoyé une erreur. Vérifier les logs pour le code HTTP de l'API cible.
+**Causes fréquentes et actions :**
+- **Timeout** : L'agent a dépassé le délai (`execution.timeout`). Si possible, augmenter le timeout dans le manifest et réessayer.
+- **LLM Error** : Erreur du modèle LLM (rate limit, clé API invalide). C'est un problème de configuration serveur — informer l'utilisateur.
+- **Service API Error** : L'API externe a renvoyé une erreur. Lire les logs pour le code HTTP, vérifier les `authorizedUris` du provider via `GET /api/providers`.
 
 ### Exécution en status "timeout"
 
-**Cause :** L'exécution a dépassé le `execution.timeout` défini dans le manifest (en secondes).
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/flows/{flowId}
+```
+Lire `manifest.execution.timeout` pour connaître le délai actuel.
 
-**Solutions :**
-1. Augmenter le timeout dans le manifest (ex: `"timeout": 600` pour 10 minutes)
-2. Simplifier le prompt pour réduire le travail de l'agent
-3. Découper la tâche en plusieurs flows plus petits
+**Actions de l'agent :**
+1. Augmenter le timeout dans le manifest si nécessaire
+2. Ou simplifier le prompt/la tâche
+3. Ou découper en plusieurs flows plus petits
 
 ### 409 EXECUTION_IN_PROGRESS
 
-**Cause :** Il y a déjà une exécution en cours pour ce flow et cet utilisateur.
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/flows/{flowId}/executions?limit=5
+```
+Trouver l'exécution en cours (`status: "running"` ou `"pending"`).
 
-**Solutions :**
-1. Attendre la fin de l'exécution en cours : `GET https://appstrate.com/api/executions/{executionId}`
-2. Annuler l'exécution en cours : `POST https://appstrate.com/api/executions/{executionId}/cancel`
+**Actions de l'agent :**
+1. Attendre la fin : poll `GET /api/executions/{executionId}` toutes les 3-5 secondes
+2. Ou annuler : `POST /api/executions/{executionId}/cancel`, puis relancer
 
 ---
 
@@ -174,23 +195,28 @@ Parcourir les logs pour identifier à quel moment l'exécution a échoué. Les l
 
 ### 409 lors de la suppression d'un provider
 
-**Cause :** Le provider est encore référencé par un ou plusieurs flows.
-
-**Diagnostic :** Identifier les flows qui utilisent ce provider :
+**Diagnostic autonome :**
 ```
-GET https://appstrate.com/api/flows
+GET {BASE_URL}/api/flows
 ```
-Chercher dans les manifests les services qui référencent ce provider.
+Chercher dans les manifests les services qui référencent ce provider (champ `requires.services[].provider`).
 
-**Solution :** Supprimer ou modifier les flows concernés avant de supprimer le provider.
+**Actions de l'agent :**
+1. Lister les flows qui utilisent ce provider
+2. Mettre à jour ou supprimer ces flows d'abord
+3. Puis réessayer la suppression du provider
 
 ### Connexion OAuth2 qui échoue
 
-**Diagnostic :**
-1. Vérifier que le provider a les bons `authorizationUrl` et `tokenUrl`
-2. Vérifier que le `clientId` et `clientSecret` sont corrects
-3. Vérifier que le `OAUTH_CALLBACK_URL` dans la configuration serveur correspond à l'URL autorisée dans la console du provider externe
-4. Vérifier les scopes demandés sont valides pour ce provider
+**Diagnostic autonome :**
+```
+GET {BASE_URL}/api/providers
+```
+Vérifier la configuration du provider (authorizationUrl, tokenUrl, scopes).
+
+**Actions de l'agent :**
+1. Vérifier que les URLs OAuth sont correctes
+2. Si le problème persiste, informer l'utilisateur que le `clientId`/`clientSecret` ou l'URL de callback est probablement mal configuré côté provider externe
 
 ---
 
@@ -198,26 +224,26 @@ Chercher dans les manifests les services qui référencent ce provider.
 
 ### 409 FLOW_IN_USE lors de la suppression
 
-**Cause :** Le skill ou l'extension est encore référencé par un ou plusieurs flows.
-
-**Diagnostic :**
+**Diagnostic autonome :**
 ```
-GET https://appstrate.com/api/library/skills/{skillId}
-GET https://appstrate.com/api/library/extensions/{extensionId}
+GET {BASE_URL}/api/library/skills/{skillId}
+GET {BASE_URL}/api/library/extensions/{extensionId}
 ```
 La réponse contient un champ `flows` listant les flows qui référencent cette ressource.
 
-**Solution :** Dissocier la ressource des flows avant de la supprimer :
-```
-PUT https://appstrate.com/api/flows/{flowId}/skills
-{ "skillIds": [] }
-```
+**Actions de l'agent :**
+1. Pour chaque flow référencé, dissocier la ressource :
+   ```
+   PUT /api/flows/{flowId}/skills
+   { "skillIds": [... IDs restants sans celui à supprimer ...] }
+   ```
+2. Puis réessayer la suppression
 
 ### 403 lors de la modification d'un built-in
 
 **Cause :** Les skills et extensions built-in (source: `"built-in"`) ne peuvent pas être modifiés ni supprimés via l'API.
 
-**Solution :** Créer une copie en tant que skill/extension d'organisation avec un ID différent.
+**Action de l'agent :** Créer une copie en tant que skill/extension d'organisation avec un ID différent, puis utiliser cette copie.
 
 ---
 
@@ -234,17 +260,22 @@ PUT https://appstrate.com/api/flows/{flowId}/skills
 | `POST /api/flows/import` | 10/min |
 | `POST /api/flows` | 10/min |
 
-**Solution :** Attendre 60 secondes avant de réessayer. Implémenter un backoff exponentiel si l'erreur persiste.
+**Action de l'agent :** Attendre 60 secondes avant de réessayer. Implémenter un backoff exponentiel si l'erreur persiste.
 
 ---
 
-## Checklist de pré-exécution
+## Checklist de pré-exécution autonome
 
-Avant de lancer un flow, vérifier systématiquement :
+Avant de lancer un flow, **exécuter ces vérifications** (pas les demander à l'utilisateur) :
 
-- [ ] Le flow existe : `GET /api/flows/{flowId}` → 200
-- [ ] Tous les services sont connectés : vérifier `services[].status === "connected"` dans le flow detail
-- [ ] Les services admin sont bindés : vérifier `services[].adminConnection` pour les services en mode admin
-- [ ] La configuration est complète : vérifier `config` contient tous les champs `required` du schema
-- [ ] L'input est valide : vérifier les champs `required` du `input.schema` et les types
-- [ ] Pas d'exécution en cours : vérifier `runningExecutions === 0` dans le flow detail (ou gérer le 409)
+```
+GET /api/flows/{flowId}
+```
+
+Puis vérifier dans la réponse :
+
+- [ ] `services[].status === "connected"` pour tous les services → sinon, résoudre (voir DEPENDENCY_NOT_SATISFIED)
+- [ ] `services[].adminConnection` est défini pour les services en mode admin → sinon, binder
+- [ ] `config` contient tous les champs `required` du `manifest.config.schema` → sinon, remplir via `PUT /api/flows/{flowId}/config`
+- [ ] L'input prévu respecte `manifest.input.schema` (champs required + types) → sinon, corriger
+- [ ] `runningExecutions === 0` → sinon, attendre ou annuler l'exécution en cours
