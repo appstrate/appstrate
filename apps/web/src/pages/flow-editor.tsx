@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
@@ -250,11 +250,7 @@ export function FlowEditorPage() {
   }
 
   if (isEdit && !detail) {
-    return (
-      <div className="empty-state">
-        <p>{t("editor.notFound")}</p>
-      </div>
-    );
+    return <Navigate to="/" replace />;
   }
 
   if (isEdit && detail && detail.source !== "user") {
