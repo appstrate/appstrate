@@ -4,7 +4,7 @@ import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import { parseTokenResponse } from "./token-utils.ts";
+import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /**
@@ -161,12 +161,13 @@ export async function handleOAuthCallback(
   );
 
   // Exchange code for tokens
+  const useBasicAuth = provider.tokenAuthMethod === "client_secret_basic";
+
   const tokenBody = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     redirect_uri: stateRow.redirectUri,
-    client_id: oauthCreds.clientId,
-    client_secret: oauthCreds.clientSecret,
+    ...(useBasicAuth ? {} : { client_id: oauthCreds.clientId, client_secret: oauthCreds.clientSecret }),
     ...(provider.pkceEnabled !== false ? { code_verifier: stateRow.codeVerifier } : {}),
     ...(provider.tokenParams ?? {}),
   });
@@ -175,7 +176,7 @@ export async function handleOAuthCallback(
   try {
     tokenResponse = await fetch(provider.tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: buildTokenHeaders(provider.tokenAuthMethod, oauthCreds.clientId, oauthCreds.clientSecret),
       body: tokenBody.toString(),
       signal: AbortSignal.timeout(30_000),
     });

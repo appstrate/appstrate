@@ -36,6 +36,13 @@
       "when": 1771964705022,
       "tag": "0004_light_xavin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771990427016,
+      "tag": "0005_chemical_star_brand",
+      "breakpoints": true
     }
   ]
 }

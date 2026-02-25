@@ -250,6 +250,7 @@ export interface ProviderConfig {
   defaultScopes?: string[];
   scopeSeparator?: string;
   pkceEnabled?: boolean;
+  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
   authorizationParams?: Record<string, string>;
   tokenParams?: Record<string, string>;
   credentialSchema?: Record<string, unknown>;

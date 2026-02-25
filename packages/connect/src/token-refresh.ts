@@ -3,7 +3,7 @@ import { serviceConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials, ProviderSnapshot } from "./types.ts";
 import { encryptCredentials, decryptCredentials, decrypt } from "./encryption.ts";
-import { parseTokenResponse } from "./token-utils.ts";
+import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /** In-memory concurrency lock: one refresh at a time per connection. */
@@ -75,18 +75,19 @@ async function doRefresh(
   const clientSecret = decrypt(providerSnapshot.clientSecretEncrypted);
 
   // Perform token refresh
+  const useBasicAuth = providerSnapshot.tokenAuthMethod === "client_secret_basic";
+
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: creds.refresh_token,
-    client_id: clientId,
-    client_secret: clientSecret,
+    ...(useBasicAuth ? {} : { client_id: clientId, client_secret: clientSecret }),
   });
 
   let response: Response;
   try {
     response = await fetch(tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: buildTokenHeaders(providerSnapshot.tokenAuthMethod, clientId, clientSecret),
       body: body.toString(),
       signal: AbortSignal.timeout(30_000),
     });
