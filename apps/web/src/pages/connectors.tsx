@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useOrg } from "../hooks/use-org";
 import { useServices } from "../hooks/use-services";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
@@ -37,6 +38,17 @@ export function ConnectorsPage() {
       <div className="header-row">
         <h2>{t("connectors.pageTitle", { orgName: currentOrg?.name })}</h2>
         <ProfileSelector />
+      </div>
+
+      <div className="service-card service-card-spaced">
+        <div className="connectors-intro">
+          <p className="service-provider">
+            {t("connectors.orgDescription", { orgName: currentOrg?.name })}{" "}
+            <Link to="/org-settings?tab=providers" className="link-inline">
+              {t("connectors.addMoreProviders")}
+            </Link>
+          </p>
+        </div>
       </div>
 
       {isLoading ? (

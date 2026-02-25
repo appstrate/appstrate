@@ -1201,7 +1201,7 @@ button:disabled {
   font-weight: 600;
 }
 .service-provider {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
 }
 .service-card-status {
@@ -2842,7 +2842,7 @@ button:disabled {
 }
 
 .service-card-spaced {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .service-card-danger {
@@ -3188,6 +3188,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .header-row h2 {
