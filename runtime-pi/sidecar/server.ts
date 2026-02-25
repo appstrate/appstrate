@@ -334,10 +334,10 @@ app.all("/proxy", async (c) => {
 
   // Parse JSON bodies so agents don't need to double-parse
   const contentType = targetRes.headers.get("content-type") || "";
-  let body: unknown = text;
+  let responseBody: unknown = text;
   if (/\bjson\b/.test(contentType) && !truncated) {
     try {
-      body = JSON.parse(text);
+      responseBody = JSON.parse(text);
     } catch {
       // Content-Type says JSON but body isn't valid — keep as string
     }
@@ -346,7 +346,7 @@ app.all("/proxy", async (c) => {
   return c.json({
     status: targetRes.status,
     statusText: targetRes.statusText,
-    body,
+    body: responseBody,
     ...(truncated ? { truncated: true } : {}),
   });
 });
