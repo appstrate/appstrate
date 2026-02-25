@@ -121,7 +121,10 @@ export class PiAdapter implements ExecutionAdapter {
       if (ctx.proxyUrl) {
         containerEnv.HTTP_PROXY = ctx.proxyUrl;
         containerEnv.HTTPS_PROXY = ctx.proxyUrl;
+        containerEnv.http_proxy = ctx.proxyUrl;
+        containerEnv.https_proxy = ctx.proxyUrl;
         containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
+        containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
       }
 
       // 5. Create agent on the custom network ONLY

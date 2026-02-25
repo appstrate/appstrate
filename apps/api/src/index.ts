@@ -15,6 +15,7 @@ import { logger } from "./lib/logger.ts";
 import { initRealtime } from "./services/realtime.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { initBuiltInProviders } from "@appstrate/connect";
+import { initBuiltInProxies } from "./services/proxy-registry.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { initBuiltInLibrary } from "./services/builtin-library.ts";
@@ -32,6 +33,7 @@ import { createShareRouter } from "./routes/share.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
+import { createProxiesRouter } from "./routes/proxies.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
 import healthRouter from "./routes/health.ts";
@@ -169,12 +171,24 @@ if (dataDir) {
     logger.info("Built-in providers loaded (env var only)");
   }
 
+  // Load built-in proxies from {dataDir}/proxies.json + SYSTEM_PROXIES env var
+  const proxiesPath = join(dataDir, "proxies.json");
+  try {
+    const fileProxies = JSON.parse(readFileSync(proxiesPath, "utf-8"));
+    initBuiltInProxies(fileProxies);
+    logger.info("Built-in proxies loaded", { count: fileProxies.length });
+  } catch {
+    initBuiltInProxies();
+    logger.info("Built-in proxies loaded (env var only)");
+  }
+
   await initFlowService(dataDir);
   logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
 
   await initBuiltInLibrary(dataDir);
 } else {
   initBuiltInProviders(); // SYSTEM_PROVIDERS env var still loaded
+  initBuiltInProxies(); // SYSTEM_PROXIES env var still loaded
   logger.info("DATA_DIR not set — built-in resources disabled");
 }
 
@@ -328,6 +342,7 @@ app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
+app.route("/api/proxies", createProxiesRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

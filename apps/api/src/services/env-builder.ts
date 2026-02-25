@@ -9,6 +9,7 @@ import { buildServiceTokens } from "./token-resolver.ts";
 import { getFlowConfig, getLastExecutionState } from "./state.ts";
 import { getFlowPackage } from "./flow-package.ts";
 import { getLatestVersionId } from "./flow-versions.ts";
+import { resolveProxyUrl } from "./org-proxies.ts";
 
 /**
  * Resolve unique provider definitions for prompt context.
@@ -108,9 +109,7 @@ export async function buildExecutionContext(params: {
 }> {
   const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
 
-  const proxyUrl = getEnv().PROXY_URL ?? null;
-
-  const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId] =
+  const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId, proxyUrl] =
     await Promise.all([
       buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
       getFlowConfig(orgId, flow.id),
@@ -118,6 +117,7 @@ export async function buildExecutionContext(params: {
       resolveProviderDefs(db, orgId, flow.manifest.requires.services),
       getFlowPackage(flow, orgId),
       flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
+      resolveProxyUrl(orgId, flow.id),
     ]);
 
   const promptContext = buildPromptContext({

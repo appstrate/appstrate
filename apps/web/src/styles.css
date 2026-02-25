@@ -3194,3 +3194,9 @@ button:disabled {
 .header-row h2 {
   margin: 0;
 }
+
+.header-selectors {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}

@@ -19,6 +19,10 @@ const envSchema = z.object({
     .string()
     .default("[]")
     .transform((s) => JSON.parse(s) as unknown[]),
+  SYSTEM_PROXIES: z
+    .string()
+    .default("[]")
+    .transform((s) => JSON.parse(s) as unknown[]),
 
   // App
   APP_URL: z.string().default("http://localhost:3010"),

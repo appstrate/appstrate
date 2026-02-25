@@ -33,6 +33,7 @@ import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
+import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { truncate, formatDateField } from "../lib/markdown";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
@@ -68,6 +69,9 @@ export function FlowDetailPage() {
   const { data: executions } = useExecutions(flowId);
   const { data: schedules } = useSchedules(flowId);
   const { data: providers } = useProviders();
+  const { data: orgProxies } = useProxies();
+  const { data: flowProxy } = useFlowProxy(flowId);
+  const setFlowProxy = useSetFlowProxy(flowId!);
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
@@ -164,7 +168,31 @@ export function FlowDetailPage() {
       <div className="flow-detail-header">
         <div className="header-row">
           <h2>{detail.displayName}</h2>
-          <ProfileSelector />
+          <div className="header-selectors">
+            {isOrgAdmin && orgProxies && orgProxies.length > 0 && (
+              <div className="profile-selector">
+                <label>{t("proxies.flow.label", { ns: "settings" })}</label>
+                <select
+                  className="profile-select"
+                  value={flowProxy?.proxyId ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFlowProxy.mutate(val === "" ? null : val);
+                  }}
+                  disabled={setFlowProxy.isPending}
+                >
+                  <option value="">{t("proxies.flow.inherit", { ns: "settings" })}</option>
+                  <option value="none">{t("proxies.flow.none", { ns: "settings" })}</option>
+                  {orgProxies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <ProfileSelector />
+          </div>
         </div>
         <p className="description">{detail.description}</p>
       </div>

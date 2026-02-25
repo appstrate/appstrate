@@ -17,6 +17,7 @@ import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
 import { connectionsPaths } from "./paths/connections.ts";
 import { providersPaths } from "./paths/providers.ts";
+import { proxiesPaths } from "./paths/proxies.ts";
 import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
 import { libraryPaths } from "./paths/library.ts";
@@ -39,6 +40,7 @@ export const openApiSpec = {
     ...schedulesPaths,
     ...connectionsPaths,
     ...providersPaths,
+    ...proxiesPaths,
     ...connectionProfilesPaths,
     ...apiKeysPaths,
     ...libraryPaths,

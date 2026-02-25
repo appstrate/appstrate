@@ -291,6 +291,35 @@ export function createFlowsRouter() {
     return c.json({ success: true });
   });
 
+  // GET /api/flows/:id/proxy — get flow proxy configuration
+  router.get("/:id/proxy", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const config = await getFlowConfig(orgId, flow.id);
+    const proxyId = (config.__proxyId as string | null) ?? null;
+
+    return c.json({ proxyId, resolved: proxyId !== "none" });
+  });
+
+  // PUT /api/flows/:id/proxy — set flow proxy override (admin-only)
+  router.put("/:id/proxy", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const body = await c.req.json<{ proxyId: string | null }>();
+
+    // Read existing config and merge __proxyId
+    const currentConfig = await getFlowConfig(orgId, flow.id);
+    if (body.proxyId === null) {
+      // Remove the override
+      const { __proxyId: _, ...rest } = currentConfig;
+      await setFlowConfig(orgId, flow.id, rest);
+    } else {
+      await setFlowConfig(orgId, flow.id, { ...currentConfig, __proxyId: body.proxyId });
+    }
+
+    return c.json({ success: true });
+  });
+
   // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)
   router.post("/:id/share-token", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
