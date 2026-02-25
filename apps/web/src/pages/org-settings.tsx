@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -623,6 +623,17 @@ function ProvidersTab({
 
   return (
     <>
+      <div className="service-card service-card-spaced">
+        <div className="connectors-intro">
+          <p className="service-provider">
+            {t("providers.orgDescription")}{" "}
+            <Link to="/connectors" className="link-inline">
+              {t("providers.configureLink")}
+            </Link>
+          </p>
+        </div>
+      </div>
+
       <div className="tab-toolbar">
         <button className="primary" onClick={onCreate}>
           {t("providers.addProvider")}
