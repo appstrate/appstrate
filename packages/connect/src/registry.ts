@@ -86,6 +86,7 @@ function rowToDefinition(row: ProviderConfig): ProviderDefinition {
     defaultScopes: row.defaultScopes ?? [],
     scopeSeparator: row.scopeSeparator ?? " ",
     pkceEnabled: row.pkceEnabled ?? true,
+    tokenAuthMethod: (row.tokenAuthMethod as ProviderDefinition["tokenAuthMethod"]) ?? undefined,
     authorizationParams: (row.authorizationParams as Record<string, string>) ?? {},
     tokenParams: (row.tokenParams as Record<string, string>) ?? {},
     credentialSchema: (row.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,

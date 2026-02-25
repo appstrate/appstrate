@@ -577,6 +577,7 @@ export const providerConfigs = pgTable(
       .default(sql`'{}'::text[]`),
     scopeSeparator: text("scope_separator").default(" "),
     pkceEnabled: boolean("pkce_enabled").default(true),
+    tokenAuthMethod: text("token_auth_method"),
     authorizationParams: jsonb("authorization_params").default({}),
     tokenParams: jsonb("token_params").default({}),
     // Credential fields

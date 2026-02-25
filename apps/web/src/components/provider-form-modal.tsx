@@ -30,6 +30,7 @@ interface FormData {
   defaultScopes: string;
   scopeSeparator: string;
   pkceEnabled: boolean;
+  tokenAuthMethod: string;
   credentialFieldName: string;
   credentialHeaderName: string;
   credentialHeaderPrefix: string;
@@ -54,6 +55,7 @@ function getInitial(provider: ProviderConfig | null | undefined): FormData {
       defaultScopes: "",
       scopeSeparator: " ",
       pkceEnabled: true,
+      tokenAuthMethod: "client_secret_post",
       credentialFieldName: "",
       credentialHeaderName: "",
       credentialHeaderPrefix: "",
@@ -76,6 +78,7 @@ function getInitial(provider: ProviderConfig | null | undefined): FormData {
     defaultScopes: provider.defaultScopes?.join("\n") ?? "",
     scopeSeparator: provider.scopeSeparator ?? " ",
     pkceEnabled: provider.pkceEnabled ?? true,
+    tokenAuthMethod: provider.tokenAuthMethod ?? "client_secret_post",
     credentialFieldName: provider.credentialFieldName ?? "",
     credentialHeaderName: provider.credentialHeaderName ?? "",
     credentialHeaderPrefix: provider.credentialHeaderPrefix ?? "",
@@ -149,6 +152,7 @@ function ProviderFormBody({
       }
       data.scopeSeparator = form.scopeSeparator;
       data.pkceEnabled = form.pkceEnabled;
+      data.tokenAuthMethod = form.tokenAuthMethod;
       if (availableScopes.length > 0) {
         data.availableScopes = availableScopes.filter((s) => s.value.trim() && s.label.trim());
       }
@@ -377,6 +381,18 @@ function ProviderFormBody({
                   <option value=" ">{t("providers.form.scopeSepSpace")}</option>
                   <option value=",">{t("providers.form.scopeSepComma")}</option>
                   <option value="+">{t("providers.form.scopeSepPlus")}</option>
+                </select>
+              </div>
+              <div className="form-group flex-1">
+                <label htmlFor="pf-tokenAuthMethod">{t("providers.form.tokenAuthMethod")}</label>
+                <select
+                  id="pf-tokenAuthMethod"
+                  value={form.tokenAuthMethod}
+                  onChange={(e) => setField("tokenAuthMethod", e.target.value)}
+                  disabled={isBuiltIn}
+                >
+                  <option value="client_secret_post">{t("providers.form.tokenAuthPost")}</option>
+                  <option value="client_secret_basic">{t("providers.form.tokenAuthBasic")}</option>
                 </select>
               </div>
               <div className="form-group flex-1 form-group-inline-end">

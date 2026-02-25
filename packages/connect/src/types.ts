@@ -15,6 +15,7 @@ export interface ProviderDefinition {
   pkceEnabled?: boolean; // default true
   authorizationParams?: Record<string, string>; // access_type, prompt, etc.
   tokenParams?: Record<string, string>;
+  tokenAuthMethod?: "client_secret_post" | "client_secret_basic"; // default: client_secret_post
   // Credential schema (API_KEY, BASIC, CUSTOM)
   credentialSchema?: JSONSchemaObject;
   // Proxy/API
@@ -41,6 +42,7 @@ export interface ProviderSnapshot {
   refreshUrl?: string;
   clientIdEncrypted?: string;
   clientSecretEncrypted?: string;
+  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
   scopeSeparator?: string;
   credentialFieldName?: string;
   credentialHeaderName?: string;

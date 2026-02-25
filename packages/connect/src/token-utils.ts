@@ -1,7 +1,30 @@
 /**
- * Shared token response parsing utilities.
+ * Shared token utilities.
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
  */
+
+/**
+ * Build headers for an OAuth2 token endpoint request.
+ * When tokenAuthMethod is "client_secret_basic", credentials are sent
+ * as an Authorization: Basic header (RFC 6749 §2.3.1) instead of POST body.
+ */
+export function buildTokenHeaders(
+  tokenAuthMethod: string | undefined,
+  clientId: string,
+  clientSecret: string,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  if (tokenAuthMethod === "client_secret_basic") {
+    // RFC 6749 §2.3.1: credentials MUST be URL-encoded before base64
+    const encoded = Buffer.from(
+      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
+    ).toString("base64");
+    headers["Authorization"] = `Basic ${encoded}`;
+  }
+  return headers;
+}
 
 export interface ParsedTokenResponse {
   accessToken: string;

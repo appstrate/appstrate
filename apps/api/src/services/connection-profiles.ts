@@ -192,6 +192,7 @@ export function buildProviderSnapshot(provider: ProviderDefinition): ProviderSna
     refreshUrl: provider.refreshUrl,
     clientIdEncrypted: provider.clientId ? encrypt(provider.clientId) : undefined,
     clientSecretEncrypted: provider.clientSecret ? encrypt(provider.clientSecret) : undefined,
+    tokenAuthMethod: provider.tokenAuthMethod,
     scopeSeparator: provider.scopeSeparator,
     credentialFieldName: provider.credentialFieldName,
     credentialHeaderName: provider.credentialHeaderName,
