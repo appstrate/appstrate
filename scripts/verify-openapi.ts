@@ -94,6 +94,17 @@ const expectedEndpoints = [
   "PUT /api/flows/{flowId}/profile",
   "DELETE /api/flows/{flowId}/profile",
 
+  // Flow Proxy
+  "GET /api/flows/{flowId}/proxy",
+  "PUT /api/flows/{flowId}/proxy",
+
+  // Proxies
+  "GET /api/proxies",
+  "POST /api/proxies",
+  "PUT /api/proxies/default",
+  "PUT /api/proxies/{proxyId}",
+  "DELETE /api/proxies/{proxyId}",
+
   // API Keys
   "GET /api/api-keys",
   "POST /api/api-keys",

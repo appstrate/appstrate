@@ -186,6 +186,29 @@ export const apiKeys = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
+// Organization Proxies (org-scoped outbound proxy configuration)
+// ────────────────────────────────────────────────────────────
+
+export const orgProxies = pgTable(
+  "org_proxies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    urlEncrypted: text("url_encrypted").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    isDefault: boolean("is_default").notNull().default(false),
+    source: text("source").notNull().default("custom"), // "built-in" | "custom"
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("idx_org_proxies_org_id").on(table.orgId)],
+);
+
+// ────────────────────────────────────────────────────────────
 // 2. Profiles (extends user)
 // ────────────────────────────────────────────────────────────
 
@@ -727,3 +750,6 @@ export type NewOrgInvitation = InferInsertModel<typeof orgInvitations>;
 
 export type ApiKey = InferSelectModel<typeof apiKeys>;
 export type NewApiKey = InferInsertModel<typeof apiKeys>;
+
+export type OrgProxy = InferSelectModel<typeof orgProxies>;
+export type NewOrgProxy = InferInsertModel<typeof orgProxies>;

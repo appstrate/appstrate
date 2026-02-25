@@ -448,6 +448,77 @@ export const flowsPaths = {
       },
     },
   },
+  "/api/flows/{flowId}/proxy": {
+    get: {
+      operationId: "getFlowProxy",
+      tags: ["Flows"],
+      summary: "Get flow proxy configuration",
+      description:
+        "Returns the proxy configuration for a flow (override ID, label, resolution status).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Flow proxy config",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  proxyId: { type: ["string", "null"] },
+                  proxyLabel: { type: "string" },
+                  resolved: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "setFlowProxy",
+      tags: ["Flows"],
+      summary: "Set flow proxy override",
+      description:
+        'Set a proxy override for this flow. Pass a proxy ID, "none" to disable proxying, or null to use org default. Admin only.',
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["proxyId"],
+              properties: {
+                proxyId: {
+                  type: ["string", "null"],
+                  description: 'Proxy ID, "none" to opt out, or null for org default',
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Flow proxy updated",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/flows/{flowId}/skills": {
     put: {
       operationId: "updateFlowSkills",

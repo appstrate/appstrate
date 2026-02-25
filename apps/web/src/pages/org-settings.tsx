@@ -7,7 +7,15 @@ import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useCreateProvider, useUpdateProvider, useDeleteProvider } from "../hooks/use-mutations";
 import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
+import {
+  useProxies,
+  useCreateProxy,
+  useUpdateProxy,
+  useDeleteProxy,
+  useSetDefaultProxy,
+} from "../hooks/use-proxies";
 import { ProviderFormModal } from "../components/provider-form-modal";
+import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
@@ -17,6 +25,7 @@ import type {
   OrgInvitation,
   ProviderConfig,
   ApiKeyInfo,
+  OrgProxyInfo,
 } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
@@ -27,7 +36,7 @@ export function OrgSettingsPage() {
 
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
-  const validTabs = ["general", "members", "providers", "api-keys"] as const;
+  const validTabs = ["general", "members", "providers", "proxies", "api-keys"] as const;
   type Tab = (typeof validTabs)[number];
   const [tab, setTab] = useState<Tab>(
     validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
@@ -47,6 +56,15 @@ export function OrgSettingsPage() {
   const createProviderMutation = useCreateProvider();
   const updateProviderMutation = useUpdateProvider();
   const deleteProviderMutation = useDeleteProvider();
+
+  // Proxies
+  const [proxyModalOpen, setProxyModalOpen] = useState(false);
+  const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
+  const { data: proxies, isLoading: proxiesLoading, error: proxiesError } = useProxies();
+  const createProxyMutation = useCreateProxy();
+  const updateProxyMutation = useUpdateProxy();
+  const deleteProxyMutation = useDeleteProxy();
+  const setDefaultProxyMutation = useSetDefaultProxy();
 
   // API Keys
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
@@ -267,6 +285,14 @@ export function OrgSettingsPage() {
           onClick={() => setTab("providers")}
         >
           {t("orgSettings.tabProviders")}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "proxies"}
+          className={`tab ${tab === "proxies" ? "active" : ""}`}
+          onClick={() => setTab("proxies")}
+        >
+          {t("proxies.tabTitle")}
         </button>
         <button
           role="tab"
@@ -541,6 +567,28 @@ export function OrgSettingsPage() {
         />
       )}
 
+      {tab === "proxies" && (
+        <ProxiesTab
+          proxies={proxies}
+          isLoading={proxiesLoading}
+          error={proxiesError}
+          onCreate={() => {
+            setEditProxy(null);
+            setProxyModalOpen(true);
+          }}
+          onEdit={(p) => {
+            setEditProxy(p);
+            setProxyModalOpen(true);
+          }}
+          onDelete={(p) => {
+            if (!confirm(t("proxies.deleteConfirm", { label: p.label }))) return;
+            deleteProxyMutation.mutate(p.id);
+          }}
+          onSetDefault={(p) => setDefaultProxyMutation.mutate(p.id)}
+          onRemoveDefault={() => setDefaultProxyMutation.mutate(null)}
+        />
+      )}
+
       {tab === "api-keys" && (
         <ApiKeysTab
           apiKeys={apiKeysData}
@@ -572,6 +620,23 @@ export function OrgSettingsPage() {
       />
 
       <ApiKeyCreateModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
+
+      <ProxyFormModal
+        open={proxyModalOpen}
+        onClose={() => setProxyModalOpen(false)}
+        proxy={editProxy}
+        isPending={createProxyMutation.isPending || updateProxyMutation.isPending}
+        onSubmit={(data) => {
+          if (editProxy) {
+            updateProxyMutation.mutate(
+              { id: editProxy.id, data },
+              { onSuccess: () => setProxyModalOpen(false) },
+            );
+          } else {
+            createProxyMutation.mutate(data, { onSuccess: () => setProxyModalOpen(false) });
+          }
+        }}
+      />
     </>
   );
 }
@@ -701,6 +766,92 @@ function ProvidersTab({
         </div>
       ) : (
         <EmptyState message={t("providers.empty", { defaultValue: "No providers configured." })} />
+      )}
+    </>
+  );
+}
+
+function ProxiesTab({
+  proxies,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+  onSetDefault,
+  onRemoveDefault,
+}: {
+  proxies: OrgProxyInfo[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  onCreate: () => void;
+  onEdit: (p: OrgProxyInfo) => void;
+  onDelete: (p: OrgProxyInfo) => void;
+  onSetDefault: (p: OrgProxyInfo) => void;
+  onRemoveDefault: () => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
+  return (
+    <>
+      <div className="service-card service-card-spaced">
+        <div className="connectors-intro">
+          <p className="service-provider">{t("proxies.description")}</p>
+        </div>
+      </div>
+
+      <div className="tab-toolbar">
+        <button className="primary" onClick={onCreate}>
+          {t("proxies.add")}
+        </button>
+      </div>
+
+      {proxies && proxies.length > 0 ? (
+        <div className="services-grid">
+          {proxies.map((p) => {
+            const isBuiltIn = p.source === "built-in";
+            return (
+              <div key={p.id} className="service-card">
+                <div className="service-card-header">
+                  <div className="service-info">
+                    <h3>{p.label}</h3>
+                    <span className="service-provider">{p.urlPrefix}</span>
+                    <div className="provider-badges">
+                      {p.isDefault && (
+                        <span className="badge badge-success">{t("proxies.default")}</span>
+                      )}
+                      {isBuiltIn && <span className="badge badge-dim">{t("proxies.builtIn")}</span>}
+                      {!isBuiltIn && (
+                        <span className="badge badge-dim">
+                          {p.enabled ? t("proxies.enabled") : t("proxies.disabled")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
+                  {p.isDefault && !isBuiltIn && (
+                    <button onClick={onRemoveDefault}>{t("proxies.removeDefault")}</button>
+                  )}
+                  {!p.isDefault && (
+                    <button onClick={() => onSetDefault(p)}>{t("proxies.setDefault")}</button>
+                  )}
+                  {!isBuiltIn && (
+                    <>
+                      <button onClick={() => onEdit(p)}>{t("proxies.edit")}</button>
+                      <button onClick={() => onDelete(p)}>{t("proxies.delete")}</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState message={t("proxies.empty")} compact />
       )}
     </>
   );

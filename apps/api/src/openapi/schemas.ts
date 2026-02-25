@@ -407,4 +407,18 @@ export const schemas = {
       },
     },
   },
+  OrgProxy: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      label: { type: "string" },
+      urlPrefix: { type: "string", description: "Masked proxy URL for display" },
+      enabled: { type: "boolean" },
+      isDefault: { type: "boolean" },
+      source: { type: "string", enum: ["built-in", "custom"] },
+      createdBy: { type: "string" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
 } as const;

@@ -50,6 +50,13 @@
       "when": 1772027057126,
       "tag": "0006_cynical_leo",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1772034913124,
+      "tag": "0007_sweet_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }
