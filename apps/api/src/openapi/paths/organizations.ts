@@ -195,6 +195,35 @@ export const organizationsPaths = {
     },
   },
   "/api/orgs/{orgId}/invitations/{invitationId}": {
+    put: {
+      operationId: "changeInvitationRole",
+      tags: ["Organizations"],
+      summary: "Change invitation role",
+      description: "Change the role assigned to a pending invitation. Owner only.",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["role"],
+              properties: {
+                role: { type: "string", enum: ["admin", "member"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": { description: "Invitation role updated" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
     delete: {
       operationId: "cancelInvitation",
       tags: ["Organizations"],

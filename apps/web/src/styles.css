@@ -2771,6 +2771,15 @@ button:disabled {
   flex: 1;
 }
 
+.invite-form-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.invite-form-row input {
+  flex: 1;
+}
+
 .invite-form-field input {
   width: 100%;
   padding: 0.5rem 0.75rem;

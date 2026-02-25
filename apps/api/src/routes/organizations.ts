@@ -15,7 +15,12 @@ import {
   slugify,
   isSlugAvailable,
 } from "../services/organizations.ts";
-import { createInvitation, getOrgInvitations, cancelInvitation } from "../services/invitations.ts";
+import {
+  createInvitation,
+  getOrgInvitations,
+  cancelInvitation,
+  updateInvitationRole,
+} from "../services/invitations.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -256,6 +261,36 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
 
   await cancelInvitation(invitationId);
   return c.json({ ok: true });
+});
+
+// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (owner only)
+router.put("/:orgId/invitations/:invitationId", async (c) => {
+  const user = c.get("user");
+  const orgId = c.req.param("orgId");
+  const invitationId = c.req.param("invitationId");
+
+  const member = await getOrgMember(orgId, user.id);
+  if (!member || member.role !== "owner") {
+    return c.json(
+      { error: "FORBIDDEN", message: "Seul le proprietaire peut changer les roles" },
+      403,
+    );
+  }
+
+  const body = await c.req.json<{ role: string }>();
+  if (!["member", "admin"].includes(body.role)) {
+    return c.json(
+      { error: "VALIDATION_ERROR", message: "Le role doit etre 'member' ou 'admin'" },
+      400,
+    );
+  }
+
+  const updated = await updateInvitationRole(invitationId, orgId, body.role as "member" | "admin");
+  if (!updated) {
+    return c.json({ error: "NOT_FOUND", message: "Invitation introuvable ou deja acceptee" }, 404);
+  }
+
+  return c.json({ id: updated.id, role: updated.role });
 });
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin/owner only)
