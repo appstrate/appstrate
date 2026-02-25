@@ -43,6 +43,13 @@
       "when": 1771990427016,
       "tag": "0005_chemical_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772027057126,
+      "tag": "0006_cynical_leo",
+      "breakpoints": true
     }
   ]
 }

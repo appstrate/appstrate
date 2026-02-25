@@ -4,11 +4,19 @@ import { Link } from "react-router-dom";
 import { useOrg } from "../hooks/use-org";
 import { useServices } from "../hooks/use-services";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
-import { useConnect, useDisconnect, useConnectApiKey } from "../hooks/use-mutations";
+import {
+  useConnect,
+  useDisconnect,
+  useConnectApiKey,
+  useConnectCredentials,
+} from "../hooks/use-mutations";
+import { useProviders } from "../hooks/use-providers";
 import { ApiKeyModal } from "../components/api-key-modal";
+import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ProfileSelector } from "../components/profile-selector";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { getServiceStatusDisplay } from "../lib/service-status";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 
 export function ConnectorsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -19,15 +27,36 @@ export function ConnectorsPage() {
   const connectMutation = useConnect();
   const disconnectMutation = useDisconnect();
   const apiKeyMutation = useConnectApiKey();
+  const credentialsMutation = useConnectCredentials();
+  const { data: providers } = useProviders();
 
   const [apiKeyProvider, setApiKeyProvider] = useState<{
     uniqueKey: string;
     displayName: string;
   } | null>(null);
 
+  const [credProvider, setCredProvider] = useState<{
+    uniqueKey: string;
+    displayName: string;
+    schema: JSONSchemaObject;
+  } | null>(null);
+
+  const isCredentialAuth = (providerId?: string): boolean => {
+    const pDef = providers?.find((p) => p.id === providerId);
+    return !!pDef?.credentialSchema;
+  };
+
   const handleConnect = (svc: { uniqueKey: string; displayName: string; authMode?: string }) => {
     if (svc.authMode === "API_KEY") {
       setApiKeyProvider({ uniqueKey: svc.uniqueKey, displayName: svc.displayName });
+    } else if (isCredentialAuth(svc.uniqueKey)) {
+      const pDef = providers?.find((p) => p.id === svc.uniqueKey);
+      const schema = (pDef?.credentialSchema as unknown as JSONSchemaObject) ?? {
+        type: "object",
+        properties: { url: { type: "string", description: "Proxy URL" } },
+        required: ["url"],
+      };
+      setCredProvider({ uniqueKey: svc.uniqueKey, displayName: svc.displayName, schema });
     } else {
       connectMutation.mutate({ provider: svc.uniqueKey, ...pParam });
     }
@@ -103,7 +132,11 @@ export function ConnectorsPage() {
                       <button
                         className={needsReconnection ? "primary" : undefined}
                         onClick={() => handleConnect(svc)}
-                        disabled={connectMutation.isPending || apiKeyMutation.isPending}
+                        disabled={
+                          connectMutation.isPending ||
+                          apiKeyMutation.isPending ||
+                          credentialsMutation.isPending
+                        }
                       >
                         {t("btn.reconnect")}
                       </button>
@@ -112,7 +145,11 @@ export function ConnectorsPage() {
                     <button
                       className="primary"
                       onClick={() => handleConnect(svc)}
-                      disabled={connectMutation.isPending || apiKeyMutation.isPending}
+                      disabled={
+                        connectMutation.isPending ||
+                        apiKeyMutation.isPending ||
+                        credentialsMutation.isPending
+                      }
                     >
                       {t("btn.connect")}
                     </button>
@@ -138,6 +175,23 @@ export function ConnectorsPage() {
           }
         }}
       />
+
+      {credProvider && (
+        <CustomCredentialsModal
+          open
+          onClose={() => setCredProvider(null)}
+          schema={credProvider.schema}
+          serviceId={credProvider.uniqueKey}
+          serviceName={credProvider.displayName}
+          isPending={credentialsMutation.isPending}
+          onSubmit={(credentials) => {
+            credentialsMutation.mutate(
+              { provider: credProvider.uniqueKey, credentials, ...pParam },
+              { onSuccess: () => setCredProvider(null) },
+            );
+          }}
+        />
+      )}
     </>
   );
 }

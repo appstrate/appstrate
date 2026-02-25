@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 const PLATFORM_API_URL = process.env.PLATFORM_API_URL || "http://host.docker.internal:3000";
 const EXECUTION_TOKEN = process.env.EXECUTION_TOKEN || "";
+const PROXY_URL = process.env.PROXY_URL || "";
 const MAX_RESPONSE_SIZE = 50_000;
 const OUTBOUND_TIMEOUT_MS = 30_000;
 const SERVICE_ID_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -130,6 +131,7 @@ app.all("/proxy", async (c) => {
   const serviceId = c.req.header("X-Service");
   const targetUrl = c.req.header("X-Target");
   const substituteBody = c.req.header("X-Substitute-Body");
+  const proxyHeader = c.req.header("X-Proxy");
 
   if (!serviceId) {
     return c.json({ error: "Missing X-Service header" }, 400);
@@ -205,6 +207,7 @@ app.all("/proxy", async (c) => {
       lower === "x-service" ||
       lower === "x-target" ||
       lower === "x-substitute-body" ||
+      lower === "x-proxy" ||
       lower === "host" ||
       lower === "connection" ||
       lower === "transfer-encoding" ||
@@ -213,6 +216,24 @@ app.all("/proxy", async (c) => {
       continue;
     }
     forwardedHeaders[key] = substituteVars(value, creds.credentials);
+  }
+
+  // Resolve proxy: X-Proxy header (agent-driven) takes priority, then env PROXY_URL
+  const resolvedProxy = (proxyHeader ? substituteVars(proxyHeader, creds.credentials) : "")
+    || PROXY_URL
+    || "";
+
+  if (resolvedProxy) {
+    const unresolvedInProxy = findUnresolvedPlaceholders(resolvedProxy);
+    if (unresolvedInProxy.length > 0) {
+      const available = Object.keys(creds.credentials);
+      return c.json(
+        {
+          error: `Unresolved placeholders in X-Proxy: {{${unresolvedInProxy.join()}}}. Available: ${available.join(", ") || "(none)"}`,
+        },
+        400,
+      );
+    }
   }
 
   // 5b. Check for unresolved placeholders in headers
@@ -273,6 +294,8 @@ app.all("/proxy", async (c) => {
       headers: forwardedHeaders,
       body,
       signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      // @ts-expect-error - Bun supports proxy option natively
+      proxy: resolvedProxy || undefined,
       // @ts-expect-error - Bun supports duplex for streaming request bodies
       duplex: body instanceof ReadableStream ? "half" : undefined,
     });

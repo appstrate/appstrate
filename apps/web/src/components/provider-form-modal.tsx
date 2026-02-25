@@ -254,6 +254,7 @@ function ProviderFormBody({
             <option value="api_key">{t("providers.authMode.apiKey")}</option>
             <option value="basic">{t("providers.authMode.basic")}</option>
             <option value="custom">{t("providers.authMode.custom")}</option>
+            <option value="proxy">{t("providers.authMode.proxy")}</option>
           </select>
         </div>
 
@@ -542,8 +543,8 @@ function ProviderFormBody({
           />
         )}
 
-        {/* Authorized URIs section */}
-        {!isBuiltIn && (
+        {/* Authorized URIs section (hidden for proxy — backend forces allowAllUris) */}
+        {!isBuiltIn && form.authMode !== "proxy" && (
           <>
             <div className="section-title section-title-mt-sm">
               {t("providers.form.sectionUris")}

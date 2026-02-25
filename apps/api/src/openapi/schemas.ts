@@ -96,7 +96,7 @@ export const schemas = {
       scopes: { type: "array", items: { type: "string" } },
       connectionMode: { type: "string", enum: ["user", "admin"] },
       status: { type: "string", enum: ["connected", "not_connected", "admin_connected"] },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
+      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
       displayName: { type: "string" },
     },
   },
@@ -261,7 +261,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       providerId: { type: "string" },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
+      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
       scopesGranted: { type: "array", items: { type: "string" } },
       createdAt: { type: "string", format: "date-time" },
       expiresAt: { type: "string", format: "date-time" },
@@ -272,7 +272,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
+      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
       source: { type: "string", enum: ["built-in", "custom"] },
       hasClientId: { type: "boolean" },
       hasClientSecret: { type: "boolean" },
@@ -302,7 +302,7 @@ export const schemas = {
     properties: {
       id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
       displayName: { type: "string" },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
+      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
       clientId: { type: "string" },
       clientSecret: { type: "string" },
       authorizationUrl: { type: "string" },
