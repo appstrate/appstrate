@@ -67,12 +67,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
       sections.push(`- **${displayName}** (service ID: \`${svc.id}\`)`);
 
-      // For basic/custom providers with credentialSchema, show all variables
-      if (
-        provider &&
-        (provider.authMode === "basic" || provider.authMode === "custom") &&
-        provider.credentialSchema
-      ) {
+      // For providers with credentialSchema, show all credential variables
+      if (provider && provider.credentialSchema) {
         const props = provider.credentialSchema.properties ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
@@ -192,6 +188,40 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
     sections.push(
       "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
+    );
+  }
+
+  // Proxy awareness
+  if (ctx.proxyUrl) {
+    sections.push("## Network Proxy\n");
+    sections.push("An outbound HTTP proxy is configured for this execution.");
+    sections.push(
+      "All `curl` and HTTP requests are automatically routed through the proxy via environment variables.",
+    );
+    sections.push(
+      "Sidecar API calls via `$SIDECAR_URL/proxy` are also routed through the proxy.\n",
+    );
+  }
+
+  // Agent-driven proxy (if a proxy service is connected)
+  const proxyServices = connectedServices.filter((s) => {
+    const provider = getProviderDef(s.provider, ctx);
+    return provider?.categories?.includes("proxy");
+  });
+  if (proxyServices.length > 0 && !ctx.proxyUrl) {
+    sections.push("## Proxy Services\n");
+    sections.push(
+      "You have access to proxy service(s) for routing requests through residential IPs.",
+    );
+    sections.push("Use the `X-Proxy` header to route a request through a proxy:\n");
+    sections.push("```bash");
+    sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
+    sections.push(`  -H "X-Service: ${proxyServices[0]!.id}" \\`);
+    sections.push(`  -H "X-Proxy: {{url}}" \\`);
+    sections.push(`  -H "X-Target: https://example.com/api/data"`);
+    sections.push("```\n");
+    sections.push(
+      "Use this when a direct request is blocked (403, connection refused) due to IP-based restrictions.\n",
     );
   }
 

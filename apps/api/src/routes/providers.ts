@@ -16,7 +16,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const createProviderSchema = z.object({
   id: z.string().regex(SLUG_RE, "id must be lowercase alphanumeric with hyphens"),
   displayName: z.string().min(1, "displayName is required"),
-  authMode: z.enum(["oauth2", "api_key", "basic", "custom"]),
+  authMode: z.enum(["oauth2", "api_key", "basic", "custom", "proxy"]),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
   authorizationUrl: z.string().optional(),
@@ -190,6 +190,22 @@ export function createProvidersRouter() {
       );
     }
 
+    // Force defaults for proxy providers
+    if (data.authMode === "proxy") {
+      data.allowAllUris = true;
+      data.credentialFieldName = "url";
+      data.credentialSchema = {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
+        },
+        required: ["url"],
+      };
+      if (!data.categories?.includes("proxy")) {
+        data.categories = [...(data.categories ?? []), "proxy"];
+      }
+    }
+
     try {
       await db.insert(providerConfigs).values({
         id: data.id,
@@ -266,6 +282,22 @@ export function createProvidersRouter() {
 
     const displayName = data.displayName ?? existing.displayName;
     const authMode = (data.authMode as AuthMode) ?? existing.authMode;
+
+    // Force defaults for proxy providers
+    if (authMode === "proxy") {
+      data.allowAllUris = true;
+      data.credentialFieldName = "url";
+      data.credentialSchema = data.credentialSchema ?? {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
+        },
+        required: ["url"],
+      };
+      if (!(data.categories ?? existing.categories ?? []).includes("proxy")) {
+        data.categories = [...(data.categories ?? existing.categories ?? []), "proxy"];
+      }
+    }
 
     // Handle secrets: encrypt if provided, preserve existing if omitted/empty
     let clientIdEncrypted: string | null = existing.clientIdEncrypted ?? null;

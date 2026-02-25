@@ -77,6 +77,10 @@ export class PiAdapter implements ExecutionAdapter {
         }
       }
 
+      if (ctx.proxyUrl) {
+        sidecarEnv.PROXY_URL = ctx.proxyUrl;
+      }
+
       sidecarContainerId = await createContainer(executionId, sidecarEnv, {
         image: SIDECAR_IMAGE,
         adapterName: "sidecar",
@@ -112,6 +116,12 @@ export class PiAdapter implements ExecutionAdapter {
       for (const key of LLM_API_KEY_NAMES) {
         const val = apiEnv[key];
         if (val) containerEnv[key] = val;
+      }
+
+      if (ctx.proxyUrl) {
+        containerEnv.HTTP_PROXY = ctx.proxyUrl;
+        containerEnv.HTTPS_PROXY = ctx.proxyUrl;
+        containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
       }
 
       // 5. Create agent on the custom network ONLY

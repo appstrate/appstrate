@@ -147,10 +147,10 @@ export function FlowDetailPage() {
         : undefined;
   };
 
-  /** Check if a provider uses credential-based auth (basic/custom) */
+  /** Check if a provider uses credential-based auth (has a credentialSchema) */
   const isCredentialAuth = (provider: string): boolean => {
     const pDef = providers?.find((p) => p.id === provider);
-    return pDef?.authMode === "basic" || pDef?.authMode === "custom";
+    return !!pDef?.credentialSchema;
   };
 
   return (

@@ -36,6 +36,7 @@ export async function resolveProviderDefs(
         authorizedUris: def.authorizedUris,
         allowAllUris: def.allowAllUris,
         docsUrl: def.docsUrl,
+        categories: def.categories,
       });
     }
   }
@@ -63,6 +64,7 @@ export function buildPromptContext(params: {
   input?: Record<string, unknown>;
   files?: FileReference[];
   providers?: PromptContext["providers"];
+  proxyUrl?: string | null;
 }): PromptContext {
   return {
     rawPrompt: params.flow.prompt,
@@ -83,6 +85,7 @@ export function buildPromptContext(params: {
     })),
     providers: params.providers,
     llmModel: getEnv().LLM_MODEL_ID,
+    proxyUrl: params.proxyUrl,
   };
 }
 
@@ -105,6 +108,8 @@ export async function buildExecutionContext(params: {
 }> {
   const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
 
+  const proxyUrl = getEnv().PROXY_URL ?? null;
+
   const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId] =
     await Promise.all([
       buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
@@ -124,6 +129,7 @@ export async function buildExecutionContext(params: {
     input,
     files,
     providers: providerDefs,
+    proxyUrl,
   });
 
   return { promptContext, flowPackage, flowVersionId };

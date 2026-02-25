@@ -186,7 +186,7 @@ export async function saveApiKeyConnection(
 
 export async function saveCredentialsConnection(
   provider: string,
-  authMode: "basic" | "custom",
+  authMode: "basic" | "custom" | "proxy",
   credentials: Record<string, string>,
   profileId: string,
   orgId: string,
@@ -260,7 +260,12 @@ export async function getIntegrationsWithStatus(
       displayName: provider.displayName,
       logo: provider.iconUrl ?? "",
       status,
-      authMode: provider.authMode === "api_key" ? "API_KEY" : "OAUTH2",
+      authMode:
+        provider.authMode === "api_key"
+          ? "API_KEY"
+          : provider.authMode === "proxy"
+            ? "PROXY"
+            : "OAUTH2",
       connectionId: conn?.id,
       connectedAt: conn?.createdAt,
     };
@@ -307,7 +312,8 @@ export async function resolveServiceStatuses(
       };
 
       const authMode = await getProviderAuthMode(svc.provider, orgId);
-      const authModeLabel = authMode === "api_key" ? "API_KEY" : "OAUTH2";
+      const authModeLabel =
+        authMode === "api_key" ? "API_KEY" : authMode === "proxy" ? "PROXY" : "OAUTH2";
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
 
       if (mode === "admin") {

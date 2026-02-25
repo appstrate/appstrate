@@ -240,7 +240,7 @@ export interface AvailableScope {
 export interface ProviderConfig {
   id: string;
   displayName: string;
-  authMode: "oauth2" | "api_key" | "basic" | "custom";
+  authMode: "oauth2" | "api_key" | "basic" | "custom" | "proxy";
   source: "built-in" | "custom";
   hasClientId: boolean;
   hasClientSecret: boolean;

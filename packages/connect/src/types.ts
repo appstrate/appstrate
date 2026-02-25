@@ -1,6 +1,6 @@
 import type { JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
-export type AuthMode = "oauth2" | "api_key" | "basic" | "custom";
+export type AuthMode = "oauth2" | "api_key" | "basic" | "custom" | "proxy";
 
 export interface ProviderDefinition {
   id: string;

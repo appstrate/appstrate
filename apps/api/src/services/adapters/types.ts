@@ -56,8 +56,10 @@ export interface PromptContext {
     authorizedUris?: string[];
     allowAllUris?: boolean;
     docsUrl?: string;
+    categories?: string[];
   }>;
   llmModel: string;
+  proxyUrl?: string | null;
 }
 
 export interface ExecutionAdapter {

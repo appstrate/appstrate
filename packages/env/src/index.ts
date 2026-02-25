@@ -51,6 +51,9 @@ const envSchema = z.object({
   MISTRAL_API_KEY: z.string().optional(),
   TOGETHER_API_KEY: z.string().optional(),
   DEEPSEEK_API_KEY: z.string().optional(),
+
+  // Outbound proxy
+  PROXY_URL: z.string().optional(),
 });
 
 // ─── Getter ──────────────────────────────────────────────────
