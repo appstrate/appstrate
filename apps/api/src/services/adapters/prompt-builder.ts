@@ -54,6 +54,17 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
     sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
     sections.push("```\n");
+    sections.push("The proxy wraps every response in a JSON envelope:");
+    sections.push("```json");
+    sections.push(`{ "status": 200, "statusText": "OK", "body": { ... } }`);
+    sections.push("```");
+    sections.push("- `status`: the HTTP status code from the target API");
+    sections.push(
+      "- `body`: the parsed response body (JSON object for JSON APIs, string otherwise)",
+    );
+    sections.push(
+      "- `truncated`: present and `true` if the response exceeded the size limit (body is a truncated string)\n",
+    );
 
     sections.push("### Connected Services\n");
 

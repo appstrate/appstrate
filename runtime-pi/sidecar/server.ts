@@ -330,12 +330,23 @@ app.all("/proxy", async (c) => {
   // 9. Return response as JSON envelope
   const responseText = await targetRes.text();
   const truncated = responseText.length > MAX_RESPONSE_SIZE;
-  const responseBody = truncated ? responseText.slice(0, MAX_RESPONSE_SIZE) : responseText;
+  const text = truncated ? responseText.slice(0, MAX_RESPONSE_SIZE) : responseText;
+
+  // Parse JSON bodies so agents don't need to double-parse
+  const contentType = targetRes.headers.get("content-type") || "";
+  let body: unknown = text;
+  if (/\bjson\b/.test(contentType) && !truncated) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Content-Type says JSON but body isn't valid — keep as string
+    }
+  }
 
   return c.json({
     status: targetRes.status,
     statusText: targetRes.statusText,
-    body: responseBody,
+    body,
     ...(truncated ? { truncated: true } : {}),
   });
 });
