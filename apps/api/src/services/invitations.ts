@@ -83,6 +83,26 @@ export async function cancelInvitation(invitationId: string) {
     .where(eq(orgInvitations.id, invitationId));
 }
 
+export async function updateInvitationRole(
+  invitationId: string,
+  orgId: string,
+  role: "member" | "admin",
+) {
+  const [updated] = await db
+    .update(orgInvitations)
+    .set({ role })
+    .where(
+      and(
+        eq(orgInvitations.id, invitationId),
+        eq(orgInvitations.orgId, orgId),
+        eq(orgInvitations.status, "pending"),
+      ),
+    )
+    .returning();
+
+  return updated ?? null;
+}
+
 export async function getOrgName(orgId: string): Promise<string> {
   const [row] = await db
     .select({ name: organizations.name })

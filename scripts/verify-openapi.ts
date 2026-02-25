@@ -122,6 +122,7 @@ const expectedEndpoints = [
   "POST /api/orgs/{orgId}/members",
   "PUT /api/orgs/{orgId}/members/{userId}",
   "DELETE /api/orgs/{orgId}/members/{userId}",
+  "PUT /api/orgs/{orgId}/invitations/{invitationId}",
   "DELETE /api/orgs/{orgId}/invitations/{invitationId}",
 
   // Profile

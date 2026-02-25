@@ -37,6 +37,7 @@ export function OrgSettingsPage() {
 
   // Members
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
   const [inviteError, setInviteError] = useState<string | null>(null);
 
   // Providers
@@ -91,15 +92,16 @@ export function OrgSettingsPage() {
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: async (email: string) => {
+    mutationFn: async ({ email, role }: { email: string; role: "member" | "admin" }) => {
       return api<{ invited?: boolean; added?: boolean; token?: string }>(`/orgs/${orgId}/members`, {
         method: "POST",
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, role }),
       });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
       setInviteEmail("");
+      setInviteRole("member");
       setInviteError(null);
       if (data?.invited && data.token) {
         setInviteLink(`${window.location.origin}/invite/${data.token}`);
@@ -115,6 +117,27 @@ export function OrgSettingsPage() {
     mutationFn: async (invitationId: string) => {
       return api(`/orgs/${orgId}/invitations/${invitationId}`, {
         method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
+    },
+    onError: (err: Error) => {
+      alert(t("error.prefix", { message: err.message }));
+    },
+  });
+
+  const changeInvitationRoleMutation = useMutation({
+    mutationFn: async ({
+      invitationId,
+      role,
+    }: {
+      invitationId: string;
+      role: "member" | "admin";
+    }) => {
+      return api(`/orgs/${orgId}/invitations/${invitationId}`, {
+        method: "PUT",
+        body: JSON.stringify({ role }),
       });
     },
     onSuccess: () => {
@@ -196,7 +219,7 @@ export function OrgSettingsPage() {
     setInviteError(null);
     const trimmed = inviteEmail.trim();
     if (!trimmed) return;
-    addMemberMutation.mutate(trimmed);
+    addMemberMutation.mutate({ email: trimmed, role: inviteRole });
   };
 
   const handleRemove = (member: OrganizationMember) => {
@@ -336,16 +359,26 @@ export function OrgSettingsPage() {
           {/* Add member form */}
           <form onSubmit={handleInvite} className="invite-form">
             <div className="invite-form-field">
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => {
-                  setInviteEmail(e.target.value);
-                  setInviteError(null);
-                }}
-                placeholder="email@example.com"
-                required
-              />
+              <div className="invite-form-row">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => {
+                    setInviteEmail(e.target.value);
+                    setInviteError(null);
+                  }}
+                  placeholder="email@example.com"
+                  required
+                />
+                <select
+                  className="inline-select"
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
+                >
+                  <option value="member">{t("orgSettings.roleMember")}</option>
+                  <option value="admin">{t("orgSettings.roleAdmin")}</option>
+                </select>
+              </div>
               {inviteError && <p className="form-error">{inviteError}</p>}
               {inviteLink && (
                 <div className="invite-link-box">
@@ -446,9 +479,26 @@ export function OrgSettingsPage() {
                       </div>
                       <span className="badge badge-pending">{t("orgSettings.invited")}</span>
                     </div>
-                    <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
+                    <div className="service-card-actions service-card-actions-bordered">
+                      {isOrgOwner && (
+                        <select
+                          className="inline-select"
+                          value={inv.role}
+                          onChange={(e) =>
+                            changeInvitationRoleMutation.mutate({
+                              invitationId: inv.id,
+                              role: e.target.value as "member" | "admin",
+                            })
+                          }
+                          disabled={changeInvitationRoleMutation.isPending}
+                        >
+                          <option value="member">{t("orgSettings.roleMember")}</option>
+                          <option value="admin">{t("orgSettings.roleAdmin")}</option>
+                        </select>
+                      )}
                       <CopyLinkButton token={inv.token} />
                       <button
+                        className="ml-auto"
                         onClick={() => cancelInvitationMutation.mutate(inv.id)}
                         disabled={cancelInvitationMutation.isPending}
                       >
