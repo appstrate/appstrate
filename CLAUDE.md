@@ -164,6 +164,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 ### Sidecar Protocol (details beyond the architecture diagram)
 - Agent calls `$SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers for authenticated API requests.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL, validates against `authorizedUris` per provider.
+- **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
 - **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Execution History API) + appends raw `prompt.md`. No Handlebars.
 - **Output validation**: If `output.schema` exists, Zod validates the result. On mismatch, `buildRetryPrompt()` re-executes up to `execution.outputRetries` times. Final failure = accepted with warning.
 - **State persistence**: `result.state` → persisted to execution record. Only latest state injected as `## Previous State` next run. Historical executions available via `$SIDECAR_URL/execution-history`.

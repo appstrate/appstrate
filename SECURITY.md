@@ -142,7 +142,7 @@ The sidecar:
 | ----------- | ---------------------------------- | -------------------------------------- |
 | URL         | `https://gmail.googleapis.com/...` | `https://gmail.googleapis.com/...`     |
 | Auth header | `Bearer {{token}}`                 | `Bearer ya29.a0AfH6SM...` (real token) |
-| Response    | `{ status: 200, body: "..." }`     | —                                      |
+| Response    | Raw upstream body (status code forwarded) | —                               |
 | Credentials | Never                              | Substituted by sidecar                 |
 
 ### Credential access is scoped and audited

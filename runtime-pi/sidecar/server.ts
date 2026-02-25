@@ -327,28 +327,18 @@ app.all("/proxy", async (c) => {
     cookieJar.set(serviceId, [...byName.values()]);
   }
 
-  // 9. Return response as JSON envelope
+  // 9. Forward upstream response transparently (pass-through proxy)
   const responseText = await targetRes.text();
   const truncated = responseText.length > MAX_RESPONSE_SIZE;
   const text = truncated ? responseText.slice(0, MAX_RESPONSE_SIZE) : responseText;
 
-  // Parse JSON bodies so agents don't need to double-parse
-  const contentType = targetRes.headers.get("content-type") || "";
-  let responseBody: unknown = text;
-  if (/\bjson\b/.test(contentType) && !truncated) {
-    try {
-      responseBody = JSON.parse(text);
-    } catch {
-      // Content-Type says JSON but body isn't valid — keep as string
-    }
+  const contentType = targetRes.headers.get("content-type") || "application/octet-stream";
+  const responseHeaders: Record<string, string> = { "Content-Type": contentType };
+  if (truncated) {
+    responseHeaders["X-Truncated"] = "true";
   }
 
-  return c.json({
-    status: targetRes.status,
-    statusText: targetRes.statusText,
-    body: responseBody,
-    ...(truncated ? { truncated: true } : {}),
-  });
+  return c.body(text, targetRes.status, responseHeaders);
 });
 
 // --- Start ---
