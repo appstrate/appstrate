@@ -52,6 +52,12 @@ export function ExecutionDetailPage() {
   const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
 
+  // Reset live status when switching to a different execution (e.g. re-run navigates
+  // to a new execId on the same route, so React reuses the component instance).
+  useEffect(() => {
+    setLiveStatus(null);
+  }, [execId]);
+
   const status = liveStatus || execution?.status;
   const isRunning = status === "running" || status === "pending";
 
