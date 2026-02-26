@@ -499,37 +499,39 @@ export function FlowDetailPage() {
 
       {tab === "schedules" && (
         <>
-          <div className="section-header">
-            <div />
-            {detail.input?.schema?.properties &&
-            Object.values(detail.input.schema.properties).some((p) => p.type === "file") ? (
-              <span className="hint">{t("schedule.fileInputBlocked")}</span>
-            ) : (
-              <button
-                onClick={() => {
-                  setEditingSchedule(null);
-                  setScheduleOpen(true);
-                }}
-              >
-                {t("btn.add")}
-              </button>
-            )}
-          </div>
-          {!schedules || schedules.length === 0 ? (
-            <EmptyState message={t("detail.emptySchedule")} compact />
+          {detail.input?.schema?.properties &&
+          Object.values(detail.input.schema.properties).some((p) => p.type === "file") ? (
+            <EmptyState message={t("schedule.fileInputBlocked")} compact />
           ) : (
-            <div className="schedule-list">
-              {schedules.map((sched) => (
-                <ScheduleRow
-                  key={sched.id}
-                  schedule={sched}
+            <>
+              <div className="section-header">
+                <div />
+                <button
                   onClick={() => {
-                    setEditingSchedule(sched);
+                    setEditingSchedule(null);
                     setScheduleOpen(true);
                   }}
-                />
-              ))}
-            </div>
+                >
+                  {t("btn.add")}
+                </button>
+              </div>
+              {!schedules || schedules.length === 0 ? (
+                <EmptyState message={t("detail.emptySchedule")} compact />
+              ) : (
+                <div className="schedule-list">
+                  {schedules.map((sched) => (
+                    <ScheduleRow
+                      key={sched.id}
+                      schedule={sched}
+                      onClick={() => {
+                        setEditingSchedule(sched);
+                        setScheduleOpen(true);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
