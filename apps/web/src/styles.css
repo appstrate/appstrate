@@ -866,7 +866,7 @@ button:disabled {
   border-color: var(--primary);
 }
 
-.form-group .hint {
+.hint {
   font-size: 0.7rem;
   color: var(--text-muted);
   margin-top: 0.25rem;
