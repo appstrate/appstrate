@@ -3106,7 +3106,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.25rem 0.625rem;
+  padding: 0.375rem 0.625rem;
   font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
