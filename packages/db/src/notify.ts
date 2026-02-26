@@ -54,6 +54,11 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'type', NEW.type,
         'event', NEW.event,
         'message', LEFT(NEW.message, 2000),
+        'data', CASE
+          WHEN NEW.data IS NULL THEN NULL
+          WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
+          ELSE '"[payload too large]"'::jsonb
+        END,
         'created_at', NEW.created_at
       )::text);
       RETURN NEW;
