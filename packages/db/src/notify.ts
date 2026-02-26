@@ -30,7 +30,6 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'status', NEW.status,
         'user_id', NEW.user_id,
         'org_id', NEW.org_id,
-        'result', CASE WHEN NEW.result IS NOT NULL THEN NEW.result ELSE 'null'::jsonb END,
         'error', NEW.error,
         'completed_at', NEW.completed_at,
         'duration', NEW.duration,
@@ -54,8 +53,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'org_id', NEW.org_id,
         'type', NEW.type,
         'event', NEW.event,
-        'message', NEW.message,
-        'data', CASE WHEN NEW.data IS NOT NULL THEN NEW.data ELSE 'null'::jsonb END,
+        'message', LEFT(NEW.message, 2000),
         'created_at', NEW.created_at
       )::text);
       RETURN NEW;
