@@ -167,7 +167,9 @@ export async function handleOAuthCallback(
     grant_type: "authorization_code",
     code,
     redirect_uri: stateRow.redirectUri,
-    ...(useBasicAuth ? {} : { client_id: oauthCreds.clientId, client_secret: oauthCreds.clientSecret }),
+    ...(useBasicAuth
+      ? {}
+      : { client_id: oauthCreds.clientId, client_secret: oauthCreds.clientSecret }),
     ...(provider.pkceEnabled !== false ? { code_verifier: stateRow.codeVerifier } : {}),
     ...(provider.tokenParams ?? {}),
   });
@@ -176,7 +178,11 @@ export async function handleOAuthCallback(
   try {
     tokenResponse = await fetch(provider.tokenUrl, {
       method: "POST",
-      headers: buildTokenHeaders(provider.tokenAuthMethod, oauthCreds.clientId, oauthCreds.clientSecret),
+      headers: buildTokenHeaders(
+        provider.tokenAuthMethod,
+        oauthCreds.clientId,
+        oauthCreds.clientSecret,
+      ),
       body: tokenBody.toString(),
       signal: AbortSignal.timeout(30_000),
     });

@@ -251,7 +251,10 @@ export function getDefaultAuthorizedUris(provider: ProviderDefinition): string[]
  * Used to return credentials in the correct format to the sidecar.
  */
 export function getCredentialFieldName(provider: ProviderDefinition): string {
-  return provider.credentialFieldName ?? (provider.authMode === "api_key" ? "api_key" : provider.authMode === "proxy" ? "url" : "token");
+  return (
+    provider.credentialFieldName ??
+    (provider.authMode === "api_key" ? "api_key" : provider.authMode === "proxy" ? "url" : "token")
+  );
 }
 
 /**
