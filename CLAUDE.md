@@ -117,18 +117,27 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |                                |-- Distributed lock via schedule_runs table
      |                                |-- Uses same executeFlowInBackground() path
      |                                |
+     |            Sidecar Pool (pre-warmed):  |-- initSidecarPool() at startup
+     |            - 2 standby containers on   |-- acquireSidecar() → /configure → attach
+     |              appstrate-sidecar-pool net |-- replenish in background after acquire
+     |                                        |-- shutdownSidecarPool() on exit
+     |                                |
      |            Docker network: appstrate-exec-{execId} (isolated bridge)
+     |            Sidecar + Agent setup run in parallel (Promise.all)
      |            ┌─────────────────────────────────────────────┐
      |            │  Sidecar Container (alias: "sidecar")       │
      |            │  - EXECUTION_TOKEN, PLATFORM_API_URL        │
+     |            │  - Configured via env vars (fresh) or       │
+     |            │    POST /configure (pooled pre-warmed)      │
      |            │  - Proxies /proxy → credential injection    │
      |            │  - Proxies /execution-history               │
      |            │  - ExtraHosts → host.docker.internal        │
      |            ├─────────────────────────────────────────────┤
-     |            │  Agent Container (Pi Coding Agent)          │
+     |            │  Agent Container (Pi Coding Agent, Bun)     │
      |            │  - FLOW_PROMPT, LLM_*, SIDECAR_URL          │
      |            │  - NO EXECUTION_TOKEN, NO PLATFORM_API_URL  │
      |            │  - NO ExtraHosts (cannot reach host)        │
+     |            │  - Files injected before start (parallel)   │
      |            │  - Calls sidecar via curl for API access    │
      |            │  - Outputs JSON lines on stdout             │
      |            └─────────────────────────────────────────────┘
@@ -161,10 +170,12 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
-- **Graceful shutdown**: `execution-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
+- **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
 ### Sidecar Protocol (details beyond the architecture diagram)
+- **Sidecar pool**: `sidecar-pool.ts` pre-warms 2 sidecar containers at startup on a standby network. `acquireSidecar()` configures a pooled container via `POST /configure` (sets `executionToken`, `platformApiUrl`, `proxyUrl`), then connects it to the execution network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
+- **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
 - Agent calls `$SIDECAR_URL/proxy` with `X-Service`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Flow-level and org-level proxy config is resolved by the platform before container creation.
