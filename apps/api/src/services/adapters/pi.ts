@@ -298,7 +298,6 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
             output_tokens: t.output ?? 0,
             cache_creation_input_tokens: t.cacheWrite ?? 0,
             cache_read_input_tokens: t.cacheRead ?? 0,
-            cost_usd: typeof obj.cost === "number" ? obj.cost : undefined,
           },
         };
       }

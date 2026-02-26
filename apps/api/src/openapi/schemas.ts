@@ -214,7 +214,6 @@ export const schemas = {
       error: { type: "string" },
       tokensUsed: { type: "integer" },
       tokenUsage: { type: "object" },
-      costUsd: { type: "string" },
       startedAt: { type: "string", format: "date-time" },
       completedAt: { type: "string", format: "date-time" },
       duration: { type: "integer", description: "Duration in milliseconds" },

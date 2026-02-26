@@ -41,9 +41,6 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
-  if (addition.cost_usd != null) {
-    total.cost_usd = (total.cost_usd ?? 0) + addition.cost_usd;
-  }
 }
 
 // --- Background execution (decoupled from client) ---
@@ -133,7 +130,6 @@ export async function executeFlowInBackground(
             ? {
                 tokensUsed: totalTokens,
                 tokenUsage: { ...accumulated } as Record<string, unknown>,
-                costUsd: accumulated.cost_usd,
               }
             : {}),
         });
@@ -272,7 +268,6 @@ export async function executeFlowInBackground(
         ...(totalTokens > 0
           ? {
               tokenUsage: { ...accumulated } as Record<string, unknown>,
-              costUsd: accumulated.cost_usd,
             }
           : {}),
       });
