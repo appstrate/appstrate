@@ -9,7 +9,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
-import { validateInput } from "../services/schema.ts";
+import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 
 export function createSchedulesRouter() {
@@ -42,6 +42,15 @@ export function createSchedulesRouter() {
       input?: Record<string, unknown>;
     }>();
 
+    // Block scheduling for flows with file inputs
+    const inputSchema = flow.manifest.input?.schema;
+    if (schemaHasFileFields(inputSchema)) {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Cannot schedule flows with file inputs" },
+        400,
+      );
+    }
+
     if (!body.cronExpression) {
       return c.json({ error: "VALIDATION_ERROR", message: "cronExpression is required" }, 400);
     }
@@ -54,7 +63,6 @@ export function createSchedulesRouter() {
     }
 
     // Validate input against flow's input schema if provided
-    const inputSchema = flow.manifest.input?.schema;
     if (body.input && inputSchema) {
       const inputValidation = validateInput(body.input, inputSchema);
       if (!inputValidation.valid) {

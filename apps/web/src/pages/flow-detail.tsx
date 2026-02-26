@@ -521,14 +521,19 @@ export function FlowDetailPage() {
         <>
           <div className="section-header">
             <div />
-            <button
-              onClick={() => {
-                setEditingSchedule(null);
-                setScheduleOpen(true);
-              }}
-            >
-              {t("btn.add")}
-            </button>
+            {detail.input?.schema?.properties &&
+            Object.values(detail.input.schema.properties).some((p) => p.type === "file") ? (
+              <span className="hint">{t("schedule.fileInputBlocked")}</span>
+            ) : (
+              <button
+                onClick={() => {
+                  setEditingSchedule(null);
+                  setScheduleOpen(true);
+                }}
+              >
+                {t("btn.add")}
+              </button>
+            )}
           </div>
           {!schedules || schedules.length === 0 ? (
             <EmptyState message={t("detail.emptySchedule")} compact />

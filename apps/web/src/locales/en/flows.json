@@ -73,6 +73,7 @@
   "schedule.presetDaily9": "Daily at 9am",
   "schedule.presetWeekday9": "Mon-Fri 9am",
   "schedule.presetMonday9": "Every Monday 9am",
+  "schedule.fileInputBlocked": "Scheduling is not available for flows with file inputs",
   "share.copyLink": "Copy link",
   "share.share": "Share",
   "share.copied": "Copied!",

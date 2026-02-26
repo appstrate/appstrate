@@ -15,6 +15,7 @@ import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { t: tFlows } = useTranslation(["flows"]);
   const { data: schedules, isLoading, error } = useAllSchedules();
   const { data: flows } = useFlows();
   const updateSchedule = useUpdateSchedule();
@@ -85,6 +86,14 @@ export function SchedulesListPage() {
                 onSave={(data) => createMutation.mutate(data)}
                 isPending={createMutation.isPending}
                 inputSchema={createFlowDetail?.input?.schema}
+                blockedMessage={
+                  createFlowDetail?.input?.schema?.properties &&
+                  Object.values(createFlowDetail.input.schema.properties).some(
+                    (p) => p.type === "file",
+                  )
+                    ? tFlows("schedule.fileInputBlocked")
+                    : undefined
+                }
                 flowPicker={
                   flows && flows.length > 1 ? (
                     <div className="form-group">

@@ -76,7 +76,15 @@ export const schedulesPaths = {
       },
       responses: {
         "201": { description: "Schedule created" },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "Validation error. Possible causes: missing/invalid cron expression, invalid input, or flow has file inputs (cannot be scheduled).",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" },
+            },
+          },
+        },
       },
     },
   },

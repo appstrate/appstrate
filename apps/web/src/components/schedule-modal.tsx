@@ -42,6 +42,7 @@ interface ScheduleModalProps {
   onDelete?: () => void;
   isPending?: boolean;
   flowPicker?: ReactNode;
+  blockedMessage?: string;
   children?: ReactNode;
 }
 
@@ -54,6 +55,7 @@ export function ScheduleModal({
   onDelete,
   isPending,
   flowPicker,
+  blockedMessage,
 }: ScheduleModalProps) {
   const { t } = useTranslation(["flows", "common"]);
   const isEdit = !!schedule;
@@ -69,15 +71,24 @@ export function ScheduleModal({
       {open && (
         <>
           {flowPicker}
-          <ScheduleForm
-            key={schemaKeys}
-            schedule={schedule}
-            inputSchema={inputSchema}
-            onClose={onClose}
-            onSave={onSave}
-            onDelete={onDelete}
-            isPending={isPending}
-          />
+          {blockedMessage ? (
+            <>
+              <p className="hint">{blockedMessage}</p>
+              <div className="modal-actions">
+                <button onClick={onClose}>{t("btn.cancel")}</button>
+              </div>
+            </>
+          ) : (
+            <ScheduleForm
+              key={schemaKeys}
+              schedule={schedule}
+              inputSchema={inputSchema}
+              onClose={onClose}
+              onSave={onSave}
+              onDelete={onDelete}
+              isPending={isPending}
+            />
+          )}
         </>
       )}
     </Modal>
