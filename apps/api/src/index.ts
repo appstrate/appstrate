@@ -38,6 +38,7 @@ import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
+import { createNotificationsRouter } from "./routes/notifications.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -348,6 +349,7 @@ app.route("/api/orgs", orgsRouter);
 
 app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
 app.route("/api/flows", flowsRouter);
+app.route("/api", createNotificationsRouter()); // Must be before executionsRouter (GET /api/executions vs /api/executions/:id)
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());

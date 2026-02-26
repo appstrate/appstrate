@@ -315,12 +315,15 @@ export const executions = pgTable(
     connectionProfileId: uuid("connection_profile_id"),
     scheduleId: text("schedule_id"),
     flowVersionId: integer("flow_version_id").references(() => flowVersions.id),
+    notifiedAt: timestamp("notified_at"),
+    readAt: timestamp("read_at"),
   },
   (table) => [
     index("idx_executions_flow_id").on(table.flowId),
     index("idx_executions_status").on(table.status),
     index("idx_executions_user_id").on(table.userId),
     index("idx_executions_org_id").on(table.orgId),
+    index("idx_executions_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
   ],
 );
 

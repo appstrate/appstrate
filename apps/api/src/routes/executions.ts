@@ -126,6 +126,7 @@ export async function executeFlowInBackground(
           error: `Execution timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
           duration,
+          notifiedAt: new Date().toISOString(),
           ...(totalTokens > 0
             ? {
                 tokensUsed: totalTokens,
@@ -259,6 +260,7 @@ export async function executeFlowInBackground(
         ...(resultState ? { state: resultState } : {}),
         completedAt: new Date().toISOString(),
         duration,
+        notifiedAt: new Date().toISOString(),
         tokensUsed:
           totalTokens > 0
             ? totalTokens
@@ -287,6 +289,7 @@ export async function executeFlowInBackground(
         error: "No result returned from adapter",
         completedAt: new Date().toISOString(),
         duration,
+        notifiedAt: new Date().toISOString(),
       });
       await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
         executionId,
@@ -305,6 +308,7 @@ export async function executeFlowInBackground(
       error: errorMessage,
       completedAt: new Date().toISOString(),
       duration,
+      notifiedAt: new Date().toISOString(),
     });
     await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
       executionId,
@@ -490,6 +494,7 @@ export function createExecutionsRouter() {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,
+      notifiedAt: now,
     });
 
     // Log the cancellation

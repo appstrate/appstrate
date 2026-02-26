@@ -421,6 +421,9 @@ button:disabled {
 .exec-row:hover {
   border-color: var(--primary);
 }
+.exec-row.unread {
+  border-left: 3px solid var(--primary);
+}
 
 .exec-row .exec-date {
   font-weight: 500;
@@ -984,24 +987,50 @@ button:disabled {
   background: var(--surface);
 }
 
-.nav-download-btn {
+/* Notification bell */
+.notification-bell {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  padding: 0.3rem 0.625rem;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border-radius: 6px;
   color: var(--text-muted);
   text-decoration: none;
   transition: all 0.15s;
-  border: 1px solid var(--border);
-  margin-right: 0.75rem;
+  margin-right: 0.5rem;
 }
-.nav-download-btn:hover {
-  color: var(--primary);
-  border-color: var(--primary);
-  background: rgba(59, 130, 246, 0.08);
+.notification-bell:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.notification-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger, #ef4444);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.exec-row .exec-flow-name {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.load-more-btn {
+  margin: 1rem auto;
+  display: block;
 }
 
 /* Login Page */

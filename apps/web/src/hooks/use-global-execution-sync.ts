@@ -3,7 +3,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import type { Execution } from "@appstrate/shared-types";
 
-const TERMINAL_STATUSES = new Set(["success", "failed", "timeout"]);
+const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 
 function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
   try {
@@ -30,6 +30,8 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
       qc.invalidateQueries({ queryKey: ["flows", orgId] });
       qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
+      qc.invalidateQueries({ queryKey: ["unread-count", orgId] });
+      qc.invalidateQueries({ queryKey: ["all-executions"] });
     }
   } catch {
     // Ignore malformed payloads

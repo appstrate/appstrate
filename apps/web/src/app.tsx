@@ -8,6 +8,7 @@ import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
+import { ExecutionsPage } from "./pages/executions-page";
 import { LibraryPage } from "./pages/library";
 import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
@@ -18,6 +19,7 @@ import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
+import { NotificationBell } from "./components/notification-bell";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
@@ -84,6 +86,28 @@ function UserMenu({
             </svg>
             {t("userMenu.preferences")}
           </Link>
+          <a
+            href="/assets/appstrate-api-guide.zip"
+            download="appstrate-api-guide.zip"
+            className="user-menu-item"
+            onClick={() => setOpen(false)}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {t("nav.downloadSkill")}
+          </a>
           <button className="user-menu-logout" onClick={onLogout}>
             {t("userMenu.logout")}
           </button>
@@ -131,28 +155,7 @@ function MainLayout() {
             {t("nav.library")}
           </Link>
         </nav>
-        <a
-          href="/assets/appstrate-api-guide.zip"
-          download="appstrate-api-guide.zip"
-          className="nav-download-btn"
-          title={t("nav.downloadSkill")}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          {t("nav.downloadSkill")}
-        </a>
+        <NotificationBell />
         <OrgSwitcher />
         <UserMenu
           displayName={profile?.displayName || user!.email || ""}
@@ -263,6 +266,7 @@ export function App() {
               <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
               <Route path="/flows/:flowId" element={<FlowDetailPage />} />
               <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
+              <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />

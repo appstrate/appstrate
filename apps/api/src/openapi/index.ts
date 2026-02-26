@@ -28,6 +28,7 @@ import { sharePaths } from "./paths/share.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
+import { notificationsPaths } from "./paths/notifications.ts";
 
 export const openApiSpec = {
   ...openApiInfo,
@@ -51,6 +52,7 @@ export const openApiSpec = {
     ...internalPaths,
     ...welcomePaths,
     ...metaPaths,
+    ...notificationsPaths,
   },
   components: {
     securitySchemes,
