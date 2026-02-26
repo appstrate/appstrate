@@ -27,7 +27,7 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useClickOutside } from "./hooks/use-click-outside";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download } from "lucide-react";
+import { User, Settings, Download, FileText } from "lucide-react";
 
 function UserMenu({
   displayName,
@@ -63,6 +63,16 @@ function UserMenu({
             <Settings size={14} />
             {t("userMenu.preferences")}
           </Link>
+          <a
+            href="/api/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="user-menu-item"
+            onClick={() => setOpen(false)}
+          >
+            <FileText size={14} />
+            {t("userMenu.apiDocs")}
+          </a>
           <a
             href="/assets/appstrate-api-guide.zip"
             download="appstrate-api-guide.zip"

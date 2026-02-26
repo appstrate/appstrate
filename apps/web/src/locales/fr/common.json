@@ -6,6 +6,7 @@
   "userMenu.ariaLabel": "Menu utilisateur",
   "userMenu.logout": "Déconnexion",
   "userMenu.preferences": "Préférences",
+  "userMenu.apiDocs": "Documentation API",
   "orgSwitcher.ariaLabel": "Changer d'organisation",
   "orgSwitcher.ariaLabelList": "Organisations",
   "orgSwitcher.connectors": "Connecteurs",
