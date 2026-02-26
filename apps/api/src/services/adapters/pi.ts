@@ -9,38 +9,17 @@ import {
   createContainer,
   createNetwork,
   detectPlatformNetwork,
-  execInContainer,
+  getContainerHostPort,
   injectFiles,
   startContainer,
   stopContainer,
   removeContainer,
   removeNetwork,
 } from "../docker.ts";
-import { acquireSidecar } from "../sidecar-pool.ts";
+import { acquireSidecar, waitForSidecarHealth } from "../sidecar-pool.ts";
 
 const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
 const SIDECAR_IMAGE = "appstrate-sidecar:latest";
-const SIDECAR_HEALTH_RETRIES = 20;
-const SIDECAR_HEALTH_DELAY_MS = 100;
-
-async function waitForSidecarHealth(sidecarContainerId: string): Promise<void> {
-  for (let attempt = 1; attempt <= SIDECAR_HEALTH_RETRIES; attempt++) {
-    try {
-      const exitCode = await execInContainer(sidecarContainerId, [
-        "bun",
-        "-e",
-        "const r = await fetch('http://localhost:8080/health'); process.exit(r.ok ? 0 : 1)",
-      ]);
-      if (exitCode === 0) return;
-    } catch {
-      // Retry
-    }
-    if (attempt < SIDECAR_HEALTH_RETRIES) {
-      await new Promise((r) => setTimeout(r, SIDECAR_HEALTH_DELAY_MS));
-    }
-  }
-  throw new Error("Sidecar health check failed after retries");
-}
 
 export class PiAdapter implements ExecutionAdapter {
   async *execute(
@@ -152,6 +131,8 @@ export class PiAdapter implements ExecutionAdapter {
           networkId: networkId!,
           networkAlias: "sidecar",
           extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
+          portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+          exposedPorts: { "8080/tcp": {} },
         });
 
         if (platformNetwork) {
@@ -159,7 +140,9 @@ export class PiAdapter implements ExecutionAdapter {
         }
 
         await startContainer(id);
-        await waitForSidecarHealth(id);
+        const hostPort = await getContainerHostPort(id, "8080/tcp");
+        if (!hostPort) throw new Error("No host port mapped for fresh sidecar");
+        await waitForSidecarHealth(hostPort);
         return id;
       };
 

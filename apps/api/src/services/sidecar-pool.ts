@@ -163,7 +163,7 @@ async function replenish(): Promise<void> {
         throw new Error("No host port mapped for pooled sidecar");
       }
 
-      await waitForPooledHealth(hostPort);
+      await waitForSidecarHealth(hostPort);
       pool.push({ containerId, hostPort });
     } catch (err) {
       logger.warn("Failed to create pooled sidecar", {
@@ -174,8 +174,8 @@ async function replenish(): Promise<void> {
   }
 }
 
-/** Wait for a pooled sidecar to become healthy via its host-mapped port. */
-async function waitForPooledHealth(hostPort: number): Promise<void> {
+/** Wait for a sidecar to become healthy via its host-mapped port. */
+export async function waitForSidecarHealth(hostPort: number): Promise<void> {
   for (let attempt = 1; attempt <= HEALTH_CHECK_RETRIES; attempt++) {
     try {
       const res = await fetch(`http://localhost:${hostPort}/health`, {
@@ -189,5 +189,5 @@ async function waitForPooledHealth(hostPort: number): Promise<void> {
       await new Promise((r) => setTimeout(r, HEALTH_CHECK_DELAY_MS));
     }
   }
-  throw new Error("Pooled sidecar health check failed after retries");
+  throw new Error("Sidecar health check failed after retries");
 }

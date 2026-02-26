@@ -107,44 +107,47 @@ async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Bu
     "prompt.md": new TextEncoder().encode(flow.prompt),
   };
 
-  // Fetch org skill files from library storage
-  const skillFiles = await getFlowSkillFiles(flow.id, orgId);
+  // Fetch org skill files and extension files in parallel
+  const [skillFiles, extFiles] = await Promise.all([
+    getFlowSkillFiles(flow.id, orgId),
+    getFlowExtensionFiles(flow.id, orgId),
+  ]);
+
   for (const [skillId, files] of skillFiles) {
     for (const [filePath, content] of Object.entries(files)) {
       entries[`skills/${skillId}/${filePath}`] = content;
     }
   }
 
-  // Add built-in skills referenced by the flow
-  for (const skill of flow.skills) {
-    if (isBuiltInSkill(skill.id) && !skillFiles.has(skill.id)) {
-      const files = await getBuiltInSkillFiles(skill.id);
-      if (files) {
-        for (const [filePath, content] of Object.entries(files)) {
-          entries[`skills/${skill.id}/${filePath}`] = content;
-        }
-      }
-    }
-  }
-
-  // Fetch org extension files from library storage
-  const extFiles = await getFlowExtensionFiles(flow.id, orgId);
   for (const [, files] of extFiles) {
     for (const [filePath, content] of Object.entries(files)) {
       entries[`extensions/${filePath}`] = content;
     }
   }
 
-  // Add built-in extensions referenced by the flow
+  // Add built-in skills and extensions referenced by the flow (parallel lookups)
+  const builtInSkillPromises = flow.skills
+    .filter((skill) => isBuiltInSkill(skill.id) && !skillFiles.has(skill.id))
+    .map(async (skill) => {
+      const files = await getBuiltInSkillFiles(skill.id);
+      if (files) {
+        for (const [filePath, content] of Object.entries(files)) {
+          entries[`skills/${skill.id}/${filePath}`] = content;
+        }
+      }
+    });
+
   const orgExtIds = new Set([...extFiles.keys()]);
-  for (const ext of flow.extensions) {
-    if (isBuiltInExtension(ext.id) && !orgExtIds.has(ext.id)) {
+  const builtInExtPromises = flow.extensions
+    .filter((ext) => isBuiltInExtension(ext.id) && !orgExtIds.has(ext.id))
+    .map(async (ext) => {
       const file = await getBuiltInExtensionFile(ext.id);
       if (file) {
         entries[`extensions/${ext.id}.ts`] = file;
       }
-    }
-  }
+    });
+
+  await Promise.all([...builtInSkillPromises, ...builtInExtPromises]);
 
   return Buffer.from(zipSync(entries, { level: ZIP_COMPRESSION_LEVEL }));
 }

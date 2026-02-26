@@ -229,7 +229,8 @@ try {
   });
 }
 
-// Clean up orphaned executions from previous server runs
+// Sequential cleanup: orphan executions must be marked before container cleanup,
+// and containers must be cleaned before sidecar pool init.
 try {
   const { count, executionIds } = await markOrphanExecutionsFailed();
   if (count > 0) {
@@ -241,7 +242,6 @@ try {
   });
 }
 
-// Clean up orphaned Docker containers/networks (best-effort, always runs)
 try {
   const { containers, networks } = await cleanupOrphanedContainers();
   if (containers > 0 || networks > 0) {
@@ -253,68 +253,55 @@ try {
   });
 }
 
-// Initialize sidecar pool (pre-warm containers for faster execution startup)
-try {
-  await initSidecarPool();
-} catch (err) {
-  logger.warn("Could not initialize sidecar pool", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Initialize scheduler
-try {
-  await initScheduler();
-} catch (err) {
-  logger.warn("Could not initialize scheduler", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Clean up expired OAuth states
-try {
-  const deleted = await db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date()));
-  logger.debug("Cleaned up expired OAuth states", { deleted });
-} catch (err) {
-  logger.warn("Could not clean up expired OAuth states", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Clean up expired invitations
-try {
-  const expiredCount = await expireOldInvitations();
-  if (expiredCount > 0) {
-    logger.info("Expired old invitations", { count: expiredCount });
-  }
-} catch (err) {
-  logger.warn("Could not expire old invitations", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Clean up expired API keys
-try {
-  const expiredKeyCount = await cleanupExpiredKeys();
-  if (expiredKeyCount > 0) {
-    logger.info("Revoked expired API keys", { count: expiredKeyCount });
-  }
-} catch (err) {
-  logger.warn("Could not clean up expired API keys", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Clean up old schedule_runs rows (retention: 30 days)
-try {
-  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const deleted = await db.delete(scheduleRuns).where(lt(scheduleRuns.createdAt, cutoff));
-  logger.debug("Cleaned up old schedule_runs", { deleted });
-} catch (err) {
-  logger.warn("Could not clean up old schedule_runs", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
+// Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
+await Promise.all([
+  initSidecarPool().catch((err) => {
+    logger.warn("Could not initialize sidecar pool", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }),
+  initScheduler().catch((err) => {
+    logger.warn("Could not initialize scheduler", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }),
+  db
+    .delete(oauthStates)
+    .where(lt(oauthStates.expiresAt, new Date()))
+    .then((deleted) => logger.debug("Cleaned up expired OAuth states", { deleted }))
+    .catch((err) => {
+      logger.warn("Could not clean up expired OAuth states", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+  expireOldInvitations()
+    .then((expiredCount) => {
+      if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
+    })
+    .catch((err) => {
+      logger.warn("Could not expire old invitations", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+  cleanupExpiredKeys()
+    .then((expiredKeyCount) => {
+      if (expiredKeyCount > 0) logger.info("Revoked expired API keys", { count: expiredKeyCount });
+    })
+    .catch((err) => {
+      logger.warn("Could not clean up expired API keys", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+  db
+    .delete(scheduleRuns)
+    .where(lt(scheduleRuns.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
+    .then((deleted) => logger.debug("Cleaned up old schedule_runs", { deleted }))
+    .catch((err) => {
+      logger.warn("Could not clean up old schedule_runs", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+]);
 
 // Graceful shutdown
 const SHUTDOWN_TIMEOUT_MS = 30_000;
