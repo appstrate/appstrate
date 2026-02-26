@@ -78,7 +78,7 @@ export function ExecutionDetailPage() {
   const runFlow = useRunFlow(flowId!);
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
-  const [userTab, setUserTab] = useState<"logs" | "result" | null>(null);
+  const [userTab, setUserTab] = useState<"logs" | "result" | "state" | null>(null);
 
   // Build log entries from historical data, merging consecutive text-only
   // progress entries into a single flowing block so small streaming fragments
@@ -122,6 +122,7 @@ export function ExecutionDetailPage() {
 
   // Use result from logs or execution object
   const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
+  const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
   // Derive active tab: user override > auto-switch to result when done
@@ -152,6 +153,7 @@ export function ExecutionDetailPage() {
           newStatus === "timeout" ||
           newStatus === "cancelled";
         if (terminal) {
+          qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
           qc.invalidateQueries({ queryKey: ["execution-logs", orgId, execId] });
         }
       },
@@ -249,6 +251,14 @@ export function ExecutionDetailPage() {
         >
           {t("exec.tabResult")}
         </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "state"}
+          className={`tab ${activeTab === "state" ? "active" : ""}`}
+          onClick={() => setUserTab("state")}
+        >
+          {t("exec.tabState")}
+        </button>
       </div>
 
       {displayStatus === "failed" && execution.error && (
@@ -262,6 +272,13 @@ export function ExecutionDetailPage() {
           <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
           <EmptyState message={t("exec.emptyResult")} compact />
+        ))}
+
+      {activeTab === "state" &&
+        (stateData ? (
+          <pre className="result-json-viewer">{JSON.stringify(stateData, null, 2)}</pre>
+        ) : (
+          <EmptyState message={t("exec.emptyState")} compact />
         ))}
     </>
   );
