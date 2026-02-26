@@ -73,6 +73,7 @@
   "schedule.presetDaily9": "Tous les jours à 9h",
   "schedule.presetWeekday9": "Lundi-Vendredi 9h",
   "schedule.presetMonday9": "Tous les lundis 9h",
+  "schedule.fileInputBlocked": "La planification n'est pas disponible pour les flows avec des fichiers en entrée",
   "share.copyLink": "Copier le lien",
   "share.share": "Partager",
   "share.copied": "Copié !",
