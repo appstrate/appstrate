@@ -254,14 +254,14 @@ export async function getRunningExecutionsForFlow(
 
 export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
   const rows = await db
-    .select({ flowId: executions.flowId })
+    .select({ flowId: executions.flowId, count: count() })
     .from(executions)
-    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])));
+    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])))
+    .groupBy(executions.flowId);
 
   const counts: Record<string, number> = {};
   for (const row of rows) {
-    const flowId = row.flowId;
-    counts[flowId] = (counts[flowId] ?? 0) + 1;
+    counts[row.flowId] = row.count;
   }
   return counts;
 }
