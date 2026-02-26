@@ -11,7 +11,7 @@ export function useProfiles(userIds: string[]) {
     queryKey: ["profiles", orgId, dedupedIds],
     queryFn: async () => {
       const result = await api<{
-        profiles: { id: string; display_name: string }[];
+        profiles: { id: string; displayName: string }[];
       }>("/profiles/batch", {
         method: "POST",
         body: JSON.stringify({ ids: dedupedIds }),
@@ -25,7 +25,7 @@ export function useProfiles(userIds: string[]) {
     const map = new Map<string, string>();
     if (data) {
       for (const row of data) {
-        if (row.display_name) map.set(row.id, row.display_name);
+        if (row.displayName) map.set(row.id, row.displayName);
       }
     }
     return map;

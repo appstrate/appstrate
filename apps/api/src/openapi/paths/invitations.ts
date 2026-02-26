@@ -25,7 +25,8 @@ export const invitationsPaths = {
             },
           },
         },
-        "404": { description: "Invalid or expired invitation" },
+        "404": { description: "Invitation not found" },
+        "410": { description: "Invitation already accepted, cancelled, or expired" },
       },
     },
   },
@@ -38,9 +39,41 @@ export const invitationsPaths = {
         "Accept an invitation. Creates user account if new, adds to org, sets session cookie.",
       security: [],
       parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                password: { type: "string", description: "Password (required for new users)" },
+                displayName: { type: "string" },
+              },
+            },
+          },
+        },
+      },
       responses: {
-        "200": { description: "Invitation accepted" },
-        "400": { description: "Invalid or expired invitation" },
+        "200": {
+          description: "Invitation accepted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean" },
+                  isNewUser: { type: "boolean" },
+                  orgId: { type: "string" },
+                  requiresLogin: {
+                    type: "boolean",
+                    description: "Present when isNewUser is false",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { description: "Invitation not found" },
+        "410": { description: "Invitation already accepted, cancelled, or expired" },
       },
     },
   },

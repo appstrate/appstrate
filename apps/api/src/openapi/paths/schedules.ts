@@ -12,13 +12,8 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  schedules: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Schedule" },
-                  },
-                },
+                type: "array",
+                items: { $ref: "#/components/schemas/Schedule" },
               },
             },
           },
@@ -42,13 +37,8 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  schedules: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Schedule" },
-                  },
-                },
+                type: "array",
+                items: { $ref: "#/components/schemas/Schedule" },
               },
             },
           },
@@ -78,7 +68,6 @@ export const schedulesPaths = {
                   description: "Cron expression (e.g. '0 9 * * 1-5')",
                 },
                 timezone: { type: "string", default: "UTC" },
-                enabled: { type: "boolean", default: true },
                 input: { type: "object" },
               },
             },
@@ -92,27 +81,6 @@ export const schedulesPaths = {
     },
   },
   "/api/schedules/{scheduleId}": {
-    get: {
-      operationId: "getSchedule",
-      tags: ["Schedules"],
-      summary: "Get a schedule",
-      description: "Get details of a single cron schedule.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "scheduleId", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Schedule detail",
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/Schedule" },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
     put: {
       operationId: "updateSchedule",
       tags: ["Schedules"],
@@ -154,7 +122,17 @@ export const schedulesPaths = {
         { name: "scheduleId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Schedule deleted" },
+        "200": {
+          description: "Schedule deleted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { ok: { type: "boolean" } },
+              },
+            },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

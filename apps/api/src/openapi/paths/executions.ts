@@ -20,6 +20,15 @@ export const executionsPaths = {
               },
             },
           },
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              properties: {
+                input: { type: "string", description: "JSON-encoded input values" },
+                file: { type: "string", format: "binary", description: "File upload" },
+              },
+            },
+          },
         },
       },
       responses: {
@@ -62,13 +71,8 @@ export const executionsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  executions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Execution" },
-                  },
-                },
+                type: "array",
+                items: { $ref: "#/components/schemas/Execution" },
               },
             },
           },
@@ -96,6 +100,7 @@ export const executionsPaths = {
             },
           },
         },
+        "409": { description: "Running executions exist" },
       },
     },
   },
@@ -127,17 +132,10 @@ export const executionsPaths = {
       operationId: "getExecutionLogs",
       tags: ["Executions"],
       summary: "Get execution logs",
-      description:
-        "Get persisted log entries for an execution. Supports pagination via `after` query param.",
+      description: "Get persisted log entries for an execution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "executionId", in: "path", required: true, schema: { type: "string" } },
-        {
-          name: "after",
-          in: "query",
-          description: "Cursor: return logs with ID greater than this value",
-          schema: { type: "integer" },
-        },
       ],
       responses: {
         "200": {
@@ -145,37 +143,9 @@ export const executionsPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                properties: {
-                  logs: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/ExecutionLog" },
-                  },
-                },
+                type: "array",
+                items: { $ref: "#/components/schemas/ExecutionLog" },
               },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/executions/{executionId}/stream": {
-    get: {
-      operationId: "streamExecutionLogs",
-      tags: ["Executions"],
-      summary: "SSE execution log stream",
-      description:
-        "Server-Sent Events stream that replays all logs from the database, then streams live updates. Cookie auth only.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "SSE stream",
-          content: {
-            "text/event-stream": {
-              schema: { type: "string" },
             },
           },
         },
@@ -193,8 +163,16 @@ export const executionsPaths = {
         { name: "executionId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "200": { description: "Execution cancelled" },
+        "200": {
+          description: "Execution cancelled",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Execution not cancellable (already completed/failed)" },
       },
     },
   },

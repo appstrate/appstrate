@@ -8,11 +8,11 @@ import type { Profile } from "@appstrate/shared-types";
 
 async function fetchProfile(): Promise<Profile | null> {
   try {
-    const data = await api<{ id: string; display_name: string; language: string }>("/profile");
+    const data = await api<{ id: string; displayName: string; language: string }>("/profile");
     const language = data.language === "fr" || data.language === "en" ? data.language : "fr";
     const profile: Profile = {
       id: data.id,
-      displayName: data.display_name,
+      displayName: data.displayName,
       language,
       createdAt: null,
       updatedAt: null,

@@ -7,7 +7,10 @@ export const realtimePaths = {
       description:
         "Server-Sent Events stream for all execution status changes in the org. Cookie auth only (no API key support).",
       security: [{ cookieAuth: [] }],
-      parameters: [{ $ref: "#/components/parameters/Verbose" }],
+      parameters: [
+        { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/Verbose" },
+      ],
       responses: {
         "200": {
           description: "SSE stream",
@@ -25,6 +28,7 @@ export const realtimePaths = {
       security: [{ cookieAuth: [] }],
       parameters: [
         { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/Verbose" },
       ],
       responses: {
@@ -45,6 +49,7 @@ export const realtimePaths = {
       security: [{ cookieAuth: [] }],
       parameters: [
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/Verbose" },
       ],
       responses: {

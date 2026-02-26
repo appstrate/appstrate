@@ -14,19 +14,33 @@ export const healthPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  status: { type: "string", enum: ["healthy", "degraded"] },
+                  status: { type: "string", enum: ["healthy", "degraded", "unhealthy"] },
                   uptime_ms: { type: "number" },
                   checks: {
                     type: "object",
                     properties: {
-                      database: { type: "string" },
-                      flows: { type: "string" },
+                      database: {
+                        type: "object",
+                        properties: {
+                          status: { type: "string", enum: ["healthy", "unhealthy"] },
+                          latency_ms: { type: "number" },
+                        },
+                      },
+                      flows: {
+                        type: "object",
+                        properties: {
+                          status: { type: "string", enum: ["healthy", "degraded"] },
+                        },
+                      },
                     },
                   },
                 },
               },
             },
           },
+        },
+        "503": {
+          description: "Platform unhealthy (database or critical service down)",
         },
       },
     },

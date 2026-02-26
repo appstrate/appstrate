@@ -20,7 +20,14 @@ export const welcomePaths = {
         },
       },
       responses: {
-        "200": { description: "Profile updated" },
+        "200": {
+          description: "Profile updated",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
       },
     },
   },

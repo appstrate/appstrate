@@ -4,13 +4,20 @@ export const profilePaths = {
       operationId: "getProfile",
       tags: ["Profile"],
       summary: "Get user profile",
-      description: "Get the current user's profile (displayName, language).",
+      description: "Get the current user's profile (display_name, language).",
       responses: {
         "200": {
           description: "User profile",
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/Profile" },
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  displayName: { type: "string" },
+                  language: { type: "string", enum: ["fr", "en"] },
+                },
+              },
             },
           },
         },
@@ -40,7 +47,14 @@ export const profilePaths = {
           description: "Profile updated",
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/Profile" },
+              schema: {
+                type: "object",
+                properties: {
+                  ok: { type: "boolean" },
+                  language: { type: "string", enum: ["fr", "en"] },
+                  displayName: { type: "string" },
+                },
+              },
             },
           },
         },
@@ -59,9 +73,9 @@ export const profilePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["userIds"],
+              required: ["ids"],
               properties: {
-                userIds: { type: "array", items: { type: "string" } },
+                ids: { type: "array", items: { type: "string" } },
               },
             },
           },

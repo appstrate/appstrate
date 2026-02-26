@@ -50,7 +50,6 @@ const expectedEndpoints = [
   "DELETE /api/flows/{flowId}/executions",
   "GET /api/executions/{executionId}",
   "GET /api/executions/{executionId}/logs",
-  "GET /api/executions/{executionId}/stream",
   "POST /api/executions/{executionId}/cancel",
 
   // Realtime (SSE)
@@ -62,7 +61,6 @@ const expectedEndpoints = [
   "GET /api/schedules",
   "GET /api/flows/{flowId}/schedules",
   "POST /api/flows/{flowId}/schedules",
-  "GET /api/schedules/{scheduleId}",
   "PUT /api/schedules/{scheduleId}",
   "DELETE /api/schedules/{scheduleId}",
 
