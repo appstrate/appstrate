@@ -29,6 +29,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     if (TERMINAL_STATUSES.has(status)) {
       qc.invalidateQueries({ queryKey: ["flows", orgId] });
       qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
+      qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
     }
   } catch {
     // Ignore malformed payloads
