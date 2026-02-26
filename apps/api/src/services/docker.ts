@@ -449,7 +449,21 @@ export async function cleanupOrphanedContainers(): Promise<{
 
 // --- Platform network auto-detection ---
 
-let platformNetworkCache: { networkId: string; hostname: string } | null | undefined;
+let platformNetworkCache:
+  | { networkId: string; hostname: string; gatewayIp: string }
+  | null
+  | undefined;
+
+/**
+ * Get the address to reach Docker host-mapped ports.
+ * Returns "localhost" in local dev, or the Docker gateway IP when the platform
+ * itself runs inside a container (e.g. Coolify).
+ * Result is cached after the first call.
+ */
+export async function getDockerHostAddress(): Promise<string> {
+  const platform = await detectPlatformNetwork();
+  return platform?.gatewayIp || "localhost";
+}
 
 /**
  * Detect the Docker network the platform container is connected to.
@@ -461,6 +475,7 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
   hostname: string;
+  gatewayIp: string;
 } | null> {
   if (platformNetworkCache !== undefined) return platformNetworkCache;
 
@@ -479,7 +494,7 @@ export async function detectPlatformNetwork(): Promise<{
       NetworkSettings?: {
         Networks?: Record<
           string,
-          { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string }
+          { NetworkID?: string; Aliases?: string[] | null; IPAddress?: string; Gateway?: string }
         >;
       };
     };
@@ -498,11 +513,13 @@ export async function detectPlatformNetwork(): Promise<{
       // Use the first alias or fall back to the container hostname
       const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
 
-      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
+      const gatewayIp = info.Gateway ?? "";
+      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName, gatewayIp };
       logger.info("Detected platform Docker network", {
         network: name,
         networkId: info.NetworkID,
         hostname: dnsName,
+        gatewayIp,
       });
       return platformNetworkCache;
     }
