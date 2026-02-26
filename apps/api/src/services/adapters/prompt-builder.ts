@@ -33,20 +33,85 @@ function formatFileSize(bytes: number): string {
 
 export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
-
-  // API access instructions — sidecar proxy with curl
   const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
+
+  // --- System identity & environment ---
+  sections.push("## System\n");
+  sections.push("You are an AI agent running on the Appstrate platform.");
+  sections.push("You execute a specific task inside an isolated, ephemeral Docker container.\n");
+
+  sections.push("### Environment");
+  sections.push(
+    "- **Ephemeral container**: This container is destroyed when your execution ends. " +
+      "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
+      "Do NOT rely on the filesystem for persistence.",
+  );
+  sections.push(
+    "- **Network isolation**: You have no direct internet access. " +
+      "All external API calls must go through the sidecar proxy at `$SIDECAR_URL/proxy`. " +
+      "You cannot reach the host machine or any service outside this container directly.",
+  );
+  if (ctx.timeout) {
+    sections.push(
+      `- **Timeout**: You have ${ctx.timeout} seconds to complete this task. ` +
+        "Work efficiently and output your result promptly.",
+    );
+  }
+  sections.push(
+    "- **Workspace**: `/workspace` is your working directory. " +
+      "Uploaded documents are available at `/workspace/documents/`. " +
+      "You may use the filesystem for temporary processing during this execution only.\n",
+  );
+
+  sections.push("### Persistence");
+  sections.push(
+    "The ONLY way to persist data between executions is through the `state` object in your JSON output. " +
+      "Everything else — files, variables, computations — is lost when this container stops. " +
+      "If you need to remember something for the next run, put it in `state`.\n",
+  );
+
+  // Available tools
+  if (ctx.availableTools && ctx.availableTools.length > 0) {
+    sections.push("### Tools");
+    sections.push(
+      "You have access to the following tools (in addition to standard coding capabilities):\n",
+    );
+    for (const tool of ctx.availableTools) {
+      const desc = tool.description ? `: ${tool.description}` : "";
+      sections.push(`- **${tool.name || tool.id}**${desc}`);
+    }
+    sections.push("");
+  }
+
+  // Available skills
+  if (ctx.availableSkills && ctx.availableSkills.length > 0) {
+    sections.push("### Skills");
+    sections.push(
+      "The following skill references are available in your workspace at `.pi/skills/`:\n",
+    );
+    for (const skill of ctx.availableSkills) {
+      const desc = skill.description ? `: ${skill.description}` : "";
+      sections.push(`- **${skill.name || skill.id}**${desc}`);
+    }
+    sections.push("");
+  }
+
+  // --- API access instructions ---
   if (connectedServices.length > 0) {
     sections.push("## API Access\n");
-    sections.push("Make authenticated API requests via the proxy at `$SIDECAR_URL/proxy`.\n");
+    sections.push(
+      "Make authenticated API requests via the sidecar proxy at `$SIDECAR_URL/proxy`.\n",
+    );
     sections.push("Headers:");
     sections.push("- `X-Service`: the service ID");
     sections.push("- `X-Target`: the target URL (must match the service's authorized URLs)");
     sections.push("- All other headers and the body are forwarded as-is");
     sections.push(
-      "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials",
+      "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials at request time",
     );
-    sections.push("- Add `X-Substitute-Body: true` if the body also contains placeholders\n");
+    sections.push(
+      "- Add `X-Substitute-Body: true` if the request body also contains placeholders\n",
+    );
     sections.push("Example:");
     sections.push("```bash");
     sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
@@ -57,7 +122,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("The proxy forwards the upstream response as-is (status code, headers, body).");
     sections.push("Use standard HTTP status codes to detect success or failure.");
     sections.push(
-      "If the response exceeded the size limit, the `X-Truncated: true` response header is present.\n",
+      "If the response exceeded the size limit, the `X-Truncated: true` response header is present — " +
+        "consider paginating or narrowing your query.\n",
     );
 
     sections.push("### Connected Services\n");
@@ -106,11 +172,10 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // User input — enriched with schema metadata
+  // --- User input ---
   const inputProps = ctx.schemas.input?.properties;
   const inputRequired = ctx.schemas.input?.required ?? [];
   const nonFileInputEntries = Object.entries(ctx.input).filter(([key]) => {
-    // Exclude file-type fields (they appear in ## Documents)
     const prop = inputProps?.[key];
     return prop?.type !== "file";
   });
@@ -133,7 +198,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // Uploaded documents
+  // --- Uploaded documents ---
   if (ctx.files && ctx.files.length > 0) {
     sections.push("## Documents\n");
     sections.push(
@@ -148,7 +213,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("\nRead the documents directly from the filesystem.\n");
   }
 
-  // Configuration — enriched with schema metadata
+  // --- Configuration ---
   const configProps = ctx.schemas.config?.properties;
   const configRequired = ctx.schemas.config?.required ?? [];
   const configEntries = Object.entries(ctx.config);
@@ -170,19 +235,29 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // Previous state (latest execution only)
+  // --- Previous state ---
   if (ctx.previousState) {
     sections.push("## Previous State\n");
-    sections.push("State from the most recent execution:\n");
+    sections.push(
+      "This flow supports stateful execution across runs. " +
+        "Your most recent execution left the following state:\n",
+    );
     sections.push("```json");
     sections.push(JSON.stringify(ctx.previousState, null, 2));
     sections.push("```\n");
+    sections.push(
+      "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
+        "To update the state for the next run, include an updated `state` object in your JSON output.\n",
+    );
   }
 
-  // Execution History API (on-demand access to historical executions via sidecar)
+  // --- Execution History API ---
   if (ctx.executionApi) {
-    sections.push("## Execution History API\n");
-    sections.push("You can fetch historical execution data on demand via the sidecar proxy.\n");
+    sections.push("## Execution History\n");
+    sections.push(
+      "You can access data from previous executions beyond just the latest state. " +
+        "This is useful for trend analysis, auditing past results, or recovering from failures.\n",
+    );
     sections.push("```bash");
     sections.push('curl -s "$SIDECAR_URL/execution-history?limit=10&fields=state"');
     sections.push("```\n");
@@ -196,7 +271,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // Proxy awareness
+  // --- Proxy awareness ---
   if (ctx.proxyUrl) {
     sections.push("## Network Proxy\n");
     sections.push("An outbound HTTP proxy is configured for this execution.");
@@ -230,15 +305,16 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // Output format
+  // --- Output format ---
   const outputSchema = ctx.schemas.output;
   sections.push("## Output Format\n");
   sections.push(
-    "When you have completed the task, output your final result as a JSON object inside a ```json code block.",
+    "When you have completed the task, output your final result as a JSON object inside a ```json code block. " +
+      "This is the ONLY output that will be captured and returned to the user — everything else is logged but not persisted as a result.\n",
   );
 
   if (outputSchema?.properties && Object.keys(outputSchema.properties).length > 0) {
-    sections.push("\nThe JSON must include the following fields:");
+    sections.push("The JSON must include the following fields:");
     const example: Record<string, unknown> = {};
     for (const [key, prop] of Object.entries(outputSchema.properties)) {
       const req = outputSchema.required?.includes(key) ? "required" : "optional";
@@ -272,7 +348,17 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   sections.push(
-    "\nIf you need to persist state for the next run, include a `state` object in your result.\n",
+    "\n### State Persistence\n" +
+      "Include a `state` object in your JSON output to persist data for the next run. " +
+      "Only the latest state is kept — design it to be self-contained. " +
+      "This is your only memory between executions.\n",
+  );
+
+  sections.push(
+    "### Validation\n" +
+      "Your JSON output is validated against the expected schema. " +
+      "If it does not match, you may be asked to correct it. " +
+      "Make sure all required fields are present and correctly typed.\n",
   );
 
   // Append raw prompt at the end, without any interpolation

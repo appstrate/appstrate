@@ -87,6 +87,17 @@ export function buildPromptContext(params: {
     providers: params.providers,
     llmModel: getEnv().LLM_MODEL_ID,
     proxyUrl: params.proxyUrl,
+    timeout: params.flow.manifest.execution?.timeout ?? 300,
+    availableTools: params.flow.extensions.map((e) => ({
+      id: e.id,
+      name: e.name,
+      description: e.description,
+    })),
+    availableSkills: params.flow.skills.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+    })),
   };
 }
 

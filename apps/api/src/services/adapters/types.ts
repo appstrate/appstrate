@@ -28,6 +28,12 @@ export interface FileReference {
   size: number;
 }
 
+export interface ToolMeta {
+  id: string;
+  name?: string;
+  description?: string;
+}
+
 export interface PromptContext {
   rawPrompt: string;
   tokens: Record<string, string>;
@@ -60,6 +66,9 @@ export interface PromptContext {
   }>;
   llmModel: string;
   proxyUrl?: string | null;
+  timeout?: number;
+  availableTools?: ToolMeta[];
+  availableSkills?: ToolMeta[];
 }
 
 export interface ExecutionAdapter {
