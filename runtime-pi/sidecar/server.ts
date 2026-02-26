@@ -1,8 +1,12 @@
 import { Hono } from "hono";
 
-const PLATFORM_API_URL = process.env.PLATFORM_API_URL || "http://host.docker.internal:3000";
-const EXECUTION_TOKEN = process.env.EXECUTION_TOKEN || "";
-const PROXY_URL = process.env.PROXY_URL || "";
+// Mutable config — can be set via env vars at startup or updated at runtime
+// via POST /configure (used by sidecar pool for pre-warmed containers).
+const config = {
+  platformApiUrl: process.env.PLATFORM_API_URL || "http://host.docker.internal:3000",
+  executionToken: process.env.EXECUTION_TOKEN || "",
+  proxyUrl: process.env.PROXY_URL || "",
+};
 const MAX_RESPONSE_SIZE = 50_000;
 const OUTBOUND_TIMEOUT_MS = 30_000;
 const SERVICE_ID_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -21,8 +25,8 @@ interface CredentialsResponse {
 }
 
 async function fetchCredentials(serviceId: string): Promise<CredentialsResponse> {
-  const res = await fetch(`${PLATFORM_API_URL}/internal/credentials/${serviceId}`, {
-    headers: { Authorization: `Bearer ${EXECUTION_TOKEN}` },
+  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${serviceId}`, {
+    headers: { Authorization: `Bearer ${config.executionToken}` },
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch credentials for ${serviceId}: ${res.status}`);
@@ -102,15 +106,30 @@ function isBlockedUrl(url: string): boolean {
 // Health check for startup readiness
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// Runtime configuration endpoint (used by sidecar pool for pre-warmed containers)
+app.post("/configure", async (c) => {
+  const body = await c.req.json<{
+    executionToken?: string;
+    platformApiUrl?: string;
+    proxyUrl?: string;
+  }>();
+  if (body.executionToken) config.executionToken = body.executionToken;
+  if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
+  if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
+  // Reset cookie jar for new execution context
+  cookieJar.clear();
+  return c.json({ status: "configured" });
+});
+
 // Execution history proxy
 app.get("/execution-history", async (c) => {
   const qs = c.req.url.split("?")[1] || "";
-  const url = `${PLATFORM_API_URL}/internal/execution-history${qs ? `?${qs}` : ""}`;
+  const url = `${config.platformApiUrl}/internal/execution-history${qs ? `?${qs}` : ""}`;
 
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { Authorization: `Bearer ${EXECUTION_TOKEN}` },
+      headers: { Authorization: `Bearer ${config.executionToken}` },
     });
   } catch (err) {
     return c.json(
@@ -220,7 +239,7 @@ app.all("/proxy", async (c) => {
 
   // Resolve proxy: X-Proxy header (agent-driven) takes priority, then env PROXY_URL
   const resolvedProxy = (proxyHeader ? substituteVars(proxyHeader, creds.credentials) : "")
-    || PROXY_URL
+    || config.proxyUrl
     || "";
 
   if (resolvedProxy) {

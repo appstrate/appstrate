@@ -10,16 +10,18 @@ import {
   createNetwork,
   detectPlatformNetwork,
   execInContainer,
+  injectFiles,
   startContainer,
   stopContainer,
   removeContainer,
   removeNetwork,
 } from "../docker.ts";
+import { acquireSidecar } from "../sidecar-pool.ts";
 
 const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
 const SIDECAR_IMAGE = "appstrate-sidecar:latest";
-const SIDECAR_HEALTH_RETRIES = 5;
-const SIDECAR_HEALTH_DELAY_MS = 500;
+const SIDECAR_HEALTH_RETRIES = 20;
+const SIDECAR_HEALTH_DELAY_MS = 100;
 
 async function waitForSidecarHealth(sidecarContainerId: string): Promise<void> {
   for (let attempt = 1; attempt <= SIDECAR_HEALTH_RETRIES; attempt++) {
@@ -60,47 +62,35 @@ export class PiAdapter implements ExecutionAdapter {
     let sidecarContainerId: string | undefined;
 
     try {
-      // 1. Create isolated network
-      networkId = await createNetwork(networkName);
+      // Phase 1: Create network + detect platform network (parallel)
+      const [netId, platformNetwork] = await Promise.all([
+        createNetwork(networkName),
+        detectPlatformNetwork(),
+      ]);
+      networkId = netId;
 
-      // 2. Create sidecar directly on custom network with host access
-      const platformNetwork = await detectPlatformNetwork();
+      // Single source of truth for sidecar configuration
+      const sidecarConfig = {
+        executionToken: ctx.executionApi?.token ?? "",
+        platformApiUrl: ctx.executionApi
+          ? platformNetwork
+            ? `http://${platformNetwork.hostname}:${apiEnv.PORT}`
+            : ctx.executionApi.url
+          : "",
+        proxyUrl: ctx.proxyUrl ?? undefined,
+      };
 
+      // Env vars representation (for fresh sidecar creation fallback)
       const sidecarEnv: Record<string, string> = { PORT: "8080" };
-      if (ctx.executionApi) {
-        sidecarEnv.EXECUTION_TOKEN = ctx.executionApi.token;
-        if (platformNetwork) {
-          // Platform is inside Docker — use its internal network hostname
-          sidecarEnv.PLATFORM_API_URL = `http://${platformNetwork.hostname}:${apiEnv.PORT}`;
-        } else {
-          sidecarEnv.PLATFORM_API_URL = ctx.executionApi.url;
-        }
+      if (sidecarConfig.executionToken) {
+        sidecarEnv.EXECUTION_TOKEN = sidecarConfig.executionToken;
+        sidecarEnv.PLATFORM_API_URL = sidecarConfig.platformApiUrl;
+      }
+      if (sidecarConfig.proxyUrl) {
+        sidecarEnv.PROXY_URL = sidecarConfig.proxyUrl;
       }
 
-      if (ctx.proxyUrl) {
-        sidecarEnv.PROXY_URL = ctx.proxyUrl;
-      }
-
-      sidecarContainerId = await createContainer(executionId, sidecarEnv, {
-        image: SIDECAR_IMAGE,
-        adapterName: "sidecar",
-        memory: 256 * 1024 * 1024,
-        nanoCpus: 500_000_000,
-        networkId,
-        networkAlias: "sidecar",
-        extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
-      });
-
-      // 2b. Connect sidecar to platform network (for containerized deployments)
-      if (platformNetwork) {
-        await connectContainerToNetwork(platformNetwork.networkId, sidecarContainerId);
-      }
-
-      // 3. Start sidecar and wait for health
-      await startContainer(sidecarContainerId);
-      await waitForSidecarHealth(sidecarContainerId);
-
-      // 4. Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
+      // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
         FLOW_PROMPT: prompt,
         LLM_PROVIDER: provider,
@@ -127,25 +117,80 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
       }
 
-      // 5. Create agent on the custom network ONLY
-      const containerId = await createContainer(executionId, containerEnv, {
-        image: PI_RUNTIME_IMAGE,
-        adapterName: "pi",
-        networkId,
-        networkAlias: "agent",
-      });
+      // Prepare files for batch injection into agent
+      const filesToInject: Array<{ name: string; content: Buffer }> = [];
+      if (flowPackage) {
+        filesToInject.push({ name: "flow-package.zip", content: flowPackage });
+      }
+      if (inputFiles) {
+        for (const f of inputFiles) {
+          filesToInject.push({
+            name: `documents/${sanitizeStorageKey(f.name)}`,
+            content: f.buffer,
+          });
+        }
+      }
 
-      // 6. Run container lifecycle
+      // Phase 2: Setup sidecar + create agent + inject files (parallel)
+      // The sidecar path (pool or fresh) runs concurrently with agent creation + file injection.
+      const sidecarSetup = async (): Promise<string> => {
+        // Try pool first (pre-warmed sidecar: ~50-130ms)
+        const pooled = await acquireSidecar(
+          executionId,
+          networkId!,
+          sidecarConfig,
+          platformNetwork,
+        );
+        if (pooled) return pooled;
+
+        // Fallback: create fresh sidecar (~500-1500ms)
+        const id = await createContainer(executionId, sidecarEnv, {
+          image: SIDECAR_IMAGE,
+          adapterName: "sidecar",
+          memory: 256 * 1024 * 1024,
+          nanoCpus: 500_000_000,
+          networkId: networkId!,
+          networkAlias: "sidecar",
+          extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
+        });
+
+        if (platformNetwork) {
+          await connectContainerToNetwork(platformNetwork.networkId, id);
+        }
+
+        await startContainer(id);
+        await waitForSidecarHealth(id);
+        return id;
+      };
+
+      const agentSetup = async (): Promise<string> => {
+        const id = await createContainer(executionId, containerEnv, {
+          image: PI_RUNTIME_IMAGE,
+          adapterName: "pi",
+          networkId: networkId!,
+          networkAlias: "agent",
+        });
+
+        // Inject files while sidecar is starting
+        if (filesToInject.length > 0) {
+          await injectFiles(id, filesToInject, "/workspace");
+        }
+
+        return id;
+      };
+
+      // Run both in parallel — agent creation + file injection overlaps with sidecar startup
+      const [sidecarId, containerId] = await Promise.all([sidecarSetup(), agentSetup()]);
+      sidecarContainerId = sidecarId;
+
+      // Phase 3: Run agent container lifecycle (start + stream + wait + cleanup)
+      // Files are already injected above — pass no files to runContainerLifecycle
       yield* runContainerLifecycle({
         containerId,
         adapterName: "pi",
         executionId,
         timeout,
-        flowPackage,
-        inputFiles: inputFiles?.map((f) => ({
-          name: sanitizeStorageKey(f.name),
-          buffer: f.buffer,
-        })),
+        // flowPackage/inputFiles already injected in agentSetup
         extraData: { provider, model: modelId },
         signal,
         stopOnTimeout: sidecarContainerId ? [sidecarContainerId] : [],

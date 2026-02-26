@@ -23,6 +23,7 @@ import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { cleanupOrphanedContainers } from "./services/docker.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
+import { initSidecarPool, shutdownSidecarPool } from "./services/sidecar-pool.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
 import { ensureLibraryBucket } from "./services/library.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
@@ -252,6 +253,15 @@ try {
   });
 }
 
+// Initialize sidecar pool (pre-warm containers for faster execution startup)
+try {
+  await initSidecarPool();
+} catch (err) {
+  logger.warn("Could not initialize sidecar pool", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
 // Initialize scheduler
 try {
   await initScheduler();
@@ -313,8 +323,9 @@ const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  logger.info("Shutdown initiated, stopping scheduler...");
+  logger.info("Shutdown initiated, stopping scheduler and sidecar pool...");
   shutdownScheduler();
+  await shutdownSidecarPool();
 
   const inFlight = getInFlightCount();
   if (inFlight > 0) {

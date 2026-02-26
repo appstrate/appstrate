@@ -20,6 +20,9 @@ export interface CreateContainerOptions {
   networkId?: string;
   networkAlias?: string;
   extraHosts?: string[];
+  portBindings?: Record<string, Array<{ HostPort: string }>>;
+  exposedPorts?: Record<string, object>;
+  labels?: Record<string, string>;
 }
 
 export async function createContainer(
@@ -44,12 +47,14 @@ export async function createContainer(
     Image: options.image,
     Env: env,
     Tty: false,
+    ExposedPorts: options.exposedPorts,
     HostConfig: {
       Memory: options.memory ?? 1024 * 1024 * 1024,
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
       AutoRemove: false,
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
+      PortBindings: options.portBindings,
     },
     NetworkingConfig: {
       EndpointsConfig: Object.keys(networkingConfig).length > 0 ? networkingConfig : undefined,
@@ -58,6 +63,7 @@ export async function createContainer(
       "appstrate.execution": executionId,
       "appstrate.adapter": options.adapterName,
       "appstrate.managed": "true",
+      ...options.labels,
     },
   };
 
@@ -201,17 +207,17 @@ export async function removeContainer(containerId: string): Promise<void> {
 }
 
 /**
- * Inject a single file into a container using Docker's archive API.
- * Creates a minimal tar archive and PUTs it to /containers/{id}/archive.
+ * Inject files into a container using a single tar archive via Docker's archive API.
  * Must be called after createContainer() and before startContainer().
  */
-export async function injectFile(
+export async function injectFiles(
   containerId: string,
-  fileName: string,
-  fileContent: Buffer,
+  files: Array<{ name: string; content: Buffer }>,
   targetDir: string,
 ): Promise<void> {
-  const tar = createTarArchive(fileName, fileContent);
+  if (files.length === 0) return;
+
+  const tar = createTarArchive(files);
 
   const res = await dockerFetch(
     `/containers/${containerId}/archive?path=${encodeURIComponent(targetDir)}`,
@@ -224,56 +230,45 @@ export async function injectFile(
 
   if (!res.ok) {
     const error = await res.text();
-    throw new Error(`Failed to inject file into container: ${res.status} ${error}`);
+    throw new Error(`Failed to inject files into container: ${res.status} ${error}`);
   }
 }
 
-/** Create a minimal tar archive containing a single file. */
-function createTarArchive(fileName: string, content: Buffer): Buffer {
-  // Tar header: 512 bytes
+/** Create a tar header for a single file entry. */
+function createTarHeader(fileName: string, contentLength: number): Buffer {
   const header = Buffer.alloc(512, 0);
-
-  // name (0-99): file name
   header.write(fileName, 0, Math.min(fileName.length, 100), "utf8");
-
-  // mode (100-107): file permissions
   header.write("0000644\0", 100, 8, "utf8");
-
-  // uid (108-115)
   header.write("0001000\0", 108, 8, "utf8");
-
-  // gid (116-123)
   header.write("0001000\0", 116, 8, "utf8");
-
-  // size (124-135): file size in octal
-  header.write(content.length.toString(8).padStart(11, "0") + "\0", 124, 12, "utf8");
-
-  // mtime (136-147): modification time in octal
+  header.write(contentLength.toString(8).padStart(11, "0") + "\0", 124, 12, "utf8");
   const mtime = Math.floor(Date.now() / 1000);
   header.write(mtime.toString(8).padStart(11, "0") + "\0", 136, 12, "utf8");
-
-  // checksum placeholder (148-155): spaces for calculation
   header.write("        ", 148, 8, "utf8");
-
-  // typeflag (156): '0' for regular file
   header.write("0", 156, 1, "utf8");
 
-  // Compute checksum: sum of all bytes in the header (treating checksum field as spaces)
   let checksum = 0;
-  for (let i = 0; i < 512; i++) {
-    checksum += header[i]!;
-  }
+  for (let i = 0; i < 512; i++) checksum += header[i]!;
   header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "utf8");
 
-  // Data blocks: content padded to 512-byte boundary
-  const dataBlocks = Math.ceil(content.length / 512);
-  const data = Buffer.alloc(dataBlocks * 512, 0);
-  content.copy(data);
+  return header;
+}
+
+/** Create a tar archive containing one or more files. */
+function createTarArchive(files: Array<{ name: string; content: Buffer }>): Buffer {
+  const blocks: Buffer[] = [];
+
+  for (const file of files) {
+    blocks.push(createTarHeader(file.name, file.content.length));
+    const dataBlocks = Math.ceil(file.content.length / 512);
+    const data = Buffer.alloc(dataBlocks * 512, 0);
+    file.content.copy(data);
+    blocks.push(data);
+  }
 
   // End-of-archive: two 512-byte zero blocks
-  const end = Buffer.alloc(1024, 0);
-
-  return Buffer.concat([header, data, end]);
+  blocks.push(Buffer.alloc(1024, 0));
+  return Buffer.concat(blocks);
 }
 
 export async function stopContainer(containerId: string, timeout = 5): Promise<void> {
@@ -354,17 +349,45 @@ export async function execInContainer(containerId: string, cmd: string[]): Promi
 export async function connectContainerToNetwork(
   networkId: string,
   containerId: string,
+  aliases?: string[],
 ): Promise<void> {
+  const body: Record<string, unknown> = { Container: containerId };
+  if (aliases && aliases.length > 0) {
+    body.EndpointConfig = { Aliases: aliases };
+  }
+
   const res = await dockerFetch(`/networks/${networkId}/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ Container: containerId }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const error = await res.text();
     throw new Error(`Failed to connect container to network: ${res.status} ${error}`);
   }
+}
+
+/**
+ * Get the host-mapped port for a container's exposed port.
+ * Returns the host port number, or null if no mapping exists.
+ */
+export async function getContainerHostPort(
+  containerId: string,
+  containerPort: string,
+): Promise<number | null> {
+  const res = await dockerFetch(`/containers/${containerId}/json`);
+  if (!res.ok) return null;
+
+  const data = (await res.json()) as {
+    NetworkSettings?: {
+      Ports?: Record<string, Array<{ HostPort: string }> | null>;
+    };
+  };
+
+  const portInfo = data.NetworkSettings?.Ports?.[containerPort]?.[0];
+  if (!portInfo?.HostPort) return null;
+  return parseInt(portInfo.HostPort, 10);
 }
 
 export async function removeNetwork(networkId: string): Promise<void> {
