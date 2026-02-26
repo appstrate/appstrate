@@ -474,6 +474,15 @@ export const schemas = {
       },
     },
   },
+  FlowMemory: {
+    type: "object",
+    properties: {
+      id: { type: "integer" },
+      content: { type: "string" },
+      executionId: { type: ["string", "null"] },
+      createdAt: { type: ["string", "null"], format: "date-time" },
+    },
+  },
   OrgProxy: {
     type: "object",
     properties: {

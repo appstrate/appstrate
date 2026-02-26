@@ -348,6 +348,34 @@ export function useDeleteFlow() {
   });
 }
 
+// --- Memory mutations ---
+
+export function useDeleteMemory(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (memoryId: number) => {
+      return api(`/flows/${flowId}/memories/${memoryId}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flow-memories"] });
+    },
+    onError: onMutationError,
+  });
+}
+
+export function useDeleteAllMemories(flowId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return api<{ deleted: number }>(`/flows/${flowId}/memories`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flow-memories"] });
+    },
+    onError: onMutationError,
+  });
+}
+
 // --- Provider mutations ---
 
 function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {

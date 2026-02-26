@@ -1,6 +1,12 @@
-import { eq, and, ne, desc, isNotNull, inArray, count } from "drizzle-orm";
+import { eq, and, ne, desc, asc, isNotNull, inArray, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { flowConfigs, executions, executionLogs, flowAdminConnections } from "@appstrate/db/schema";
+import {
+  flowConfigs,
+  executions,
+  executionLogs,
+  flowAdminConnections,
+  flowMemories,
+} from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 
 // --- Flow Config (per-org) ---
@@ -383,4 +389,68 @@ export async function markOrphanExecutionsFailed(): Promise<number> {
     .where(inArray(executions.status, ["running", "pending"]))
     .returning({ id: executions.id });
   return updated.length;
+}
+
+// --- Flow Memories (org-scoped, accumulate across executions) ---
+
+const MAX_MEMORY_CONTENT = 2000;
+const MAX_MEMORIES_PER_FLOW = 100;
+
+export async function getFlowMemories(flowId: string, orgId: string) {
+  return db
+    .select()
+    .from(flowMemories)
+    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)))
+    .orderBy(asc(flowMemories.createdAt));
+}
+
+export async function addFlowMemories(
+  flowId: string,
+  orgId: string,
+  contents: string[],
+  executionId: string,
+): Promise<number> {
+  // Count existing memories
+  const [row] = await db
+    .select({ count: count() })
+    .from(flowMemories)
+    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)));
+  const existing = row?.count ?? 0;
+  const available = Math.max(0, MAX_MEMORIES_PER_FLOW - existing);
+  if (available === 0) return 0;
+
+  const toInsert = contents
+    .slice(0, available)
+    .map((c) => c.slice(0, MAX_MEMORY_CONTENT))
+    .map((content) => ({ flowId, orgId, content, executionId }));
+
+  if (toInsert.length === 0) return 0;
+
+  const inserted = await db
+    .insert(flowMemories)
+    .values(toInsert)
+    .returning({ id: flowMemories.id });
+  return inserted.length;
+}
+
+export async function deleteFlowMemory(
+  id: number,
+  flowId: string,
+  orgId: string,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(flowMemories)
+    .where(
+      and(eq(flowMemories.id, id), eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)),
+    )
+    .returning({ id: flowMemories.id });
+  return deleted.length > 0;
+}
+
+export async function deleteAllFlowMemories(flowId: string, orgId: string): Promise<number> {
+  const deleted = await db
+    .delete(flowMemories)
+    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)))
+    .returning({ id: flowMemories.id });
+  return deleted.length;
 }

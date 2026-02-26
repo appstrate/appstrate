@@ -12,6 +12,7 @@ import {
   deleteFlowExecutions,
   listFlowExecutions,
   listExecutionLogs,
+  addFlowMemories,
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
@@ -247,6 +248,15 @@ export async function executeFlowInBackground(
         result.state && typeof result.state === "object"
           ? (result.state as Record<string, unknown>)
           : undefined;
+
+      // Extract and persist memories
+      const resultMemories = Array.isArray(result.memories)
+        ? result.memories.filter((m): m is string => typeof m === "string" && m.trim().length > 0)
+        : undefined;
+      if (resultMemories && resultMemories.length > 0) {
+        await addFlowMemories(flow.id, orgId, resultMemories, executionId);
+      }
+
       await updateExecution(executionId, {
         status: "success",
         result,

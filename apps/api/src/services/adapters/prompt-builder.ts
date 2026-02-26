@@ -65,9 +65,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
   sections.push("### Persistence");
   sections.push(
-    "The ONLY way to persist data between executions is through the `state` object in your JSON output. " +
-      "Everything else — files, variables, computations — is lost when this container stops. " +
-      "If you need to remember something for the next run, put it in `state`.\n",
+    "You have two ways to persist data between executions:\n" +
+      "- **State**: A JSON object in your output (`state`) — overwritten each run, scoped to the user. " +
+      "Use this for structured data you need to process next time (cursors, timestamps, counters).\n" +
+      "- **Memory**: A list of text memos (`memories`) — accumulated across all runs, shared across all users. " +
+      "Use this to capture discoveries, learnings, and insights that should persist long-term.\n" +
+      "Everything else — files, variables, computations — is lost when this container stops.\n",
   );
 
   // Available tools
@@ -251,6 +254,24 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
+  // --- Memory ---
+  if (ctx.memories && ctx.memories.length > 0) {
+    sections.push("## Memory\n");
+    sections.push(
+      "This flow has accumulated the following memories from previous executions. " +
+        "These are shared across all users running this flow:\n",
+    );
+    for (const mem of ctx.memories) {
+      const date = mem.createdAt ? ` (${mem.createdAt})` : "";
+      sections.push(`- ${mem.content}${date}`);
+    }
+    sections.push(
+      "\nTo add new memories, include a `memories` array of strings in your JSON output. " +
+        "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
+        "Use `state` for structured data needed for the next run.\n",
+    );
+  }
+
   // --- Execution History API ---
   if (ctx.executionApi) {
     sections.push("## Execution History\n");
@@ -350,8 +371,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   sections.push(
     "\n### State Persistence\n" +
       "Include a `state` object in your JSON output to persist data for the next run. " +
-      "Only the latest state is kept — design it to be self-contained. " +
-      "This is your only memory between executions.\n",
+      "Only the latest state is kept — design it to be self-contained.\n",
+  );
+
+  sections.push(
+    "### Memory Persistence\n" +
+      'Include a `memories` array of strings (e.g. `"memories": ["Learned that X works better than Y"]`) ' +
+      "to save discoveries and insights that accumulate over time. " +
+      "Memories are shared across all users and persist indefinitely.\n",
   );
 
   sections.push(

@@ -9,6 +9,9 @@ import {
   getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
+  getFlowMemories,
+  deleteFlowMemory,
+  deleteAllFlowMemories,
 } from "../services/state.ts";
 import { getConnectionStatus, resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateConfig } from "../services/schema.ts";
@@ -318,6 +321,44 @@ export function createFlowsRouter() {
     }
 
     return c.json({ success: true });
+  });
+
+  // GET /api/flows/:id/memories — list flow memories
+  router.get("/:id/memories", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const memories = await getFlowMemories(flow.id, orgId);
+    return c.json({
+      memories: memories.map((m) => ({
+        id: m.id,
+        content: m.content,
+        executionId: m.executionId,
+        createdAt: m.createdAt?.toISOString() ?? null,
+      })),
+    });
+  });
+
+  // DELETE /api/flows/:id/memories — delete all memories (admin only)
+  router.delete("/:id/memories", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const deleted = await deleteAllFlowMemories(flow.id, orgId);
+    return c.json({ deleted });
+  });
+
+  // DELETE /api/flows/:id/memories/:memoryId — delete single memory (admin only)
+  router.delete("/:id/memories/:memoryId", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const memoryId = parseInt(c.req.param("memoryId"), 10);
+    if (isNaN(memoryId)) {
+      return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
+    }
+    const deleted = await deleteFlowMemory(memoryId, flow.id, orgId);
+    if (!deleted) {
+      return c.json({ error: "NOT_FOUND", message: "Memory not found" }, 404);
+    }
+    return c.json({ deleted: true });
   });
 
   // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)

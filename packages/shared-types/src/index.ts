@@ -1,4 +1,11 @@
-export type { Profile, Execution, ExecutionLog, ConnectionProfile, UserFlowProfile, OrgProxy } from "@appstrate/db/schema";
+export type {
+  Profile,
+  Execution,
+  ExecutionLog,
+  ConnectionProfile,
+  UserFlowProfile,
+  OrgProxy,
+} from "@appstrate/db/schema";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -199,6 +206,15 @@ export interface OrgExtension {
 export interface OrgExtensionDetail extends OrgExtension {
   content: string;
   flows: { id: string; displayName: string }[];
+}
+
+// --- Flow Memory Types ---
+
+export interface FlowMemoryItem {
+  id: number;
+  content: string;
+  executionId: string | null;
+  createdAt: string | null;
 }
 
 // --- Org Proxy Types ---

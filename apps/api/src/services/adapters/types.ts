@@ -64,6 +64,7 @@ export interface PromptContext {
     docsUrl?: string;
     categories?: string[];
   }>;
+  memories?: Array<{ id: number; content: string; createdAt: string | null }>;
   llmModel: string;
   proxyUrl?: string | null;
   timeout?: number;

@@ -41,6 +41,9 @@ const expectedEndpoints = [
   "POST /api/flows/{flowId}/services/{serviceId}/bind",
   "DELETE /api/flows/{flowId}/services/{serviceId}/bind",
   "POST /api/flows/{flowId}/share-token",
+  "GET /api/flows/{flowId}/memories",
+  "DELETE /api/flows/{flowId}/memories",
+  "DELETE /api/flows/{flowId}/memories/{memoryId}",
   "PUT /api/flows/{flowId}/skills",
   "PUT /api/flows/{flowId}/extensions",
 
