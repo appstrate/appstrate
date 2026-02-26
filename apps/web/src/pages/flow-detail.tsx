@@ -26,7 +26,7 @@ import {
   useDeleteAllMemories,
 } from "../hooks/use-mutations";
 import { useFlowMemories } from "../hooks/use-memories";
-import { Badge } from "../components/badge";
+import { ExecutionRow } from "../components/execution-row";
 import { ConfigModal } from "../components/config-modal";
 import { InputModal } from "../components/input-modal";
 import { ScheduleModal } from "../components/schedule-modal";
@@ -37,7 +37,7 @@ import { ShareDropdown } from "../components/share-dropdown";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
-import { truncate, formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/markdown";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import type { Schedule, JSONSchemaObject } from "@appstrate/shared-types";
@@ -485,33 +485,13 @@ export function FlowDetailPage() {
             <EmptyState message={t("detail.emptyExec")} compact />
           ) : (
             <div className="exec-list">
-              {executions.map((exec) => {
-                const date = exec.startedAt ? formatDateField(exec.startedAt) : "";
-                const duration = exec.duration ? `${(exec.duration / 1000).toFixed(1)}s` : "";
-                const inputPreview = exec.input ? truncate(JSON.stringify(exec.input), 60) : "";
-
-                const userName = exec.userId ? profileMap.get(exec.userId) : undefined;
-
-                return (
-                  <Link
-                    key={exec.id}
-                    className="exec-row"
-                    to={`/flows/${flowId}/executions/${exec.id}`}
-                  >
-                    <Badge status={exec.status} />
-                    {userName && (
-                      <span className="exec-user">{t("exec.user", { name: userName })}</span>
-                    )}
-                    <span className="exec-date">{date}</span>
-                    {duration && <span className="exec-duration">{duration}</span>}
-                    {exec.tokensUsed != null && (
-                      <span className="exec-tokens">{exec.tokensUsed.toLocaleString()} tok</span>
-                    )}
-                    {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
-                    {exec.scheduleId && <span className="tag">cron</span>}
-                  </Link>
-                );
-              })}
+              {executions.map((exec) => (
+                <ExecutionRow
+                  key={exec.id}
+                  execution={exec}
+                  userName={exec.userId ? profileMap.get(exec.userId) : undefined}
+                />
+              ))}
             </div>
           )}
         </>

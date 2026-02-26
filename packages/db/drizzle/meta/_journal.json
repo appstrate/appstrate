@@ -71,6 +71,13 @@
       "when": 1772135943899,
       "tag": "0009_worthless_spirit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1772142545857,
+      "tag": "0010_motionless_domino",
+      "breakpoints": true
     }
   ]
 }

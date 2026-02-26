@@ -161,6 +161,12 @@ const expectedEndpoints = [
   // Meta
   "GET /api/openapi.json",
   "GET /api/docs",
+
+  // Notifications
+  "GET /api/notifications/unread-count",
+  "PUT /api/notifications/read/{executionId}",
+  "PUT /api/notifications/read-all",
+  "GET /api/executions",
 ];
 
 const specEndpoints = new Set<string>();

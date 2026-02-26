@@ -1,4 +1,4 @@
-import { eq, and, ne, desc, asc, isNotNull, inArray, count } from "drizzle-orm";
+import { eq, and, ne, desc, asc, isNotNull, isNull, inArray, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import {
   flowConfigs,
@@ -82,6 +82,7 @@ export async function updateExecution(
     completedAt?: string;
     duration?: number;
     tokenUsage?: Record<string, unknown>;
+    notifiedAt?: string;
   },
 ): Promise<void> {
   const set: Record<string, unknown> = {};
@@ -94,6 +95,7 @@ export async function updateExecution(
   if (updates.result !== undefined) set.result = updates.result;
   if (updates.state !== undefined) set.state = updates.state;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
+  if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
 
   try {
     await db.update(executions).set(set).where(eq(executions.id, id));
@@ -390,6 +392,83 @@ export async function markOrphanExecutionsFailed(): Promise<{
     .where(inArray(executions.status, ["running", "pending"]))
     .returning({ id: executions.id });
   return { count: updated.length, executionIds: updated.map((r) => r.id) };
+}
+
+// --- Notifications ---
+
+export async function markNotificationRead(
+  executionId: string,
+  userId: string,
+  orgId: string,
+): Promise<boolean> {
+  const updated = await db
+    .update(executions)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(executions.id, executionId),
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+        isNotNull(executions.notifiedAt),
+      ),
+    )
+    .returning({ id: executions.id });
+  return updated.length > 0;
+}
+
+export async function markAllNotificationsRead(userId: string, orgId: string): Promise<number> {
+  const updated = await db
+    .update(executions)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+        isNotNull(executions.notifiedAt),
+        isNull(executions.readAt),
+      ),
+    )
+    .returning({ id: executions.id });
+  return updated.length;
+}
+
+export async function getUnreadNotificationCount(userId: string, orgId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: count() })
+    .from(executions)
+    .where(
+      and(
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+        isNotNull(executions.notifiedAt),
+        isNull(executions.readAt),
+      ),
+    );
+  return row?.count ?? 0;
+}
+
+export async function listUserExecutions(
+  userId: string,
+  orgId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<{ executions: Record<string, unknown>[]; total: number }> {
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+
+  const [countRow] = await db
+    .select({ count: count() })
+    .from(executions)
+    .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)));
+
+  const rows = await db
+    .select()
+    .from(executions)
+    .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)))
+    .orderBy(desc(executions.startedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return { executions: rows as unknown as Record<string, unknown>[], total: countRow?.count ?? 0 };
 }
 
 // --- Flow Memories (org-scoped, accumulate across executions) ---

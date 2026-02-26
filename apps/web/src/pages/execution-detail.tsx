@@ -14,6 +14,7 @@ import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useProfiles } from "../hooks/use-profiles";
+import { useMarkRead } from "../hooks/use-notifications";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import type { TFunction } from "i18next";
@@ -74,6 +75,15 @@ export function ExecutionDetailPage() {
       [qc, orgId, execId],
     ),
   );
+
+  const markRead = useMarkRead();
+
+  // Auto-mark notification as read when viewing an execution
+  useEffect(() => {
+    if (execution && execId && execution.notifiedAt && !execution.readAt) {
+      markRead.mutate(execId);
+    }
+  }, [execution?.notifiedAt, execution?.readAt, execId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runFlow = useRunFlow(flowId!);
   const cancelExecution = useCancelExecution();
