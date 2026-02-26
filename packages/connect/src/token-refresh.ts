@@ -38,7 +38,13 @@ export async function refreshIfNeeded(
   if (inflight) return inflight;
 
   // Start refresh
-  const refreshPromise = doRefresh(db, connectionId, providerId, credentialsEncrypted, providerSnapshot);
+  const refreshPromise = doRefresh(
+    db,
+    connectionId,
+    providerId,
+    credentialsEncrypted,
+    providerSnapshot,
+  );
 
   inflightRefreshes.set(connectionId, refreshPromise);
 

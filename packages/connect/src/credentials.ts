@@ -1,7 +1,12 @@
 import { eq, and } from "drizzle-orm";
 import { serviceConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { ConnectionRecord, DecryptedCredentials, AuthMode, ProviderSnapshot } from "./types.ts";
+import type {
+  ConnectionRecord,
+  DecryptedCredentials,
+  AuthMode,
+  ProviderSnapshot,
+} from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { refreshIfNeeded } from "./token-refresh.ts";
 
@@ -31,10 +36,7 @@ export async function getConnection(
 /**
  * List all connections for a profile.
  */
-export async function listConnections(
-  db: Db,
-  profileId: string,
-): Promise<ConnectionRecord[]> {
+export async function listConnections(db: Db, profileId: string): Promise<ConnectionRecord[]> {
   const rows = await db
     .select()
     .from(serviceConnections)
@@ -100,7 +102,8 @@ export async function resolveCredentialsForProxy(
 
   let sidecarCredentials: Record<string, string>;
   if (snapshot.authMode === "oauth2" || snapshot.authMode === "api_key") {
-    const fieldName = snapshot.credentialFieldName ?? (snapshot.authMode === "api_key" ? "api_key" : "token");
+    const fieldName =
+      snapshot.credentialFieldName ?? (snapshot.authMode === "api_key" ? "api_key" : "token");
     const value = result.credentials.access_token ?? result.credentials.api_key;
     if (value) {
       sidecarCredentials = { [fieldName]: value };
