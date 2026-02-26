@@ -55,7 +55,6 @@ Response:
   "error": null,
   "tokensUsed": 1500,
   "tokenUsage": { "inputTokens": 500, "outputTokens": 1000 },
-  "costUsd": "0.015",
   "startedAt": "2026-01-15T10:00:00Z",
   "completedAt": null,
   "duration": null

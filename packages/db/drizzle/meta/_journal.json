@@ -64,6 +64,13 @@
       "when": 1772074412417,
       "tag": "0008_slimy_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1772135943899,
+      "tag": "0009_worthless_spirit",
+      "breakpoints": true
     }
   ]
 }

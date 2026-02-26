@@ -189,11 +189,6 @@ export function ExecutionDetailPage() {
         {!isRunning && execution.tokensUsed != null && (
           <span className="exec-meta">{execution.tokensUsed.toLocaleString()} tokens</span>
         )}
-        {!isRunning && (execution as Record<string, unknown>).cost_usd != null && (
-          <span className="exec-meta">
-            ${Number((execution as Record<string, unknown>).cost_usd).toFixed(4)}
-          </span>
-        )}
         {isRunning && (
           <button
             className="danger"

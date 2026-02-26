@@ -33,8 +33,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'error', NEW.error,
         'completed_at', NEW.completed_at,
         'duration', NEW.duration,
-        'tokens_used', NEW.tokens_used,
-        'cost_usd', NEW.cost_usd
+        'tokens_used', NEW.tokens_used
       )::text);
       RETURN NEW;
     END;
