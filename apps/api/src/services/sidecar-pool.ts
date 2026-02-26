@@ -1,0 +1,193 @@
+import { logger } from "../lib/logger.ts";
+import {
+  createContainer,
+  startContainer,
+  removeContainer,
+  connectContainerToNetwork,
+  getContainerHostPort,
+  createNetwork,
+  removeNetwork,
+} from "./docker.ts";
+const SIDECAR_IMAGE = "appstrate-sidecar:latest";
+const POOL_SIZE = 2;
+const HEALTH_CHECK_RETRIES = 20;
+const HEALTH_CHECK_DELAY_MS = 100;
+
+interface PooledSidecar {
+  containerId: string;
+  hostPort: number;
+}
+
+const pool: PooledSidecar[] = [];
+let standbyNetworkId: string | undefined;
+let enabled = false;
+let replenishing = false;
+
+/**
+ * Initialize the sidecar pool with pre-warmed containers.
+ * Runs in background — if Docker is unavailable, pool is silently disabled.
+ */
+export async function initSidecarPool(): Promise<void> {
+  try {
+    standbyNetworkId = await createNetwork("appstrate-sidecar-pool");
+    await replenish();
+    enabled = true;
+    logger.info("Sidecar pool initialized", { size: pool.length });
+  } catch (err) {
+    logger.warn("Sidecar pool disabled — falling back to on-demand creation", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    enabled = false;
+  }
+}
+
+/**
+ * Acquire a pre-warmed sidecar from the pool.
+ * Configures it with execution-specific credentials and connects to the execution network.
+ * Returns the container ID, or null if pool is empty/disabled (caller falls back to fresh creation).
+ */
+export async function acquireSidecar(
+  executionId: string,
+  executionNetworkId: string,
+  sidecarEnv: {
+    executionToken: string;
+    platformApiUrl: string;
+    proxyUrl?: string;
+  },
+  platformNetwork?: { networkId: string; hostname: string } | null,
+): Promise<string | null> {
+  if (!enabled || pool.length === 0) return null;
+
+  const entry = pool.pop()!;
+
+  try {
+    // Configure sidecar via its host-mapped port
+    const configRes = await fetch(`http://localhost:${entry.hostPort}/configure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        executionToken: sidecarEnv.executionToken,
+        platformApiUrl: sidecarEnv.platformApiUrl,
+        proxyUrl: sidecarEnv.proxyUrl || "",
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (!configRes.ok) {
+      throw new Error(`Configure failed: ${configRes.status}`);
+    }
+
+    // Connect to execution network with "sidecar" alias for agent DNS resolution
+    await connectContainerToNetwork(executionNetworkId, entry.containerId, ["sidecar"]);
+
+    // Connect to platform network for host access (containerized deployments)
+    if (platformNetwork) {
+      await connectContainerToNetwork(platformNetwork.networkId, entry.containerId);
+    }
+
+    logger.debug("Acquired sidecar from pool", { executionId, containerId: entry.containerId });
+
+    // Replenish pool in background (don't await)
+    scheduleReplenish();
+
+    return entry.containerId;
+  } catch (err) {
+    logger.warn("Failed to acquire sidecar from pool, will create fresh", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Clean up the failed container
+    removeContainer(entry.containerId).catch(() => {});
+    scheduleReplenish();
+    return null;
+  }
+}
+
+/** Shutdown the pool and clean up all containers. */
+export async function shutdownSidecarPool(): Promise<void> {
+  enabled = false;
+  const entries = pool.splice(0);
+  for (const entry of entries) {
+    await removeContainer(entry.containerId).catch(() => {});
+  }
+  if (standbyNetworkId) {
+    await removeNetwork(standbyNetworkId).catch(() => {});
+    standbyNetworkId = undefined;
+  }
+  logger.info("Sidecar pool shut down");
+}
+
+/** Schedule background replenishment (debounced). */
+function scheduleReplenish(): void {
+  if (replenishing) return;
+  replenishing = true;
+  // Small delay to batch multiple acquisitions
+  setTimeout(() => {
+    replenish()
+      .catch((err) => {
+        logger.warn("Sidecar pool replenish failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        replenishing = false;
+      });
+  }, 100);
+}
+
+/** Fill the pool to its target size. */
+async function replenish(): Promise<void> {
+  while (pool.length < POOL_SIZE) {
+    if (!standbyNetworkId) break;
+
+    try {
+      const containerId = await createContainer(
+        "pool",
+        { PORT: "8080" },
+        {
+          image: SIDECAR_IMAGE,
+          adapterName: "sidecar-pool",
+          memory: 256 * 1024 * 1024,
+          nanoCpus: 500_000_000,
+          networkId: standbyNetworkId,
+          portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+          exposedPorts: { "8080/tcp": {} },
+          labels: { "appstrate.pool": "sidecar" },
+        },
+      );
+
+      await startContainer(containerId);
+
+      const hostPort = await getContainerHostPort(containerId, "8080/tcp");
+      if (!hostPort) {
+        await removeContainer(containerId).catch(() => {});
+        throw new Error("No host port mapped for pooled sidecar");
+      }
+
+      await waitForPooledHealth(hostPort);
+      pool.push({ containerId, hostPort });
+    } catch (err) {
+      logger.warn("Failed to create pooled sidecar", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      break;
+    }
+  }
+}
+
+/** Wait for a pooled sidecar to become healthy via its host-mapped port. */
+async function waitForPooledHealth(hostPort: number): Promise<void> {
+  for (let attempt = 1; attempt <= HEALTH_CHECK_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`http://localhost:${hostPort}/health`, {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (res.ok) return;
+    } catch {
+      // Retry
+    }
+    if (attempt < HEALTH_CHECK_RETRIES) {
+      await new Promise((r) => setTimeout(r, HEALTH_CHECK_DELAY_MS));
+    }
+  }
+  throw new Error("Pooled sidecar health check failed after retries");
+}

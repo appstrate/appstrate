@@ -7,7 +7,6 @@ import {
   waitForExit,
   stopContainer,
   removeContainer,
-  injectFile,
 } from "../docker.ts";
 
 export interface ContainerLifecycleOptions {
@@ -15,8 +14,6 @@ export interface ContainerLifecycleOptions {
   adapterName: string;
   executionId: string;
   timeout: number;
-  flowPackage?: Buffer;
-  inputFiles?: Array<{ name: string; buffer: Buffer }>;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
   /** Extra container IDs to stop on timeout (e.g. sidecar). */
@@ -25,29 +22,13 @@ export interface ContainerLifecycleOptions {
 }
 
 /**
- * Shared container lifecycle: package injection, start, timeout, stream loop,
- * exit handling, and cleanup. Each adapter delegates to this after building
- * env vars and creating the container.
+ * Shared container lifecycle: start, timeout, stream loop, exit handling, and cleanup.
+ * File injection must be done before calling this (for parallelization with sidecar startup).
  */
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
 ): AsyncGenerator<ExecutionMessage> {
-  const { containerId, adapterName, executionId, timeout, flowPackage, extraData, signal } =
-    options;
-
-  // Inject flow package ZIP before starting
-  if (flowPackage) {
-    await injectFile(containerId, "flow-package.zip", flowPackage, "/workspace");
-  }
-
-  // Inject uploaded input files into /workspace/documents/
-  // Use /workspace as target and prefix filename with documents/ so the tar
-  // creates the subdirectory (Docker archive API requires the target dir to exist).
-  if (options.inputFiles && options.inputFiles.length > 0) {
-    for (const file of options.inputFiles) {
-      await injectFile(containerId, `documents/${file.name}`, file.buffer, "/workspace");
-    }
-  }
+  const { containerId, adapterName, executionId, timeout, extraData, signal } = options;
 
   yield {
     type: "progress",

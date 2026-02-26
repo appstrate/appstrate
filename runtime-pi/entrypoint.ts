@@ -1,7 +1,6 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { tsImport } from "tsx/esm/api";
 import { getModel } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
@@ -26,7 +25,7 @@ function die(message: string): never {
 }
 
 /** Unwrap the default export from a dynamically imported module.
- *  tsImport (tsx) can double-wrap: mod.default may be a module namespace
+ *  Some bundlers double-wrap: mod.default may be a module namespace
  *  whose own .default holds the actual function. Walk up to 2 levels. */
 function resolveDefaultExport(mod: Record<string, unknown>): unknown {
   let value = mod.default;
@@ -54,9 +53,7 @@ const loadedExtensionIds = new Set<string>();
 
 /**
  * Load all .ts extension files from a directory, skipping already-loaded IDs.
- * Uses tsx's tsImport() to load extensions in an isolated module context,
- * avoiding ERR_REQUIRE_CYCLE_MODULE when extensions share dependencies
- * with the entrypoint's module graph.
+ * Uses native import() — Bun handles TypeScript natively without tsx.
  */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!fs.existsSync(dir)) return;
@@ -66,7 +63,7 @@ async function loadExtensionsFromDir(dir: string, label: string) {
     if (loadedExtensionIds.has(id)) continue;
     const extPath = path.join(dir, entry);
     try {
-      const mod = await tsImport(extPath, import.meta.url);
+      const mod = await import(extPath);
       const factory = resolveDefaultExport(mod);
       if (typeof factory !== "function") {
         emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
@@ -103,7 +100,7 @@ if (fs.existsSync(packagePath)) {
       try {
         fs.symlinkSync("/runtime/node_modules", workspaceNodeModules);
       } catch {
-        // Non-fatal — NODE_PATH may still work
+        // Non-fatal — Bun resolves from parent dirs too
       }
     }
 
