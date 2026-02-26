@@ -22,7 +22,10 @@ import {
   useBindAdminService,
   useUnbindAdminService,
   useDisconnect,
+  useDeleteMemory,
+  useDeleteAllMemories,
 } from "../hooks/use-mutations";
+import { useFlowMemories } from "../hooks/use-memories";
 import { Badge } from "../components/badge";
 import { ConfigModal } from "../components/config-modal";
 import { InputModal } from "../components/input-modal";
@@ -56,7 +59,7 @@ function checkRequiredConfig(detail: {
   return true;
 }
 
-type Tab = "executions" | "schedules";
+type Tab = "executions" | "schedules" | "memories";
 
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
@@ -87,6 +90,9 @@ export function FlowDetailPage() {
   const createSchedule = useCreateSchedule(flowId!);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  const { data: memories } = useFlowMemories(flowId);
+  const deleteMemory = useDeleteMemory(flowId!);
+  const deleteAllMemories = useDeleteAllMemories(flowId!);
 
   const [tab, setTab] = useState<Tab>("executions");
   const [configOpen, setConfigOpen] = useState(false);
@@ -441,6 +447,15 @@ export function FlowDetailPage() {
           {t("detail.tabSchedules")}
           {schedules && schedules.length > 0 ? ` (${schedules.length})` : ""}
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === "memories"}
+          className={`tab ${tab === "memories" ? "active" : ""}`}
+          onClick={() => setTab("memories")}
+        >
+          {t("detail.tabMemories")}
+          {memories && memories.length > 0 ? ` (${memories.length})` : ""}
+        </button>
       </div>
 
       {tab === "executions" && (
@@ -528,6 +543,51 @@ export function FlowDetailPage() {
                     setScheduleOpen(true);
                   }}
                 />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "memories" && (
+        <>
+          {isOrgAdmin && memories && memories.length > 0 && (
+            <div className="section-header">
+              <div />
+              <button
+                className="btn-danger"
+                disabled={deleteAllMemories.isPending}
+                onClick={() => {
+                  if (confirm(t("detail.clearMemoriesConfirm"))) {
+                    deleteAllMemories.mutate();
+                  }
+                }}
+              >
+                {t("detail.clearMemories")}
+              </button>
+            </div>
+          )}
+          {!memories || memories.length === 0 ? (
+            <EmptyState message={t("detail.emptyMemories")} compact />
+          ) : (
+            <div className="memory-list">
+              {memories.map((mem) => (
+                <div key={mem.id} className="memory-row">
+                  <span className="memory-content">{mem.content}</span>
+                  <span className="memory-date">
+                    {mem.createdAt ? formatDateField(mem.createdAt) : ""}
+                  </span>
+                  {isOrgAdmin && (
+                    <button
+                      type="button"
+                      className="btn-unbind"
+                      onClick={() => deleteMemory.mutate(mem.id)}
+                      disabled={deleteMemory.isPending}
+                    >
+                      {t("btn.delete")}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}

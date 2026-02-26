@@ -358,6 +358,30 @@ export const executionLogs = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
+// 7b. Flow memories (org-scoped, accumulate across executions)
+// ────────────────────────────────────────────────────────────
+
+export const flowMemories = pgTable(
+  "flow_memories",
+  {
+    id: serial("id").primaryKey(),
+    flowId: text("flow_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    executionId: text("execution_id").references(() => executions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("idx_flow_memories_flow_org").on(table.flowId, table.orgId),
+    index("idx_flow_memories_org_id").on(table.orgId),
+  ],
+);
+
+// ────────────────────────────────────────────────────────────
 // 8. Flow schedules (org-scoped, per-user)
 // ────────────────────────────────────────────────────────────
 
@@ -460,7 +484,9 @@ export const connectionProfiles = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_connection_profiles_default").on(table.userId).where(sql`${table.isDefault} = true`),
+    uniqueIndex("idx_connection_profiles_default")
+      .on(table.userId)
+      .where(sql`${table.isDefault} = true`),
     index("idx_connection_profiles_user_id").on(table.userId),
   ],
 );
@@ -753,3 +779,5 @@ export type NewApiKey = InferInsertModel<typeof apiKeys>;
 
 export type OrgProxy = InferSelectModel<typeof orgProxies>;
 export type NewOrgProxy = InferInsertModel<typeof orgProxies>;
+
+export type FlowMemory = InferSelectModel<typeof flowMemories>;

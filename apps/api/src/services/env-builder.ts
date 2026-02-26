@@ -6,7 +6,7 @@ import type { Db } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
 import { buildServiceTokens } from "./token-resolver.ts";
-import { getFlowConfig, getLastExecutionState } from "./state.ts";
+import { getFlowConfig, getLastExecutionState, getFlowMemories } from "./state.ts";
 import { getFlowPackage } from "./flow-package.ts";
 import { getLatestVersionId } from "./flow-versions.ts";
 import { resolveProxyUrl } from "./org-proxies.ts";
@@ -65,6 +65,7 @@ export function buildPromptContext(params: {
   input?: Record<string, unknown>;
   files?: FileReference[];
   providers?: PromptContext["providers"];
+  memories?: PromptContext["memories"];
   proxyUrl?: string | null;
 }): PromptContext {
   return {
@@ -85,6 +86,7 @@ export function buildPromptContext(params: {
       provider: s.provider,
     })),
     providers: params.providers,
+    memories: params.memories,
     llmModel: getEnv().LLM_MODEL_ID,
     proxyUrl: params.proxyUrl,
     timeout: params.flow.manifest.execution?.timeout ?? 300,
@@ -120,16 +122,25 @@ export async function buildExecutionContext(params: {
 }> {
   const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
 
-  const [tokens, config, previousState, providerDefs, flowPackage, flowVersionId, proxyUrl] =
-    await Promise.all([
-      buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
-      getFlowConfig(orgId, flow.id),
-      getLastExecutionState(flow.id, userId, orgId),
-      resolveProviderDefs(db, orgId, flow.manifest.requires.services),
-      getFlowPackage(flow, orgId),
-      flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
-      resolveProxyUrl(orgId, flow.id),
-    ]);
+  const [
+    tokens,
+    config,
+    previousState,
+    providerDefs,
+    flowPackage,
+    flowVersionId,
+    proxyUrl,
+    memories,
+  ] = await Promise.all([
+    buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
+    getFlowConfig(orgId, flow.id),
+    getLastExecutionState(flow.id, userId, orgId),
+    resolveProviderDefs(db, orgId, flow.manifest.requires.services),
+    getFlowPackage(flow, orgId),
+    flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
+    resolveProxyUrl(orgId, flow.id),
+    getFlowMemories(flow.id, orgId),
+  ]);
 
   const promptContext = buildPromptContext({
     flow,
@@ -140,6 +151,11 @@ export async function buildExecutionContext(params: {
     input,
     files,
     providers: providerDefs,
+    memories: memories.map((m) => ({
+      id: m.id,
+      content: m.content,
+      createdAt: m.createdAt?.toISOString() ?? null,
+    })),
     proxyUrl,
   });
 

@@ -575,6 +575,94 @@ export const flowsPaths = {
       },
     },
   },
+  "/api/flows/{flowId}/memories": {
+    get: {
+      operationId: "listFlowMemories",
+      tags: ["Flows"],
+      summary: "List flow memories",
+      description: "Returns accumulated memories for a flow (org-scoped, shared across all users).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Memory list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  memories: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FlowMemory" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteAllFlowMemories",
+      tags: ["Flows"],
+      summary: "Delete all flow memories",
+      description: "Delete all accumulated memories for a flow. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Memories deleted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  deleted: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/flows/{flowId}/memories/{memoryId}": {
+    delete: {
+      operationId: "deleteFlowMemory",
+      tags: ["Flows"],
+      summary: "Delete a single flow memory",
+      description: "Delete a specific memory by ID. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "memoryId", in: "path", required: true, schema: { type: "integer" } },
+      ],
+      responses: {
+        "200": {
+          description: "Memory deleted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  deleted: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/flows/{flowId}/skills": {
     put: {
       operationId: "updateFlowSkills",

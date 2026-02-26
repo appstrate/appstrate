@@ -57,6 +57,13 @@
       "when": 1772034913124,
       "tag": "0007_sweet_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1772074412417,
+      "tag": "0008_slimy_scourge",
+      "breakpoints": true
     }
   ]
 }
