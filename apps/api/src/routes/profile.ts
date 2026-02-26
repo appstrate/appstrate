@@ -23,7 +23,7 @@ profileRouter.get("/profile", async (c) => {
 
   return c.json({
     id: rows[0].id,
-    display_name: rows[0].displayName,
+    displayName: rows[0].displayName,
     language: rows[0].language,
   });
 });
@@ -72,7 +72,7 @@ profileRouter.post("/profiles/batch", async (c) => {
   if (ids.length === 0) return c.json({ profiles: [] });
 
   const rows = await db
-    .select({ id: profiles.id, display_name: profiles.displayName })
+    .select({ id: profiles.id, displayName: profiles.displayName })
     .from(profiles)
     .where(inArray(profiles.id, ids));
 

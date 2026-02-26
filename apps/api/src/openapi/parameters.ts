@@ -9,6 +9,14 @@ export const parameters = {
       "Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key).",
     schema: { type: "string", format: "uuid" },
   },
+  SseOrgId: {
+    name: "orgId",
+    in: "query" as const,
+    required: true,
+    description:
+      "Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource).",
+    schema: { type: "string", format: "uuid" },
+  },
   Verbose: {
     name: "verbose",
     in: "query" as const,

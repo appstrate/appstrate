@@ -62,10 +62,15 @@ export const connectionProfilesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  id: { type: "string", format: "uuid" },
-                  name: { type: "string" },
-                  isDefault: { type: "boolean" },
-                  createdAt: { type: "string", format: "date-time" },
+                  profile: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string", format: "uuid" },
+                      name: { type: "string" },
+                      isDefault: { type: "boolean" },
+                      createdAt: { type: "string", format: "date-time" },
+                    },
+                  },
                 },
               },
             },

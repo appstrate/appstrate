@@ -64,6 +64,7 @@ export const flowsPaths = {
                 type: "object",
                 properties: {
                   flowId: { type: "string" },
+                  message: { type: "string" },
                 },
               },
             },
@@ -105,7 +106,15 @@ export const flowsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                properties: { flowId: { type: "string" } },
+                properties: {
+                  flowId: { type: "string" },
+                  message: { type: "string" },
+                  skillsCreated: { type: "integer" },
+                  skillsMatched: { type: "integer" },
+                  extensionsCreated: { type: "integer" },
+                  extensionsMatched: { type: "integer" },
+                  warnings: { type: "array", items: { type: "string" } },
+                },
               },
             },
           },
@@ -181,12 +190,14 @@ export const flowsPaths = {
                 type: "object",
                 properties: {
                   flowId: { type: "string" },
+                  message: { type: "string" },
                   updatedAt: { type: "string" },
                 },
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { description: "Flow in use (running executions)" },
@@ -228,7 +239,20 @@ export const flowsPaths = {
         },
       },
       responses: {
-        "200": { description: "Configuration saved" },
+        "200": {
+          description: "Configuration saved",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  config: { type: "object" },
+                  validation: { type: "object", properties: { valid: { type: "boolean" } } },
+                },
+              },
+            },
+          },
+        },
         "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
@@ -300,9 +324,14 @@ export const flowsPaths = {
           "multipart/form-data": {
             schema: {
               type: "object",
-              required: ["file"],
+              required: ["file", "updatedAt"],
               properties: {
                 file: { type: "string", format: "binary", description: "ZIP file" },
+                updatedAt: {
+                  type: "string",
+                  format: "date-time",
+                  description: "Current updatedAt for optimistic concurrency",
+                },
               },
             },
           },
@@ -317,14 +346,17 @@ export const flowsPaths = {
                 type: "object",
                 properties: {
                   flowId: { type: "string" },
+                  message: { type: "string" },
                   updatedAt: { type: "string" },
                 },
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Stale updatedAt (concurrent edit conflict)" },
       },
     },
   },
@@ -339,10 +371,29 @@ export const flowsPaths = {
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
         { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
       ],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                profileId: { type: "string", description: "Optional connection profile ID" },
+              },
+            },
+          },
+        },
+      },
       responses: {
-        "200": { description: "Admin connection bound" },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "200": {
+          description: "Admin connection bound",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { bound: { type: "boolean" } } },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
@@ -356,7 +407,14 @@ export const flowsPaths = {
         { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Admin connection unbound" },
+        "200": {
+          description: "Admin connection unbound",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { unbound: { type: "boolean" } } },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -391,7 +449,7 @@ export const flowsPaths = {
           description: "Profile override set",
           content: {
             "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
             },
           },
         },
@@ -411,7 +469,7 @@ export const flowsPaths = {
           description: "Profile override cleared",
           content: {
             "application/json": {
-              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
             },
           },
         },
@@ -429,7 +487,7 @@ export const flowsPaths = {
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "201": {
+        "200": {
           description: "Share token created",
           content: {
             "application/json": {
@@ -437,7 +495,6 @@ export const flowsPaths = {
                 type: "object",
                 properties: {
                   token: { type: "string" },
-                  url: { type: "string" },
                   expiresAt: { type: "string", format: "date-time" },
                 },
               },
@@ -454,7 +511,7 @@ export const flowsPaths = {
       tags: ["Flows"],
       summary: "Get flow proxy configuration",
       description:
-        "Returns the proxy configuration for a flow (override ID, label, resolution status).",
+        "Returns the proxy configuration for a flow (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
@@ -468,7 +525,6 @@ export const flowsPaths = {
                 type: "object",
                 properties: {
                   proxyId: { type: ["string", "null"] },
-                  proxyLabel: { type: "string" },
                   resolved: { type: "boolean" },
                 },
               },
@@ -544,7 +600,22 @@ export const flowsPaths = {
         },
       },
       responses: {
-        "200": { description: "Skills updated" },
+        "200": {
+          description: "Skills updated",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  flowId: { type: "string" },
+                  skillIds: { type: "array", items: { type: "string" } },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -575,7 +646,22 @@ export const flowsPaths = {
         },
       },
       responses: {
-        "200": { description: "Extensions updated" },
+        "200": {
+          description: "Extensions updated",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  flowId: { type: "string" },
+                  extensionIds: { type: "array", items: { type: "string" } },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },

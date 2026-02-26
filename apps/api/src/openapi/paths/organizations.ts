@@ -35,7 +35,7 @@ export const organizationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["name", "slug"],
+              required: ["name"],
               properties: {
                 name: { type: "string" },
                 slug: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
@@ -98,7 +98,14 @@ export const organizationsPaths = {
       description: "Delete organization and all associated data. Owner only.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       responses: {
-        "204": { description: "Organization deleted" },
+        "200": {
+          description: "Organization deleted",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -127,15 +134,18 @@ export const organizationsPaths = {
         },
       },
       responses: {
-        "200": {
+        "201": {
           description: "User added or invitation created",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  invited: { type: "boolean" },
-                  added: { type: "boolean" },
+                  added: { type: "boolean", description: "True if user was added directly" },
+                  invited: { type: "boolean", description: "True if invitation was sent" },
+                  userId: { type: "string", description: "User ID (if added)" },
+                  email: { type: "string", description: "Email (if invited)" },
+                  role: { type: "string" },
                   token: {
                     type: "string",
                     description: "Invitation token (only if invited)",
@@ -188,7 +198,14 @@ export const organizationsPaths = {
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Member removed" },
+        "200": {
+          description: "Member removed",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -234,7 +251,14 @@ export const organizationsPaths = {
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Invitation cancelled" },
+        "200": {
+          description: "Invitation cancelled",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { ok: { type: "boolean" } } },
+            },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },

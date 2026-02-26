@@ -5,7 +5,16 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "List active connections",
       description: "List active service connections for the current user in the org.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          description: "Connection profile ID (defaults to user's default profile)",
+          schema: { type: "string" },
+        },
+      ],
       responses: {
         "200": {
           description: "Connection list",
@@ -33,7 +42,16 @@ export const connectionsPaths = {
       summary: "List all providers with connection status",
       description:
         "List all configured providers with current connection status and auth mode for the user.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          description: "Connection profile ID (defaults to user's default profile)",
+          schema: { type: "string" },
+        },
+      ],
       responses: {
         "200": {
           description: "Integration list",
@@ -72,6 +90,7 @@ export const connectionsPaths = {
               type: "object",
               properties: {
                 scopes: { type: "array", items: { type: "string" } },
+                profileId: { type: "string", description: "Connection profile ID" },
               },
             },
           },
@@ -86,6 +105,7 @@ export const connectionsPaths = {
                 type: "object",
                 properties: {
                   authUrl: { type: "string" },
+                  state: { type: "string" },
                 },
               },
             },
@@ -180,9 +200,26 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "provider", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          description: "Connection profile ID (defaults to user's default profile)",
+          schema: { type: "string" },
+        },
       ],
       responses: {
-        "204": { description: "Disconnected" },
+        "200": {
+          description: "Disconnected",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { success: { type: "boolean" } },
+              },
+            },
+          },
+        },
       },
     },
   },

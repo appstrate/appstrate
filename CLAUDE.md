@@ -48,18 +48,20 @@ appstrate/
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
-│   │   └── paths/            # One file per route domain (82 endpoints)
+│   │   └── paths/            # One file per route domain (97 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
 │   ├── pages/                # Route pages (React Router v7 BrowserRouter)
 │   ├── hooks/                # React Query hooks + SSE realtime hooks
 │   ├── components/           # UI components (modals, forms, editors)
+│   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
+│   ├── lib/                  # Utilities (auth-client, markdown, service-status, strings)
 │   ├── styles.css            # Single CSS file (dark theme, no Tailwind/modules)
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (25 tables, enums, indexes)
+│   ├── schema.ts             # Full schema (28 tables, enums, indexes)
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (auto profile+org on signup)
 │
@@ -70,6 +72,7 @@ appstrate/
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
 │   ├── providers.json        # Merged with SYSTEM_PROVIDERS env var
+│   ├── proxies.json          # Merged with SYSTEM_PROXIES env var
 │   ├── skills/{id}/SKILL.md  # YAML frontmatter (name, description)
 │   └── extensions/{id}.ts    # Pi agent tools (ExtensionFactory pattern)
 │
@@ -91,11 +94,11 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
      |                                |
      |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
      |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
-     |-- PUT /api/flows/:id/config -->|-- schema.ts (Zod validation) → state.ts (Drizzle)
+     |-- PUT /api/flows/:id/config -->|-- schema.ts (AJV validation) → state.ts (Drizzle)
      |-- POST /auth/connect/:prov --->|-- connection-manager.ts → OAuth2 flow / API key storage
      |                                |
      |-- POST /api/flows/:id/run ---->|
-     |                                |-- 1. Validate deps, config, input (Zod)
+     |                                |-- 1. Validate deps, config, input (AJV)
      |                                |-- 2. Create execution record (pending, user_id)
      |                                |-- 3. Fire-and-forget: executeFlowInBackground()
      |                                |-- 4. Output validation loop (if output schema)
@@ -136,7 +139,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 ### Development Workflow
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
 - **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
-- **Quality gate**: `bun run check` (turbo check = TypeScript across all packages).
+- **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
 - **Tests**: `bun test` in `apps/api/`. Framework: `bun:test` (NOT vitest/jest). Tests in `services/__tests__/` and `routes/__tests__/`. Mocking pattern: call `mock.module("../../services/foo.ts", () => ({ fn: mock(...) }))` BEFORE `const { handler } = await import("../route.ts")` — dynamic import is required so mocks take effect. No frontend tests currently.
 
 ### Frontend
@@ -154,35 +157,36 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `flow` (set by `requireFlow()`).
 - **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not built-in + no running executions.
-- **Rate limiting**: Token bucket per `method:path:userId`. Key limits: run (20/min), import (10/min), create (10/min). `rateLimitByIp()` for public unauthenticated routes.
+- **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
-- **Validation (AJV)**: `validateConfig()` and `validateInput()` use `coerceTypes: true` (e.g. `"50"` accepted as number). `validateOutput()` does NOT coerce — strict mode. Extra fields always allowed (no `additionalProperties: false`).
+- **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
 ### Sidecar Protocol (details beyond the architecture diagram)
-- Agent calls `$SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers for authenticated API requests.
-- Sidecar substitutes `{{variable}}` placeholders in headers/URL, validates against `authorizedUris` per provider.
+- Agent calls `$SIDECAR_URL/proxy` with `X-Service`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
+- Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
+- **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Flow-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
 - **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Execution History API) + appends raw `prompt.md`. No Handlebars.
-- **Output validation**: If `output.schema` exists, Zod validates the result. On mismatch, `buildRetryPrompt()` re-executes up to `execution.outputRetries` times. Final failure = accepted with warning.
+- **Output validation**: If `output.schema` exists, AJV validates the result. On mismatch, `buildRetryPrompt()` re-executes up to `execution.outputRetries` times. Final failure = accepted with warning.
 - **State persistence**: `result.state` → persisted to execution record. Only latest state injected as `## Previous State` next run. Historical executions available via `$SIDECAR_URL/execution-history`.
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 82 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 97 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `providers`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
+Full schema: `packages/db/src/schema.ts` (28 tables, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
 
 ## Environment Variables
 
@@ -193,9 +197,11 @@ Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string |
 | `BETTER_AUTH_SECRET` | Yes | — | Session signing secret |
 | `CONNECTION_ENCRYPTION_KEY` | Yes | — | 32 bytes, base64-encoded. Encrypts stored credentials |
-| `DATA_DIR` | No | unset | Path to `data/` dir — if unset, built-in flows/providers/skills disabled |
-| `PLATFORM_API_URL` | No | `http://host.docker.internal:{PORT}` | How sidecar reaches the host platform |
+| `DATA_DIR` | No | unset | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled (providers still load from `SYSTEM_PROVIDERS` env) |
+| `PLATFORM_API_URL` | No | — | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
 | `SYSTEM_PROVIDERS` | No | `"[]"` | JSON array, merged with `data/providers.json` |
+| `SYSTEM_PROXIES` | No | `"[]"` | JSON array, merged with `data/proxies.json` |
+| `PROXY_URL` | No | — | Outbound HTTP proxy URL injected into sidecar containers |
 | `LLM_PROVIDER` | No | `anthropic` | Passed to agent containers |
 | `LLM_MODEL_ID` | No | `claude-sonnet-4-5-20250929` | Passed to agent containers |
 | `ANTHROPIC_API_KEY` | No | — | Passed through to agent containers (or `OPENAI_API_KEY`, etc.) |
@@ -203,6 +209,10 @@ Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `
 | `PORT` | No | `3010` | Server port |
 | `APP_URL` | No | `http://localhost:3010` | Public URL for OAuth callbacks |
 | `TRUSTED_ORIGINS` | No | `http://localhost:3010,http://localhost:5173` | CORS origins, comma-separated |
+| `DOCKER_SOCKET` | No | `/var/run/docker.sock` | Path to Docker socket |
+| `EXECUTION_ADAPTER` | No | `pi` | Adapter type for flow execution |
+| `OAUTH_CALLBACK_URL` | No | — | Custom OAuth callback URL (computed from `APP_URL` if unset) |
+| `STORAGE_DIR` | No | `""` | Directory for file storage |
 
 ## Flow & Extension Gotchas
 
@@ -212,8 +222,9 @@ Full schema: `packages/db/src/schema.ts` (25 tables, Drizzle ORM). Migrations: `
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** argument. Using `execute(args)` receives the toolCallId string.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
-- **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
-- **Execution lifecycle**: `pending` → `running` → `completed` | `failed` | `timeout`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
+- **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), `proxy` (outbound HTTP proxy — auto-sets `allowAllUris: true` and `credentialSchema` with URL field). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
+- **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). Built-in proxies loaded from `data/proxies.json` + `SYSTEM_PROXIES` env var at boot. Flow-level override via `GET/PUT /api/flows/:id/proxy`. Cascade: flow override → org default → `PROXY_URL` env var.
+- **Execution lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
 
 ## Known Issues & Technical Debt
 
