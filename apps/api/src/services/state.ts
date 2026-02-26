@@ -378,17 +378,20 @@ export async function listExecutionLogs(executionId: string, orgId: string) {
     .orderBy(executionLogs.id);
 }
 
-export async function markOrphanExecutionsFailed(): Promise<number> {
+export async function markOrphanExecutionsFailed(): Promise<{
+  count: number;
+  executionIds: string[];
+}> {
   const updated = await db
     .update(executions)
     .set({
       status: "failed",
-      error: "Server restarted",
+      error: "Server restarted while execution was in progress. Please retry.",
       completedAt: new Date(),
     })
     .where(inArray(executions.status, ["running", "pending"]))
     .returning({ id: executions.id });
-  return updated.length;
+  return { count: updated.length, executionIds: updated.map((r) => r.id) };
 }
 
 // --- Flow Memories (org-scoped, accumulate across executions) ---
