@@ -131,7 +131,6 @@ function DisplayNameForm() {
     updateDisplayName.mutate(name.trim(), {
       onSuccess: () => {
         setSuccess(t("preferences.displayNameChanged"));
-        window.location.reload();
       },
     });
   };
