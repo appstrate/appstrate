@@ -378,6 +378,52 @@ export async function removeNetwork(networkId: string): Promise<void> {
   }
 }
 
+// --- Orphaned container cleanup ---
+
+export async function cleanupOrphanedContainers(): Promise<{
+  containers: number;
+  networks: number;
+}> {
+  const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
+  const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to list managed containers: ${res.status} ${error}`);
+  }
+
+  const containers = (await res.json()) as Array<{
+    Id: string;
+    Labels: Record<string, string>;
+  }>;
+
+  if (containers.length === 0) return { containers: 0, networks: 0 };
+
+  const executionIds = new Set<string>();
+
+  for (const c of containers) {
+    const execId = c.Labels["appstrate.execution"];
+    if (execId) executionIds.add(execId);
+    try {
+      await removeContainer(c.Id); // force=true handles running containers
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  let networkCount = 0;
+  for (const execId of executionIds) {
+    try {
+      await removeNetwork(`appstrate-exec-${execId}`);
+      networkCount++;
+    } catch {
+      /* network may not exist */
+    }
+  }
+
+  return { containers: containers.length, networks: networkCount };
+}
+
 // --- Platform network auto-detection ---
 
 let platformNetworkCache: { networkId: string; hostname: string } | null | undefined;

@@ -230,3 +230,4 @@ Full schema: `packages/db/src/schema.ts` (28 tables, Drizzle ORM). Migrations: `
 
 1. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
 2. **Scheduler is in-memory**: Cron jobs run in-process via `croner`, re-loaded from DB on restart. Distributed locking via `schedule_runs` table prevents duplicates.
+3. **Orphan cleanup**: On startup, orphaned executions (still `running`/`pending`) are marked `failed` and all containers labeled `appstrate.managed=true` are cleaned up via `cleanupOrphanedContainers()` in `docker.ts`.

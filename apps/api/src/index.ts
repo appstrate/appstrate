@@ -20,6 +20,7 @@ import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
 import { initBuiltInLibrary } from "./services/builtin-library.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
+import { cleanupOrphanedContainers } from "./services/docker.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { ensureStorageBucket } from "./services/flow-package.ts";
@@ -229,12 +230,24 @@ try {
 
 // Clean up orphaned executions from previous server runs
 try {
-  const orphanCount = await markOrphanExecutionsFailed();
-  if (orphanCount > 0) {
-    logger.info("Marked orphaned executions as failed", { count: orphanCount });
+  const { count, executionIds } = await markOrphanExecutionsFailed();
+  if (count > 0) {
+    logger.info("Marked orphaned executions as failed", { count, executionIds });
   }
 } catch (err) {
   logger.warn("Could not clean orphaned executions", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
+// Clean up orphaned Docker containers/networks (best-effort, always runs)
+try {
+  const { containers, networks } = await cleanupOrphanedContainers();
+  if (containers > 0 || networks > 0) {
+    logger.info("Cleaned up orphaned Docker resources", { containers, networks });
+  }
+} catch (err) {
+  logger.warn("Could not clean up orphaned Docker resources", {
     error: err instanceof Error ? err.message : String(err),
   });
 }

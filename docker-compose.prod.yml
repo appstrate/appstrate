@@ -55,7 +55,7 @@ services:
     build:
       context: .
     restart: unless-stopped
-    mem_limit: 512m
+    mem_limit: 8g
     environment:
       - PORT=3000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
