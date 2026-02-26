@@ -20,7 +20,7 @@ import type { UserConnectionItem } from "@appstrate/shared-types";
 export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
   const updateLanguage = useUpdateLanguage();
-  const [tab, setTab] = useState<"general" | "connectors" | "profiles">("general");
+  const [tab, setTab] = useState<"general" | "security" | "connectors" | "profiles">("general");
 
   return (
     <>
@@ -35,6 +35,14 @@ export function PreferencesPage() {
           onClick={() => setTab("general")}
         >
           {t("preferences.tabGeneral")}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "security"}
+          className={`tab ${tab === "security" ? "active" : ""}`}
+          onClick={() => setTab("security")}
+        >
+          {t("preferences.tabSecurity")}
         </button>
         <button
           role="tab"
@@ -61,6 +69,8 @@ export function PreferencesPage() {
           languagePending={updateLanguage.isPending}
         />
       )}
+
+      {tab === "security" && <SecurityTab />}
 
       {tab === "connectors" && <ConnectorsTab />}
 
@@ -101,16 +111,17 @@ function GeneralTab({
 
       <div className="section-title">{t("preferences.account")}</div>
       <DisplayNameForm />
-      <PasswordChangeForm />
+    </>
+  );
+}
 
-      <div className="section-title">{t("preferences.notifications")}</div>
-      <div className="service-card">
-        <div className="service-card-header service-card-header-flush">
-          <div className="service-info">
-            <span className="service-provider">{t("preferences.notificationsHint")}</span>
-          </div>
-        </div>
-      </div>
+function SecurityTab() {
+  const { t } = useTranslation(["settings", "common"]);
+
+  return (
+    <>
+      <div className="section-title">{t("preferences.changePassword")}</div>
+      <PasswordChangeForm />
     </>
   );
 }
