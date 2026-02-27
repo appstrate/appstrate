@@ -12,7 +12,6 @@ import {
   getContainerHostPort,
   injectFiles,
   startContainer,
-  stopContainer,
   removeContainer,
   removeNetwork,
 } from "../docker.ts";
@@ -180,26 +179,28 @@ export class PiAdapter implements ExecutionAdapter {
         processLogs: processPiLogs,
       });
     } finally {
-      // Cleanup sidecar + network (idempotent — 404 is OK)
+      // Cleanup sidecar + network in parallel (idempotent — 404 is OK)
+      // removeContainer uses force=true which kills + removes in a single Docker call
+      const cleanups: Promise<void>[] = [];
       if (sidecarContainerId) {
-        await stopContainer(sidecarContainerId).catch((err) => {
-          logger.error("Failed to stop sidecar", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-        await removeContainer(sidecarContainerId).catch((err) => {
-          logger.error("Failed to remove sidecar", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
+        cleanups.push(
+          removeContainer(sidecarContainerId).catch((err) => {
+            logger.error("Failed to remove sidecar", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }),
+        );
       }
       if (networkId) {
-        await removeNetwork(networkId).catch((err) => {
-          logger.error("Failed to remove network", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
+        cleanups.push(
+          removeNetwork(networkId).catch((err) => {
+            logger.error("Failed to remove network", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }),
+        );
       }
+      await Promise.all(cleanups);
     }
   }
 }

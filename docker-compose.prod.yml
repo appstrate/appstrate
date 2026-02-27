@@ -3,6 +3,22 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     mem_limit: 1g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "wal_level=minimal"
+      - "-c"
+      - "max_wal_senders=0"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "effective_cache_size=512MB"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-appstrate}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}

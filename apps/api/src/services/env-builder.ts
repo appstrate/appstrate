@@ -19,29 +19,23 @@ export async function resolveProviderDefs(
   orgId: string,
   services: FlowServiceRequirement[],
 ): Promise<NonNullable<PromptContext["providers"]>> {
-  const providerDefs: NonNullable<PromptContext["providers"]> = [];
-  const seen = new Set<string>();
-  for (const svc of services) {
-    if (seen.has(svc.provider)) continue;
-    seen.add(svc.provider);
-    const def = await getProvider(database, orgId, svc.provider);
-    if (def) {
-      providerDefs.push({
-        id: def.id,
-        displayName: def.displayName,
-        authMode: def.authMode,
-        credentialSchema: def.credentialSchema,
-        credentialFieldName: def.credentialFieldName,
-        credentialHeaderName: def.credentialHeaderName,
-        credentialHeaderPrefix: def.credentialHeaderPrefix,
-        authorizedUris: def.authorizedUris,
-        allowAllUris: def.allowAllUris,
-        docsUrl: def.docsUrl,
-        categories: def.categories,
-      });
-    }
-  }
-  return providerDefs;
+  const uniqueProviders = [...new Set(services.map((s) => s.provider))];
+  const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
+  return defs
+    .filter((def): def is NonNullable<typeof def> => def != null)
+    .map((def) => ({
+      id: def.id,
+      displayName: def.displayName,
+      authMode: def.authMode,
+      credentialSchema: def.credentialSchema,
+      credentialFieldName: def.credentialFieldName,
+      credentialHeaderName: def.credentialHeaderName,
+      credentialHeaderPrefix: def.credentialHeaderPrefix,
+      authorizedUris: def.authorizedUris,
+      allowAllUris: def.allowAllUris,
+      docsUrl: def.docsUrl,
+      categories: def.categories,
+    }));
 }
 
 /**
@@ -115,6 +109,7 @@ export async function buildExecutionContext(params: {
   userId: string;
   input?: Record<string, unknown>;
   files?: FileReference[];
+  config?: Record<string, unknown>;
 }): Promise<{
   promptContext: PromptContext;
   flowPackage: Buffer | null;
@@ -133,12 +128,12 @@ export async function buildExecutionContext(params: {
     memories,
   ] = await Promise.all([
     buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
-    getFlowConfig(orgId, flow.id),
+    params.config ?? getFlowConfig(orgId, flow.id),
     getLastExecutionState(flow.id, userId, orgId),
     resolveProviderDefs(db, orgId, flow.manifest.requires.services),
     getFlowPackage(flow, orgId),
     flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
-    resolveProxyUrl(orgId, flow.id),
+    resolveProxyUrl(orgId, flow.id, params.config),
     getFlowMemories(flow.id, orgId),
   ]);
 

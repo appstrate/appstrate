@@ -136,42 +136,53 @@ function scheduleReplenish(): void {
   }, 100);
 }
 
-/** Fill the pool to its target size. */
+/** Create a single pooled sidecar container. */
+async function createPooledSidecar(): Promise<PooledSidecar> {
+  const containerId = await createContainer(
+    "pool",
+    { PORT: "8080" },
+    {
+      image: SIDECAR_IMAGE,
+      adapterName: "sidecar-pool",
+      memory: 256 * 1024 * 1024,
+      nanoCpus: 500_000_000,
+      networkId: standbyNetworkId!,
+      portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+      exposedPorts: { "8080/tcp": {} },
+      labels: { "appstrate.pool": "sidecar" },
+    },
+  );
+
+  await startContainer(containerId);
+
+  const hostPort = await getContainerHostPort(containerId, "8080/tcp");
+  if (!hostPort) {
+    await removeContainer(containerId).catch(() => {});
+    throw new Error("No host port mapped for pooled sidecar");
+  }
+
+  await waitForSidecarHealth(hostPort);
+  return { containerId, hostPort };
+}
+
+/** Fill the pool to its target size (parallel creation). */
 async function replenish(): Promise<void> {
-  while (pool.length < POOL_SIZE) {
-    if (!standbyNetworkId) break;
+  if (!standbyNetworkId) return;
 
-    try {
-      const containerId = await createContainer(
-        "pool",
-        { PORT: "8080" },
-        {
-          image: SIDECAR_IMAGE,
-          adapterName: "sidecar-pool",
-          memory: 256 * 1024 * 1024,
-          nanoCpus: 500_000_000,
-          networkId: standbyNetworkId,
-          portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-          exposedPorts: { "8080/tcp": {} },
-          labels: { "appstrate.pool": "sidecar" },
-        },
-      );
+  const needed = POOL_SIZE - pool.length;
+  if (needed <= 0) return;
 
-      await startContainer(containerId);
+  const results = await Promise.allSettled(
+    Array.from({ length: needed }, () => createPooledSidecar()),
+  );
 
-      const hostPort = await getContainerHostPort(containerId, "8080/tcp");
-      if (!hostPort) {
-        await removeContainer(containerId).catch(() => {});
-        throw new Error("No host port mapped for pooled sidecar");
-      }
-
-      await waitForSidecarHealth(hostPort);
-      pool.push({ containerId, hostPort });
-    } catch (err) {
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      pool.push(result.value);
+    } else {
       logger.warn("Failed to create pooled sidecar", {
-        error: err instanceof Error ? err.message : String(err),
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
-      break;
     }
   }
 }

@@ -423,26 +423,19 @@ export async function cleanupOrphanedContainers(): Promise<{
   if (containers.length === 0) return { containers: 0, networks: 0 };
 
   const executionIds = new Set<string>();
-
   for (const c of containers) {
     const execId = c.Labels["appstrate.execution"];
     if (execId) executionIds.add(execId);
-    try {
-      await removeContainer(c.Id); // force=true handles running containers
-    } catch {
-      /* best-effort */
-    }
   }
 
-  let networkCount = 0;
-  for (const execId of executionIds) {
-    try {
-      await removeNetwork(`appstrate-exec-${execId}`);
-      networkCount++;
-    } catch {
-      /* network may not exist */
-    }
-  }
+  // Remove all containers in parallel (force=true handles running containers)
+  await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
+
+  // Remove associated networks in parallel
+  const networkResults = await Promise.allSettled(
+    [...executionIds].map((id) => removeNetwork(`appstrate-exec-${id}`)),
+  );
+  const networkCount = networkResults.filter((r) => r.status === "fulfilled").length;
 
   return { containers: containers.length, networks: networkCount };
 }
