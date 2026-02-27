@@ -377,6 +377,7 @@ export function createExecutionsRouter() {
       userId: user.id,
       input: parsedInput,
       files: fileRefs,
+      config,
     });
 
     // Create execution record

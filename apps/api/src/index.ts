@@ -196,40 +196,31 @@ if (dataDir) {
   logger.info("DATA_DIR not set — built-in resources disabled");
 }
 
-// Ensure local storage directories
-try {
-  await ensureStorageBucket();
-} catch (err) {
-  logger.warn("Could not ensure storage bucket", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-try {
-  await ensureLibraryBucket();
-} catch (err) {
-  logger.warn("Could not ensure library bucket", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Install NOTIFY triggers for realtime
-try {
-  await createNotifyTriggers(db);
-  logger.info("NOTIFY triggers installed");
-} catch (err) {
-  logger.warn("Could not install NOTIFY triggers", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
-
-// Initialize realtime LISTEN channels
-try {
-  await initRealtime();
-} catch (err) {
-  logger.warn("Could not initialize realtime LISTEN", {
-    error: err instanceof Error ? err.message : String(err),
-  });
-}
+// Parallel init: storage, library, NOTIFY triggers, and realtime are all independent
+await Promise.all([
+  ensureStorageBucket().catch((err) => {
+    logger.warn("Could not ensure storage bucket", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }),
+  ensureLibraryBucket().catch((err) => {
+    logger.warn("Could not ensure library bucket", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }),
+  createNotifyTriggers(db)
+    .then(() => logger.info("NOTIFY triggers installed"))
+    .catch((err) => {
+      logger.warn("Could not install NOTIFY triggers", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+  initRealtime().catch((err) => {
+    logger.warn("Could not initialize realtime LISTEN", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }),
+]);
 
 // Sequential cleanup: orphan executions must be marked before container cleanup,
 // and containers must be cleaned before sidecar pool init.

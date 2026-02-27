@@ -146,10 +146,14 @@ export async function setDefaultProxy(orgId: string, proxyId: string | null): Pr
 
 // --- Resolution ---
 
-export async function resolveProxyUrl(orgId: string, flowId: string): Promise<string | null> {
+export async function resolveProxyUrl(
+  orgId: string,
+  flowId: string,
+  config?: Record<string, unknown>,
+): Promise<string | null> {
   // 1. Check flow config for __proxyId
-  const config = await getFlowConfig(orgId, flowId);
-  const proxyId = config.__proxyId as string | undefined | null;
+  const resolved = config ?? (await getFlowConfig(orgId, flowId));
+  const proxyId = resolved.__proxyId as string | undefined | null;
 
   if (proxyId === "none") return null;
 
