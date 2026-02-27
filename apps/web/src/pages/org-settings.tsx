@@ -860,7 +860,7 @@ function ProxiesTab({
                   {p.isDefault && !isBuiltIn && (
                     <button onClick={onRemoveDefault}>{t("proxies.removeDefault")}</button>
                   )}
-                  {!p.isDefault && (
+                  {!p.isDefault && !isBuiltIn && (
                     <button onClick={() => onSetDefault(p)}>{t("proxies.setDefault")}</button>
                   )}
                   {!isBuiltIn && (
