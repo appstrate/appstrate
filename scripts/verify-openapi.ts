@@ -82,6 +82,9 @@ const expectedEndpoints = [
   "PUT /api/providers/{providerId}",
   "DELETE /api/providers/{providerId}",
 
+  // Provider Templates
+  "GET /api/provider-templates",
+
   // Connection Profiles
   "GET /api/connection-profiles",
   "POST /api/connection-profiles",

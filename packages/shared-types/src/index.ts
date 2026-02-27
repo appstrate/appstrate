@@ -9,6 +9,10 @@ export type {
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
+// --- Auth Mode ---
+
+export type AuthMode = "oauth2" | "oauth1" | "api_key" | "basic" | "custom" | "proxy";
+
 // --- Execution Types ---
 
 export type ExecutionStatus =
@@ -258,6 +262,32 @@ export interface Integration {
   connectedAt?: string;
 }
 
+// --- Provider Template Types ---
+
+export interface ProviderTemplateStep {
+  title: string;
+  description: string;
+  link?: string;
+  linkLabel?: string;
+}
+
+export interface ProviderTemplateSetupGuide {
+  steps: ProviderTemplateStep[];
+  callbackUrlHint?: string;
+}
+
+export interface ProviderTemplate {
+  templateId: string;
+  displayName: string;
+  description: string;
+  authMode: AuthMode;
+  iconUrl?: string;
+  categories?: string[];
+  docsUrl?: string;
+  providerDefaults: Record<string, unknown>;
+  setupGuide: ProviderTemplateSetupGuide;
+}
+
 // --- Available Scope Types ---
 
 export interface AvailableScope {
@@ -270,13 +300,15 @@ export interface AvailableScope {
 export interface ProviderConfig {
   id: string;
   displayName: string;
-  authMode: "oauth2" | "oauth1" | "api_key" | "basic" | "custom" | "proxy";
+  authMode: AuthMode;
   source: "built-in" | "custom";
   hasClientId: boolean;
   hasClientSecret: boolean;
   authorizationUrl?: string;
   tokenUrl?: string;
   refreshUrl?: string;
+  requestTokenUrl?: string;
+  accessTokenUrl?: string;
   defaultScopes?: string[];
   scopeSeparator?: string;
   pkceEnabled?: boolean;

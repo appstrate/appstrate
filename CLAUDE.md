@@ -48,7 +48,7 @@ appstrate/
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
-│   │   └── paths/            # One file per route domain (97 endpoints)
+│   │   └── paths/            # One file per route domain (105 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -186,14 +186,14 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 97 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 105 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-templates`, `proxies`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
 
 ## Database
 
@@ -233,7 +233,7 @@ Full schema: `packages/db/src/schema.ts` (28 tables, Drizzle ORM). Migrations: `
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** argument. Using `execute(args)` receives the toolCallId string.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
-- **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), `proxy` (outbound HTTP proxy — auto-sets `allowAllUris: true` and `credentialSchema` with URL field). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
+- **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `oauth1` (OAuth 1.0a with HMAC-SHA1 — uses `requestTokenUrl`/`accessTokenUrl`; `clientId`/`clientSecret` map to consumer key/secret), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), `proxy` (outbound HTTP proxy — auto-sets `allowAllUris: true` and `credentialSchema` with URL field). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
 - **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). Built-in proxies loaded from `data/proxies.json` + `SYSTEM_PROXIES` env var at boot. Flow-level override via `GET/PUT /api/flows/:id/proxy`. Cascade: flow override → org default → `PROXY_URL` env var.
 - **Execution lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
 

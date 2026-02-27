@@ -15,6 +15,10 @@ import {
   useSetDefaultProxy,
 } from "../hooks/use-proxies";
 import { ProviderFormModal } from "../components/provider-form-modal";
+import { ProviderTemplatePicker } from "../components/provider-template-picker";
+import { ProviderTemplateForm } from "../components/provider-template-form";
+import { authModeI18nKey } from "../lib/auth-mode";
+import type { ProviderTemplate } from "@appstrate/shared-types";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -52,6 +56,11 @@ export function OrgSettingsPage() {
   // Providers
   const [providerModalOpen, setProviderModalOpen] = useState(false);
   const [editProvider, setEditProvider] = useState<ProviderConfig | null>(null);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<{
+    template: ProviderTemplate;
+    callbackUrl: string;
+  } | null>(null);
   const { data: providers, isLoading: providersLoading, error: providersError } = useProviders();
   const createProviderMutation = useCreateProvider();
   const updateProviderMutation = useUpdateProvider();
@@ -553,8 +562,7 @@ export function OrgSettingsPage() {
           isLoading={providersLoading}
           error={providersError}
           onCreate={() => {
-            setEditProvider(null);
-            setProviderModalOpen(true);
+            setTemplatePickerOpen(true);
           }}
           onEdit={(p) => {
             setEditProvider(p);
@@ -599,6 +607,29 @@ export function OrgSettingsPage() {
             if (!confirm(t("apiKeys.revokeConfirm", { name: key.name }))) return;
             revokeApiKeyMutation.mutate(key.id);
           }}
+        />
+      )}
+
+      <ProviderTemplatePicker
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        onSelectTemplate={(template, callbackUrl) => {
+          setTemplatePickerOpen(false);
+          setSelectedTemplate({ template, callbackUrl });
+        }}
+        onSelectCustom={() => {
+          setTemplatePickerOpen(false);
+          setEditProvider(null);
+          setProviderModalOpen(true);
+        }}
+      />
+
+      {selectedTemplate && (
+        <ProviderTemplateForm
+          open={!!selectedTemplate}
+          onClose={() => setSelectedTemplate(null)}
+          template={selectedTemplate.template}
+          callbackUrl={selectedTemplate.callbackUrl}
         />
       )}
 
@@ -679,12 +710,6 @@ function ProvidersTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const authModeLabel: Record<string, string> = {
-    oauth2: t("providers.authMode.oauth2"),
-    api_key: t("providers.authMode.apiKey"),
-    basic: t("providers.authMode.basic"),
-    custom: t("providers.authMode.custom"),
-  };
 
   return (
     <>
@@ -728,7 +753,7 @@ function ProvidersTab({
                     </h3>
                     <div className="provider-badges">
                       <span className="badge badge-pending">
-                        {authModeLabel[p.authMode] ?? p.authMode}
+                        {t(authModeI18nKey(p.authMode), { defaultValue: p.authMode })}
                       </span>
                       {isBuiltIn && (
                         <span className="badge badge-dim">{t("providers.builtIn")}</span>

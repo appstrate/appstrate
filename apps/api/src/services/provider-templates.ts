@@ -1,0 +1,545 @@
+import type { ProviderTemplate } from "@appstrate/shared-types";
+
+const providerTemplates: ProviderTemplate[] = [
+  // --- OAuth2 Providers ---
+  {
+    templateId: "slack",
+    displayName: "Slack",
+    description: "Team messaging and workflow automation",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/slack",
+    categories: ["messaging", "productivity"],
+    docsUrl: "https://api.slack.com/docs",
+    providerDefaults: {
+      authorizationUrl: "https://slack.com/oauth/v2/authorize",
+      tokenUrl: "https://slack.com/api/oauth.v2.access",
+      defaultScopes: ["channels:read", "chat:write", "users:read"],
+      scopeSeparator: ",",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://slack.com/api/*"],
+      availableScopes: [
+        { value: "channels:read", label: "View channels" },
+        { value: "channels:history", label: "View channel messages" },
+        { value: "chat:write", label: "Send messages" },
+        { value: "users:read", label: "View users" },
+        { value: "users:read.email", label: "View user emails" },
+        { value: "files:read", label: "View files" },
+        { value: "files:write", label: "Upload files" },
+        { value: "reactions:read", label: "View reactions" },
+        { value: "reactions:write", label: "Add reactions" },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the redirect URL to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Slack app",
+          description:
+            'Go to the Slack API dashboard and create a new app. Choose "From scratch" and select your workspace.',
+          link: "https://api.slack.com/apps",
+          linkLabel: "Open Slack API",
+        },
+        {
+          title: "Configure OAuth & Permissions",
+          description:
+            'In your app settings, go to "OAuth & Permissions". Add the redirect URL below, then add the scopes you need under "Bot Token Scopes".',
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            'Go to "Basic Information" and copy your Client ID and Client Secret into the fields below.',
+        },
+      ],
+    },
+  },
+  {
+    templateId: "github",
+    displayName: "GitHub",
+    description: "Code hosting and collaboration platform",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/github/white",
+    categories: ["development", "code"],
+    docsUrl: "https://docs.github.com/en/apps/oauth-apps",
+    providerDefaults: {
+      authorizationUrl: "https://github.com/login/oauth/authorize",
+      tokenUrl: "https://github.com/login/oauth/access_token",
+      defaultScopes: ["repo", "read:user"],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://api.github.com/*"],
+      availableScopes: [
+        { value: "repo", label: "Full repository access" },
+        { value: "read:user", label: "Read user profile" },
+        { value: "user:email", label: "Read user emails" },
+        { value: "read:org", label: "Read org membership" },
+        { value: "gist", label: "Create gists" },
+        { value: "notifications", label: "Access notifications" },
+        { value: "workflow", label: "Update GitHub Actions workflows" },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the Authorization callback URL to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Register a new OAuth application",
+          description:
+            'Go to GitHub Developer Settings and click "New OAuth App". Fill in your application name and homepage URL.',
+          link: "https://github.com/settings/developers",
+          linkLabel: "Open GitHub Developer Settings",
+        },
+        {
+          title: "Set the callback URL",
+          description: "Set the Authorization callback URL to the redirect URI shown below.",
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            "After creating the app, copy the Client ID. Then generate a new Client Secret and paste both values below.",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "notion",
+    displayName: "Notion",
+    description: "All-in-one workspace for notes and docs",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/notion/white",
+    categories: ["productivity", "documentation"],
+    docsUrl: "https://developers.notion.com/",
+    providerDefaults: {
+      authorizationUrl: "https://api.notion.com/v1/oauth/authorize",
+      tokenUrl: "https://api.notion.com/v1/oauth/token",
+      defaultScopes: [],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_basic",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://api.notion.com/*"],
+      authorizationParams: { owner: "user" },
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the redirect URI to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Notion integration",
+          description:
+            'Go to "My integrations" in Notion and create a new integration. Choose "Public" as the integration type.',
+          link: "https://www.notion.so/my-integrations",
+          linkLabel: "Open Notion Integrations",
+        },
+        {
+          title: "Configure OAuth settings",
+          description:
+            "In the integration settings, go to the Distribution tab. Add the redirect URI shown below.",
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            "Copy the OAuth Client ID and OAuth Client Secret from the integration's Secrets tab.",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "hubspot",
+    displayName: "HubSpot",
+    description: "CRM, marketing, and sales platform",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/hubspot",
+    categories: ["crm", "marketing"],
+    docsUrl: "https://developers.hubspot.com/docs/api/overview",
+    providerDefaults: {
+      authorizationUrl: "https://app.hubspot.com/oauth/authorize",
+      tokenUrl: "https://api.hubapi.com/oauth/v1/token",
+      refreshUrl: "https://api.hubapi.com/oauth/v1/token",
+      defaultScopes: ["crm.objects.contacts.read"],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://api.hubapi.com/*"],
+      availableScopes: [
+        { value: "crm.objects.contacts.read", label: "Read contacts" },
+        { value: "crm.objects.contacts.write", label: "Write contacts" },
+        { value: "crm.objects.companies.read", label: "Read companies" },
+        { value: "crm.objects.companies.write", label: "Write companies" },
+        { value: "crm.objects.deals.read", label: "Read deals" },
+        { value: "crm.objects.deals.write", label: "Write deals" },
+        { value: "content", label: "Content access" },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the redirect URL to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a HubSpot app",
+          description:
+            "Go to the HubSpot developer portal, create a developer account if needed, then create a new app.",
+          link: "https://developers.hubspot.com/",
+          linkLabel: "Open HubSpot Developer Portal",
+        },
+        {
+          title: "Configure OAuth settings",
+          description:
+            'In your app settings, go to the "Auth" tab. Add the redirect URL below and select the scopes your app needs.',
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            'Copy the Client ID and Client Secret from the "Auth" tab and paste them below.',
+        },
+      ],
+    },
+  },
+
+  {
+    templateId: "gmail",
+    displayName: "Gmail",
+    description: "Email service by Google",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/gmail",
+    categories: ["email", "productivity"],
+    docsUrl: "https://developers.google.com/workspace/gmail/api",
+    providerDefaults: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      refreshUrl: "https://oauth2.googleapis.com/token",
+      defaultScopes: [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+      ],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://gmail.googleapis.com/*", "https://www.googleapis.com/gmail/*"],
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+      availableScopes: [
+        { value: "https://www.googleapis.com/auth/gmail.readonly", label: "Read-only access" },
+        { value: "https://www.googleapis.com/auth/gmail.send", label: "Send messages" },
+        { value: "https://www.googleapis.com/auth/gmail.compose", label: "Compose & send drafts" },
+        {
+          value: "https://www.googleapis.com/auth/gmail.modify",
+          label: "Read & write (no delete)",
+        },
+        { value: "https://www.googleapis.com/auth/gmail.labels", label: "Manage labels" },
+        { value: "https://www.googleapis.com/auth/gmail.metadata", label: "Read metadata only" },
+        { value: "https://www.googleapis.com/auth/gmail.insert", label: "Insert messages" },
+        {
+          value: "https://www.googleapis.com/auth/gmail.settings.basic",
+          label: "Manage basic settings",
+        },
+        { value: "https://mail.google.com/", label: "Full mailbox access" },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the authorized redirect URI to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Google Cloud project",
+          description:
+            "Go to the Google Cloud Console. Create a new project (or select an existing one), then enable the Gmail API from the API Library.",
+          link: "https://console.cloud.google.com/apis/library/gmail.googleapis.com",
+          linkLabel: "Open Google Cloud Console",
+        },
+        {
+          title: "Configure the OAuth consent screen",
+          description:
+            'Go to "OAuth consent screen" in the APIs & Services section. Choose "External" user type, fill in the app name and contact info, then add the Gmail scopes you need.',
+          link: "https://console.cloud.google.com/apis/credentials/consent",
+          linkLabel: "Open Consent Screen",
+        },
+        {
+          title: "Create OAuth credentials",
+          description:
+            'Go to "Credentials", click "Create Credentials" > "OAuth client ID". Choose "Web application", add the redirect URI shown below, then copy the Client ID and Client Secret.',
+          link: "https://console.cloud.google.com/apis/credentials",
+          linkLabel: "Open Credentials",
+        },
+      ],
+    },
+  },
+
+  {
+    templateId: "trello",
+    displayName: "Trello",
+    description: "Project management and collaboration boards",
+    authMode: "oauth1",
+    iconUrl: "https://cdn.simpleicons.org/trello",
+    categories: ["productivity", "project-management"],
+    docsUrl: "https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/",
+    providerDefaults: {
+      requestTokenUrl: "https://trello.com/1/OAuthGetRequestToken",
+      authorizationUrl: "https://trello.com/1/OAuthAuthorizeToken",
+      accessTokenUrl: "https://trello.com/1/OAuthGetAccessToken",
+      authorizationParams: {
+        name: "Appstrate",
+        scope: "read,write",
+        expiration: "never",
+      },
+      authorizedUris: ["https://api.trello.com/*"],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the allowed origins to include: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Trello Power-Up",
+          description:
+            "Go to the Trello Power-Ups admin page and create a new Power-Up. Enter a name and select your Workspace.",
+          link: "https://trello.com/power-ups/admin",
+          linkLabel: "Open Trello Power-Ups Admin",
+        },
+        {
+          title: "Generate an API key",
+          description:
+            'In your Power-Up settings, go to the "API Key" tab. Generate a new API key if needed. This is your Client ID (Consumer Key).',
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            "Copy the API Key as Client ID and the Secret (shown on the same page) as Client Secret into the fields below.",
+        },
+      ],
+    },
+  },
+
+  // --- API Key Providers ---
+  {
+    templateId: "stripe",
+    displayName: "Stripe",
+    description: "Payment processing platform",
+    authMode: "api_key",
+    iconUrl: "https://cdn.simpleicons.org/stripe",
+    categories: ["payments", "finance"],
+    docsUrl: "https://stripe.com/docs/api",
+    providerDefaults: {
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://api.stripe.com/*"],
+    },
+    setupGuide: {
+      steps: [
+        {
+          title: "Get your API key",
+          description:
+            'Go to the Stripe Dashboard and navigate to Developers > API Keys. Copy your Secret key (starts with "sk_").',
+          link: "https://dashboard.stripe.com/apikeys",
+          linkLabel: "Open Stripe Dashboard",
+        },
+        {
+          title: "Connect on the Connectors page",
+          description:
+            "After creating this provider, go to the Connectors page to add your API key.",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "brevo",
+    displayName: "Brevo",
+    description: "Email marketing and CRM platform",
+    authMode: "api_key",
+    iconUrl: "https://cdn.simpleicons.org/brevo",
+    categories: ["email", "marketing", "crm"],
+    docsUrl: "https://developers.brevo.com/docs/getting-started",
+    providerDefaults: {
+      credentialHeaderName: "api-key",
+      credentialHeaderPrefix: "",
+      authorizedUris: ["https://api.brevo.com/*"],
+    },
+    setupGuide: {
+      steps: [
+        {
+          title: "Get your API key",
+          description:
+            "Go to the Brevo dashboard, navigate to Settings > API Keys, and create a new API v3 key.",
+          link: "https://app.brevo.com/settings/keys/api",
+          linkLabel: "Open Brevo API Keys",
+        },
+        {
+          title: "Connect on the Connectors page",
+          description:
+            "After creating this provider, go to the Connectors page to add your API key.",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "google-drive",
+    displayName: "Google Drive",
+    description: "Cloud file storage and synchronization",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/googledrive",
+    categories: ["storage", "productivity"],
+    docsUrl: "https://developers.google.com/workspace/drive/api",
+    providerDefaults: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      refreshUrl: "https://oauth2.googleapis.com/token",
+      defaultScopes: ["https://www.googleapis.com/auth/drive.file"],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: [
+        "https://www.googleapis.com/drive/*",
+        "https://www.googleapis.com/upload/drive/*",
+      ],
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+      availableScopes: [
+        {
+          value: "https://www.googleapis.com/auth/drive.file",
+          label: "Per-file access (recommended)",
+        },
+        { value: "https://www.googleapis.com/auth/drive.readonly", label: "Read-only access" },
+        { value: "https://www.googleapis.com/auth/drive", label: "Full access" },
+        {
+          value: "https://www.googleapis.com/auth/drive.metadata.readonly",
+          label: "Read metadata only",
+        },
+        { value: "https://www.googleapis.com/auth/drive.appdata", label: "App data folder" },
+        {
+          value: "https://www.googleapis.com/auth/drive.photos.readonly",
+          label: "Read photos/videos",
+        },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the authorized redirect URI to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Google Cloud project",
+          description:
+            "Go to the Google Cloud Console. Create a new project (or select an existing one), then enable the Google Drive API from the API Library.",
+          link: "https://console.cloud.google.com/apis/library/drive.googleapis.com",
+          linkLabel: "Open Google Cloud Console",
+        },
+        {
+          title: "Configure the OAuth consent screen",
+          description:
+            'Go to "OAuth consent screen" in the APIs & Services section. Choose "External" user type, fill in the app name and contact info, then add the Drive scopes you need.',
+          link: "https://console.cloud.google.com/apis/credentials/consent",
+          linkLabel: "Open Consent Screen",
+        },
+        {
+          title: "Create OAuth credentials",
+          description:
+            'Go to "Credentials", click "Create Credentials" > "OAuth client ID". Choose "Web application", add the redirect URI shown below, then copy the Client ID and Client Secret.',
+          link: "https://console.cloud.google.com/apis/credentials",
+          linkLabel: "Open Credentials",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "google-sheets",
+    displayName: "Google Sheets",
+    description: "Online spreadsheet editor",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/googlesheets",
+    categories: ["productivity", "spreadsheets"],
+    docsUrl: "https://developers.google.com/workspace/sheets/api",
+    providerDefaults: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      refreshUrl: "https://oauth2.googleapis.com/token",
+      defaultScopes: ["https://www.googleapis.com/auth/spreadsheets"],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://sheets.googleapis.com/*"],
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+      availableScopes: [
+        { value: "https://www.googleapis.com/auth/spreadsheets", label: "Full spreadsheet access" },
+        {
+          value: "https://www.googleapis.com/auth/spreadsheets.readonly",
+          label: "Read-only access",
+        },
+        {
+          value: "https://www.googleapis.com/auth/drive.file",
+          label: "Per-file access (recommended)",
+        },
+      ],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the authorized redirect URI to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a Google Cloud project",
+          description:
+            "Go to the Google Cloud Console. Create a new project (or select an existing one), then enable the Google Sheets API from the API Library.",
+          link: "https://console.cloud.google.com/apis/library/sheets.googleapis.com",
+          linkLabel: "Open Google Cloud Console",
+        },
+        {
+          title: "Configure the OAuth consent screen",
+          description:
+            'Go to "OAuth consent screen" in the APIs & Services section. Choose "External" user type, fill in the app name and contact info, then add the Sheets scopes you need.',
+          link: "https://console.cloud.google.com/apis/credentials/consent",
+          linkLabel: "Open Consent Screen",
+        },
+        {
+          title: "Create OAuth credentials",
+          description:
+            'Go to "Credentials", click "Create Credentials" > "OAuth client ID". Choose "Web application", add the redirect URI shown below, then copy the Client ID and Client Secret.',
+          link: "https://console.cloud.google.com/apis/credentials",
+          linkLabel: "Open Credentials",
+        },
+      ],
+    },
+  },
+  {
+    templateId: "clickup",
+    displayName: "ClickUp",
+    description: "Project management and productivity platform",
+    authMode: "oauth2",
+    iconUrl: "https://cdn.simpleicons.org/clickup",
+    categories: ["productivity", "project-management"],
+    docsUrl: "https://developer.clickup.com/docs/Getting%20Started",
+    providerDefaults: {
+      authorizationUrl: "https://app.clickup.com/api",
+      tokenUrl: "https://api.clickup.com/api/v2/oauth/token",
+      defaultScopes: [],
+      scopeSeparator: " ",
+      pkceEnabled: false,
+      tokenAuthMethod: "client_secret_post",
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      authorizedUris: ["https://api.clickup.com/*"],
+    },
+    setupGuide: {
+      callbackUrlHint: "Set the redirect URL to: {{callbackUrl}}",
+      steps: [
+        {
+          title: "Create a ClickUp app",
+          description:
+            'Go to ClickUp Settings > Integrations > ClickUp API, then click "Create an App". Enter your app name and the redirect URL shown below.',
+          link: "https://app.clickup.com/settings",
+          linkLabel: "Open ClickUp Settings",
+        },
+        {
+          title: "Copy your credentials",
+          description:
+            "After creating the app, copy the Client ID and Client Secret and paste them into the fields below.",
+        },
+      ],
+    },
+  },
+];
+
+export function getProviderTemplates(): ProviderTemplate[] {
+  return providerTemplates;
+}
