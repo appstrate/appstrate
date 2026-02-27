@@ -51,12 +51,16 @@ export function ExecutionDetailPage() {
   const { data: execution, isLoading, error } = useExecution(execId);
   const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
+  const [trackedExecId, setTrackedExecId] = useState(execId);
 
   // Reset live status when switching to a different execution (e.g. re-run navigates
   // to a new execId on the same route, so React reuses the component instance).
-  useEffect(() => {
+  // Using the "state derived from props" pattern (setState during render) avoids
+  // the cascading-render lint warning from calling setState inside useEffect.
+  if (execId !== trackedExecId) {
+    setTrackedExecId(execId);
     setLiveStatus(null);
-  }, [execId]);
+  }
 
   const status = liveStatus || execution?.status;
   const isRunning = status === "running" || status === "pending";
