@@ -11,22 +11,26 @@ import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { refreshIfNeeded } from "./token-refresh.ts";
 
 /**
- * Get a connection by profile + provider.
+ * Get a connection by profile + provider, optionally filtered by configHash.
  */
 export async function getConnection(
   db: Db,
   profileId: string,
   providerId: string,
+  configHash?: string,
 ): Promise<ConnectionRecord | null> {
+  const conditions = [
+    eq(serviceConnections.profileId, profileId),
+    eq(serviceConnections.providerId, providerId),
+  ];
+  if (configHash) {
+    conditions.push(eq(serviceConnections.configHash, configHash));
+  }
+
   const rows = await db
     .select()
     .from(serviceConnections)
-    .where(
-      and(
-        eq(serviceConnections.profileId, profileId),
-        eq(serviceConnections.providerId, providerId),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -53,8 +57,9 @@ export async function getCredentials(
   db: Db,
   profileId: string,
   providerId: string,
+  configHash?: string,
 ): Promise<{ credentials: Record<string, string>; connection: ConnectionRecord } | null> {
-  const connection = await getConnection(db, profileId, providerId);
+  const connection = await getConnection(db, profileId, providerId, configHash);
   if (!connection) return null;
 
   let decrypted: DecryptedCredentials;
@@ -90,12 +95,13 @@ export async function resolveCredentialsForProxy(
   db: Db,
   profileId: string,
   providerId: string,
+  configHash?: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, profileId, providerId);
+  const result = await getCredentials(db, profileId, providerId, configHash);
   if (!result) return null;
 
   const snapshot = result.connection.providerSnapshot;
@@ -125,7 +131,9 @@ export async function resolveCredentialsForProxy(
 }
 
 /**
- * Save a connection (atomic upsert via transaction: delete + insert).
+ * Save a connection (upsert on profileId + providerId + configHash).
+ * Same configHash → updates existing connection (reconnection with identical config).
+ * Different configHash → inserts a new row (new provider config from another org).
  */
 export async function saveConnection(
   db: Db,
@@ -143,19 +151,9 @@ export async function saveConnection(
 ): Promise<void> {
   const encrypted = encryptCredentials(credentials);
 
-  await db.transaction(async (tx) => {
-    // Delete existing connection
-    await tx
-      .delete(serviceConnections)
-      .where(
-        and(
-          eq(serviceConnections.profileId, profileId),
-          eq(serviceConnections.providerId, providerId),
-        ),
-      );
-
-    // Insert new connection
-    await tx.insert(serviceConnections).values({
+  await db
+    .insert(serviceConnections)
+    .values({
       profileId,
       providerId,
       authMode,
@@ -166,12 +164,23 @@ export async function saveConnection(
       providerSnapshot,
       configHash,
       updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [serviceConnections.profileId, serviceConnections.providerId, serviceConnections.configHash],
+      set: {
+        authMode,
+        credentialsEncrypted: encrypted,
+        scopesGranted: options?.scopesGranted ?? [],
+        expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+        rawTokenResponse: options?.rawTokenResponse ?? null,
+        providerSnapshot,
+        updatedAt: new Date(),
+      },
     });
-  });
 }
 
 /**
- * Delete a connection.
+ * Delete all connections for a provider on a profile.
  */
 export async function deleteConnection(
   db: Db,
@@ -186,6 +195,18 @@ export async function deleteConnection(
         eq(serviceConnections.providerId, providerId),
       ),
     );
+}
+
+/**
+ * Delete a single connection by its ID.
+ */
+export async function deleteConnectionById(
+  db: Db,
+  connectionId: string,
+): Promise<void> {
+  await db
+    .delete(serviceConnections)
+    .where(eq(serviceConnections.id, connectionId));
 }
 
 // --- Internal helpers ---

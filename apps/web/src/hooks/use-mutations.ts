@@ -145,10 +145,16 @@ export function useConnectApiKey() {
 export function useDisconnect() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (params: string | { provider: string; profileId?: string }) => {
+    mutationFn: async (
+      params: string | { provider: string; profileId?: string; connectionId?: string },
+    ) => {
       const provider = typeof params === "string" ? params : params.provider;
       const profileId = typeof params === "string" ? undefined : params.profileId;
-      const qs = profileId ? `?profileId=${profileId}` : "";
+      const connectionId = typeof params === "string" ? undefined : params.connectionId;
+      const qsParts: string[] = [];
+      if (connectionId) qsParts.push(`connectionId=${connectionId}`);
+      else if (profileId) qsParts.push(`profileId=${profileId}`);
+      const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
       return apiFetch(`/auth/connections/${provider}${qs}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateServiceRelated(qc),

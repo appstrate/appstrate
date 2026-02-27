@@ -1,0 +1,2 @@
+DROP INDEX "idx_service_connections_unique";--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_service_connections_unique" ON "service_connections" USING btree ("profile_id","provider_id","config_hash");

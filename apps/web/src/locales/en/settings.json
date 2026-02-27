@@ -239,6 +239,8 @@
   "connectors.deleteConfirm": "Delete {{provider}} connection from profile {{profile}}?",
   "connectors.orgValid": "Valid for {{org}}",
   "connectors.orgNeedsReconnection": "Reconnection needed for {{org}}",
+  "connectors.unused": "Unused",
+  "connectors.unusedHint": "This connection doesn't match any organization's configuration",
   "connectors.authMode.oauth2": "OAuth",
   "connectors.authMode.api_key": "API Key",
   "connectors.authMode.basic": "Basic",
