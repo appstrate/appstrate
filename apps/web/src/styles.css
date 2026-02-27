@@ -755,6 +755,15 @@ button:disabled {
   margin-bottom: 0.375rem;
 }
 
+.result-item-meta a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.result-item-meta a:hover {
+  text-decoration: underline;
+}
+
 .result-item-content {
   font-size: 0.8rem;
   color: var(--text-muted);
