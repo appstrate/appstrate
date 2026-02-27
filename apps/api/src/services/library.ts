@@ -453,12 +453,16 @@ export async function getFlowSkillFiles(
     .from(flowSkills)
     .where(and(eq(flowSkills.flowId, flowId), eq(flowSkills.orgId, orgId)));
 
+  const entries = await Promise.all(
+    data.map(async (row) => {
+      const files = await downloadLibraryPackage("skills", orgId, row.skillId);
+      return [row.skillId, files] as const;
+    }),
+  );
+
   const result = new Map<string, Record<string, Uint8Array>>();
-  for (const row of data) {
-    const files = await downloadLibraryPackage("skills", orgId, row.skillId);
-    if (files) {
-      result.set(row.skillId, files);
-    }
+  for (const [id, files] of entries) {
+    if (files) result.set(id, files);
   }
   return result;
 }
@@ -473,12 +477,16 @@ export async function getFlowExtensionFiles(
     .from(flowExtensions)
     .where(and(eq(flowExtensions.flowId, flowId), eq(flowExtensions.orgId, orgId)));
 
+  const entries = await Promise.all(
+    data.map(async (row) => {
+      const files = await downloadLibraryPackage("extensions", orgId, row.extensionId);
+      return [row.extensionId, files] as const;
+    }),
+  );
+
   const result = new Map<string, Record<string, Uint8Array>>();
-  for (const row of data) {
-    const files = await downloadLibraryPackage("extensions", orgId, row.extensionId);
-    if (files) {
-      result.set(row.extensionId, files);
-    }
+  for (const [id, files] of entries) {
+    if (files) result.set(id, files);
   }
   return result;
 }
