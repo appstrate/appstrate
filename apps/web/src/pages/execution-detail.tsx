@@ -173,7 +173,7 @@ export function ExecutionDetailPage() {
   const displayStatus = status || execution.status;
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
   const time = execution.duration ?? elapsed;
-  const duration = isRunning ? `${(time / 1000).toFixed(1)}s` : "";
+  const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
   const userName = execution.userId ? profileMap.get(execution.userId) : undefined;
 
   return (
