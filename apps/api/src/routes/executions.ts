@@ -309,16 +309,23 @@ export function createExecutionsRouter() {
     const flowId = flow.id;
     const profileIdOverride = c.req.query("profileId");
 
-    // Resolve service profiles (user profile + admin connections)
-    const serviceProfiles = await resolveServiceProfiles(
-      flow.manifest.requires.services,
-      user.id,
-      flowId,
-      orgId,
-      profileIdOverride,
-    );
+    // Run independent pre-flight operations in parallel
+    const [serviceProfiles, config, userProfileId, inputResult] = await Promise.all([
+      resolveServiceProfiles(
+        flow.manifest.requires.services,
+        user.id,
+        flowId,
+        orgId,
+        profileIdOverride,
+      ),
+      getFlowConfig(orgId, flowId),
+      profileIdOverride
+        ? Promise.resolve(profileIdOverride)
+        : getEffectiveProfileId(user.id, flowId),
+      parseRequestInput(c, flow.manifest.input?.schema),
+    ]);
 
-    // Validate service dependencies
+    // Validate service dependencies (needs serviceProfiles)
     const depError = await validateFlowDependencies(
       flow.manifest.requires.services,
       serviceProfiles,
@@ -329,7 +336,6 @@ export function createExecutionsRouter() {
     }
 
     // Validate config
-    const config = await getFlowConfig(orgId, flowId);
     const configSchema = flow.manifest.config?.schema ?? {
       type: "object" as const,
       properties: {},
@@ -347,8 +353,6 @@ export function createExecutionsRouter() {
       );
     }
 
-    const inputSchema = flow.manifest.input?.schema;
-    const inputResult = await parseRequestInput(c, inputSchema);
     if (!inputResult.ok) {
       return c.json(inputResult.error, inputResult.status);
     }
@@ -363,9 +367,6 @@ export function createExecutionsRouter() {
       type: f.type,
       size: f.size,
     }));
-
-    // Get user's effective profile for snapshot
-    const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(user.id, flowId));
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({

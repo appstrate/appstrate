@@ -1,5 +1,4 @@
-import { execSync } from "node:child_process";
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getModel } from "@mariozechner/pi-ai";
 import {
@@ -24,6 +23,13 @@ function die(message: string): never {
   process.exit(1);
 }
 
+async function run(cmd: string[]): Promise<void> {
+  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
+  await proc.exited;
+}
+
+const exists = (p: string) => fs.access(p).then(() => true, () => false);
+
 /** Unwrap the default export from a dynamically imported module.
  *  Some bundlers double-wrap: mod.default may be a module namespace
  *  whose own .default holds the actual function. Walk up to 2 levels. */
@@ -39,9 +45,11 @@ function resolveDefaultExport(mod: Record<string, unknown>): unknown {
 
 const WORKSPACE = "/workspace";
 try {
-  execSync("git init -q " + WORKSPACE);
-  execSync(`git -C ${WORKSPACE} config user.email "pi@appstrate.local"`);
-  execSync(`git -C ${WORKSPACE} config user.name "Pi"`);
+  await run(["git", "init", "-q", WORKSPACE]);
+  await Promise.all([
+    run(["git", "-C", WORKSPACE, "config", "user.email", "pi@appstrate.local"]),
+    run(["git", "-C", WORKSPACE, "config", "user.name", "Pi"]),
+  ]);
 } catch {
   // Non-fatal — git init may fail if already initialized
 }
@@ -56,8 +64,8 @@ const loadedExtensionIds = new Set<string>();
  * Uses native import() — Bun handles TypeScript natively without tsx.
  */
 async function loadExtensionsFromDir(dir: string, label: string) {
-  if (!fs.existsSync(dir)) return;
-  for (const entry of fs.readdirSync(dir)) {
+  if (!(await exists(dir))) return;
+  for (const entry of await fs.readdir(dir)) {
     if (!entry.endsWith(".ts")) continue;
     const id = entry.replace(/\.ts$/, "");
     if (loadedExtensionIds.has(id)) continue;
@@ -82,23 +90,24 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
 const packagePath = path.join(WORKSPACE, "flow-package.zip");
 
-if (fs.existsSync(packagePath)) {
+if (await exists(packagePath)) {
   try {
-    execSync(`unzip -qo ${packagePath} -d ${WORKSPACE}/.flow-package`);
+    await run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.flow-package`]);
 
     // Install skills
     const skillsDir = path.join(WORKSPACE, ".flow-package", "skills");
-    if (fs.existsSync(skillsDir)) {
+    if (await exists(skillsDir)) {
       const piSkillsDir = path.join(WORKSPACE, ".pi", "skills");
-      execSync(`mkdir -p ${piSkillsDir} && cp -r ${skillsDir}/* ${piSkillsDir}/`);
+      await fs.mkdir(piSkillsDir, { recursive: true });
+      await run(["cp", "-r", `${skillsDir}/.`, piSkillsDir]);
       emit({ type: "text_delta", text: "Installed skills from flow package\n" });
     }
 
     // Ensure node_modules resolution works for dynamically imported extensions
     const workspaceNodeModules = path.join(WORKSPACE, "node_modules");
-    if (!fs.existsSync(workspaceNodeModules)) {
+    if (!(await exists(workspaceNodeModules))) {
       try {
-        fs.symlinkSync("/runtime/node_modules", workspaceNodeModules);
+        await fs.symlink("/runtime/node_modules", workspaceNodeModules);
       } catch {
         // Non-fatal — Bun resolves from parent dirs too
       }
@@ -108,7 +117,7 @@ if (fs.existsSync(packagePath)) {
     await loadExtensionsFromDir(path.join(WORKSPACE, ".flow-package", "extensions"), "flow-package");
 
     // Cleanup extracted package
-    execSync(`rm -rf ${WORKSPACE}/.flow-package ${packagePath}`);
+    await run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]);
   } catch (err) {
     emit({ type: "error", message: `Failed to extract flow package: ${err}` });
   }

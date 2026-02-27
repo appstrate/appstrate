@@ -24,9 +24,9 @@ export async function validateFlowDependencies(
   serviceProfiles: Record<string, string>,
   orgId: string,
 ): Promise<DependencyError | null> {
+  // Check for missing profiles first (no async needed)
   for (const svc of services) {
     const profileId = serviceProfiles[svc.id];
-
     if (!profileId) {
       const mode = svc.connectionMode ?? "user";
       if (mode === "admin") {
@@ -43,8 +43,17 @@ export async function validateFlowDependencies(
         connectUrl: `/auth/connect/${svc.provider}`,
       };
     }
+  }
 
-    const conn = await getConnectionStatus(svc.provider, profileId, orgId);
+  // Fetch all connection statuses in parallel (all services have profiles at this point)
+  const statuses = await Promise.all(
+    services.map((svc) => getConnectionStatus(svc.provider, serviceProfiles[svc.id]!, orgId)),
+  );
+
+  for (let i = 0; i < services.length; i++) {
+    const svc = services[i]!;
+    const conn = statuses[i]!;
+
     if (conn.status === "not_connected") {
       return {
         error: "DEPENDENCY_NOT_SATISFIED",
@@ -63,7 +72,6 @@ export async function validateFlowDependencies(
       };
     }
 
-    // Scope validation
     if (svc.scopes && svc.scopes.length > 0 && conn.scopesGranted) {
       const scopeResult = validateScopes(conn.scopesGranted, svc.scopes);
       if (!scopeResult.sufficient) {
