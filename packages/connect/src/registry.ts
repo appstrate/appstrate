@@ -101,6 +101,8 @@ function rowToDefinition(row: ProviderConfig): ProviderDefinition {
     availableScopes: (row.availableScopes as ProviderDefinition["availableScopes"])?.length
       ? (row.availableScopes as ProviderDefinition["availableScopes"])
       : undefined,
+    requestTokenUrl: row.requestTokenUrl ?? undefined,
+    accessTokenUrl: row.accessTokenUrl ?? undefined,
   };
 }
 
@@ -201,6 +203,47 @@ export async function getProviderOAuthCredentials(
     clientId: decrypt(row.clientIdEncrypted),
     clientSecret: decrypt(row.clientSecretEncrypted),
   };
+}
+
+/**
+ * Get OAuth1 consumer credentials for a provider or throw if not configured.
+ * Checks inline credentials (consumerKey/consumerSecret) first, then falls back
+ * to the DB config columns (clientIdEncrypted/clientSecretEncrypted reused).
+ */
+export async function getProviderOAuth1CredentialsOrThrow(
+  db: Db,
+  orgId: string,
+  providerId: string,
+): Promise<{ consumerKey: string; consumerSecret: string }> {
+  // 1. Check built-in provider's inline credentials
+  const builtIn = ensureInit().get(providerId);
+  if (builtIn?.consumerKey && builtIn?.consumerSecret) {
+    return { consumerKey: builtIn.consumerKey, consumerSecret: builtIn.consumerSecret };
+  }
+
+  // 2. Fall back to DB config (reuses clientId/clientSecret columns)
+  const rows = await db
+    .select({
+      clientIdEncrypted: providerConfigs.clientIdEncrypted,
+      clientSecretEncrypted: providerConfigs.clientSecretEncrypted,
+    })
+    .from(providerConfigs)
+    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+    .limit(1);
+
+  if (rows.length > 0) {
+    const row = rows[0]!;
+    if (row.clientIdEncrypted && row.clientSecretEncrypted) {
+      return {
+        consumerKey: decrypt(row.clientIdEncrypted),
+        consumerSecret: decrypt(row.clientSecretEncrypted),
+      };
+    }
+  }
+
+  throw new Error(
+    `No OAuth1 consumer credentials configured for provider '${providerId}'. Set SYSTEM_PROVIDERS env var or configure via admin.`,
+  );
 }
 
 /**

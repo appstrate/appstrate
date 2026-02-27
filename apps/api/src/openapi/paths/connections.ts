@@ -76,9 +76,9 @@ export const connectionsPaths = {
     post: {
       operationId: "connectOAuth",
       tags: ["Connections"],
-      summary: "Start OAuth2 flow",
+      summary: "Start OAuth connection flow",
       description:
-        "Initiates OAuth2 authorization flow. Returns `authorizationUrl` to redirect the user.",
+        "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "provider", in: "path", required: true, schema: { type: "string" } },
@@ -177,17 +177,49 @@ export const connectionsPaths = {
     get: {
       operationId: "oauthCallback",
       tags: ["Connections"],
-      summary: "OAuth2 callback",
+      summary: "OAuth2/OAuth1 callback",
       description:
-        "OAuth2 callback handler — exchanges authorization code for tokens. Redirects to the frontend.",
+        "OAuth callback handler. Supports both OAuth2 (code+state) and OAuth1 (oauth_token+oauth_verifier). Exchanges tokens and closes the popup window.",
       security: [],
       parameters: [
-        { name: "code", in: "query", required: true, schema: { type: "string" } },
-        { name: "state", in: "query", required: true, schema: { type: "string" } },
+        {
+          name: "code",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "OAuth2 authorization code",
+        },
+        {
+          name: "state",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "OAuth2 state parameter",
+        },
+        {
+          name: "oauth_token",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "OAuth1 request token",
+        },
+        {
+          name: "oauth_verifier",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "OAuth1 verifier",
+        },
+        {
+          name: "error",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "OAuth error code",
+        },
       ],
       responses: {
-        "200": { description: "Tokens exchanged successfully (redirects via 302)" },
-        "302": { description: "Redirect to frontend" },
+        "200": { description: "Tokens exchanged successfully, popup closes" },
       },
     },
   },

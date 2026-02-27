@@ -25,6 +25,8 @@ import { getEnv } from "@appstrate/env";
 import {
   initiateOAuth,
   handleOAuthCallback,
+  initiateOAuth1,
+  handleOAuth1Callback,
   saveConnection,
   getConnection,
   listConnections as listConnectionsRaw,
@@ -38,6 +40,7 @@ import {
   type ProviderDefinition,
   type InitiateOAuthResult,
   type OAuthCallbackResult,
+  type OAuth1CallbackResult,
   type ScopeValidationResult,
 } from "@appstrate/connect";
 import { computeConfigHash, buildProviderSnapshot } from "./connection-profiles.ts";
@@ -66,8 +69,23 @@ export type {
   ProviderDefinition,
   InitiateOAuthResult,
   OAuthCallbackResult,
+  OAuth1CallbackResult,
   ScopeValidationResult,
 };
+
+/** Map provider authMode to the uppercase label exposed in API responses. */
+function authModeLabel(authMode: string | undefined): string {
+  switch (authMode) {
+    case "api_key":
+      return "API_KEY";
+    case "proxy":
+      return "PROXY";
+    case "oauth1":
+      return "OAUTH1";
+    default:
+      return "OAUTH2";
+  }
+}
 
 // ─── Connection Status ───────────────────────────────────────
 
@@ -124,6 +142,13 @@ export async function initiateConnection(
 ): Promise<{ authUrl: string; state: string }> {
   const apiEnv = getEnv();
   const redirectUri = apiEnv.OAUTH_CALLBACK_URL ?? `http://localhost:${apiEnv.PORT}/auth/callback`;
+
+  // Route to OAuth1 if the provider uses it
+  const providerDef = await getProvider(db, orgId, provider);
+  if (providerDef?.authMode === "oauth1") {
+    return initiateOAuth1(db, orgId, userId, profileId, provider, redirectUri);
+  }
+
   return initiateOAuth(db, orgId, userId, profileId, provider, redirectUri, requestedScopes);
 }
 
@@ -154,6 +179,38 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     providerId: result.providerId,
     profileId: result.profileId,
     scopes: result.scopesGranted,
+  });
+
+  return result;
+}
+
+// ─── OAuth1 Callback ────────────────────────────────────────
+
+export async function handleOAuth1CallbackAndSave(
+  oauthToken: string,
+  oauthVerifier: string,
+): Promise<OAuth1CallbackResult> {
+  const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
+
+  const { snapshot, configHash } = await getProviderSnapshot(result.orgId, result.providerId);
+
+  await saveConnection(
+    db,
+    result.profileId,
+    result.providerId,
+    "oauth1",
+    {
+      consumer_key: result.consumerKey,
+      access_token: result.accessToken,
+      access_token_secret: result.accessTokenSecret,
+    },
+    snapshot,
+    configHash,
+  );
+
+  logger.info("OAuth1 connection established", {
+    providerId: result.providerId,
+    profileId: result.profileId,
   });
 
   return result;
@@ -260,12 +317,7 @@ export async function getIntegrationsWithStatus(
       displayName: provider.displayName,
       logo: provider.iconUrl ?? "",
       status,
-      authMode:
-        provider.authMode === "api_key"
-          ? "API_KEY"
-          : provider.authMode === "proxy"
-            ? "PROXY"
-            : "OAUTH2",
+      authMode: authModeLabel(provider.authMode),
       connectionId: conn?.id,
       connectedAt: conn?.createdAt,
     };
@@ -312,8 +364,7 @@ export async function resolveServiceStatuses(
       };
 
       const authMode = await getProviderAuthMode(svc.provider, orgId);
-      const authModeLabel =
-        authMode === "api_key" ? "API_KEY" : authMode === "proxy" ? "PROXY" : "OAUTH2";
+      const label = authModeLabel(authMode);
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
 
       if (mode === "admin") {
@@ -323,7 +374,7 @@ export async function resolveServiceStatuses(
           return {
             ...base,
             status: conn.status,
-            authMode: authModeLabel,
+            authMode: label,
             connectionMode: "admin" as const,
             adminProvided: true,
             ...buildScopeInfo(conn.scopesGranted, scopesRequired, conn.status === "connected"),
@@ -332,7 +383,7 @@ export async function resolveServiceStatuses(
         return {
           ...base,
           status: "not_connected" as const,
-          authMode: authModeLabel,
+          authMode: label,
           connectionMode: "admin" as const,
           adminProvided: false,
           ...(scopesRequired ? { scopesRequired } : {}),
@@ -346,7 +397,7 @@ export async function resolveServiceStatuses(
       return {
         ...base,
         status: conn.status,
-        authMode: authModeLabel,
+        authMode: label,
         connectionMode: "user" as const,
         ...buildScopeInfo(connScopesGranted, scopesRequired, conn.status === "connected"),
       };

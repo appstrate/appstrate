@@ -140,7 +140,7 @@ export function FlowDetailPage() {
     if (hasInputSchema) {
       setInputOpen(true);
     } else {
-      runFlow.mutate(undefined);
+      runFlow.mutate(profileId ? { profileId } : undefined);
     }
   };
 
@@ -586,7 +586,7 @@ export function FlowDetailPage() {
         open={inputOpen}
         onClose={() => setInputOpen(false)}
         flow={detail}
-        onSubmit={(input, files) => runFlow.mutate({ input, files })}
+        onSubmit={(input, files) => runFlow.mutate({ input, files, profileId: profileId ?? undefined })}
         isPending={runFlow.isPending}
       />
       <ScheduleModal

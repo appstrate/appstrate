@@ -282,7 +282,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
+      authMode: {
+        type: "string",
+        enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"],
+      },
       source: { type: "string", enum: ["built-in", "custom"] },
       hasClientId: { type: "boolean" },
       hasClientSecret: { type: "boolean" },
@@ -323,7 +326,10 @@ export const schemas = {
     properties: {
       id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
       displayName: { type: "string" },
-      authMode: { type: "string", enum: ["oauth2", "api_key", "basic", "custom", "proxy"] },
+      authMode: {
+        type: "string",
+        enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"],
+      },
       clientId: { type: "string" },
       clientSecret: { type: "string" },
       authorizationUrl: { type: "string" },

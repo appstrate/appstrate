@@ -37,8 +37,10 @@ export function useRunFlow(flowId: string) {
     mutationFn: async (params?: {
       input?: Record<string, unknown>;
       files?: Record<string, File[]>;
+      profileId?: string;
     }) => {
-      const { input, files } = params ?? {};
+      const { input, files, profileId } = params ?? {};
+      const qs = profileId ? `?profileId=${encodeURIComponent(profileId)}` : "";
 
       // If files are present, use FormData
       const hasFiles = files && Object.values(files).some((f) => f.length > 0);
@@ -52,11 +54,11 @@ export function useRunFlow(flowId: string) {
             fd.append(key, file);
           }
         }
-        return uploadFormData<{ executionId: string }>(`/flows/${flowId}/run`, fd);
+        return uploadFormData<{ executionId: string }>(`/flows/${flowId}/run${qs}`, fd);
       }
 
       // JSON mode (existing behavior)
-      return api<{ executionId: string }>(`/flows/${flowId}/run`, {
+      return api<{ executionId: string }>(`/flows/${flowId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(input ? { input } : {}),
       });

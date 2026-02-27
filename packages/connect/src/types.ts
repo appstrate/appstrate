@@ -1,6 +1,6 @@
 import type { JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
-export type AuthMode = "oauth2" | "api_key" | "basic" | "custom" | "proxy";
+export type AuthMode = "oauth2" | "oauth1" | "api_key" | "basic" | "custom" | "proxy";
 
 export interface ProviderDefinition {
   id: string;
@@ -13,7 +13,7 @@ export interface ProviderDefinition {
   defaultScopes?: string[];
   scopeSeparator?: string; // " " | "," | "+"
   pkceEnabled?: boolean; // default true
-  authorizationParams?: Record<string, string>; // access_type, prompt, etc.
+  authorizationParams?: Record<string, string>; // OAuth2: access_type, prompt; OAuth1: name, scope, expiration
   tokenParams?: Record<string, string>;
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic"; // default: client_secret_post
   // Credential schema (API_KEY, BASIC, CUSTOM)
@@ -22,6 +22,11 @@ export interface ProviderDefinition {
   credentialFieldName?: string; // "token" | "api_key" etc. — how the credential is named when returned
   credentialHeaderName?: string; // "Authorization" | "api-key" etc. — header name for injection
   credentialHeaderPrefix?: string; // "Bearer " | "" etc.
+  // OAuth1
+  requestTokenUrl?: string;
+  accessTokenUrl?: string;
+  consumerKey?: string;
+  consumerSecret?: string;
   // Inline OAuth credentials (from SYSTEM_PROVIDERS env var)
   clientId?: string;
   clientSecret?: string;
@@ -49,6 +54,11 @@ export interface ProviderSnapshot {
   credentialHeaderPrefix?: string;
   authorizedUris?: string[];
   allowAllUris?: boolean;
+  // OAuth1
+  requestTokenUrl?: string;
+  accessTokenUrl?: string;
+  consumerKeyEncrypted?: string;
+  consumerSecretEncrypted?: string;
 }
 
 export interface ConnectionRecord {
@@ -87,6 +97,8 @@ export interface OAuthStateRecord {
   redirectUri: string;
   createdAt: string;
   expiresAt: string;
+  authMode: string;
+  oauthTokenSecret?: string;
 }
 
 export interface ScopeValidationResult {

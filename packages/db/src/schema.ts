@@ -30,7 +30,7 @@ export const executionStatusEnum = pgEnum("execution_status", [
   "cancelled",
 ]);
 
-export const authModeEnum = pgEnum("auth_mode", ["oauth2", "api_key", "basic", "custom", "proxy"]);
+export const authModeEnum = pgEnum("auth_mode", ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"]);
 
 export const invitationStatusEnum = pgEnum("invitation_status", [
   "pending",
@@ -642,6 +642,9 @@ export const providerConfigs = pgTable(
       .array()
       .default(sql`'{}'::text[]`),
     allowAllUris: boolean("allow_all_uris").default(false),
+    // OAuth1 fields
+    requestTokenUrl: text("request_token_url"),
+    accessTokenUrl: text("access_token_url"),
     // Common
     iconUrl: text("icon_url"),
     categories: text("categories")
@@ -702,6 +705,8 @@ export const oauthStates = pgTable(
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
     codeVerifier: text("code_verifier").notNull(),
+    oauthTokenSecret: text("oauth_token_secret"),
+    authMode: text("auth_mode").notNull().default("oauth2"),
     scopesRequested: text("scopes_requested")
       .array()
       .default(sql`'{}'::text[]`),
