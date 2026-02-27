@@ -1,7 +1,8 @@
 /**
  * Connection Manager — thin service wrapper over @appstrate/connect.
  * Single source for connection operations.
- * All functions operate on profileId (no more orgId/userId for credential access).
+ * Credential lookups use profileId + configHash (derived from orgId) to disambiguate
+ * connections when a user is connected to multiple orgs with different provider configs.
  */
 
 import { db } from "../lib/db.ts";
@@ -13,7 +14,7 @@ import type {
   ProviderDisplayInfo,
 } from "@appstrate/shared-types";
 
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import {
   serviceConnections,
   connectionProfiles,
@@ -31,6 +32,7 @@ import {
   getConnection,
   listConnections as listConnectionsRaw,
   deleteConnection as deleteConnectionRaw,
+  deleteConnectionById as deleteConnectionByIdRaw,
   listProviders,
   getProviderAuthMode as getProviderAuthModeRaw,
   getProvider,
@@ -102,31 +104,44 @@ export async function getConnectionStatus(
   profileId: string,
   orgId?: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, profileId, provider);
-  if (conn) {
-    // Check configHash if orgId is provided
-    if (orgId) {
-      const providerDef = await getProvider(db, orgId, provider);
-      if (providerDef) {
-        const currentHash = computeConfigHash(providerDef);
-        if (currentHash !== conn.configHash) {
-          return {
-            provider,
-            status: "needs_reconnection",
-            connectionId: conn.id,
-            connectedAt: conn.createdAt,
-            scopesGranted: conn.scopesGranted,
-          };
-        }
+  if (orgId) {
+    const providerDef = await getProvider(db, orgId, provider);
+    if (providerDef) {
+      const currentHash = computeConfigHash(providerDef);
+      // Try exact match on configHash first
+      const exactConn = await getConnection(db, profileId, provider, currentHash);
+      if (exactConn) {
+        return {
+          provider,
+          status: "connected",
+          connectionId: exactConn.id,
+          connectedAt: exactConn.createdAt,
+          scopesGranted: exactConn.scopesGranted,
+        };
+      }
+      // Fallback: any connection for this provider → needs reconnection
+      const anyConn = await getConnection(db, profileId, provider);
+      if (anyConn) {
+        return {
+          provider,
+          status: "needs_reconnection",
+          connectionId: anyConn.id,
+          connectedAt: anyConn.createdAt,
+          scopesGranted: anyConn.scopesGranted,
+        };
       }
     }
-    return {
-      provider,
-      status: "connected",
-      connectionId: conn.id,
-      connectedAt: conn.createdAt,
-      scopesGranted: conn.scopesGranted,
-    };
+  } else {
+    const conn = await getConnection(db, profileId, provider);
+    if (conn) {
+      return {
+        provider,
+        status: "connected",
+        connectionId: conn.id,
+        connectedAt: conn.createdAt,
+        scopesGranted: conn.scopesGranted,
+      };
+    }
   }
   return { provider, status: "not_connected" };
 }
@@ -275,6 +290,26 @@ export async function disconnectProvider(provider: string, profileId: string): P
   logger.info("Connection deleted", { provider, profileId });
 }
 
+export async function disconnectConnectionById(
+  connectionId: string,
+  userId: string,
+): Promise<void> {
+  // Verify the connection belongs to a profile owned by this user
+  const rows = await db
+    .select({ id: serviceConnections.id })
+    .from(serviceConnections)
+    .innerJoin(connectionProfiles, eq(serviceConnections.profileId, connectionProfiles.id))
+    .where(and(eq(serviceConnections.id, connectionId), eq(connectionProfiles.userId, userId)))
+    .limit(1);
+
+  if (rows.length === 0) {
+    throw new Error("Connection not found or not owned by user");
+  }
+
+  await deleteConnectionByIdRaw(db, connectionId);
+  logger.info("Connection deleted by ID", { connectionId, userId });
+}
+
 // ─── Provider Info ───────────────────────────────────────────
 
 export async function getProviderAuthMode(
@@ -305,21 +340,32 @@ export async function getIntegrationsWithStatus(
   ]);
 
   return providers.map((provider) => {
-    const conn = connections.find((c) => c.providerId === provider.id);
-    let status: "connected" | "not_connected" | "needs_reconnection" = "not_connected";
-    if (conn) {
-      const currentHash = computeConfigHash(provider);
-      status = currentHash !== conn.configHash ? "needs_reconnection" : "connected";
+    const currentHash = computeConfigHash(provider);
+    // Look for exact configHash match first
+    const exactConn = connections.find(
+      (c) => c.providerId === provider.id && c.configHash === currentHash,
+    );
+    if (exactConn) {
+      return {
+        uniqueKey: provider.id,
+        provider: provider.id,
+        displayName: provider.displayName,
+        logo: provider.iconUrl ?? "",
+        status: "connected" as const,
+        authMode: authModeLabel(provider.authMode),
+        connectionId: exactConn.id,
+        connectedAt: exactConn.createdAt,
+      };
     }
+    // Fallback: any connection for this provider → needs reconnection
+    const anyConn = connections.find((c) => c.providerId === provider.id);
     return {
       uniqueKey: provider.id,
       provider: provider.id,
       displayName: provider.displayName,
       logo: provider.iconUrl ?? "",
-      status,
+      status: anyConn ? ("needs_reconnection" as const) : ("not_connected" as const),
       authMode: authModeLabel(provider.authMode),
-      connectionId: conn?.id,
-      connectedAt: conn?.createdAt,
     };
   });
 }

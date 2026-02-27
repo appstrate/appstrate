@@ -393,23 +393,31 @@ function ConnectorsTab() {
                             {conn.scopesGranted.length > 0 && ` · ${conn.scopesGranted.join(", ")}`}
                             {conn.connectedAt && ` · ${formatDateField(conn.connectedAt)}`}
                           </span>
-                          {conn.orgs?.length > 0 && (
-                            <span className="connection-orgs">
-                              {conn.orgs.map((org) => (
+                          {(() => {
+                            const validOrgs = conn.orgs?.filter((o) => o.status === "valid") ?? [];
+                            return validOrgs.length > 0 ? (
+                              <span className="connection-orgs">
+                                {validOrgs.map((org) => (
+                                  <span
+                                    key={org.id}
+                                    className="badge badge-success"
+                                    title={t("connectors.orgValid", { org: org.name })}
+                                  >
+                                    {org.name}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : (
+                              <span className="connection-orgs">
                                 <span
-                                  key={org.id}
-                                  className={`badge ${org.status === "valid" ? "badge-success" : "badge-warning"}`}
-                                  title={
-                                    org.status === "valid"
-                                      ? t("connectors.orgValid", { org: org.name })
-                                      : t("connectors.orgNeedsReconnection", { org: org.name })
-                                  }
+                                  className="badge badge-muted"
+                                  title={t("connectors.unusedHint")}
                                 >
-                                  {org.name}
+                                  {t("connectors.unused")}
                                 </span>
-                              ))}
-                            </span>
-                          )}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <button
                           onClick={() => {
@@ -423,7 +431,7 @@ function ConnectorsTab() {
                             ) {
                               disconnectMutation.mutate({
                                 provider: providerId,
-                                profileId: conn.profile.id,
+                                connectionId: conn.connectionId,
                               });
                             }
                           }}

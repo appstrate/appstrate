@@ -695,7 +695,7 @@ export const serviceConnections = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId),
+    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId, table.configHash),
     index("idx_service_connections_profile").on(table.profileId),
   ],
 );

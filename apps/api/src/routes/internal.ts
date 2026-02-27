@@ -6,8 +6,8 @@ import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getFlow } from "../services/flow-service.ts";
-import { resolveCredentialsForProxy } from "@appstrate/connect";
-import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveCredentialsForProxy, getProvider } from "@appstrate/connect";
+import { getEffectiveProfileId, computeConfigHash } from "../services/connection-profiles.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -188,8 +188,12 @@ export function createInternalRouter() {
           (await getEffectiveProfileId(execution.userId, execution.flowId));
       }
 
-      // Unified credential resolution
-      const result = await resolveCredentialsForProxy(db, profileId, service.provider);
+      // Resolve configHash for the org's provider config
+      const providerDef = await getProvider(db, execution.orgId, service.provider);
+      const configHash = providerDef ? computeConfigHash(providerDef) : undefined;
+
+      // Unified credential resolution with configHash disambiguation
+      const result = await resolveCredentialsForProxy(db, profileId, service.provider, configHash);
 
       if (!result) {
         return c.json(

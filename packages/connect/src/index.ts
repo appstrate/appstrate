@@ -50,4 +50,5 @@ export {
   resolveCredentialsForProxy,
   saveConnection,
   deleteConnection,
+  deleteConnectionById,
 } from "./credentials.ts";

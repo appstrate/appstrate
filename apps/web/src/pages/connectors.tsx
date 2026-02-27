@@ -117,12 +117,15 @@ export function ConnectorsPage() {
                   {connDate && <span className="service-date">{connDate}</span>}
                 </div>
                 <div className="service-card-actions">
-                  {isConnected || needsReconnection ? (
+                  {isConnected ? (
                     <>
                       <button
                         onClick={() => {
                           if (confirm(t("services.disconnectConfirm", { name: svc.uniqueKey }))) {
-                            disconnectMutation.mutate({ provider: svc.uniqueKey, ...pParam });
+                            disconnectMutation.mutate({
+                              provider: svc.uniqueKey,
+                              ...(svc.connectionId ? { connectionId: svc.connectionId } : pParam),
+                            });
                           }
                         }}
                         disabled={disconnectMutation.isPending}
@@ -130,7 +133,6 @@ export function ConnectorsPage() {
                         {t("btn.disconnect")}
                       </button>
                       <button
-                        className={needsReconnection ? "primary" : undefined}
                         onClick={() => handleConnect(svc)}
                         disabled={
                           connectMutation.isPending ||
@@ -151,7 +153,7 @@ export function ConnectorsPage() {
                         credentialsMutation.isPending
                       }
                     >
-                      {t("btn.connect")}
+                      {needsReconnection ? t("btn.reconnect") : t("btn.connect")}
                     </button>
                   )}
                 </div>

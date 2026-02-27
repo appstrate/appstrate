@@ -259,6 +259,7 @@ export interface Integration {
   logo?: string;
   status: "connected" | "not_connected" | "needs_reconnection";
   authMode?: string;
+  connectionId?: string;
   connectedAt?: string;
 }
 

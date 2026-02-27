@@ -228,7 +228,8 @@ export const connectionsPaths = {
       operationId: "disconnectProvider",
       tags: ["Connections"],
       summary: "Disconnect a service",
-      description: "Remove the active connection for a provider in the current org.",
+      description:
+        "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "provider", in: "path", required: true, schema: { type: "string" } },
@@ -238,6 +239,14 @@ export const connectionsPaths = {
           required: false,
           description: "Connection profile ID (defaults to user's default profile)",
           schema: { type: "string" },
+        },
+        {
+          name: "connectionId",
+          in: "query",
+          required: false,
+          description:
+            "Specific connection ID to delete. When provided, only this connection is removed (ignores profileId).",
+          schema: { type: "string", format: "uuid" },
         },
       ],
       responses: {

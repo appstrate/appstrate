@@ -10,6 +10,7 @@ import {
   saveCredentialsConnection,
   getIntegrationsWithStatus,
   disconnectProvider,
+  disconnectConnectionById,
   getProviderAuthMode,
 } from "../services/connection-manager.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
@@ -157,12 +158,19 @@ router.get("/integrations", async (c) => {
 });
 
 // DELETE /auth/connections/:provider — disconnect a service for current user
+// If ?connectionId is provided, deletes only that specific connection.
+// Otherwise, deletes ALL connections for the provider on the profile.
 router.delete("/connections/:provider", async (c) => {
   const provider = c.req.param("provider");
   const user = c.get("user");
+  const connectionId = c.req.query("connectionId");
   try {
-    const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
-    await disconnectProvider(provider, profileId);
+    if (connectionId) {
+      await disconnectConnectionById(connectionId, user.id);
+    } else {
+      const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+      await disconnectProvider(provider, profileId);
+    }
     return c.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete connection";
