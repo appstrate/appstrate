@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Badge } from "./badge";
@@ -14,10 +15,24 @@ export function ExecutionRow({
   userName?: string;
 }) {
   const { t } = useTranslation(["flows"]);
+  const isRunning = execution.status === "running" || execution.status === "pending";
   const isUnread = execution.notifiedAt != null && execution.readAt == null;
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
-  const duration = execution.duration ? `${(execution.duration / 1000).toFixed(1)}s` : "";
   const inputPreview = execution.input ? truncate(JSON.stringify(execution.input), 60) : "";
+
+  // Live elapsed timer while running
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isRunning || !execution.startedAt) return;
+    const start = new Date(execution.startedAt).getTime();
+    const tick = () => setElapsed(Date.now() - start);
+    tick();
+    const id = setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, [isRunning, execution.startedAt]);
+
+  const time = isRunning ? elapsed : execution.duration;
+  const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
 
   return (
     <Link
