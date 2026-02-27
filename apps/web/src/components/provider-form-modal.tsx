@@ -25,6 +25,8 @@ interface FormData {
   authorizationUrl: string;
   tokenUrl: string;
   refreshUrl: string;
+  requestTokenUrl: string;
+  accessTokenUrl: string;
   clientId: string;
   clientSecret: string;
   defaultScopes: string;
@@ -50,6 +52,8 @@ function getInitial(provider: ProviderConfig | null | undefined): FormData {
       authorizationUrl: "",
       tokenUrl: "",
       refreshUrl: "",
+      requestTokenUrl: "",
+      accessTokenUrl: "",
       clientId: "",
       clientSecret: "",
       defaultScopes: "",
@@ -73,6 +77,8 @@ function getInitial(provider: ProviderConfig | null | undefined): FormData {
     authorizationUrl: provider.authorizationUrl ?? "",
     tokenUrl: provider.tokenUrl ?? "",
     refreshUrl: provider.refreshUrl ?? "",
+    requestTokenUrl: provider.requestTokenUrl ?? "",
+    accessTokenUrl: provider.accessTokenUrl ?? "",
     clientId: "",
     clientSecret: "",
     defaultScopes: provider.defaultScopes?.join("\n") ?? "",
@@ -156,6 +162,14 @@ function ProviderFormBody({
       if (availableScopes.length > 0) {
         data.availableScopes = availableScopes.filter((s) => s.value.trim() && s.label.trim());
       }
+    }
+
+    if (form.authMode === "oauth1") {
+      if (form.requestTokenUrl) data.requestTokenUrl = form.requestTokenUrl;
+      if (form.authorizationUrl) data.authorizationUrl = form.authorizationUrl;
+      if (form.accessTokenUrl) data.accessTokenUrl = form.accessTokenUrl;
+      if (form.clientId) data.clientId = form.clientId;
+      if (form.clientSecret) data.clientSecret = form.clientSecret;
     }
 
     if (form.authMode === "api_key") {
@@ -251,6 +265,7 @@ function ProviderFormBody({
             disabled={isEdit}
           >
             <option value="oauth2">{t("providers.authMode.oauth2")}</option>
+            <option value="oauth1">{t("providers.authMode.oauth1")}</option>
             <option value="api_key">{t("providers.authMode.apiKey")}</option>
             <option value="basic">{t("providers.authMode.basic")}</option>
             <option value="custom">{t("providers.authMode.custom")}</option>
@@ -483,6 +498,74 @@ function ProviderFormBody({
                 </div>
               </>
             )}
+          </>
+        )}
+
+        {/* OAuth1 section */}
+        {form.authMode === "oauth1" && (
+          <>
+            <div className="section-title section-title-mt-sm">
+              {t("providers.form.sectionOAuth1")}
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="pf-requestTokenUrl">{t("providers.form.requestTokenUrl")}</label>
+              <input
+                id="pf-requestTokenUrl"
+                type="text"
+                value={form.requestTokenUrl}
+                onChange={(e) => setField("requestTokenUrl", e.target.value)}
+                readOnly={isBuiltIn}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="pf-authorizationUrl">{t("providers.form.authorizationUrl")}</label>
+              <input
+                id="pf-authorizationUrl"
+                type="text"
+                value={form.authorizationUrl}
+                onChange={(e) => setField("authorizationUrl", e.target.value)}
+                readOnly={isBuiltIn}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="pf-accessTokenUrl">{t("providers.form.accessTokenUrl")}</label>
+              <input
+                id="pf-accessTokenUrl"
+                type="text"
+                value={form.accessTokenUrl}
+                onChange={(e) => setField("accessTokenUrl", e.target.value)}
+                readOnly={isBuiltIn}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="pf-clientId">{t("providers.form.clientId")}</label>
+              <input
+                id="pf-clientId"
+                type="password"
+                value={form.clientId}
+                onChange={(e) => setField("clientId", e.target.value)}
+                placeholder={
+                  isEdit && provider?.hasClientId ? t("providers.form.secretUnchanged") : ""
+                }
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="pf-clientSecret">{t("providers.form.clientSecret")}</label>
+              <input
+                id="pf-clientSecret"
+                type="password"
+                value={form.clientSecret}
+                onChange={(e) => setField("clientSecret", e.target.value)}
+                placeholder={
+                  isEdit && provider?.hasClientSecret ? t("providers.form.secretUnchanged") : ""
+                }
+              />
+            </div>
           </>
         )}
 

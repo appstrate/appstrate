@@ -382,6 +382,7 @@ export function useDeleteAllMemories(flowId: string) {
 
 function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["providers"] });
+  qc.invalidateQueries({ queryKey: ["provider-templates"] });
   qc.invalidateQueries({ queryKey: ["services"] });
 }
 
