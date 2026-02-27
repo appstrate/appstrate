@@ -710,7 +710,6 @@ function ProvidersTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-
   return (
     <>
       <div className="service-card service-card-spaced">

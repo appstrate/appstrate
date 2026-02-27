@@ -30,7 +30,14 @@ export const executionStatusEnum = pgEnum("execution_status", [
   "cancelled",
 ]);
 
-export const authModeEnum = pgEnum("auth_mode", ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"]);
+export const authModeEnum = pgEnum("auth_mode", [
+  "oauth2",
+  "oauth1",
+  "api_key",
+  "basic",
+  "custom",
+  "proxy",
+]);
 
 export const invitationStatusEnum = pgEnum("invitation_status", [
   "pending",
@@ -323,7 +330,12 @@ export const executions = pgTable(
     index("idx_executions_status").on(table.status),
     index("idx_executions_user_id").on(table.userId),
     index("idx_executions_org_id").on(table.orgId),
-    index("idx_executions_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
+    index("idx_executions_notification").on(
+      table.userId,
+      table.orgId,
+      table.notifiedAt,
+      table.readAt,
+    ),
   ],
 );
 

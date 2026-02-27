@@ -14,7 +14,10 @@ import { extractErrorMessage } from "./utils.ts";
 
 /** RFC 5849 §3.6 — percent-encode per OAuth spec (stricter than encodeURIComponent). */
 function percentEncode(str: string): string {
-  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return encodeURIComponent(str).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 function generateNonce(): string {
@@ -186,12 +189,7 @@ export async function handleOAuth1Callback(
   const rows = await db
     .select()
     .from(oauthStates)
-    .where(
-      and(
-        eq(oauthStates.state, oauthToken),
-        gt(oauthStates.expiresAt, new Date()),
-      ),
-    )
+    .where(and(eq(oauthStates.state, oauthToken), gt(oauthStates.expiresAt, new Date())))
     .limit(1);
 
   if (rows.length === 0) {

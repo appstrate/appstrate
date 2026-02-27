@@ -586,7 +586,9 @@ export function FlowDetailPage() {
         open={inputOpen}
         onClose={() => setInputOpen(false)}
         flow={detail}
-        onSubmit={(input, files) => runFlow.mutate({ input, files, profileId: profileId ?? undefined })}
+        onSubmit={(input, files) =>
+          runFlow.mutate({ input, files, profileId: profileId ?? undefined })
+        }
         isPending={runFlow.isPending}
       />
       <ScheduleModal
