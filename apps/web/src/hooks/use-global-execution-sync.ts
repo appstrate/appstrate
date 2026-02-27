@@ -26,9 +26,10 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
       return [newRow as Execution, ...prev].slice(0, 50);
     });
 
+    qc.invalidateQueries({ queryKey: ["flows", orgId] });
+    qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
+
     if (TERMINAL_STATUSES.has(status)) {
-      qc.invalidateQueries({ queryKey: ["flows", orgId] });
-      qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
       qc.invalidateQueries({ queryKey: ["unread-count", orgId] });
       qc.invalidateQueries({ queryKey: ["all-executions"] });
