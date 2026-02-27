@@ -9,6 +9,14 @@ export const executionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Connection profile ID to use for this execution. Overrides the user's default or flow-specific profile.",
+        },
       ],
       requestBody: {
         content: {

@@ -140,6 +140,8 @@ export async function handleOAuthCallback(
     redirectUri: rawRow.redirectUri,
     createdAt: rawRow.createdAt?.toISOString() ?? "",
     expiresAt: rawRow.expiresAt.toISOString(),
+    authMode: rawRow.authMode,
+    oauthTokenSecret: rawRow.oauthTokenSecret ?? undefined,
   };
 
   // Check expiration

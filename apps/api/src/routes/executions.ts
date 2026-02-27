@@ -331,6 +331,7 @@ export function createExecutionsRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const flowId = flow.id;
+    const profileIdOverride = c.req.query("profileId");
 
     // Resolve service profiles (user profile + admin connections)
     const serviceProfiles = await resolveServiceProfiles(
@@ -338,6 +339,7 @@ export function createExecutionsRouter() {
       user.id,
       flowId,
       orgId,
+      profileIdOverride,
     );
 
     // Validate service dependencies
@@ -387,7 +389,7 @@ export function createExecutionsRouter() {
     }));
 
     // Get user's effective profile for snapshot
-    const userProfileId = await getEffectiveProfileId(user.id, flowId);
+    const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(user.id, flowId));
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({

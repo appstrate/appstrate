@@ -174,6 +174,7 @@ export function computeConfigHash(provider: ProviderDefinition): string {
   const data = JSON.stringify({
     authMode: provider.authMode,
     clientId: provider.clientId ?? null,
+    consumerKey: provider.consumerKey ?? null,
     credentialSchema: provider.credentialSchema ?? null,
     credentialHeaderName: provider.credentialHeaderName ?? null,
     credentialHeaderPrefix: provider.credentialHeaderPrefix ?? null,
@@ -183,7 +184,7 @@ export function computeConfigHash(provider: ProviderDefinition): string {
 
 /**
  * Build a provider snapshot for storage alongside the connection.
- * Encrypted fields (clientId/Secret) are stored encrypted within the snapshot.
+ * Sensitive fields (clientId/Secret, consumerKey/Secret) are stored encrypted.
  */
 export function buildProviderSnapshot(provider: ProviderDefinition): ProviderSnapshot {
   return {
@@ -199,6 +200,11 @@ export function buildProviderSnapshot(provider: ProviderDefinition): ProviderSna
     credentialHeaderPrefix: provider.credentialHeaderPrefix,
     authorizedUris: provider.authorizedUris,
     allowAllUris: provider.allowAllUris,
+    // OAuth1
+    requestTokenUrl: provider.requestTokenUrl,
+    accessTokenUrl: provider.accessTokenUrl,
+    consumerKeyEncrypted: provider.consumerKey ? encrypt(provider.consumerKey) : undefined,
+    consumerSecretEncrypted: provider.consumerSecret ? encrypt(provider.consumerSecret) : undefined,
   };
 }
 
@@ -214,8 +220,9 @@ export async function resolveServiceProfiles(
   userId: string,
   flowId: string,
   orgId: string,
+  profileIdOverride?: string,
 ): Promise<Record<string, string>> {
-  const userProfileId = await getEffectiveProfileId(userId, flowId);
+  const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(userId, flowId));
   const adminConns = await getAdminConnections(orgId, flowId);
   const map: Record<string, string> = {};
 

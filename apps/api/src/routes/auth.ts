@@ -5,6 +5,7 @@ import {
   listUserConnections,
   initiateConnection,
   handleCallback,
+  handleOAuth1CallbackAndSave,
   saveApiKeyConnection,
   saveCredentialsConnection,
   getIntegrationsWithStatus,
@@ -92,12 +93,9 @@ router.post("/connect/:provider/credentials", async (c) => {
   }
 });
 
-// GET /auth/callback — OAuth2 callback (receives code+state, exchanges for token, closes popup)
+// GET /auth/callback — OAuth2/OAuth1 callback (detects flow type, exchanges for token, closes popup)
 router.get("/callback", async (c) => {
-  const code = c.req.query("code");
-  const state = c.req.query("state");
   const error = c.req.query("error");
-
   if (error) {
     logger.warn("OAuth callback received error", { error });
     return c.html(
@@ -105,10 +103,34 @@ router.get("/callback", async (c) => {
     );
   }
 
+  // OAuth1 callback: oauth_token + oauth_verifier
+  const oauthToken = c.req.query("oauth_token");
+  const oauthVerifier = c.req.query("oauth_verifier");
+  if (oauthToken && oauthVerifier) {
+    try {
+      await handleOAuth1CallbackAndSave(oauthToken, oauthVerifier);
+      logger.info("OAuth1 callback success", { oauthToken });
+      return c.html(`<html><body><script>window.close();</script></body></html>`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "OAuth1 callback failed";
+      logger.error("OAuth1 callback failed", { message });
+      return c.html(
+        `<html><body><p style="color:red;font-family:monospace;">Error: ${message}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
+      );
+    }
+  }
+
+  // OAuth2 callback: code + state
+  const code = c.req.query("code");
+  const state = c.req.query("state");
   if (!code || !state) {
-    logger.warn("OAuth callback missing code or state", { hasCode: !!code, hasState: !!state });
+    logger.warn("OAuth callback missing required params", {
+      hasCode: !!code,
+      hasState: !!state,
+      hasOauthToken: !!oauthToken,
+    });
     return c.html(
-      `<html><body><p>Missing code or state</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
+      `<html><body><p>Missing required parameters</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
     );
   }
 

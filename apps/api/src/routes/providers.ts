@@ -16,7 +16,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const createProviderSchema = z.object({
   id: z.string().regex(SLUG_RE, "id must be lowercase alphanumeric with hyphens"),
   displayName: z.string().min(1, "displayName is required"),
-  authMode: z.enum(["oauth2", "api_key", "basic", "custom", "proxy"]),
+  authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"]),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
   authorizationUrl: z.string().optional(),
