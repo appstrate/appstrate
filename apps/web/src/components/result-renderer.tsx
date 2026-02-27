@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
-import { escapeHtml, convertMarkdown, truncate, formatDateField } from "../lib/markdown";
+import {
+  escapeHtml,
+  linkifyText,
+  convertMarkdown,
+  truncate,
+  formatDateField,
+} from "../lib/markdown";
 
 interface ResultRendererProps {
   data: Record<string, unknown>;
@@ -76,7 +82,7 @@ function renderNestedObject(label: string, obj: Record<string, unknown>): string
     } else if (typeof v === "object") {
       html += `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(JSON.stringify(v))}</li>`;
     } else {
-      html += `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`;
+      html += `<li><strong>${escapeHtml(k)}:</strong> ${linkifyText(String(v))}</li>`;
     }
   }
   html += `</ul></div>`;
@@ -88,7 +94,7 @@ function renderNestedArray(label: string, arr: unknown[]): string {
   let html = `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><ul class="ticket-list">`;
   for (const item of arr) {
     if (typeof item === "string") {
-      html += `<li>${escapeHtml(item)}</li>`;
+      html += `<li>${linkifyText(item)}</li>`;
     } else if (typeof item === "object" && item !== null) {
       const obj = item as Record<string, unknown>;
       const display = (obj.name || obj.email || obj.title || "") as string;
@@ -96,7 +102,7 @@ function renderNestedArray(label: string, arr: unknown[]): string {
         .filter(([k]) => k !== "name" && k !== "email" && k !== "title")
         .map(([k, v]) => `${k}: ${v}`)
         .join(", ");
-      html += `<li>${display ? `<strong>${escapeHtml(display)}</strong>` : ""}${extra ? ` (${escapeHtml(truncate(extra, 100))})` : ""}</li>`;
+      html += `<li>${display ? `<strong>${escapeHtml(display)}</strong>` : ""}${extra ? ` (${linkifyText(truncate(extra, 100))})` : ""}</li>`;
     } else {
       html += `<li>${escapeHtml(String(item))}</li>`;
     }
@@ -146,7 +152,7 @@ function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]
         if (strVal.length > 80) {
           html += `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><br>${convertMarkdown(strVal)}</div>`;
         } else {
-          html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(strVal)}</div>`;
+          html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${linkifyText(strVal)}</div>`;
         }
       }
     }
@@ -174,7 +180,7 @@ function renderSchemaField(
     if (strVal.length > 80) {
       return `<div class="result-item-content"><strong>${escapeHtml(desc)}</strong><br>${convertMarkdown(strVal)}</div>`;
     }
-    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(strVal)}</div>`;
+    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(strVal)}</div>`;
   }
 
   if (prop.type === "number") {
@@ -200,7 +206,7 @@ function renderSchemaField(
     return renderNestedObject(desc, value as Record<string, unknown>);
   }
 
-  return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
+  return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(String(value))}</div>`;
 }
 
 function buildSchemaResultHtml(
@@ -248,7 +254,7 @@ function buildSchemaResultHtml(
       } else if (typeof value === "object" && !Array.isArray(value)) {
         html += renderNestedObject(label, value as Record<string, unknown>);
       } else {
-        html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</div>`;
+        html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${linkifyText(String(value))}</div>`;
       }
     }
   }
