@@ -78,14 +78,6 @@ Returns array of log entries:
 [
   {
     "id": 1,
-    "type": "system",
-    "event": "execution_started",
-    "message": "Execution started",
-    "data": { "executionId": "exec-abc123" },
-    "createdAt": "2026-01-15T10:00:00Z"
-  },
-  {
-    "id": 2,
     "type": "agent",
     "event": "progress",
     "message": "Processing query...",
@@ -108,9 +100,6 @@ Server-Sent Events stream. First replays all existing logs from DB, then streams
 
 SSE event types:
 
-- `execution_started`: `{ executionId, startedAt }`
-- `dependency_check`: `{ services: { gmail: "ok" } }`
-- `adapter_started`: `{ adapter: "pi" }`
 - `progress`: `{ message: "..." }` (repeated during execution)
 - `result`: `{ summary: "...", ... }` (the flow output)
 - `execution_completed`: `{ executionId, status: "success"|"failed"|"timeout" }`

@@ -17,7 +17,6 @@ import { useProfiles } from "../hooks/use-profiles";
 import { useMarkRead } from "../hooks/use-notifications";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
-import type { TFunction } from "i18next";
 
 function formatToolArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -28,19 +27,6 @@ function formatToolArgs(args: Record<string, unknown>): string {
   }
   const joined = parts.join(", ");
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
-}
-
-function formatEvent(event: string, data: Record<string, unknown>, t: TFunction): string {
-  if (event === "execution_started") return t("exec.started", { id: data?.executionId || "" });
-  if (event === "dependency_check") {
-    const checks = Object.entries((data?.services as Record<string, string>) || {})
-      .map(([k, v]) => `${k}: ${v}`)
-      .join(", ");
-    return t("exec.depsChecked", { checks });
-  }
-  if (event === "adapter_started")
-    return t("exec.adapterStarted", { adapter: data?.adapter || "unknown" });
-  return "";
 }
 
 export function ExecutionDetailPage() {
@@ -117,8 +103,7 @@ export function ExecutionDetailPage() {
           lastWasPlainText = false;
         } else {
           const logData = (log.data ?? {}) as Record<string, unknown>;
-          const message =
-            (logData.message as string) || log.message || formatEvent(log.event || "", logData, t);
+          const message = (logData.message as string) || log.message || "";
           if (message) {
             const args = logData.args as Record<string, unknown> | undefined;
             const detail = args ? formatToolArgs(args) : undefined;

@@ -16,12 +16,7 @@ import {
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
-import {
-  getAdapter,
-  getAdapterName,
-  TimeoutError,
-  buildRetryPrompt,
-} from "../services/adapters/index.ts";
+import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
@@ -60,30 +55,11 @@ export async function executeFlowInBackground(
   const { signal } = controller;
 
   try {
-    // Emit execution_started
-    await appendExecutionLog(executionId, userId, orgId, "system", "execution_started", null, {
-      executionId,
-      startedAt: new Date().toISOString(),
-    });
-
-    // Check dependencies
-    const depCheck: Record<string, string> = {};
-    for (const svc of flow.manifest.requires.services) {
-      depCheck[svc.id] = promptContext.tokens[svc.id] ? "ok" : "missing";
-    }
-    await appendExecutionLog(executionId, userId, orgId, "system", "dependency_check", null, {
-      services: depCheck,
-    });
-
     // Update status to running
     await updateExecution(executionId, { status: "running" });
 
     // Execute via adapter
     const adapter = getAdapter();
-    const adapterName = getAdapterName();
-    await appendExecutionLog(executionId, userId, orgId, "system", "adapter_started", null, {
-      adapter: adapterName,
-    });
 
     const timeout = flow.manifest.execution?.timeout ?? 300;
     let result: Record<string, unknown> | null = null;
