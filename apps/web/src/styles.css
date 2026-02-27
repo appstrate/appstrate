@@ -1030,6 +1030,17 @@ button:disabled {
   text-align: center;
 }
 
+.notification-bell.is-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
 .exec-row .exec-flow-name {
   font-weight: 500;
   min-width: 0;
