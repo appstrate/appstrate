@@ -123,7 +123,7 @@ export function ExecutionDetailPage() {
     }
 
     return { historicalLogs: entries, historicalResult: result };
-  }, [logs, t]);
+  }, [logs]);
 
   // Use result from logs or execution object
   const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
