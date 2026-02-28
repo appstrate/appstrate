@@ -32,9 +32,9 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1 className="login-title">
-          <span>App</span>strate
-        </h1>
+        <div className="login-logo">
+          <img src="/logo.svg" alt="Appstrate" className="app-logo" />
+        </div>
         <form onSubmit={handleSubmit}>
           {mode === "signup" && (
             <div className="form-group">
