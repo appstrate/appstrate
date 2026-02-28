@@ -1,7 +1,4 @@
 {
-  "nav.flows": "Flows",
-  "nav.schedules": "Schedules",
-  "nav.library": "Library",
   "nav.downloadSkill": "Download skill",
   "userMenu.ariaLabel": "User menu",
   "userMenu.logout": "Logout",
@@ -9,6 +6,8 @@
   "userMenu.apiDocs": "API Documentation",
   "orgSwitcher.ariaLabel": "Switch organization",
   "orgSwitcher.ariaLabelList": "Organizations",
+  "orgSwitcher.schedules": "Schedules",
+  "orgSwitcher.library": "Library",
   "orgSwitcher.connectors": "Connectors",
   "orgSwitcher.settings": "Organization settings",
   "orgSwitcher.create": "+ New organization",

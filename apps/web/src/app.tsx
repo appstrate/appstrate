@@ -27,7 +27,7 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useClickOutside } from "./hooks/use-click-outside";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download, FileText } from "lucide-react";
+import { User, Settings, Download, FileText, LogOut } from "lucide-react";
 
 function UserMenu({
   displayName,
@@ -83,6 +83,7 @@ function UserMenu({
             {t("nav.downloadSkill")}
           </a>
           <button className="user-menu-logout" onClick={onLogout}>
+            <LogOut size={14} />
             {t("userMenu.logout")}
           </button>
         </div>
@@ -92,12 +93,9 @@ function UserMenu({
 }
 
 function MainLayout() {
-  const { t } = useTranslation();
-  const location = useLocation();
   const queryClient = useQueryClient();
   const { user, profile, logout } = useAuth();
   const { isOrgAdmin } = useOrg();
-  const currentPath = location.pathname;
 
   const handleLogout = async () => {
     await logout();
@@ -110,23 +108,6 @@ function MainLayout() {
         <Link to="/" className="logo-link">
           <img src="/logo.svg" alt="Appstrate" className="app-logo" />
         </Link>
-        <nav className="main-nav">
-          <Link
-            className={`nav-tab ${currentPath === "/" || currentPath.startsWith("/flows") ? "active" : ""}`}
-            to="/"
-          >
-            {t("nav.flows")}
-          </Link>
-          <Link
-            className={`nav-tab ${currentPath === "/schedules" ? "active" : ""}`}
-            to="/schedules"
-          >
-            {t("nav.schedules")}
-          </Link>
-          <Link className={`nav-tab ${currentPath === "/library" ? "active" : ""}`} to="/library">
-            {t("nav.library")}
-          </Link>
-        </nav>
         <NotificationBell />
         <OrgSwitcher />
         <UserMenu
