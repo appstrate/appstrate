@@ -55,10 +55,11 @@ export function ExecutionsPage() {
         </EmptyState>
       ) : (
         <div className="exec-list">
-          {executions.map((exec: Execution) => (
+          {executions.map((exec: Execution, index: number) => (
             <ExecutionRow
               key={exec.id}
               execution={exec}
+              executionNumber={total - page * limit - index}
               flowName={flowNameMap.get(exec.flowId) ?? exec.flowId}
             />
           ))}

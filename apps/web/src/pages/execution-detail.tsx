@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFlowDetail } from "../hooks/use-flows";
@@ -32,6 +32,8 @@ function formatToolArgs(args: Record<string, unknown>): string {
 export function ExecutionDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
+  const location = useLocation();
+  const executionNumber = (location.state as { executionNumber?: number } | null)?.executionNumber;
   const orgId = useCurrentOrgId();
   const { data: flow } = useFlowDetail(flowId);
   const { data: execution, isLoading, error } = useExecution(execId);
@@ -183,7 +185,11 @@ export function ExecutionDetailPage() {
         <span className="separator">/</span>
         <Link to={`/flows/${flowId}`}>{flow?.displayName || flowId}</Link>
         <span className="separator">/</span>
-        <span className="current">{execId?.slice(0, 16)}...</span>
+        <span className="current">
+          {executionNumber
+            ? t("exec.breadcrumb", { number: executionNumber })
+            : date || execId?.slice(0, 8)}
+        </span>
       </nav>
 
       <div className="exec-detail-header">

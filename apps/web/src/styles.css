@@ -283,6 +283,29 @@ button.danger:hover {
   background: var(--warning);
 }
 
+.status-icon {
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.status-icon.connected {
+  color: var(--success);
+}
+.status-icon.disconnected {
+  color: var(--danger);
+}
+.status-icon.warning {
+  color: var(--warning);
+}
+.services-summary {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.375rem;
+}
+.services-summary .summary-action {
+  color: var(--warning);
+}
+
 /* Admin-provided services */
 .service.admin-provided {
   border-color: var(--success);
@@ -407,13 +430,34 @@ button:disabled {
   border-radius: 6px;
   padding: 0.75rem 1rem;
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.375rem;
   cursor: pointer;
   transition: border-color 0.15s;
   font-size: 0.8rem;
   text-decoration: none;
   color: inherit;
+}
+.exec-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+.exec-number {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.exec-result-preview {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  opacity: 0.7;
 }
 
 .exec-row:hover {
