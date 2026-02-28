@@ -1108,6 +1108,15 @@ button:disabled {
   color: var(--danger);
   margin-bottom: 0.5rem;
 }
+.field-error {
+  font-size: 0.75rem;
+  color: var(--danger);
+  margin-top: 0.25rem;
+}
+.input-error,
+.input-error:focus {
+  border-color: var(--danger) !important;
+}
 .form-success {
   font-size: 0.8rem;
   color: var(--success);

@@ -9,6 +9,7 @@ export interface FormFieldProps {
   placeholder?: string;
   description?: string;
   enumValues?: string[];
+  error?: string;
 }
 
 export function FormField({
@@ -22,8 +23,11 @@ export function FormField({
   placeholder,
   description,
   enumValues,
+  error,
 }: FormFieldProps) {
   const hintId = description ? `hint-${id}` : undefined;
+  const errorId = error ? `error-${id}` : undefined;
+  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
 
   return (
     <div className="form-group">
@@ -36,7 +40,9 @@ export function FormField({
           id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          aria-describedby={hintId}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={error ? "input-error" : undefined}
         >
           {enumValues.map((opt) => (
             <option key={opt} value={opt}>
@@ -52,12 +58,19 @@ export function FormField({
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={placeholder}
-          aria-describedby={hintId}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={error ? "input-error" : undefined}
         />
       )}
       {description && (
         <div id={hintId} className="hint">
           {description}
+        </div>
+      )}
+      {error && (
+        <div id={errorId} className="field-error">
+          {error}
         </div>
       )}
     </div>

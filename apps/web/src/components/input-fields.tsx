@@ -9,6 +9,7 @@ interface InputFieldsProps {
   fileValues?: Record<string, File[]>;
   onFileChange?: (key: string, files: File[]) => void;
   idPrefix?: string;
+  errors?: Record<string, string>;
 }
 
 export function InputFields({
@@ -18,6 +19,7 @@ export function InputFields({
   fileValues,
   onFileChange,
   idPrefix = "input",
+  errors,
 }: InputFieldsProps) {
   return (
     <>
@@ -50,6 +52,7 @@ export function InputFields({
               onChange={(v) => onChange(key, v)}
               placeholder={prop.placeholder || prop.description}
               description={prop.description}
+              error={errors?.[key]}
             />
           );
         })}

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
+import { useFormErrors } from "../hooks/use-form-errors";
 
 export function WelcomePage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -14,7 +15,23 @@ export function WelcomePage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const rules = useMemo(
+    () => ({
+      password: (v: string) => {
+        if (v && v.length < 8) return t("validation.minLength", { ns: "common", min: 8 });
+        return undefined;
+      },
+      confirmPassword: (v: string) => {
+        if (password && v !== password) return t("validation.passwordMismatch", { ns: "common" });
+        return undefined;
+      },
+    }),
+    [t, password],
+  );
+
+  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
 
   const finishAndRedirect = () => {
     if (orgId) {
@@ -26,17 +43,9 @@ export function WelcomePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setServerError(null);
 
-    if (password && password !== confirmPassword) {
-      setError(t("preferences.passwordMismatch"));
-      return;
-    }
-
-    if (password && password.length < 8) {
-      setError(t("welcome.passwordMin"));
-      return;
-    }
+    if (!validateAll({ password, confirmPassword })) return;
 
     setLoading(true);
 
@@ -61,7 +70,7 @@ export function WelcomePage() {
 
       finishAndRedirect();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur");
+      setServerError(err instanceof Error ? err.message : "Erreur");
       setLoading(false);
     }
   };
@@ -96,11 +105,18 @@ export function WelcomePage() {
               id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                clearField("password");
+              }}
+              onBlur={() => onBlur("password", password)}
               placeholder="••••••••"
               minLength={8}
               autoComplete="new-password"
+              aria-invalid={errors.password ? true : undefined}
+              className={errors.password ? "input-error" : undefined}
             />
+            {errors.password && <div className="field-error">{errors.password}</div>}
           </div>
 
           {password && (
@@ -110,15 +126,24 @@ export function WelcomePage() {
                 id="confirmPassword"
                 type="password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  clearField("confirmPassword");
+                }}
+                onBlur={() => onBlur("confirmPassword", confirmPassword)}
                 placeholder="••••••••"
                 minLength={8}
                 autoComplete="new-password"
+                aria-invalid={errors.confirmPassword ? true : undefined}
+                className={errors.confirmPassword ? "input-error" : undefined}
               />
+              {errors.confirmPassword && (
+                <div className="field-error">{errors.confirmPassword}</div>
+              )}
             </div>
           )}
 
-          {error && <p className="form-error">{error}</p>}
+          {serverError && <p className="form-error">{serverError}</p>}
 
           <button className="primary login-btn" type="submit" disabled={loading}>
             {loading ? <Spinner /> : t("welcome.save")}

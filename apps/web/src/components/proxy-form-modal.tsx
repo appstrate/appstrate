@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Spinner } from "./spinner";
+import { useFormErrors } from "../hooks/use-form-errors";
 import type { OrgProxyInfo } from "@appstrate/shared-types";
 
 interface ProxyFormModalProps {
@@ -27,10 +28,27 @@ function ProxyFormBody({
   const [label, setLabel] = useState(proxy?.label ?? "");
   const [url, setUrl] = useState("");
 
+  const rules = useMemo(
+    () => ({
+      label: (v: string) => {
+        if (!v.trim()) return t("validation.required", { ns: "common" });
+        return undefined;
+      },
+      url: (v: string) => {
+        if (!proxy && !v.trim()) return t("validation.required", { ns: "common" });
+        return undefined;
+      },
+    }),
+    [t, proxy],
+  );
+
+  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!label.trim()) return;
-    if (!proxy && !url.trim()) return;
+
+    if (!validateAll({ label, url })) return;
+
     onSubmit({
       label: label.trim(),
       ...(url.trim() ? { url: url.trim() } : {}),
@@ -62,11 +80,17 @@ function ProxyFormBody({
             id="px-label"
             type="text"
             value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            onChange={(e) => {
+              setLabel(e.target.value);
+              clearField("label");
+            }}
+            onBlur={() => onBlur("label", label)}
             placeholder={t("proxies.modal.labelPlaceholder")}
-            required
             autoFocus
+            aria-invalid={errors.label ? true : undefined}
+            className={errors.label ? "input-error" : undefined}
           />
+          {errors.label && <div className="field-error">{errors.label}</div>}
         </div>
         <div className="form-group">
           <label htmlFor="px-url">{t("proxies.modal.url")}</label>
@@ -74,11 +98,17 @@ function ProxyFormBody({
             id="px-url"
             type="text"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              clearField("url");
+            }}
+            onBlur={() => onBlur("url", url)}
             placeholder={t("proxies.modal.urlPlaceholder")}
-            required={!proxy}
+            aria-invalid={errors.url ? true : undefined}
+            className={errors.url ? "input-error" : undefined}
           />
           {proxy && <div className="hint">{t("proxies.modal.urlHint")}</div>}
+          {errors.url && <div className="field-error">{errors.url}</div>}
         </div>
       </form>
     </Modal>

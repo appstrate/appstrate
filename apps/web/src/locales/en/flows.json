@@ -69,7 +69,6 @@
   "schedule.timezone": "Timezone",
   "schedule.enabled": "Enabled",
   "schedule.inputTitle": "Input parameters",
-  "schedule.cronRequired": "Cron expression is required",
   "schedule.preset30min": "Every 30 min",
   "schedule.presetHourly": "Every hour",
   "schedule.presetDaily9": "Daily at 9am",

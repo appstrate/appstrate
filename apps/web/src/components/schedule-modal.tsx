@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useFormErrors } from "../hooks/use-form-errors";
 import { Modal } from "./modal";
 import { InputFields } from "./input-fields";
 import { initInputValues, buildInputPayload } from "./input-utils";
@@ -126,11 +127,20 @@ function ScheduleForm({
     initInputValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),
   );
 
+  const rules = useMemo(
+    () => ({
+      cronExpression: (v: string) => {
+        if (!v.trim()) return t("validation.required", { ns: "common" });
+        return undefined;
+      },
+    }),
+    [t],
+  );
+
+  const { errors, validateAll, clearField } = useFormErrors(rules);
+
   const handleSubmit = () => {
-    if (!cronExpression.trim()) {
-      alert(t("schedule.cronRequired"));
-      return;
-    }
+    if (!validateAll({ cronExpression })) return;
 
     const input = hasInputSchema ? buildInputPayload(schema, inputValues) : undefined;
 
@@ -165,7 +175,10 @@ function ScheduleForm({
               key={p.cron}
               type="button"
               className={`cron-preset ${cronExpression === p.cron ? "active" : ""}`}
-              onClick={() => setCronExpression(p.cron)}
+              onClick={() => {
+                setCronExpression(p.cron);
+                clearField("cronExpression");
+              }}
             >
               {p.label}
             </button>
@@ -179,10 +192,16 @@ function ScheduleForm({
           id="sched-cron"
           type="text"
           value={cronExpression}
-          onChange={(e) => setCronExpression(e.target.value)}
+          onChange={(e) => {
+            setCronExpression(e.target.value);
+            clearField("cronExpression");
+          }}
           placeholder="*/30 * * * *"
+          aria-invalid={errors.cronExpression ? true : undefined}
+          className={errors.cronExpression ? "input-error" : undefined}
         />
         <div className="hint">{t("schedule.cronHint")}</div>
+        {errors.cronExpression && <div className="field-error">{errors.cronExpression}</div>}
       </div>
 
       <div className="form-group">
