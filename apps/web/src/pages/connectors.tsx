@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { useOrg } from "../hooks/use-org";
 import { useServices } from "../hooks/use-services";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
@@ -9,27 +8,37 @@ import {
   useDisconnect,
   useConnectApiKey,
   useConnectCredentials,
+  useCreateProvider,
+  useUpdateProvider,
+  useDeleteProvider,
 } from "../hooks/use-mutations";
 import { useProviders } from "../hooks/use-providers";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ProfileSelector } from "../components/profile-selector";
+import { ProviderCard } from "../components/provider-card";
+import { ProviderFormModal } from "../components/provider-form-modal";
+import { ProviderTemplatePicker } from "../components/provider-template-picker";
+import { ProviderTemplateForm } from "../components/provider-template-form";
 import { LoadingState, ErrorState } from "../components/page-states";
-import { getServiceStatusDisplay } from "../lib/service-status";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, ProviderConfig, ProviderTemplate } from "@appstrate/shared-types";
 
 export function ConnectorsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { currentOrg } = useOrg();
+  const { currentOrg, isOrgAdmin } = useOrg();
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
-  const { data: integrations, isLoading, error } = useServices();
+  const { data: integrations, isLoading: integrationsLoading, error } = useServices();
+  const { data: providers, isLoading: providersLoading } = useProviders();
   const connectMutation = useConnect();
   const disconnectMutation = useDisconnect();
   const apiKeyMutation = useConnectApiKey();
   const credentialsMutation = useConnectCredentials();
-  const { data: providers } = useProviders();
+  const createProviderMutation = useCreateProvider();
+  const updateProviderMutation = useUpdateProvider();
+  const deleteProviderMutation = useDeleteProvider();
 
+  // Connection modals
   const [apiKeyProvider, setApiKeyProvider] = useState<{
     uniqueKey: string;
     displayName: string;
@@ -41,13 +50,33 @@ export function ConnectorsPage() {
     schema: JSONSchemaObject;
   } | null>(null);
 
+  // Provider CRUD modals
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [editProvider, setEditProvider] = useState<ProviderConfig | null>(null);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<{
+    template: ProviderTemplate;
+    callbackUrl: string;
+  } | null>(null);
+
   const isCredentialAuth = (providerId?: string): boolean => {
     const pDef = providers?.find((p) => p.id === providerId);
     return !!pDef?.credentialSchema;
   };
 
+  const resolveAuthMode = (svc: { uniqueKey: string; authMode?: string }): string | undefined => {
+    if (svc.authMode) return svc.authMode;
+    const pDef = providers?.find((p) => p.id === svc.uniqueKey);
+    return pDef?.authMode === "api_key"
+      ? "API_KEY"
+      : pDef?.authMode === "oauth2"
+        ? "OAUTH2"
+        : undefined;
+  };
+
   const handleConnect = (svc: { uniqueKey: string; displayName: string; authMode?: string }) => {
-    if (svc.authMode === "API_KEY") {
+    const authMode = resolveAuthMode(svc);
+    if (authMode === "API_KEY") {
       setApiKeyProvider({ uniqueKey: svc.uniqueKey, displayName: svc.displayName });
     } else if (isCredentialAuth(svc.uniqueKey)) {
       const pDef = providers?.find((p) => p.id === svc.uniqueKey);
@@ -62,6 +91,29 @@ export function ConnectorsPage() {
     }
   };
 
+  const handleDisconnect = (provider: string, connectionId?: string) => {
+    disconnectMutation.mutate({
+      provider,
+      ...(connectionId ? { connectionId } : pParam),
+    });
+  };
+
+  const handleDeleteProvider = (p: ProviderConfig) => {
+    if (!confirm(t("providers.deleteConfirm", { name: p.displayName }))) return;
+    deleteProviderMutation.mutate(p.id);
+  };
+
+  const mergedItems = useMemo(() => {
+    if (!providers) return [];
+    const integrationMap = new Map((integrations ?? []).map((svc) => [svc.uniqueKey, svc]));
+    return providers.map((p) => ({
+      provider: p,
+      integration: integrationMap.get(p.id),
+    }));
+  }, [providers, integrations]);
+
+  const isLoading = providersLoading || integrationsLoading;
+
   return (
     <>
       <div className="header-row">
@@ -72,97 +124,61 @@ export function ConnectorsPage() {
       <div className="service-card service-card-spaced">
         <div className="connectors-intro">
           <p className="service-provider">
-            {t("connectors.orgDescription", { orgName: currentOrg?.name })}{" "}
-            <Link to="/org-settings?tab=providers" className="link-inline">
-              {t("connectors.addMoreProviders")}
-            </Link>
+            {isOrgAdmin
+              ? t("connectors.adminDescription", { orgName: currentOrg?.name })
+              : t("connectors.memberDescription", { orgName: currentOrg?.name })}
           </p>
         </div>
       </div>
+
+      {isOrgAdmin && (
+        <div className="tab-toolbar">
+          <button className="primary" onClick={() => setTemplatePickerOpen(true)}>
+            {t("providers.addProvider")}
+          </button>
+        </div>
+      )}
 
       {isLoading ? (
         <LoadingState />
       ) : error ? (
         <ErrorState message={error.message} />
-      ) : !integrations || integrations.length === 0 ? (
+      ) : mergedItems.length === 0 ? (
         <div className="empty-state">
-          <p>{t("services.empty")}</p>
-          <p className="empty-hint">{t("services.emptyHint")}</p>
+          <p>{t("connectors.noProviders")}</p>
+          <p className="empty-hint">
+            {isOrgAdmin
+              ? t("connectors.noProvidersAdminHint")
+              : t("connectors.noProvidersMemberHint")}
+          </p>
         </div>
       ) : (
         <div className="services-grid">
-          {integrations.map((svc) => {
-            const isConnected = svc.status === "connected";
-            const needsReconnection = svc.status === "needs_reconnection";
-            const connDate = svc.connectedAt ? new Date(svc.connectedAt).toLocaleDateString() : "";
-            const { statusDotClass, badgeClass, statusLabel } = getServiceStatusDisplay(
-              svc.status,
-              t,
-            );
-
-            return (
-              <div key={svc.uniqueKey} className="service-card">
-                <div className="service-card-header">
-                  {svc.logo && (
-                    <img className="service-logo" src={svc.logo} alt={svc.displayName} />
-                  )}
-                  <div className="service-info">
-                    <h3>{svc.displayName}</h3>
-                    <span className="service-provider">{svc.provider}</span>
-                  </div>
-                </div>
-                <div className="service-card-status">
-                  <span className={`status-dot ${statusDotClass}`} />
-                  <span className={`badge ${badgeClass}`}>{statusLabel}</span>
-                  {connDate && <span className="service-date">{connDate}</span>}
-                </div>
-                <div className="service-card-actions">
-                  {isConnected ? (
-                    <>
-                      <button
-                        onClick={() => {
-                          if (confirm(t("services.disconnectConfirm", { name: svc.uniqueKey }))) {
-                            disconnectMutation.mutate({
-                              provider: svc.uniqueKey,
-                              ...(svc.connectionId ? { connectionId: svc.connectionId } : pParam),
-                            });
-                          }
-                        }}
-                        disabled={disconnectMutation.isPending}
-                      >
-                        {t("btn.disconnect")}
-                      </button>
-                      <button
-                        onClick={() => handleConnect(svc)}
-                        disabled={
-                          connectMutation.isPending ||
-                          apiKeyMutation.isPending ||
-                          credentialsMutation.isPending
-                        }
-                      >
-                        {t("btn.reconnect")}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="primary"
-                      onClick={() => handleConnect(svc)}
-                      disabled={
-                        connectMutation.isPending ||
-                        apiKeyMutation.isPending ||
-                        credentialsMutation.isPending
-                      }
-                    >
-                      {needsReconnection ? t("btn.reconnect") : t("btn.connect")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {mergedItems.map(({ provider, integration }) => (
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              integration={integration}
+              isAdmin={isOrgAdmin}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onEdit={(p) => {
+                setEditProvider(p);
+                setProviderModalOpen(true);
+              }}
+              onDelete={handleDeleteProvider}
+              connectPending={
+                connectMutation.isPending ||
+                apiKeyMutation.isPending ||
+                credentialsMutation.isPending
+              }
+              disconnectPending={disconnectMutation.isPending}
+            />
+          ))}
         </div>
       )}
 
+      {/* Connection modals */}
       <ApiKeyModal
         open={!!apiKeyProvider}
         onClose={() => setApiKeyProvider(null)}
@@ -194,6 +210,47 @@ export function ConnectorsPage() {
           }}
         />
       )}
+
+      {/* Provider CRUD modals (admin only) */}
+      <ProviderTemplatePicker
+        open={templatePickerOpen}
+        onClose={() => setTemplatePickerOpen(false)}
+        onSelectTemplate={(template, callbackUrl) => {
+          setTemplatePickerOpen(false);
+          setSelectedTemplate({ template, callbackUrl });
+        }}
+        onSelectCustom={() => {
+          setTemplatePickerOpen(false);
+          setEditProvider(null);
+          setProviderModalOpen(true);
+        }}
+      />
+
+      {selectedTemplate && (
+        <ProviderTemplateForm
+          open={!!selectedTemplate}
+          onClose={() => setSelectedTemplate(null)}
+          template={selectedTemplate.template}
+          callbackUrl={selectedTemplate.callbackUrl}
+        />
+      )}
+
+      <ProviderFormModal
+        open={providerModalOpen}
+        onClose={() => setProviderModalOpen(false)}
+        provider={editProvider}
+        isPending={createProviderMutation.isPending || updateProviderMutation.isPending}
+        onSubmit={(data) => {
+          if (editProvider) {
+            updateProviderMutation.mutate(
+              { id: editProvider.id, data },
+              { onSuccess: () => setProviderModalOpen(false) },
+            );
+          } else {
+            createProviderMutation.mutate(data, { onSuccess: () => setProviderModalOpen(false) });
+          }
+        }}
+      />
     </>
   );
 }
