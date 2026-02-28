@@ -69,17 +69,26 @@ function InputModalForm({
     initInputValues(schema, initialValues),
   );
   const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const clearFieldError = (key: string) => {
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const { [key]: _, ...rest } = prev;
+      return rest;
+    });
+  };
 
   const handleSubmit = () => {
     const input = buildInputPayload(schema, values);
+    const newErrors: Record<string, string> = {};
 
     // Validate required text fields
     for (const key of Object.keys(schema.properties)) {
       const prop = schema.properties[key]!;
       if (prop.type === "file") continue;
       if (schema.required?.includes(key) && (!input[key] || input[key] === "")) {
-        alert(t("input.fieldRequired", { field: key }));
-        return;
+        newErrors[key] = t("input.fieldRequired", { field: key });
       }
     }
 
@@ -88,9 +97,13 @@ function InputModalForm({
       const prop = schema.properties[key]!;
       if (prop.type !== "file") continue;
       if (schema.required?.includes(key) && (!fileValues[key] || fileValues[key]!.length === 0)) {
-        alert(t("input.fileRequired", { field: key }));
-        return;
+        newErrors[key] = t("input.fileRequired", { field: key });
       }
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
     }
 
     // Check if we have any files
@@ -103,9 +116,16 @@ function InputModalForm({
       <InputFields
         schema={schema}
         values={values}
-        onChange={(key, v) => setValues((prev) => ({ ...prev, [key]: v }))}
+        onChange={(key, v) => {
+          setValues((prev) => ({ ...prev, [key]: v }));
+          clearFieldError(key);
+        }}
         fileValues={fileValues}
-        onFileChange={(key, files) => setFileValues((prev) => ({ ...prev, [key]: files }))}
+        onFileChange={(key, files) => {
+          setFileValues((prev) => ({ ...prev, [key]: files }));
+          clearFieldError(key);
+        }}
+        errors={errors}
       />
       <div className="modal-actions">
         <button onClick={onClose} disabled={isPending}>

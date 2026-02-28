@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useFormErrors } from "../hooks/use-form-errors";
 import { Modal } from "./modal";
 import { Spinner } from "./spinner";
 import { SchemaSection, type SchemaField } from "./flow-editor/schema-section";
@@ -127,8 +128,30 @@ function ProviderFormBody({
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const rules = useMemo(
+    () => ({
+      displayName: (v: string) => {
+        if (!isBuiltIn && !v.trim()) return t("validation.required", { ns: "common" });
+        return undefined;
+      },
+      id: (v: string) => {
+        if (isEdit) return undefined;
+        if (!v.trim()) return t("validation.required", { ns: "common" });
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(v.trim()))
+          return t("validation.slugFormat", { ns: "common" });
+        return undefined;
+      },
+    }),
+    [t, isEdit, isBuiltIn],
+  );
+
+  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validateAll({ displayName: form.displayName, id: form.id })) return;
+
     const data: Record<string, unknown> = {
       displayName: form.displayName,
       authMode: form.authMode,
@@ -230,11 +253,19 @@ function ProviderFormBody({
             onChange={(e) => {
               const name = e.target.value;
               setField("displayName", name);
-              if (!idEdited) setField("id", toSlug(name));
+              clearField("displayName");
+              if (!idEdited) {
+                setField("id", toSlug(name));
+                clearField("id");
+              }
             }}
+            onBlur={() => onBlur("displayName", form.displayName)}
             required
             readOnly={isBuiltIn}
+            aria-invalid={errors.displayName ? true : undefined}
+            className={errors.displayName ? "input-error" : undefined}
           />
+          {errors.displayName && <div className="field-error">{errors.displayName}</div>}
         </div>
 
         <div className="form-group">
@@ -246,14 +277,21 @@ function ProviderFormBody({
             onChange={(e) => {
               setField("id", toLiveSlug(e.target.value));
               setIdEdited(true);
+              clearField("id");
             }}
-            onBlur={() => setField("id", toSlug(form.id))}
+            onBlur={() => {
+              setField("id", toSlug(form.id));
+              onBlur("id", form.id);
+            }}
             placeholder={t("providers.form.idPlaceholder")}
             required
             readOnly={isEdit}
             pattern="[a-z0-9][a-z0-9-]*"
+            aria-invalid={errors.id ? true : undefined}
+            className={errors.id ? "input-error" : undefined}
           />
           {!isEdit && <div className="hint">{t("providers.form.idHint")}</div>}
+          {errors.id && <div className="field-error">{errors.id}</div>}
         </div>
 
         <div className="form-group">

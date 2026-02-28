@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth } from "../hooks/use-auth";
+import { useFormErrors } from "../hooks/use-form-errors";
 import { useDisconnect, useDeleteAllConnections } from "../hooks/use-mutations";
 import {
   useConnectionProfiles,
@@ -179,19 +180,38 @@ function PasswordChangeForm() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
+  const [serverError, setServerError] = useState("");
   const [success, setSuccess] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const rules = useMemo(
+    () => ({
+      currentPassword: (v: string) => {
+        if (!v) return t("validation.required", { ns: "common" });
+        return undefined;
+      },
+      newPassword: (v: string) => {
+        if (!v) return t("validation.required", { ns: "common" });
+        if (v.length < 6) return t("validation.minLength", { ns: "common", min: 6 });
+        return undefined;
+      },
+      confirmPassword: (v: string) => {
+        if (!v) return t("validation.required", { ns: "common" });
+        if (v !== newPassword) return t("validation.passwordMismatch", { ns: "common" });
+        return undefined;
+      },
+    }),
+    [t, newPassword],
+  );
+
+  const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    setServerError("");
     setSuccess("");
 
-    if (newPassword !== confirmPassword) {
-      setError(t("preferences.passwordMismatch"));
-      return;
-    }
+    if (!validateAll({ currentPassword, newPassword, confirmPassword })) return;
 
     setSubmitting(true);
     try {
@@ -200,18 +220,13 @@ function PasswordChangeForm() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      clearErrors();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t("login.error"));
+      setServerError(err instanceof Error ? err.message : t("login.error"));
     } finally {
       setSubmitting(false);
     }
   };
-
-  const canSubmit =
-    currentPassword.length > 0 &&
-    newPassword.length >= 6 &&
-    confirmPassword.length > 0 &&
-    !submitting;
 
   return (
     <div className="service-card service-card-spaced">
@@ -223,11 +238,16 @@ function PasswordChangeForm() {
             value={currentPassword}
             onChange={(e) => {
               setCurrentPassword(e.target.value);
-              setError("");
+              clearField("currentPassword");
+              setServerError("");
               setSuccess("");
             }}
+            onBlur={() => onBlur("currentPassword", currentPassword)}
             autoComplete="current-password"
+            aria-invalid={errors.currentPassword ? true : undefined}
+            className={errors.currentPassword ? "input-error" : undefined}
           />
+          {errors.currentPassword && <div className="field-error">{errors.currentPassword}</div>}
         </div>
         <div className="form-group">
           <label>{t("preferences.newPassword")}</label>
@@ -236,12 +256,17 @@ function PasswordChangeForm() {
             value={newPassword}
             onChange={(e) => {
               setNewPassword(e.target.value);
-              setError("");
+              clearField("newPassword");
+              setServerError("");
               setSuccess("");
             }}
+            onBlur={() => onBlur("newPassword", newPassword)}
             minLength={6}
             autoComplete="new-password"
+            aria-invalid={errors.newPassword ? true : undefined}
+            className={errors.newPassword ? "input-error" : undefined}
           />
+          {errors.newPassword && <div className="field-error">{errors.newPassword}</div>}
         </div>
         <div className="form-group">
           <label>{t("preferences.confirmPassword")}</label>
@@ -250,15 +275,20 @@ function PasswordChangeForm() {
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value);
-              setError("");
+              clearField("confirmPassword");
+              setServerError("");
               setSuccess("");
             }}
+            onBlur={() => onBlur("confirmPassword", confirmPassword)}
             autoComplete="new-password"
+            aria-invalid={errors.confirmPassword ? true : undefined}
+            className={errors.confirmPassword ? "input-error" : undefined}
           />
+          {errors.confirmPassword && <div className="field-error">{errors.confirmPassword}</div>}
         </div>
-        {error && <div className="form-error">{error}</div>}
+        {serverError && <div className="form-error">{serverError}</div>}
         {success && <div className="form-success">{success}</div>}
-        <button type="submit" className="primary" disabled={!canSubmit}>
+        <button type="submit" className="primary" disabled={submitting}>
           {submitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </button>
       </form>

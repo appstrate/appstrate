@@ -41,5 +41,10 @@
   "status.running": "en cours",
   "status.pending": "en attente",
   "status.timeout": "timeout",
-  "status.cancelled": "annulé"
+  "status.cancelled": "annulé",
+  "validation.required": "Ce champ est requis",
+  "validation.minLength": "Minimum {{min}} caractères",
+  "validation.passwordMismatch": "Les mots de passe ne correspondent pas",
+  "validation.slugFormat": "Lettres minuscules, chiffres et tirets uniquement",
+  "validation.emailFormat": "Adresse email invalide"
 }

@@ -69,7 +69,6 @@
   "schedule.timezone": "Fuseau horaire",
   "schedule.enabled": "Activé",
   "schedule.inputTitle": "Paramètres d'entrée",
-  "schedule.cronRequired": "L'expression cron est requise",
   "schedule.preset30min": "Toutes les 30 min",
   "schedule.presetHourly": "Toutes les heures",
   "schedule.presetDaily9": "Tous les jours à 9h",
