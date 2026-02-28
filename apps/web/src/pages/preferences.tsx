@@ -14,7 +14,8 @@ import {
 import { useCurrentProfileId } from "../hooks/use-current-profile";
 import { ProfileSelector } from "../components/profile-selector";
 import { formatDateField } from "../lib/markdown";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { Unplug } from "lucide-react";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { UserConnectionItem } from "@appstrate/shared-types";
 
 export function PreferencesPage() {
@@ -339,10 +340,15 @@ function ConnectorsTab() {
       </div>
 
       {providerIds.length === 0 ? (
-        <div className="empty-state">
-          <p>{t("connectors.noConnections")}</p>
-          <p className="empty-hint">{t("connectors.noConnectionsHint")}</p>
-        </div>
+        <EmptyState
+          message={t("connectors.noConnections")}
+          hint={t("connectors.noConnectionsHint")}
+          icon={Unplug}
+        >
+          <Link to="/connectors">
+            <button>{t("connectors.goToConnectors")}</button>
+          </Link>
+        </EmptyState>
       ) : (
         <div className="services-grid">
           {providerIds.map((providerId) => {

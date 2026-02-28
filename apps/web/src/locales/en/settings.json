@@ -280,5 +280,8 @@
   "proxies.modal.urlPlaceholder": "http://user:pass@host:port",
   "proxies.flow.label": "Proxy",
   "proxies.flow.inherit": "Default (org)",
-  "proxies.flow.none": "No proxy"
+  "proxies.flow.none": "No proxy",
+  "connectors.goToConnectors": "Go to connectors",
+  "library.emptySkillHint": "Upload a ZIP file containing a skill",
+  "library.emptyExtensionHint": "Upload a ZIP file containing an extension"
 }

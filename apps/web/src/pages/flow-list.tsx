@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Layers } from "lucide-react";
 import { useFlows } from "../hooks/use-flows";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
 import { ImportModal } from "../components/import-modal";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 export function FlowList() {
   const { t } = useTranslation(["flows", "common"]);
@@ -31,10 +32,14 @@ export function FlowList() {
             <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>
           </div>
         </div>
-        <div className="empty-state">
-          <p>{t("list.empty")}</p>
-          <p className="empty-hint">{t("list.emptyHint")}</p>
-        </div>
+        <EmptyState message={t("list.empty")} hint={t("list.emptyHint")} icon={Layers}>
+          {isOrgAdmin && (
+            <Link to="/flows/new">
+              <button>{t("list.create")}</button>
+            </Link>
+          )}
+          <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>
+        </EmptyState>
         <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       </>
     );

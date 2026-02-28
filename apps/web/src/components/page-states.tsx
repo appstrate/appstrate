@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
+import type { LucideIcon } from "lucide-react";
 
 export function LoadingState() {
   return (
@@ -23,21 +24,30 @@ export function EmptyState({
   message,
   hint,
   compact,
+  icon: Icon,
+  children,
 }: {
   message: string;
   hint?: string;
   compact?: boolean;
+  icon?: LucideIcon;
+  children?: React.ReactNode;
 }) {
   return (
     <div className={`empty-state${compact ? " empty-state-compact" : ""}`}>
+      {Icon && <Icon className="empty-state-icon" />}
       {compact ? (
-        <p className="empty-hint">{message}</p>
+        <>
+          <p className="empty-hint">{message}</p>
+          {hint && <p className="empty-hint">{hint}</p>}
+        </>
       ) : (
         <>
           <p>{message}</p>
           {hint && <p className="empty-hint">{hint}</p>}
         </>
       )}
+      {children && <div className="empty-state-actions">{children}</div>}
     </div>
   );
 }

@@ -259,7 +259,14 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
       {isLoading ? (
         <div className="empty-state empty-state-compact">{t("loading")}</div>
       ) : !providers || providers.length === 0 ? (
-        <div className="empty-state empty-state-compact">{t("editor.noIntegration")}</div>
+        <div className="empty-state empty-state-compact">
+          {t("editor.noIntegration")}
+          <div className="empty-state-actions">
+            <Link to="/connectors">
+              <button>{t("editor.goToConnectors")}</button>
+            </Link>
+          </div>
+        </div>
       ) : (
         <div className="service-picker-grid">
           {providers.map((p) => {

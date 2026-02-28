@@ -482,7 +482,17 @@ export function FlowDetailPage() {
             </div>
           )}
           {!executions || executions.length === 0 ? (
-            <EmptyState message={t("detail.emptyExec")} compact />
+            <EmptyState message={t("detail.emptyExec")} compact>
+              <button
+                className="primary"
+                onClick={handleRun}
+                disabled={
+                  !allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending
+                }
+              >
+                {runFlow.isPending && <Spinner />} {t("detail.run")}
+              </button>
+            </EmptyState>
           ) : (
             <div className="exec-list">
               {executions.map((exec) => (
@@ -516,7 +526,16 @@ export function FlowDetailPage() {
                 </button>
               </div>
               {!schedules || schedules.length === 0 ? (
-                <EmptyState message={t("detail.emptySchedule")} compact />
+                <EmptyState message={t("detail.emptySchedule")} compact>
+                  <button
+                    onClick={() => {
+                      setEditingSchedule(null);
+                      setScheduleOpen(true);
+                    }}
+                  >
+                    {t("btn.add")}
+                  </button>
+                </EmptyState>
               ) : (
                 <div className="schedule-list">
                   {schedules.map((sched) => (
@@ -555,7 +574,11 @@ export function FlowDetailPage() {
             </div>
           )}
           {!memories || memories.length === 0 ? (
-            <EmptyState message={t("detail.emptyMemories")} compact />
+            <EmptyState
+              message={t("detail.emptyMemories")}
+              hint={t("detail.emptyMemoriesHint")}
+              compact
+            />
           ) : (
             <div className="memory-list">
               {memories.map((mem) => (
