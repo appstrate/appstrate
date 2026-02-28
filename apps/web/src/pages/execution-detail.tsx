@@ -116,7 +116,12 @@ export function ExecutionDetailPage() {
               // Merge into previous text entry with newline to preserve natural breaks
               entries[entries.length - 1]!.message += "\n" + message;
             } else {
-              entries.push({ message, type: log.type || "progress", detail });
+              entries.push({
+                message,
+                type: log.type || "progress",
+                detail,
+                createdAt: log.createdAt,
+              });
             }
             lastWasPlainText = isPlainText;
           }
