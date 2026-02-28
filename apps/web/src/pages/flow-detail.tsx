@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import { ProfileSelector } from "../components/profile-selector";
@@ -40,6 +41,7 @@ import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies"
 import { formatDateField } from "../lib/markdown";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
+import { getServiceStatusDisplay, computeServicesSummary } from "../lib/service-status";
 import type { Schedule, JSONSchemaObject } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: {
@@ -57,6 +59,15 @@ function checkRequiredConfig(detail: {
     }
   }
   return true;
+}
+
+function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
+  const { statusDotClass, statusLabel, statusIcon } = getServiceStatusDisplay(status, t);
+  return (
+    <span className={`status-icon ${statusDotClass}`} aria-label={statusLabel}>
+      {statusIcon}
+    </span>
+  );
 }
 
 type Tab = "executions" | "schedules" | "memories";
@@ -203,11 +214,29 @@ export function FlowDetailPage() {
         <p className="description">{detail.description}</p>
       </div>
 
+      {(() => {
+        const summary = computeServicesSummary(detail.requires.services, t);
+        if (!summary) return null;
+        return (
+          <div className="services-summary">
+            {summary.connectedCount > 0 &&
+              t("detail.servicesSummaryOk", { connected: summary.connectedCount })}
+            {summary.connectedCount > 0 && summary.actionCount > 0 && " — "}
+            {summary.actionCount > 0 && (
+              <span className="summary-action">
+                {t("detail.servicesSummaryAction", { count: summary.actionCount })}
+              </span>
+            )}
+          </div>
+        );
+      })()}
       <div className="services">
         {detail.requires.services.map((svc) => {
           const isConnected = svc.status === "connected";
           const isAdminMode = svc.connectionMode === "admin";
           const authMode = getServiceAuthMode(svc);
+          const effectiveStatus =
+            isConnected && svc.scopesSufficient === false ? "needs_reconnection" : svc.status;
 
           // Admin-provided service
           if (isAdminMode) {
@@ -250,7 +279,7 @@ export function FlowDetailPage() {
             if (svc.adminProvided && isConnected) {
               return (
                 <div key={svc.id} className="service admin-provided" title={svc.description}>
-                  <span className="status-dot connected" />
+                  <ServiceIcon status="connected" t={t} />
                   {svc.name || svc.id}
                   <span className="admin-service-badge">{t("admin")}</span>
                   {isOrgAdmin && (
@@ -269,7 +298,7 @@ export function FlowDetailPage() {
             // Admin mode but not yet bound
             return (
               <div key={svc.id} className="service admin-pending" title={svc.description}>
-                <span className="status-dot disconnected" />
+                <ServiceIcon status="not_connected" t={t} />
                 {svc.name || svc.id}
                 {isOrgAdmin ? (
                   <button
@@ -310,7 +339,7 @@ export function FlowDetailPage() {
           if (needsReconnection) {
             return (
               <div key={svc.id} className="service needs-reconnection" title={svc.description}>
-                <span className="status-dot warning" />
+                <ServiceIcon status="needs_reconnection" t={t} />
                 {svc.name || svc.id}
                 <button
                   type="button"
@@ -330,7 +359,7 @@ export function FlowDetailPage() {
                 className={`service${hasScopeIssue ? " scope-warning" : ""}`}
                 title={svc.description}
               >
-                <span className={`status-dot ${hasScopeIssue ? "warning" : "connected"}`} />
+                <ServiceIcon status={effectiveStatus} t={t} />
                 {svc.name || svc.id}
                 {hasScopeIssue && svc.scopesMissing && (
                   <button
@@ -369,7 +398,7 @@ export function FlowDetailPage() {
               onClick={handleServiceConnect}
               title={svc.description}
             >
-              <span className="status-dot disconnected" />
+              <ServiceIcon status="not_connected" t={t} />
               {svc.name || svc.id}
               {` (${t("detail.connect")})`}
             </button>
@@ -495,10 +524,11 @@ export function FlowDetailPage() {
             </EmptyState>
           ) : (
             <div className="exec-list">
-              {executions.map((exec) => (
+              {executions.map((exec, index) => (
                 <ExecutionRow
                   key={exec.id}
                   execution={exec}
+                  executionNumber={executions.length - index}
                   userName={exec.userId ? profileMap.get(exec.userId) : undefined}
                 />
               ))}
