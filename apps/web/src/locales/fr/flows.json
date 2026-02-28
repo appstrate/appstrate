@@ -205,5 +205,9 @@
   "executions.goToFlows": "Voir les flows",
   "detail.emptyMemoriesHint": "Les mémoires sont créées automatiquement lors des exécutions",
   "editor.goToLibrary": "Aller à la bibliothèque",
-  "editor.goToConnectors": "Aller aux connecteurs"
+  "editor.goToConnectors": "Aller aux connecteurs",
+  "log.copyLogs": "Copier les logs",
+  "log.copied": "Copié !",
+  "log.toggleTimestamps": "Horodatages",
+  "log.autoScroll": "Défilement automatique"
 }
