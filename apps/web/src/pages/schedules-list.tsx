@@ -10,7 +10,8 @@ import {
 } from "../hooks/use-schedules";
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { Calendar } from "lucide-react";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
@@ -54,10 +55,11 @@ export function SchedulesListPage() {
       </div>
 
       {!schedules || schedules.length === 0 ? (
-        <div className="empty-state">
-          <p>{t("schedules.empty")}</p>
-          <p className="empty-hint">{t("schedules.emptyHint")}</p>
-        </div>
+        <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
+          <button onClick={openCreate} disabled={!flows || flows.length === 0}>
+            {t("btn.add")}
+          </button>
+        </EmptyState>
       ) : (
         <div className="schedule-list">
           {schedules.map((sched) => {

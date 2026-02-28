@@ -1,5 +1,6 @@
 import { type ChangeEvent, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import {
   useOrgSkills,
   useOrgExtensions,
@@ -85,7 +86,12 @@ export function ResourceSection({
             <Spinner />
           </div>
         ) : !items || items.length === 0 ? (
-          <p className="editor-hint">{emptyLabel}</p>
+          <>
+            <p className="editor-hint">{emptyLabel}</p>
+            <p className="editor-hint">
+              <Link to="/library">{t("editor.goToLibrary")}</Link>
+            </p>
+          </>
         ) : (
           <div className="library-checkbox-list">
             {items.map((item) => (

@@ -20,7 +20,8 @@ import { ProviderCard } from "../components/provider-card";
 import { ProviderFormModal } from "../components/provider-form-modal";
 import { ProviderTemplatePicker } from "../components/provider-template-picker";
 import { ProviderTemplateForm } from "../components/provider-template-form";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { Plug } from "lucide-react";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { JSONSchemaObject, ProviderConfig, ProviderTemplate } from "@appstrate/shared-types";
 
 export function ConnectorsPage() {
@@ -121,16 +122,6 @@ export function ConnectorsPage() {
         <ProfileSelector />
       </div>
 
-      <div className="service-card service-card-spaced">
-        <div className="connectors-intro">
-          <p className="service-provider">
-            {isOrgAdmin
-              ? t("connectors.adminDescription", { orgName: currentOrg?.name })
-              : t("connectors.memberDescription", { orgName: currentOrg?.name })}
-          </p>
-        </div>
-      </div>
-
       {isOrgAdmin && (
         <div className="tab-toolbar">
           <button className="primary" onClick={() => setTemplatePickerOpen(true)}>
@@ -144,14 +135,21 @@ export function ConnectorsPage() {
       ) : error ? (
         <ErrorState message={error.message} />
       ) : mergedItems.length === 0 ? (
-        <div className="empty-state">
-          <p>{t("connectors.noProviders")}</p>
-          <p className="empty-hint">
-            {isOrgAdmin
+        <EmptyState
+          message={t("connectors.noProviders")}
+          hint={
+            isOrgAdmin
               ? t("connectors.noProvidersAdminHint")
-              : t("connectors.noProvidersMemberHint")}
-          </p>
-        </div>
+              : t("connectors.noProvidersMemberHint")
+          }
+          icon={Plug}
+        >
+          {isOrgAdmin && (
+            <button className="primary" onClick={() => setTemplatePickerOpen(true)}>
+              {t("providers.addProvider")}
+            </button>
+          )}
+        </EmptyState>
       ) : (
         <div className="services-grid">
           {mergedItems.map(({ provider, integration }) => (

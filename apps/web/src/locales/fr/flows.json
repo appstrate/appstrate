@@ -198,5 +198,9 @@
   "editor.customServiceIdentifier": "Identifiant",
   "editor.customServiceIdentifierPlaceholder": "mon-api-notion",
   "editor.customServiceIdentifierDesc": "Auto-généré (kebab-case)",
-  "editor.customServiceIdentifierInvalid": "Doit être en kebab-case (a-z, 0-9, tirets)"
+  "editor.customServiceIdentifierInvalid": "Doit être en kebab-case (a-z, 0-9, tirets)",
+  "executions.goToFlows": "Voir les flows",
+  "detail.emptyMemoriesHint": "Les mémoires sont créées automatiquement lors des exécutions",
+  "editor.goToLibrary": "Aller à la bibliothèque",
+  "editor.goToConnectors": "Aller aux connecteurs"
 }

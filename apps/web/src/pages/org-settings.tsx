@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ShieldAlert } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -205,7 +206,13 @@ export function OrgSettingsPage() {
   }
 
   if (!isOrgAdmin) {
-    return <EmptyState message={t("orgSettings.adminOnly")} />;
+    return (
+      <EmptyState message={t("orgSettings.adminOnly")} icon={ShieldAlert}>
+        <Link to="/">
+          <button>{t("btn.back")}</button>
+        </Link>
+      </EmptyState>
+    );
   }
 
   if (isLoading) return <LoadingState />;
@@ -682,7 +689,11 @@ function ProxiesTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("proxies.empty")} compact />
+        <EmptyState message={t("proxies.empty")} compact>
+          <button className="primary" onClick={onCreate}>
+            {t("proxies.add")}
+          </button>
+        </EmptyState>
       )}
     </>
   );
@@ -773,7 +784,11 @@ function ApiKeysTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} compact />
+        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} compact>
+          <button className="primary" onClick={onCreate}>
+            {t("apiKeys.createBtn")}
+          </button>
+        </EmptyState>
       )}
     </>
   );

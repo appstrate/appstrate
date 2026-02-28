@@ -10,6 +10,7 @@ import {
 } from "../hooks/use-library";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "../components/spinner";
+import { EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
 import { LibraryItemDetail } from "../components/library-item-detail";
 import type { OrgSkill, OrgExtension } from "@appstrate/shared-types";
@@ -24,6 +25,7 @@ function getTabConfig(t: (key: string, opts?: Record<string, unknown>) => string
       useDelete: useDeleteSkill,
       uploadLabel: t("library.uploadSkill"),
       emptyLabel: t("library.emptySkill"),
+      emptyHint: t("library.emptySkillHint"),
       detailType: "skill" as const,
       detailPrefix: "Skill",
       deleteConfirm: (item: OrgSkill | OrgExtension) =>
@@ -35,6 +37,7 @@ function getTabConfig(t: (key: string, opts?: Record<string, unknown>) => string
       useDelete: useDeleteExtension,
       uploadLabel: t("library.uploadExtension"),
       emptyLabel: t("library.emptyExtension"),
+      emptyHint: t("library.emptyExtensionHint"),
       detailType: "extension" as const,
       detailPrefix: "Extension",
       deleteConfirm: (item: OrgSkill | OrgExtension) =>
@@ -98,9 +101,21 @@ function LibraryTab({ type }: { type: LibraryType }) {
       )}
 
       {!items || items.length === 0 ? (
-        <div className="empty-state">
-          <p>{config.emptyLabel}</p>
-        </div>
+        <EmptyState message={config.emptyLabel} hint={config.emptyHint}>
+          {isOrgAdmin && (
+            <label className="btn-upload">
+              {upload.isPending ? <Spinner /> : config.uploadLabel}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".zip"
+                onChange={handleUpload}
+                className="hidden"
+                disabled={upload.isPending}
+              />
+            </label>
+          )}
+        </EmptyState>
       ) : (
         <div className="library-table-wrap">
           <table className="library-table">

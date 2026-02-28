@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ShieldAlert } from "lucide-react";
 import { useFlowDetail } from "../hooks/use-flows";
 import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
@@ -15,6 +16,7 @@ import { PromptEditor } from "../components/flow-editor/prompt-editor";
 import { ServicePicker } from "../components/flow-editor/service-picker";
 import { JsonEditor } from "../components/flow-editor/json-editor";
 import { Spinner } from "../components/spinner";
+import { EmptyState } from "../components/page-states";
 import type { FlowFormState, EditorTab } from "../components/flow-editor/types";
 import {
   defaultFormState,
@@ -235,9 +237,11 @@ export function FlowEditorPage() {
 
   if (!isOrgAdmin) {
     return (
-      <div className="empty-state">
-        <p>{t("editor.adminOnly")}</p>
-      </div>
+      <EmptyState message={t("editor.adminOnly")} icon={ShieldAlert}>
+        <Link to="/">
+          <button>{t("btn.back")}</button>
+        </Link>
+      </EmptyState>
     );
   }
 
