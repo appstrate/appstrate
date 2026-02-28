@@ -8,7 +8,7 @@ import { Spinner } from "./spinner";
 
 export function OrgSwitcher() {
   const { t } = useTranslation();
-  const { currentOrg, orgs, switchOrg, loading } = useOrg();
+  const { currentOrg, orgs, switchOrg, loading, isOrgAdmin } = useOrg();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -65,9 +65,11 @@ export function OrgSwitcher() {
             <Link to="/connectors" className="org-switcher-link" onClick={() => setOpen(false)}>
               {t("orgSwitcher.connectors")}
             </Link>
-            <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
-              {t("orgSwitcher.settings")}
-            </Link>
+            {isOrgAdmin && (
+              <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
+                {t("orgSwitcher.settings")}
+              </Link>
+            )}
             <Link
               to="/create-org"
               className="org-switcher-link org-switcher-link-primary"

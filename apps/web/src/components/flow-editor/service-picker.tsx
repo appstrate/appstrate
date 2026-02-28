@@ -282,10 +282,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
             );
           })}
           {isOrgAdmin && (
-            <Link
-              to="/org-settings?tab=providers"
-              className="service-picker-card service-picker-add-provider"
-            >
+            <Link to="/connectors" className="service-picker-card service-picker-add-provider">
               <span className="service-picker-add-icon">+</span>
               <div className="service-picker-card-info">
                 <span className="service-picker-card-name">

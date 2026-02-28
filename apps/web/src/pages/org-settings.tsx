@@ -1,11 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
-import { useProviders } from "../hooks/use-providers";
-import { useCreateProvider, useUpdateProvider, useDeleteProvider } from "../hooks/use-mutations";
 import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
 import {
   useProxies,
@@ -14,11 +12,6 @@ import {
   useDeleteProxy,
   useSetDefaultProxy,
 } from "../hooks/use-proxies";
-import { ProviderFormModal } from "../components/provider-form-modal";
-import { ProviderTemplatePicker } from "../components/provider-template-picker";
-import { ProviderTemplateForm } from "../components/provider-template-form";
-import { authModeI18nKey } from "../lib/auth-mode";
-import type { ProviderTemplate } from "@appstrate/shared-types";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -27,7 +20,6 @@ import type {
   OrganizationMember,
   OrgRole,
   OrgInvitation,
-  ProviderConfig,
   ApiKeyInfo,
   OrgProxyInfo,
 } from "@appstrate/shared-types";
@@ -40,7 +32,7 @@ export function OrgSettingsPage() {
 
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
-  const validTabs = ["general", "members", "providers", "proxies", "api-keys"] as const;
+  const validTabs = ["general", "members", "proxies", "api-keys"] as const;
   type Tab = (typeof validTabs)[number];
   const [tab, setTab] = useState<Tab>(
     validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
@@ -52,19 +44,6 @@ export function OrgSettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
   const [inviteError, setInviteError] = useState<string | null>(null);
-
-  // Providers
-  const [providerModalOpen, setProviderModalOpen] = useState(false);
-  const [editProvider, setEditProvider] = useState<ProviderConfig | null>(null);
-  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<{
-    template: ProviderTemplate;
-    callbackUrl: string;
-  } | null>(null);
-  const { data: providers, isLoading: providersLoading, error: providersError } = useProviders();
-  const createProviderMutation = useCreateProvider();
-  const updateProviderMutation = useUpdateProvider();
-  const deleteProviderMutation = useDeleteProvider();
 
   // Proxies
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
@@ -286,14 +265,6 @@ export function OrgSettingsPage() {
           onClick={() => setTab("members")}
         >
           {t("orgSettings.tabMembers", { count: members.length })}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "providers"}
-          className={`tab ${tab === "providers" ? "active" : ""}`}
-          onClick={() => setTab("providers")}
-        >
-          {t("orgSettings.tabProviders")}
         </button>
         <button
           role="tab"
@@ -556,25 +527,6 @@ export function OrgSettingsPage() {
         </>
       )}
 
-      {tab === "providers" && (
-        <ProvidersTab
-          providers={providers}
-          isLoading={providersLoading}
-          error={providersError}
-          onCreate={() => {
-            setTemplatePickerOpen(true);
-          }}
-          onEdit={(p) => {
-            setEditProvider(p);
-            setProviderModalOpen(true);
-          }}
-          onDelete={(p) => {
-            if (!confirm(t("providers.deleteConfirm", { name: p.displayName }))) return;
-            deleteProviderMutation.mutate(p.id);
-          }}
-        />
-      )}
-
       {tab === "proxies" && (
         <ProxiesTab
           proxies={proxies}
@@ -609,46 +561,6 @@ export function OrgSettingsPage() {
           }}
         />
       )}
-
-      <ProviderTemplatePicker
-        open={templatePickerOpen}
-        onClose={() => setTemplatePickerOpen(false)}
-        onSelectTemplate={(template, callbackUrl) => {
-          setTemplatePickerOpen(false);
-          setSelectedTemplate({ template, callbackUrl });
-        }}
-        onSelectCustom={() => {
-          setTemplatePickerOpen(false);
-          setEditProvider(null);
-          setProviderModalOpen(true);
-        }}
-      />
-
-      {selectedTemplate && (
-        <ProviderTemplateForm
-          open={!!selectedTemplate}
-          onClose={() => setSelectedTemplate(null)}
-          template={selectedTemplate.template}
-          callbackUrl={selectedTemplate.callbackUrl}
-        />
-      )}
-
-      <ProviderFormModal
-        open={providerModalOpen}
-        onClose={() => setProviderModalOpen(false)}
-        provider={editProvider}
-        isPending={createProviderMutation.isPending || updateProviderMutation.isPending}
-        onSubmit={(data) => {
-          if (editProvider) {
-            updateProviderMutation.mutate(
-              { id: editProvider.id, data },
-              { onSuccess: () => setProviderModalOpen(false) },
-            );
-          } else {
-            createProviderMutation.mutate(data, { onSuccess: () => setProviderModalOpen(false) });
-          }
-        }}
-      />
 
       <ApiKeyCreateModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
 
@@ -687,111 +599,6 @@ function CopyLinkButton({ token }: { token: string }) {
     >
       {copied ? t("btn.copied") : t("btn.copyLink")}
     </button>
-  );
-}
-
-function ProvidersTab({
-  providers,
-  isLoading,
-  error,
-  onCreate,
-  onEdit,
-  onDelete,
-}: {
-  providers: ProviderConfig[] | undefined;
-  isLoading: boolean;
-  error: Error | null;
-  onCreate: () => void;
-  onEdit: (p: ProviderConfig) => void;
-  onDelete: (p: ProviderConfig) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
-
-  return (
-    <>
-      <div className="service-card service-card-spaced">
-        <div className="connectors-intro">
-          <p className="service-provider">
-            {t("providers.orgDescription")}{" "}
-            <Link to="/connectors" className="link-inline">
-              {t("providers.configureLink")}
-            </Link>
-          </p>
-        </div>
-      </div>
-
-      <div className="tab-toolbar">
-        <button className="primary" onClick={onCreate}>
-          {t("providers.addProvider")}
-        </button>
-      </div>
-
-      {providers && providers.length > 0 ? (
-        <div className="services-grid">
-          {providers.map((p) => {
-            const isBuiltIn = p.source === "built-in";
-            return (
-              <div key={p.id} className="service-card">
-                <div className="service-card-header">
-                  <div className="service-info">
-                    <h3 className="provider-name">
-                      {p.iconUrl && (
-                        <img
-                          src={p.iconUrl}
-                          alt=""
-                          className="provider-icon"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = "none";
-                          }}
-                        />
-                      )}
-                      {p.displayName}
-                    </h3>
-                    <div className="provider-badges">
-                      <span className="badge badge-pending">
-                        {t(authModeI18nKey(p.authMode), { defaultValue: p.authMode })}
-                      </span>
-                      {isBuiltIn && (
-                        <span className="badge badge-dim">{t("providers.builtIn")}</span>
-                      )}
-                      {p.source === "custom" && (
-                        <span className="badge badge-dim">{t("providers.custom")}</span>
-                      )}
-                      {p.usedByFlows != null && p.usedByFlows > 0 && (
-                        <span className="badge badge-success">
-                          {t("providers.usedByFlows", { count: p.usedByFlows })}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {!isBuiltIn && (
-                  <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
-                    <button onClick={() => onEdit(p)}>{t("btn.edit")}</button>
-                    <button
-                      onClick={() => onDelete(p)}
-                      disabled={!!p.usedByFlows && p.usedByFlows > 0}
-                      title={
-                        p.usedByFlows && p.usedByFlows > 0
-                          ? t("providers.cannotDeleteInUse")
-                          : undefined
-                      }
-                    >
-                      {t("btn.delete")}
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState message={t("providers.empty", { defaultValue: "No providers configured." })} />
-      )}
-    </>
   );
 }
 
