@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Users, ChevronDown, Check } from "lucide-react";
+import { Users, ChevronDown, Check, Calendar, BookOpen, Plug, Settings, Plus } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useClickOutside } from "../hooks/use-click-outside";
 import { Spinner } from "./spinner";
@@ -62,11 +62,21 @@ export function OrgSwitcher() {
           })}
 
           <div className="org-switcher-divider">
+            <Link to="/schedules" className="org-switcher-link" onClick={() => setOpen(false)}>
+              <Calendar size={14} />
+              {t("orgSwitcher.schedules")}
+            </Link>
+            <Link to="/library" className="org-switcher-link" onClick={() => setOpen(false)}>
+              <BookOpen size={14} />
+              {t("orgSwitcher.library")}
+            </Link>
             <Link to="/connectors" className="org-switcher-link" onClick={() => setOpen(false)}>
+              <Plug size={14} />
               {t("orgSwitcher.connectors")}
             </Link>
             {isOrgAdmin && (
               <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
+                <Settings size={14} />
                 {t("orgSwitcher.settings")}
               </Link>
             )}
@@ -75,6 +85,7 @@ export function OrgSwitcher() {
               className="org-switcher-link org-switcher-link-primary"
               onClick={() => setOpen(false)}
             >
+              <Plus size={14} />
               {t("orgSwitcher.create")}
             </Link>
           </div>
