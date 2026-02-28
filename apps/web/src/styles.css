@@ -42,15 +42,9 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
-header h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  cursor: pointer;
-}
-
-header h1 span {
-  color: var(--primary);
+.app-logo {
+  height: 34px;
+  width: auto;
 }
 
 /* Breadcrumb */
@@ -962,7 +956,8 @@ button:disabled {
 }
 
 .logo-link {
-  color: inherit;
+  display: flex;
+  align-items: center;
   text-decoration: none;
 }
 
@@ -1065,15 +1060,12 @@ button:disabled {
   width: 100%;
   max-width: 360px;
 }
-.login-title {
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.025em;
+.login-logo {
   text-align: center;
   margin-bottom: 2rem;
 }
-.login-title span {
-  color: var(--primary);
+.login-logo .app-logo {
+  height: 52px;
 }
 .login-btn {
   width: 100%;

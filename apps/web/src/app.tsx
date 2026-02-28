@@ -107,11 +107,9 @@ function MainLayout() {
   return (
     <div className="container">
       <header>
-        <h1>
-          <Link to="/" className="logo-link">
-            <span>App</span>strate
-          </Link>
-        </h1>
+        <Link to="/" className="logo-link">
+          <img src="/logo.svg" alt="Appstrate" className="app-logo" />
+        </Link>
         <nav className="main-nav">
           <Link
             className={`nav-tab ${currentPath === "/" || currentPath.startsWith("/flows") ? "active" : ""}`}
