@@ -26,7 +26,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
       PERFORM pg_notify('execution_update', json_build_object(
         'operation', TG_OP,
         'id', NEW.id,
-        'flow_id', NEW.flow_id,
+        'package_id', NEW.package_id,
         'status', NEW.status,
         'user_id', NEW.user_id,
         'org_id', NEW.org_id,

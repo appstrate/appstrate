@@ -31,20 +31,20 @@ import type { FlowDetail } from "@appstrate/shared-types";
 function FlowEditorForm({
   initialState,
   detail,
-  flowId,
+  packageId,
   isEdit,
   userEmail,
 }: {
   initialState: FlowFormState;
   detail: FlowDetail | null;
-  flowId: string | undefined;
+  packageId: string | undefined;
   isEdit: boolean;
   userEmail: string;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
   const createFlow = useCreateFlow();
-  const updateFlow = useUpdateFlow(flowId || "");
+  const updateFlow = useUpdateFlow(packageId || "");
 
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +97,7 @@ function FlowEditorForm({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
-  const canEdit = isEdit && detail?.source === "user" && !!detail?.updatedAt;
+  const canEdit = isEdit && detail?.source !== "built-in" && !!detail?.updatedAt;
 
   const handleJsonApply = (newState: FlowFormState) => {
     setForm(newState);
@@ -111,7 +111,7 @@ function FlowEditorForm({
         <span className="separator">/</span>
         {isEdit && detail ? (
           <>
-            <Link to={`/flows/${flowId}`}>{detail.displayName}</Link>
+            <Link to={`/flows/${packageId}`}>{detail.displayName}</Link>
             <span className="separator">/</span>
             <span className="current">{t("editor.breadcrumbEdit")}</span>
           </>
@@ -138,7 +138,7 @@ function FlowEditorForm({
           {isEdit && (
             <PackageSection
               detail={detail}
-              flowId={flowId}
+              packageId={packageId}
               canEdit={canEdit}
               onPackageUploaded={() => {
                 needsFullRefresh.current = true;
@@ -211,7 +211,7 @@ function FlowEditorForm({
 
       {activeTab !== "json" && (
         <div className="editor-actions">
-          <button type="button" onClick={() => navigate(isEdit ? `/flows/${flowId}` : "/")}>
+          <button type="button" onClick={() => navigate(isEdit ? `/flows/${packageId}` : "/")}>
             {t("btn.cancel")}
           </button>
           <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
@@ -227,13 +227,13 @@ function FlowEditorForm({
 
 export function FlowEditorPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { flowId } = useParams<{ flowId: string }>();
+  const { packageId } = useParams<{ packageId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isOrgAdmin } = useOrg();
-  const isEdit = !!flowId;
+  const isEdit = !!packageId;
 
-  const { data: detail, isLoading } = useFlowDetail(flowId);
+  const { data: detail, isLoading } = useFlowDetail(packageId);
 
   if (!isOrgAdmin) {
     return (
@@ -257,8 +257,8 @@ export function FlowEditorPage() {
     return <Navigate to="/" replace />;
   }
 
-  if (isEdit && detail && detail.source !== "user") {
-    navigate(`/flows/${flowId}`, { replace: true });
+  if (isEdit && detail && detail.source === "built-in") {
+    navigate(`/flows/${packageId}`, { replace: true });
     return null;
   }
 
@@ -266,10 +266,10 @@ export function FlowEditorPage() {
 
   return (
     <FlowEditorForm
-      key={flowId ?? "new"}
+      key={packageId ?? "new"}
       initialState={initialState}
       detail={detail ?? null}
-      flowId={flowId}
+      packageId={packageId}
       isEdit={isEdit}
       userEmail={user?.email ?? ""}
     />

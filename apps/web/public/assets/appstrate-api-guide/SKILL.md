@@ -19,7 +19,7 @@ Before performing any action or asking any question, call the relevant GET endpo
 2. **Need to know what providers are configured?** → Call `GET /api/providers` — don't ask the user
 3. **Need to know what services are connected?** → Call `GET /auth/integrations` — don't ask the user
 4. **Need to know what skills/extensions are available?** → Call `GET /api/library/skills` and `GET /api/library/extensions` — don't ask the user
-5. **Need to know the flow's requirements?** → Call `GET /api/flows/{flowId}` — don't ask the user
+5. **Need to know the flow's requirements?** → Call `GET /api/flows/{packageId}` — don't ask the user
 6. **Need to know if config is set?** → The flow detail response includes current `config` values — don't ask the user
 
 ### Only Ask the User When You Must
@@ -89,7 +89,7 @@ This skill is organized into focused reference files. **Read the file relevant t
 
 1. **Always discover before acting**: Call GET endpoints to understand the current state before creating, updating, or asking the user anything.
 2. **Validate your API key immediately**: The first thing you do with a new key is `GET /api/flows` to verify it works.
-3. **Check flow detail before running**: `GET /api/flows/{flowId}` tells you everything — services, config, input schema, running executions.
+3. **Check flow detail before running**: `GET /api/flows/{packageId}` tells you everything — services, config, input schema, running executions.
 4. **Resolve blockers autonomously**: If a service is disconnected, figure out the `authMode` and initiate the connection. Only ask the user for secrets.
 5. **Poll with backoff**: When waiting for execution completion, use 2-5 second intervals.
 6. **Use pagination for logs**: Pass `?after={lastId}` to `GET /api/executions/{executionId}/logs` for incremental log retrieval.

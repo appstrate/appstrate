@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
-import { useImportFlow } from "../hooks/use-mutations";
+import { useImportPackage } from "../hooks/use-mutations";
 
 interface ImportModalProps {
   open: boolean;
@@ -16,7 +16,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const importFlow = useImportFlow();
+  const importPackage = useImportPackage();
 
   const validateFile = useCallback(
     (f: File): string => {
@@ -53,7 +53,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
 
   const handleSubmit = () => {
     if (!file) return;
-    importFlow.mutate(file, {
+    importPackage.mutate(file, {
       onSuccess: () => {
         setFile(null);
         setError("");
@@ -63,7 +63,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   };
 
   const handleClose = () => {
-    if (importFlow.isPending) return;
+    if (importPackage.isPending) return;
     setFile(null);
     setError("");
     onClose();
@@ -76,15 +76,15 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       title={t("import.title")}
       actions={
         <>
-          <button onClick={handleClose} disabled={importFlow.isPending}>
+          <button onClick={handleClose} disabled={importPackage.isPending}>
             {t("btn.cancel")}
           </button>
           <button
             className="primary"
             onClick={handleSubmit}
-            disabled={!file || importFlow.isPending}
+            disabled={!file || importPackage.isPending}
           >
-            {importFlow.isPending ? t("import.importing") : t("import.submit")}
+            {importPackage.isPending ? t("import.importing") : t("import.submit")}
           </button>
         </>
       }
@@ -119,7 +119,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         )}
       </div>
       {error && <p className="drop-zone-error">{error}</p>}
-      {importFlow.isError && <p className="drop-zone-error">{importFlow.error.message}</p>}
+      {importPackage.isError && <p className="drop-zone-error">{importPackage.error.message}</p>}
     </Modal>
   );
 }

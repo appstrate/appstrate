@@ -13,13 +13,11 @@ import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 
 const VALID_MANIFEST = {
   schemaVersion: "1.0.0",
-  metadata: {
-    id: "test-flow",
-    displayName: "Test Flow",
-    description: "A test flow",
-    author: "test",
-    tags: ["test"],
-  },
+  name: "test-flow",
+  displayName: "Test Flow",
+  description: "A test flow",
+  author: "test",
+  tags: ["test"],
   requires: {
     services: [{ id: "gmail", provider: "google-mail" }],
     skills: ["greeting-style"],
@@ -110,12 +108,10 @@ describe("validateManifest", () => {
   test("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
       schemaVersion: "1.0.0",
-      metadata: {
-        id: "minimal",
-        displayName: "Minimal",
-        description: "Minimal flow",
-        author: "test",
-      },
+      name: "minimal",
+      displayName: "Minimal",
+      description: "Minimal flow",
+      author: "test",
       requires: { services: [] },
     };
     const result = validateManifest(minimal);
@@ -132,21 +128,21 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("rejects manifest with invalid metadata.id (not a slug)", () => {
+  test("rejects manifest with invalid name (not a slug)", () => {
     const bad = {
       ...VALID_MANIFEST,
-      metadata: { ...VALID_MANIFEST.metadata, id: "Invalid Name!" },
+      name: "Invalid Name!",
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain("metadata.id");
+    expect(result.errors[0]).toContain("name");
   });
 
-  test("rejects manifest missing required metadata fields", () => {
+  test("rejects manifest missing required fields", () => {
     const bad = {
       schemaVersion: "1.0.0",
-      metadata: { id: "test" },
+      name: "test",
       requires: { services: [] },
     };
     const result = validateManifest(bad);

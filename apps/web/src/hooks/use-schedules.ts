@@ -13,14 +13,14 @@ export function useAllSchedules() {
   });
 }
 
-export function useSchedules(flowId: string | undefined) {
+export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["schedules", orgId, flowId],
+    queryKey: ["schedules", orgId, packageId],
     queryFn: async () => {
-      return api<Schedule[]>(`/flows/${flowId}/schedules`);
+      return api<Schedule[]>(`/flows/${packageId}/schedules`);
     },
-    enabled: !!flowId,
+    enabled: !!packageId,
   });
 }
 
@@ -30,7 +30,7 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
 
 // Mutations still go through the API (croner sync needed on the backend)
 
-export function useCreateSchedule(flowId: string) {
+export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
@@ -39,7 +39,7 @@ export function useCreateSchedule(flowId: string) {
       timezone?: string;
       input?: Record<string, unknown>;
     }) => {
-      return api<Schedule>(`/flows/${flowId}/schedules`, {
+      return api<Schedule>(`/flows/${packageId}/schedules`, {
         method: "POST",
         body: JSON.stringify(data),
       });

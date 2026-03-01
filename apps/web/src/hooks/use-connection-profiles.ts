@@ -68,11 +68,11 @@ export function useDeleteConnectionProfile() {
   });
 }
 
-export function useSetFlowProfile(flowId: string) {
+export function useSetFlowProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
-      api(`/flows/${flowId}/profile`, {
+      api(`/flows/${packageId}/profile`, {
         method: "PUT",
         body: JSON.stringify({ profileId }),
       }),
@@ -83,10 +83,10 @@ export function useSetFlowProfile(flowId: string) {
   });
 }
 
-export function useClearFlowProfile(flowId: string) {
+export function useClearFlowProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api(`/flows/${flowId}/profile`, { method: "DELETE" }),
+    mutationFn: () => api(`/flows/${packageId}/profile`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow"] });
       qc.invalidateQueries({ queryKey: ["services"] });

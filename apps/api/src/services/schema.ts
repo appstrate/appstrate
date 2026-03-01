@@ -1,89 +1,36 @@
-import { z } from "zod";
 import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
+import {
+  validateLocalFlowManifest,
+  validateManifest as validateRegistryManifest,
+  SLUG_REGEX,
+} from "@appstrate/validation";
 
-// --- Section A: Static manifest schema ---
+export { SLUG_REGEX };
 
-export const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+/**
+ * Validate a flow manifest — accepts both local format (slug name, optional version)
+ * and registry format (scoped @scope/name, required semver version).
+ */
+export function validateManifest(raw: unknown): {
+  valid: boolean;
+  errors: string[];
+  manifest?: unknown;
+} {
+  // Try local format first (most common path)
+  const localResult = validateLocalFlowManifest(raw);
+  if (localResult.valid) return localResult;
 
-const flowFieldTypeEnum = z.enum(["string", "number", "boolean", "array", "object", "file"]);
+  // Fall back to registry format (scoped name, semver version)
+  const registryResult = validateRegistryManifest(raw);
+  if (registryResult.valid) return registryResult;
 
-const jsonSchemaPropertySchema = z.object({
-  type: flowFieldTypeEnum,
-  description: z.string().optional(),
-  default: z.unknown().optional(),
-  enum: z.array(z.unknown()).optional(),
-  format: z.string().optional(),
-  placeholder: z.string().optional(),
-  accept: z.string().optional(),
-  maxSize: z.number().positive().optional(),
-  multiple: z.boolean().optional(),
-  maxFiles: z.number().int().positive().optional(),
-});
+  // Return local errors as default
+  return localResult;
+}
 
-const jsonSchemaObjectSchema = z.object({
-  type: z.literal("object"),
-  properties: z.record(z.string(), jsonSchemaPropertySchema),
-  required: z.array(z.string()).optional(),
-  propertyOrder: z.array(z.string()).optional(),
-});
-
-const serviceRequirementSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)"),
-  provider: z.string(),
-  scopes: z.array(z.string()).optional().default([]),
-  connectionMode: z.enum(["user", "admin"]).optional().default("user"),
-});
-
-const slugString = z
-  .string()
-  .min(1)
-  .regex(SLUG_REGEX, "Doit etre un slug valide (a-z, 0-9, tirets, pas de tiret en debut/fin)");
-
-const manifestSchema = z.looseObject({
-  $schema: z.string().optional(),
-  schemaVersion: z.string(),
-  metadata: z.object({
-    id: slugString,
-    displayName: z.string().min(1),
-    description: z.string(),
-    author: z.string(),
-    license: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-  }),
-  requires: z.object({
-    services: z.array(serviceRequirementSchema),
-    skills: z.array(slugString).optional().default([]),
-    extensions: z.array(slugString).optional().default([]),
-  }),
-  input: z
-    .object({
-      schema: jsonSchemaObjectSchema,
-    })
-    .optional(),
-  output: z
-    .object({
-      schema: jsonSchemaObjectSchema,
-    })
-    .optional(),
-  config: z
-    .object({
-      schema: jsonSchemaObjectSchema,
-    })
-    .optional(),
-  execution: z
-    .object({
-      timeout: z.number().optional(),
-      outputRetries: z.number().min(0).max(5).optional(),
-    })
-    .optional(),
-});
-
-// --- Section B: AJV runtime validation ---
+// --- AJV runtime validation ---
 
 const ajv = new Ajv({ coerceTypes: true, allErrors: true, strict: false });
 
@@ -110,19 +57,6 @@ export interface ValidationResult {
   valid: boolean;
   errors: { field: string; message: string }[];
   data?: Record<string, unknown>;
-}
-
-export function validateManifest(raw: unknown): {
-  valid: boolean;
-  errors: string[];
-  manifest?: unknown;
-} {
-  const result = manifestSchema.safeParse(raw);
-  if (result.success) {
-    return { valid: true, errors: [], manifest: result.data };
-  }
-  const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
-  return { valid: false, errors };
 }
 
 export function validateConfig(

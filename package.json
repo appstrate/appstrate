@@ -22,6 +22,9 @@
     "docker:prod": "docker compose -f docker-compose.prod.yml up -d",
     "verify:openapi": "bun scripts/verify-openapi.ts"
   },
+  "dependencies": {
+    "@appstrate/validation": "file:../validation"
+  },
   "devDependencies": {
     "@readme/openapi-parser": "^5.5.0",
     "@redocly/openapi-core": "^2.19.1",

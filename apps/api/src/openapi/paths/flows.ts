@@ -1,6 +1,6 @@
 /**
  * Flows paths — includes both flows.ts and user-flows.ts endpoints
- * since they share base paths (e.g. /api/flows/{flowId}).
+ * since they share base paths (e.g. /api/flows/{packageId}).
  */
 export const flowsPaths = {
   "/api/flows": {
@@ -63,7 +63,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   message: { type: "string" },
                 },
               },
@@ -107,7 +107,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   message: { type: "string" },
                   skillsCreated: { type: "integer" },
                   skillsMatched: { type: "integer" },
@@ -124,7 +124,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}": {
+  "/api/flows/{packageId}": {
     get: {
       operationId: "getFlow",
       tags: ["Flows"],
@@ -132,7 +132,7 @@ export const flowsPaths = {
       description: "Returns flow detail including services, config, state, skills, and extensions.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "profileId",
           in: "query",
@@ -161,7 +161,7 @@ export const flowsPaths = {
       description: "Update manifest, prompt, skills, and extensions of a user flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -189,7 +189,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   message: { type: "string" },
                   updatedAt: { type: "string" },
                 },
@@ -210,7 +210,7 @@ export const flowsPaths = {
       description: "Delete a user-imported flow. Built-in flows cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Flow deleted" },
@@ -219,7 +219,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/config": {
+  "/api/flows/{packageId}/config": {
     put: {
       operationId: "saveFlowConfig",
       tags: ["Flows"],
@@ -228,7 +228,7 @@ export const flowsPaths = {
         "Save flow configuration values. Validated against manifest config schema. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -257,7 +257,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/versions": {
+  "/api/flows/{packageId}/versions": {
     get: {
       operationId: "listFlowVersions",
       tags: ["Flows"],
@@ -265,7 +265,7 @@ export const flowsPaths = {
       description: "List version history for a user flow (newest first).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -287,7 +287,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/package": {
+  "/api/flows/{packageId}/package": {
     get: {
       operationId: "downloadFlowPackage",
       tags: ["Flows"],
@@ -295,7 +295,7 @@ export const flowsPaths = {
       description: "Download the flow package as a ZIP file. User flows only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -316,7 +316,7 @@ export const flowsPaths = {
       description: "Upload a new ZIP package for a user flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -345,7 +345,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   message: { type: "string" },
                   updatedAt: { type: "string" },
                 },
@@ -360,7 +360,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/services/{serviceId}/bind": {
+  "/api/flows/{packageId}/services/{serviceId}/bind": {
     post: {
       operationId: "bindFlowService",
       tags: ["Flows"],
@@ -368,7 +368,7 @@ export const flowsPaths = {
       description: "Bind the current admin user's connection for a flow service. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -403,7 +403,7 @@ export const flowsPaths = {
       description: "Remove the admin connection binding for a flow service. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -419,7 +419,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/profile": {
+  "/api/flows/{packageId}/profile": {
     put: {
       operationId: "setFlowProfile",
       tags: ["Flows"],
@@ -428,7 +428,7 @@ export const flowsPaths = {
         "Override the connection profile used for this flow. The specified profile must belong to the authenticated user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -462,7 +462,7 @@ export const flowsPaths = {
       description: "Remove the per-flow profile override, reverting to the user's default profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -476,7 +476,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/share-token": {
+  "/api/flows/{packageId}/share-token": {
     post: {
       operationId: "createShareToken",
       tags: ["Flows"],
@@ -484,7 +484,7 @@ export const flowsPaths = {
       description: "Generate a one-time public share link for the flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -505,7 +505,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/proxy": {
+  "/api/flows/{packageId}/proxy": {
     get: {
       operationId: "getFlowProxy",
       tags: ["Flows"],
@@ -514,7 +514,7 @@ export const flowsPaths = {
         "Returns the proxy configuration for a flow (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -542,7 +542,7 @@ export const flowsPaths = {
         'Set a proxy override for this flow. Pass a proxy ID, "none" to disable proxying, or null to use org default. Admin only.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -575,7 +575,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/memories": {
+  "/api/flows/{packageId}/memories": {
     get: {
       operationId: "listFlowMemories",
       tags: ["Flows"],
@@ -583,7 +583,7 @@ export const flowsPaths = {
       description: "Returns accumulated memories for a flow (org-scoped, shared across all users).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -612,7 +612,7 @@ export const flowsPaths = {
       description: "Delete all accumulated memories for a flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -633,7 +633,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/memories/{memoryId}": {
+  "/api/flows/{packageId}/memories/{memoryId}": {
     delete: {
       operationId: "deleteFlowMemory",
       tags: ["Flows"],
@@ -641,7 +641,7 @@ export const flowsPaths = {
       description: "Delete a specific memory by ID. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         { name: "memoryId", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
@@ -663,7 +663,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/skills": {
+  "/api/flows/{packageId}/skills": {
     put: {
       operationId: "updateFlowSkills",
       tags: ["Flows"],
@@ -671,7 +671,7 @@ export const flowsPaths = {
       description: "Set the skill references for a user flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -695,7 +695,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   skillIds: { type: "array", items: { type: "string" } },
                   message: { type: "string" },
                 },
@@ -709,7 +709,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/extensions": {
+  "/api/flows/{packageId}/extensions": {
     put: {
       operationId: "updateFlowExtensions",
       tags: ["Flows"],
@@ -717,7 +717,7 @@ export const flowsPaths = {
       description: "Set the extension references for a user flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -741,7 +741,7 @@ export const flowsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flowId: { type: "string" },
+                  packageId: { type: "string" },
                   extensionIds: { type: "array", items: { type: "string" } },
                   message: { type: "string" },
                 },

@@ -13,9 +13,8 @@ import {
   uploadLibraryPackage,
 } from "../services/library.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
-import { extractSkillMeta } from "../services/skill-utils.ts";
-import { validateExtensionSource } from "../services/extension-validation.ts";
-import { unzipAndNormalize } from "../services/flow-package.ts";
+import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
+import { unzipAndNormalize } from "../services/package-storage.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { inArray } from "drizzle-orm";
 import { db } from "../lib/db.ts";
@@ -269,13 +268,13 @@ export function createLibraryRouter() {
       id: skillId,
       name: body.name ?? existing.name ?? undefined,
       description: body.description ?? existing.description ?? undefined,
-      content: finalContent,
+      content: finalContent!,
       createdBy: existing.createdBy ?? user.id,
     });
 
     // Update storage ZIP so container packaging stays in sync
     await uploadLibraryPackage("skills", orgId, skillId, {
-      "SKILL.md": new TextEncoder().encode(finalContent),
+      "SKILL.md": new TextEncoder().encode(finalContent!),
     });
 
     return c.json({ skill: { id: skill.id, name: skill.name, description: skill.description } });
@@ -432,13 +431,13 @@ export function createLibraryRouter() {
       id: extId,
       name: body.name ?? existing.name ?? undefined,
       description: body.description ?? existing.description ?? undefined,
-      content: finalContent,
+      content: finalContent!,
       createdBy: existing.createdBy ?? user.id,
     });
 
     // Update storage ZIP so container packaging stays in sync
     await uploadLibraryPackage("extensions", orgId, extId, {
-      [`${extId}.ts`]: new TextEncoder().encode(finalContent),
+      [`${extId}.ts`]: new TextEncoder().encode(finalContent!),
     });
 
     return c.json({

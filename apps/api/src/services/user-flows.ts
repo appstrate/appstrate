@@ -1,65 +1,95 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import {
-  flows,
+  packages,
   executions,
-  flowSchedules,
-  flowConfigs,
-  flowVersions,
-  flowAdminConnections,
+  packageSchedules,
+  packageConfigs,
+  packageVersions,
+  packageAdminConnections,
 } from "@appstrate/db/schema";
-import type { Flow } from "@appstrate/db/schema";
+import type { Package } from "@appstrate/db/schema";
 
-export async function getFlowById(id: string): Promise<Flow | null> {
-  const rows = await db.select().from(flows).where(eq(flows.id, id)).limit(1);
+export async function getPackageById(id: string): Promise<Package | null> {
+  const rows = await db.select().from(packages).where(eq(packages.id, id)).limit(1);
   return rows[0] ?? null;
 }
 
-export async function insertUserFlow(
+export async function insertPackage(
   id: string,
   orgId: string,
+  type: "flow" | "skill" | "extension",
   manifest: Record<string, unknown>,
-  prompt: string,
-): Promise<Flow> {
+  content: string,
+  opts?: {
+    source?: "built-in" | "local";
+    displayName?: string;
+    description?: string;
+    name?: string;
+  },
+): Promise<Package> {
   const now = new Date();
+  const m = manifest as Record<string, unknown>;
+  const name = opts?.name ?? (m.name as string | undefined) ?? id;
+  const displayName = opts?.displayName ?? (m.displayName as string | undefined) ?? undefined;
+  const description = opts?.description ?? (m.description as string | undefined) ?? undefined;
+
   const [row] = await db
-    .insert(flows)
-    .values({ id, orgId, manifest, prompt, createdAt: now, updatedAt: now })
+    .insert(packages)
+    .values({
+      id,
+      orgId,
+      type,
+      source: opts?.source ?? "local",
+      name,
+      manifest,
+      content,
+      displayName,
+      description,
+      createdAt: now,
+      updatedAt: now,
+    })
     .returning();
-  if (!row) throw new Error("Failed to insert flow: no row returned");
+  if (!row) throw new Error("Failed to insert package: no row returned");
   return row;
 }
 
-export async function updateUserFlow(
+export async function updatePackage(
   id: string,
   payload: {
     manifest: Record<string, unknown>;
-    prompt: string;
+    content: string;
   },
   expectedUpdatedAt: string,
-): Promise<Flow | null> {
+): Promise<Package | null> {
+  const m = payload.manifest as Record<string, unknown>;
+  const displayName = (m.displayName as string | undefined) ?? undefined;
+  const description = (m.description as string | undefined) ?? undefined;
+
   const rows = await db
-    .update(flows)
+    .update(packages)
     .set({
       manifest: payload.manifest,
-      prompt: payload.prompt,
+      content: payload.content,
+      displayName,
+      description,
       updatedAt: new Date(),
     })
-    .where(and(eq(flows.id, id), eq(flows.updatedAt, new Date(expectedUpdatedAt))))
+    .where(and(eq(packages.id, id), eq(packages.updatedAt, new Date(expectedUpdatedAt))))
     .returning();
 
   return rows[0] ?? null;
 }
 
-export async function deleteUserFlow(id: string): Promise<void> {
+export async function deletePackage(id: string): Promise<void> {
   await db.transaction(async (tx) => {
-    // flow_skills and flow_extensions cascade-deleted via flows FK
+    // packageDependencies cascade-deleted via packages FK
     // execution_logs cascade-deleted via executions FK
-    await tx.delete(executions).where(eq(executions.flowId, id));
-    await tx.delete(flowSchedules).where(eq(flowSchedules.flowId, id));
-    await tx.delete(flowConfigs).where(eq(flowConfigs.flowId, id));
-    await tx.delete(flowVersions).where(eq(flowVersions.flowId, id));
-    await tx.delete(flowAdminConnections).where(eq(flowAdminConnections.flowId, id));
-    await tx.delete(flows).where(eq(flows.id, id));
+    await tx.delete(executions).where(eq(executions.packageId, id));
+    await tx.delete(packageSchedules).where(eq(packageSchedules.packageId, id));
+    await tx.delete(packageConfigs).where(eq(packageConfigs.packageId, id));
+    await tx.delete(packageVersions).where(eq(packageVersions.packageId, id));
+    await tx.delete(packageAdminConnections).where(eq(packageAdminConnections.packageId, id));
+    await tx.delete(packages).where(eq(packages.id, id));
   });
 }

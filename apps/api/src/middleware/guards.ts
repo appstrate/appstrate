@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getFlow } from "../services/flow-service.ts";
-import { getRunningExecutionsForFlow } from "../services/state.ts";
+import { getPackage } from "../services/flow-service.ts";
+import { getRunningExecutionsForPackage } from "../services/state.ts";
 
 /** Middleware: reject with 403 if the current user is not org admin/owner. */
 export function requireAdmin() {
@@ -17,11 +17,11 @@ export function requireAdmin() {
 /** Middleware: load a flow by route param and set it on context, or 404. */
 export function requireFlow(paramName = "id") {
   return async (c: Context<AppEnv>, next: Next) => {
-    const flowId = c.req.param(paramName);
+    const packageId = c.req.param(paramName);
     const orgId = c.get("orgId");
-    const flow = await getFlow(flowId, orgId);
+    const flow = await getPackage(packageId, orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${flowId}' introuvable` }, 404);
+      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${packageId}' introuvable` }, 404);
     }
     c.set("flow", flow);
     return next();
@@ -32,13 +32,13 @@ export function requireFlow(paramName = "id") {
 export function requireMutableFlow() {
   return async (c: Context<AppEnv>, next: Next) => {
     const flow = c.get("flow");
-    if (flow.source !== "user") {
+    if (flow.source === "built-in") {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: "Impossible de modifier un flow built-in" },
         403,
       );
     }
-    const running = await getRunningExecutionsForFlow(flow.id);
+    const running = await getRunningExecutionsForPackage(flow.id);
     if (running > 0) {
       return c.json(
         { error: "FLOW_IN_USE", message: `${running} execution(s) en cours pour ce flow` },

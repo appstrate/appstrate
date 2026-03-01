@@ -15,8 +15,8 @@ type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
 
 export function ShareableRunPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { flowId } = useParams<{ flowId: string }>();
-  const { data: flow, isLoading, error } = useFlowDetail(flowId);
+  const { packageId } = useParams<{ packageId: string }>();
+  const { data: flow, isLoading, error } = useFlowDetail(packageId);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
 
@@ -61,7 +61,7 @@ export function ShareableRunPage() {
   const allConnected = services.every((s) => s.status === "connected");
 
   const handleRun = async () => {
-    if (!flowId) return;
+    if (!packageId) return;
     setStatus("running");
     setResult(null);
     setExecError(null);
@@ -81,9 +81,9 @@ export function ShareableRunPage() {
             fd.append(key, file);
           }
         }
-        data = await uploadFormData<{ executionId: string }>(`/flows/${flowId}/run`, fd);
+        data = await uploadFormData<{ executionId: string }>(`/flows/${packageId}/run`, fd);
       } else {
-        data = await api<{ executionId: string }>(`/flows/${flowId}/run`, {
+        data = await api<{ executionId: string }>(`/flows/${packageId}/run`, {
           method: "POST",
           body: JSON.stringify(input ? { input } : {}),
         });

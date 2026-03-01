@@ -4,7 +4,7 @@ import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getBuiltInProxies, isBuiltInProxy } from "./proxy-registry.ts";
-import { getFlowConfig } from "./state.ts";
+import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgProxyInfo } from "@appstrate/shared-types";
 
@@ -148,11 +148,11 @@ export async function setDefaultProxy(orgId: string, proxyId: string | null): Pr
 
 export async function resolveProxyUrl(
   orgId: string,
-  flowId: string,
+  packageId: string,
   config?: Record<string, unknown>,
 ): Promise<string | null> {
   // 1. Check flow config for __proxyId
-  const resolved = config ?? (await getFlowConfig(orgId, flowId));
+  const resolved = config ?? (await getPackageConfig(orgId, packageId));
   const proxyId = resolved.__proxyId as string | undefined | null;
 
   if (proxyId === "none") return null;
@@ -162,7 +162,7 @@ export async function resolveProxyUrl(
     const url = await loadProxyUrl(orgId, proxyId);
     if (url) return url;
     logger.warn("Flow proxy override not found, falling through to org default", {
-      flowId,
+      packageId,
       proxyId,
     });
   }

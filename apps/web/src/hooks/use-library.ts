@@ -118,11 +118,11 @@ export function useDeleteExtension() {
 
 // --- Flow skill/extension reference mutations ---
 
-export function useSetFlowSkills(flowId: string) {
+export function useSetFlowSkills(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (skillIds: string[]) => {
-      return api(`/flows/${flowId}/skills`, {
+      return api(`/flows/${packageId}/skills`, {
         method: "PUT",
         body: JSON.stringify({ skillIds }),
       });
@@ -135,11 +135,11 @@ export function useSetFlowSkills(flowId: string) {
   });
 }
 
-export function useSetFlowExtensions(flowId: string) {
+export function useSetFlowExtensions(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (extensionIds: string[]) => {
-      return api(`/flows/${flowId}/extensions`, {
+      return api(`/flows/${packageId}/extensions`, {
         method: "PUT",
         body: JSON.stringify({ extensionIds }),
       });

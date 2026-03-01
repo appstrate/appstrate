@@ -10,12 +10,12 @@ interface ServiceStatus {
 }
 
 interface ShareDropdownProps {
-  flowId: string;
+  packageId: string;
   isAdmin: boolean;
   services: ServiceStatus[];
 }
 
-export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps) {
+export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownProps) {
   const { t } = useTranslation(["flows", "common"]);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -32,7 +32,7 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
   }, [open]);
 
   const copyLink = () => {
-    const url = `${window.location.origin}/flows/${flowId}/run`;
+    const url = `${window.location.origin}/flows/${packageId}/run`;
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -54,7 +54,7 @@ export function ShareDropdown({ flowId, isAdmin, services }: ShareDropdownProps)
   const generateShareLink = async () => {
     setGenerating(true);
     try {
-      const data = await api<{ token: string }>(`/flows/${flowId}/share-token`, {
+      const data = await api<{ token: string }>(`/flows/${packageId}/share-token`, {
         method: "POST",
       });
       const url = `${window.location.origin}/share/${data.token}`;

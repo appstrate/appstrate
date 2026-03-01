@@ -1,7 +1,17 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Users, ChevronDown, Check, Calendar, BookOpen, Plug, Settings, Plus } from "lucide-react";
+import {
+  Users,
+  ChevronDown,
+  Check,
+  Calendar,
+  BookOpen,
+  ShoppingBag,
+  Plug,
+  Settings,
+  Plus,
+} from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useClickOutside } from "../hooks/use-click-outside";
 import { Spinner } from "./spinner";
@@ -69,6 +79,10 @@ export function OrgSwitcher() {
             <Link to="/library" className="org-switcher-link" onClick={() => setOpen(false)}>
               <BookOpen size={14} />
               {t("orgSwitcher.library")}
+            </Link>
+            <Link to="/marketplace" className="org-switcher-link" onClick={() => setOpen(false)}>
+              <ShoppingBag size={14} />
+              {t("orgSwitcher.marketplace")}
             </Link>
             <Link to="/connectors" className="org-switcher-link" onClick={() => setOpen(false)}>
               <Plug size={14} />

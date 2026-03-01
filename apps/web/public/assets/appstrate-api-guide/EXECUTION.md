@@ -2,11 +2,11 @@
 
 ## Pre-flight Check (Mandatory)
 
-**Before running any flow, always call `GET /api/flows/{flowId}` and verify:**
+**Before running any flow, always call `GET /api/flows/{packageId}` and verify:**
 
 1. **Services**: Every entry in `services[]` must have `status: "connected"`. If any is `disconnected` or `expired`, resolve it before running.
-2. **Admin bindings**: For services with `connectionMode: "admin"`, check `adminConnection` is set. If not, bind via `POST /api/flows/{flowId}/services/{serviceId}/bind`.
-3. **Config**: Compare `config` (current values) against `manifest.config.schema` — ensure all `required` fields have values. If not, set them via `PUT /api/flows/{flowId}/config`.
+2. **Admin bindings**: For services with `connectionMode: "admin"`, check `adminConnection` is set. If not, bind via `POST /api/flows/{packageId}/services/{serviceId}/bind`.
+3. **Config**: Compare `config` (current values) against `manifest.config.schema` — ensure all `required` fields have values. If not, set them via `PUT /api/flows/{packageId}/config`.
 4. **Running executions**: Check `runningExecutions` — if > 0, either wait or cancel the existing one.
 5. **Input schema**: Read `manifest.input.schema` to know what input fields are required and their types.
 
@@ -15,7 +15,7 @@ Only ask the user for information that's not in the API response (e.g., what inp
 ## Run a Flow
 
 ```
-POST /api/flows/{flowId}/run
+POST /api/flows/{packageId}/run
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -25,7 +25,7 @@ Content-Type: application/json
 For flows with file inputs, use `multipart/form-data`:
 
 ```
-POST /api/flows/{flowId}/run
+POST /api/flows/{packageId}/run
 Authorization: Bearer ask_...
 Content-Type: multipart/form-data
 
@@ -47,7 +47,7 @@ Response:
 ```json
 {
   "id": "exec-abc123",
-  "flowId": "my-flow",
+  "packageId": "my-flow",
   "status": "running",
   "input": { "query": "Hello" },
   "result": null,
@@ -114,14 +114,14 @@ Authorization: Bearer ask_...
 ## List Flow Executions
 
 ```
-GET /api/flows/{flowId}/executions?limit=50
+GET /api/flows/{packageId}/executions?limit=50
 Authorization: Bearer ask_...
 ```
 
 ## Delete Flow Executions
 
 ```
-DELETE /api/flows/{flowId}/executions
+DELETE /api/flows/{packageId}/executions
 Authorization: Bearer ask_...
 ```
 
@@ -129,7 +129,7 @@ Deletes all completed executions for the flow. Returns `{ "deleted": 15 }`.
 
 ## Execution Lifecycle
 
-1. `POST /api/flows/{flowId}/run` validates input, checks service dependencies, creates execution record (status: `pending`)
+1. `POST /api/flows/{packageId}/run` validates input, checks service dependencies, creates execution record (status: `pending`)
 2. Execution runs in background: creates isolated Docker network, starts sidecar proxy + agent container
 3. Agent container receives the enriched prompt (raw prompt.md + structured context sections)
 4. Agent calls external services via the sidecar proxy at `$SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers
@@ -150,7 +150,7 @@ For browser-based monitoring, Appstrate provides SSE endpoints powered by Postgr
 ```
 GET /api/realtime/executions              # All execution status changes
 GET /api/realtime/executions/{executionId} # Single execution status + logs
-GET /api/realtime/flows/{flowId}/executions # Execution changes for a flow
+GET /api/realtime/flows/{packageId}/executions # Execution changes for a flow
 ```
 
 These are cookie-auth only (no API key support). Use `EventSource` in the browser or similar SSE client.
@@ -163,14 +163,14 @@ Flows can be triggered in three ways. **When the user has a recurring or event-d
 
 ### 1. Manual / On-Demand
 
-The user (or the agent) calls `POST /api/flows/{flowId}/run` directly. This is the default for one-off tasks.
+The user (or the agent) calls `POST /api/flows/{packageId}/run` directly. This is the default for one-off tasks.
 
 ### 2. API Trigger (Webhook Pattern)
 
 Any external platform can trigger a flow by calling the Appstrate API with an API key. This is the **webhook pattern** — ideal when a flow should run in reaction to a specific event from another system.
 
 ```
-POST {BASE_URL}/api/flows/{flowId}/run
+POST {BASE_URL}/api/flows/{packageId}/run
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -185,8 +185,8 @@ Content-Type: application/json
 
 **How to set this up:**
 1. Create an API key in Organization Settings (or via `POST /api/api-keys`)
-2. Note the flow ID and the expected input schema (`GET /api/flows/{flowId}` → `manifest.input.schema`)
-3. On the external platform, configure a webhook/HTTP action that calls `POST {BASE_URL}/api/flows/{flowId}/run` with the API key in `Authorization: Bearer ask_...` and the input payload in the request body
+2. Note the flow ID and the expected input schema (`GET /api/flows/{packageId}` → `manifest.input.schema`)
+3. On the external platform, configure a webhook/HTTP action that calls `POST {BASE_URL}/api/flows/{packageId}/run` with the API key in `Authorization: Bearer ask_...` and the input payload in the request body
 4. The external platform triggers the HTTP call on the desired event
 
 **Tell the user:**
@@ -194,7 +194,7 @@ Content-Type: application/json
 > Your flow can be triggered automatically from any platform that supports webhooks or HTTP requests. You need to configure a webhook on the external platform (e.g., Zapier, Make, n8n, or the service itself) that calls:
 >
 > ```
-> POST {BASE_URL}/api/flows/{flowId}/run
+> POST {BASE_URL}/api/flows/{packageId}/run
 > Authorization: Bearer ask_<your-api-key>
 > Content-Type: application/json
 > Body: { "input": { ... } }
@@ -212,7 +212,7 @@ For flows that need to run at regular intervals (every hour, every day at 9am, e
 - Weekly digest every Monday morning
 - Monthly data export on the 1st
 
-The agent can create schedules via `POST /api/flows/{flowId}/schedules` (see `SCHEDULING.md`).
+The agent can create schedules via `POST /api/flows/{packageId}/schedules` (see `SCHEDULING.md`).
 
 ### Decision Guide: When to Recommend What
 
@@ -226,7 +226,7 @@ When the user describes a recurring or automated need, **proactively recommend t
 | "Run this when a new ticket is created in Jira" | **Webhook (API trigger)** | Event-driven from external system |
 | "Run this when someone submits a form" | **Webhook (API trigger)** | Event-driven from form platform |
 | "Run this once a week and also when X happens" | **Both** | Cron for the weekly run + webhook for the event-driven trigger |
-| "Run this right now" | **Manual run** | One-off → just `POST /api/flows/{flowId}/run` |
+| "Run this right now" | **Manual run** | One-off → just `POST /api/flows/{packageId}/run` |
 
 **When recommending the webhook pattern, also explain:**
 - Which external platform could detect the event (e.g., "You can use Zapier/Make to watch for new Jira tickets and trigger the flow")

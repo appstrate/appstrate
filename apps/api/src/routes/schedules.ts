@@ -4,7 +4,7 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
   listSchedules,
-  listFlowSchedules,
+  listPackageSchedules,
   createSchedule,
   updateSchedule,
   deleteSchedule,
@@ -26,7 +26,7 @@ export function createSchedulesRouter() {
   router.get("/flows/:id/schedules", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const schedules = await listFlowSchedules(flow.id, orgId);
+    const schedules = await listPackageSchedules(flow.id, orgId);
     return c.json(schedules);
   });
 

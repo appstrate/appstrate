@@ -153,13 +153,11 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
 export function assemblePayload(state: FlowFormState, userEmail: string) {
   const manifest: Record<string, unknown> = {
     schemaVersion: "1.0",
-    metadata: {
-      id: state.metadata.id,
-      displayName: state.metadata.displayName,
-      description: state.metadata.description,
-      author: userEmail,
-      ...(state.metadata.tags.length > 0 ? { tags: state.metadata.tags } : {}),
-    },
+    name: state.metadata.id,
+    displayName: state.metadata.displayName,
+    description: state.metadata.description,
+    author: userEmail,
+    ...(state.metadata.tags.length > 0 ? { tags: state.metadata.tags } : {}),
     requires: {
       services: state.services
         .filter((s) => s.id && s.provider)
@@ -205,7 +203,6 @@ export function payloadToFormState(payload: {
   prompt: string;
 }): FlowFormState {
   const { manifest, prompt } = payload;
-  const meta = (manifest.metadata as Record<string, unknown>) || {};
   const requires = (manifest.requires as Record<string, unknown>) || {};
   const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
   const execution = (manifest.execution as Record<string, unknown>) || {};
@@ -229,10 +226,10 @@ export function payloadToFormState(payload: {
 
   return {
     metadata: {
-      id: (meta.id as string) || "",
-      displayName: (meta.displayName as string) || "",
-      description: (meta.description as string) || "",
-      tags: Array.isArray(meta.tags) ? (meta.tags as string[]) : [],
+      id: (manifest.name as string) || "",
+      displayName: (manifest.displayName as string) || "",
+      description: (manifest.description as string) || "",
+      tags: Array.isArray(manifest.tags) ? (manifest.tags as string[]) : [],
     },
     prompt,
     services,

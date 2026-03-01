@@ -28,7 +28,7 @@ export function SchedulesListPage() {
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
   const { data: createFlowDetail } = useFlowDetail(createFlowId || undefined);
-  const { data: editFlowDetail } = useFlowDetail(editingSchedule?.flowId || undefined);
+  const { data: editFlowDetail } = useFlowDetail(editingSchedule?.packageId || undefined);
   const createMutation = useCreateSchedule(createFlowId);
 
   if (isLoading) return <LoadingState />;
@@ -63,10 +63,11 @@ export function SchedulesListPage() {
       ) : (
         <div className="schedule-list">
           {schedules.map((sched) => {
-            const flowName = flows?.find((f) => f.id === sched.flowId)?.displayName ?? sched.flowId;
+            const flowName =
+              flows?.find((f) => f.id === sched.packageId)?.displayName ?? sched.packageId;
             return (
               <div key={sched.id} className="schedule-list-item">
-                <Link className="schedule-flow-link" to={`/flows/${sched.flowId}`}>
+                <Link className="schedule-flow-link" to={`/flows/${sched.packageId}`}>
                   {flowName}
                 </Link>
                 <ScheduleRow schedule={sched} onClick={() => openEdit(sched)} />

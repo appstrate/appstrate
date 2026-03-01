@@ -1,1 +1,0 @@
-ALTER TABLE "executions" DROP COLUMN "cost_usd";

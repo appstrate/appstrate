@@ -191,7 +191,7 @@ export const schemas = {
     type: "object",
     properties: {
       id: { type: "integer" },
-      flowId: { type: "string" },
+      packageId: { type: "string" },
       versionNumber: { type: "integer" },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
@@ -201,7 +201,7 @@ export const schemas = {
     type: "object",
     properties: {
       id: { type: "string" },
-      flowId: { type: "string" },
+      packageId: { type: "string" },
       userId: { type: "string" },
       orgId: { type: "string" },
       status: {
@@ -240,7 +240,7 @@ export const schemas = {
     type: "object",
     properties: {
       id: { type: "string" },
-      flowId: { type: "string" },
+      packageId: { type: "string" },
       userId: { type: "string" },
       orgId: { type: "string" },
       name: { type: ["string", "null"] },

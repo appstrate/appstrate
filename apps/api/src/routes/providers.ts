@@ -9,7 +9,7 @@ import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { getBuiltInProviders, isBuiltInProvider, encrypt } from "@appstrate/connect";
 import type { AuthMode } from "@appstrate/connect";
-import { listFlows } from "../services/flow-service.ts";
+import { listPackages } from "../services/flow-service.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -103,7 +103,7 @@ export function createProvidersRouter() {
     const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
 
     // Count provider usage across all flows (built-in + user)
-    const allFlows = await listFlows(orgId);
+    const allFlows = await listPackages(orgId);
     const providerUsage = new Map<string, number>();
     for (const flow of allFlows) {
       for (const svc of flow.manifest.requires?.services ?? []) {
@@ -379,7 +379,7 @@ export function createProvidersRouter() {
     }
 
     // Block deleting providers that are in use by flows
-    const allFlows = await listFlows(orgId);
+    const allFlows = await listPackages(orgId);
     let usageCount = 0;
     for (const flow of allFlows) {
       for (const svc of flow.manifest.requires?.services ?? []) {

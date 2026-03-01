@@ -7,10 +7,10 @@ import {
   executions,
   executionLogs,
   shareTokens,
-  flowAdminConnections,
-  flowSchedules,
-  flowConfigs,
-  flows,
+  packageAdminConnections,
+  packageSchedules,
+  packageConfigs,
+  packages,
   orgInvitations,
 } from "@appstrate/db/schema";
 import { eq, and, inArray, count } from "drizzle-orm";
@@ -234,11 +234,11 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(executionLogs).where(eq(executionLogs.orgId, orgId));
     await tx.delete(executions).where(eq(executions.orgId, orgId));
     await tx.delete(shareTokens).where(eq(shareTokens.orgId, orgId));
-    await tx.delete(flowAdminConnections).where(eq(flowAdminConnections.orgId, orgId));
+    await tx.delete(packageAdminConnections).where(eq(packageAdminConnections.orgId, orgId));
     // schedule_runs cascades from flow_schedules
-    await tx.delete(flowSchedules).where(eq(flowSchedules.orgId, orgId));
-    await tx.delete(flowConfigs).where(eq(flowConfigs.orgId, orgId));
-    await tx.delete(flows).where(eq(flows.orgId, orgId));
+    await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
+    await tx.delete(packageConfigs).where(eq(packageConfigs.orgId, orgId));
+    await tx.delete(packages).where(eq(packages.orgId, orgId));
     // serviceConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // organization_members cascades from organizations (onDelete: "cascade")

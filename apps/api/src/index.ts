@@ -17,14 +17,14 @@ import { createRealtimeRouter } from "./routes/realtime.ts";
 import { initBuiltInProviders } from "@appstrate/connect";
 import { initBuiltInProxies } from "./services/proxy-registry.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
-import { initFlowService, getBuiltInFlowCount } from "./services/flow-service.ts";
+import { initPackageService, getBuiltInPackageCount } from "./services/flow-service.ts";
 import { initBuiltInLibrary } from "./services/builtin-library.ts";
 import { markOrphanExecutionsFailed } from "./services/state.ts";
 import { cleanupOrphanedContainers } from "./services/docker.ts";
 import { initScheduler, shutdownScheduler } from "./services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "./services/execution-tracker.ts";
 import { initSidecarPool, shutdownSidecarPool } from "./services/sidecar-pool.ts";
-import { ensureStorageBucket } from "./services/flow-package.ts";
+import { ensureStorageBucket } from "./services/package-storage.ts";
 import { ensureLibraryBucket } from "./services/library.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
@@ -40,6 +40,9 @@ import { createProxiesRouter } from "./routes/proxies.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
+import { createMarketplaceRouter } from "./routes/marketplace.ts";
+import { createPackagesRouter } from "./routes/packages.ts";
+import { initRegistryProvider } from "./services/registry-provider.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -186,8 +189,8 @@ if (dataDir) {
     logger.info("Built-in proxies loaded (env var only)");
   }
 
-  await initFlowService(dataDir);
-  logger.info("Built-in flows loaded", { count: getBuiltInFlowCount() });
+  await initPackageService(dataDir);
+  logger.info("Built-in flows loaded", { count: getBuiltInPackageCount() });
 
   await initBuiltInLibrary(dataDir);
 } else {
@@ -195,6 +198,13 @@ if (dataDir) {
   initBuiltInProxies(); // SYSTEM_PROXIES env var still loaded
   logger.info("DATA_DIR not set — built-in resources disabled");
 }
+
+// Initialize registry provider (non-fatal)
+await initRegistryProvider().catch((err) => {
+  logger.warn("Could not initialize registry provider", {
+    error: err instanceof Error ? err.message : String(err),
+  });
+});
 
 // Parallel init: storage, library, NOTIFY triggers, and realtime are all independent
 await Promise.all([
@@ -345,6 +355,8 @@ app.route("/api", createNotificationsRouter()); // Must be before executionsRout
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
+app.route("/api/marketplace", createMarketplaceRouter());
+app.route("/api/packages", createPackagesRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/provider-templates", createProviderTemplatesRouter());
 app.route("/api/api-keys", createApiKeysRouter());

@@ -6,29 +6,29 @@ import { Spinner } from "../spinner";
 
 interface PackageSectionProps {
   detail: FlowDetail | null;
-  flowId: string | undefined;
+  packageId: string | undefined;
   canEdit: boolean;
   onPackageUploaded?: () => void;
 }
 
 export function PackageSection({
   detail,
-  flowId,
+  packageId,
   canEdit,
   onPackageUploaded,
 }: PackageSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
   const zipFileRef = useRef<HTMLInputElement>(null);
-  const uploadMutation = useUploadPackage(flowId || "");
+  const uploadMutation = useUploadPackage(packageId || "");
 
   const [downloading, setDownloading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
 
   const handleDownload = async () => {
-    if (!flowId) return;
+    if (!packageId) return;
     setDownloading(true);
     try {
-      await downloadPackage(flowId);
+      await downloadPackage(packageId);
     } catch (err) {
       alert(`${t("error.prefix", { message: err instanceof Error ? err.message : String(err) })}`);
     } finally {
@@ -38,7 +38,7 @@ export function PackageSection({
 
   const handleUploadZip = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !flowId || !detail?.updatedAt) return;
+    if (!file || !packageId || !detail?.updatedAt) return;
 
     setUploadSuccess(false);
     uploadMutation.mutate(
@@ -58,7 +58,7 @@ export function PackageSection({
       <div className="editor-section-header">{t("editor.packageTitle")}</div>
       <div className="editor-section-body">
         <div className="package-actions">
-          {flowId && (
+          {packageId && (
             <button type="button" onClick={handleDownload} disabled={downloading}>
               {downloading ? <Spinner /> : t("editor.downloadZip")}
             </button>

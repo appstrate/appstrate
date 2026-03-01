@@ -95,7 +95,7 @@ Create a one-time public link for anyone to run a flow:
 ### Create Share Token
 
 ```
-POST /api/flows/{flowId}/share-token
+POST /api/flows/{packageId}/share-token
 Authorization: Bearer ask_...
 ```
 

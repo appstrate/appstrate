@@ -1,5 +1,5 @@
 export const executionsPaths = {
-  "/api/flows/{flowId}/run": {
+  "/api/flows/{packageId}/run": {
     post: {
       operationId: "runFlow",
       tags: ["Executions"],
@@ -8,7 +8,7 @@ export const executionsPaths = {
         "Start a flow execution (fire-and-forget). Returns the execution ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "profileId",
           in: "query",
@@ -58,7 +58,7 @@ export const executionsPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/executions": {
+  "/api/flows/{packageId}/executions": {
     get: {
       operationId: "listFlowExecutions",
       tags: ["Executions"],
@@ -66,7 +66,7 @@ export const executionsPaths = {
       description: "List executions for a specific flow (org-scoped, default limit 50).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",
           in: "query",
@@ -94,7 +94,7 @@ export const executionsPaths = {
       description: "Delete all completed executions for a flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

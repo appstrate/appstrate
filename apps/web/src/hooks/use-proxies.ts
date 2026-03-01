@@ -75,23 +75,23 @@ export function useSetDefaultProxy() {
   });
 }
 
-export function useFlowProxy(flowId: string | undefined) {
+export function useFlowProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["flow-proxy", orgId, flowId],
+    queryKey: ["flow-proxy", orgId, packageId],
     queryFn: () =>
       api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
-        `/flows/${flowId}/proxy`,
+        `/flows/${packageId}/proxy`,
       ),
-    enabled: !!orgId && !!flowId,
+    enabled: !!orgId && !!packageId,
   });
 }
 
-export function useSetFlowProxy(flowId: string) {
+export function useSetFlowProxy(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (proxyId: string | null) => {
-      return api(`/flows/${flowId}/proxy`, {
+      return api(`/flows/${packageId}/proxy`, {
         method: "PUT",
         body: JSON.stringify({ proxyId }),
       });

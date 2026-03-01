@@ -21,7 +21,7 @@ export const schedulesPaths = {
       },
     },
   },
-  "/api/flows/{flowId}/schedules": {
+  "/api/flows/{packageId}/schedules": {
     get: {
       operationId: "listFlowSchedules",
       tags: ["Schedules"],
@@ -29,7 +29,7 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -52,7 +52,7 @@ export const schedulesPaths = {
       description: "Create a cron schedule for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,

@@ -1,43 +1,43 @@
 import { eq, and, ne, desc, asc, isNotNull, isNull, inArray, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import {
-  flowConfigs,
+  packageConfigs,
   executions,
   executionLogs,
-  flowAdminConnections,
-  flowMemories,
+  packageAdminConnections,
+  packageMemories,
 } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 
-// --- Flow Config (per-org) ---
+// --- Package Config (per-org) ---
 
-export async function getFlowConfig(
+export async function getPackageConfig(
   orgId: string,
-  flowId: string,
+  packageId: string,
 ): Promise<Record<string, unknown>> {
   const [row] = await db
-    .select({ config: flowConfigs.config })
-    .from(flowConfigs)
-    .where(and(eq(flowConfigs.orgId, orgId), eq(flowConfigs.flowId, flowId)))
+    .select({ config: packageConfigs.config })
+    .from(packageConfigs)
+    .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
     .limit(1);
   return (row?.config ?? {}) as Record<string, unknown>;
 }
 
-export async function setFlowConfig(
+export async function setPackageConfig(
   orgId: string,
-  flowId: string,
+  packageId: string,
   config: Record<string, unknown>,
 ): Promise<void> {
   await db
-    .insert(flowConfigs)
+    .insert(packageConfigs)
     .values({
       orgId,
-      flowId,
+      packageId,
       config,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [flowConfigs.orgId, flowConfigs.flowId],
+      target: [packageConfigs.orgId, packageConfigs.packageId],
       set: {
         config,
         updatedAt: new Date(),
@@ -49,17 +49,17 @@ export async function setFlowConfig(
 
 export async function createExecution(
   id: string,
-  flowId: string,
+  packageId: string,
   userId: string,
   orgId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
-  flowVersionId?: number,
+  packageVersionId?: number,
   connectionProfileId?: string,
 ): Promise<void> {
   await db.insert(executions).values({
     id,
-    flowId,
+    packageId,
     userId,
     orgId,
     status: "pending",
@@ -67,7 +67,7 @@ export async function createExecution(
     startedAt: new Date(),
     connectionProfileId: connectionProfileId ?? null,
     scheduleId: scheduleId ?? null,
-    flowVersionId: flowVersionId ?? null,
+    packageVersionId: packageVersionId ?? null,
   });
 }
 
@@ -108,7 +108,7 @@ export async function updateExecution(
 }
 
 export async function getLastExecutionState(
-  flowId: string,
+  packageId: string,
   userId: string,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
@@ -117,7 +117,7 @@ export async function getLastExecutionState(
     .from(executions)
     .where(
       and(
-        eq(executions.flowId, flowId),
+        eq(executions.packageId, packageId),
         eq(executions.userId, userId),
         eq(executions.orgId, orgId),
         isNotNull(executions.state),
@@ -129,7 +129,7 @@ export async function getLastExecutionState(
 }
 
 export async function getRecentExecutions(
-  flowId: string,
+  packageId: string,
   userId: string,
   orgId: string,
   options: {
@@ -142,7 +142,7 @@ export async function getRecentExecutions(
   const fields = options.fields ?? ["state"];
 
   const conditions = [
-    eq(executions.flowId, flowId),
+    eq(executions.packageId, packageId),
     eq(executions.userId, userId),
     eq(executions.orgId, orgId),
     eq(executions.status, "success"),
@@ -179,7 +179,7 @@ export async function getRecentExecutions(
   });
 }
 
-export async function getLastExecution(flowId: string, userId: string, orgId: string) {
+export async function getLastExecution(packageId: string, userId: string, orgId: string) {
   const [row] = await db
     .select({
       id: executions.id,
@@ -190,7 +190,7 @@ export async function getLastExecution(flowId: string, userId: string, orgId: st
     .from(executions)
     .where(
       and(
-        eq(executions.flowId, flowId),
+        eq(executions.packageId, packageId),
         eq(executions.userId, userId),
         eq(executions.orgId, orgId),
       ),
@@ -232,12 +232,12 @@ export async function appendExecutionLog(
   }
 }
 
-export async function getRunningExecutionsForFlow(
-  flowId: string,
+export async function getRunningExecutionsForPackage(
+  packageId: string,
   userId?: string,
 ): Promise<number> {
   const conditions = [
-    eq(executions.flowId, flowId),
+    eq(executions.packageId, packageId),
     inArray(executions.status, ["running", "pending"]),
   ];
 
@@ -254,14 +254,14 @@ export async function getRunningExecutionsForFlow(
 
 export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
   const rows = await db
-    .select({ flowId: executions.flowId, count: count() })
+    .select({ packageId: executions.packageId, count: count() })
     .from(executions)
     .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])))
-    .groupBy(executions.flowId);
+    .groupBy(executions.packageId);
 
   const counts: Record<string, number> = {};
   for (const row of rows) {
-    counts[row.flowId] = row.count;
+    counts[row.packageId] = row.count;
   }
   return counts;
 }
@@ -270,15 +270,20 @@ export async function getRunningExecutionsCounts(orgId: string): Promise<Record<
 
 export async function getAdminConnections(
   orgId: string,
-  flowId: string,
+  packageId: string,
 ): Promise<Record<string, string>> {
   const rows = await db
     .select({
-      serviceId: flowAdminConnections.serviceId,
-      profileId: flowAdminConnections.profileId,
+      serviceId: packageAdminConnections.serviceId,
+      profileId: packageAdminConnections.profileId,
     })
-    .from(flowAdminConnections)
-    .where(and(eq(flowAdminConnections.orgId, orgId), eq(flowAdminConnections.flowId, flowId)));
+    .from(packageAdminConnections)
+    .where(
+      and(
+        eq(packageAdminConnections.orgId, orgId),
+        eq(packageAdminConnections.packageId, packageId),
+      ),
+    );
   const result: Record<string, string> = {};
   for (const row of rows) {
     if (row.profileId) {
@@ -290,21 +295,21 @@ export async function getAdminConnections(
 
 export async function bindAdminConnection(
   orgId: string,
-  flowId: string,
+  packageId: string,
   serviceId: string,
   profileId: string,
 ): Promise<void> {
   await db
-    .insert(flowAdminConnections)
+    .insert(packageAdminConnections)
     .values({
       orgId,
-      flowId,
+      packageId,
       serviceId,
       profileId,
       connectedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [flowAdminConnections.flowId, flowAdminConnections.serviceId],
+      target: [packageAdminConnections.packageId, packageAdminConnections.serviceId],
       set: {
         orgId,
         profileId,
@@ -315,16 +320,16 @@ export async function bindAdminConnection(
 
 export async function unbindAdminConnection(
   orgId: string,
-  flowId: string,
+  packageId: string,
   serviceId: string,
 ): Promise<void> {
   await db
-    .delete(flowAdminConnections)
+    .delete(packageAdminConnections)
     .where(
       and(
-        eq(flowAdminConnections.orgId, orgId),
-        eq(flowAdminConnections.flowId, flowId),
-        eq(flowAdminConnections.serviceId, serviceId),
+        eq(packageAdminConnections.orgId, orgId),
+        eq(packageAdminConnections.packageId, packageId),
+        eq(packageAdminConnections.serviceId, serviceId),
       ),
     );
 }
@@ -340,7 +345,7 @@ export async function getExecution(id: string) {
       status: executions.status,
       userId: executions.userId,
       orgId: executions.orgId,
-      flowId: executions.flowId,
+      packageId: executions.packageId,
     })
     .from(executions)
     .where(eq(executions.id, id))
@@ -348,19 +353,19 @@ export async function getExecution(id: string) {
   return row ?? null;
 }
 
-export async function deleteFlowExecutions(flowId: string, orgId: string): Promise<number> {
+export async function deletePackageExecutions(packageId: string, orgId: string): Promise<number> {
   const deleted = await db
     .delete(executions)
-    .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)))
+    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)))
     .returning({ id: executions.id });
   return deleted.length;
 }
 
-export async function listFlowExecutions(flowId: string, orgId: string, limit = 50) {
+export async function listPackageExecutions(packageId: string, orgId: string, limit = 50) {
   return db
     .select()
     .from(executions)
-    .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)))
+    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit);
 }
@@ -471,21 +476,21 @@ export async function listUserExecutions(
   return { executions: rows as unknown as Record<string, unknown>[], total: countRow?.count ?? 0 };
 }
 
-// --- Flow Memories (org-scoped, accumulate across executions) ---
+// --- Package Memories (org-scoped, accumulate across executions) ---
 
 const MAX_MEMORY_CONTENT = 2000;
-const MAX_MEMORIES_PER_FLOW = 100;
+const MAX_MEMORIES_PER_PACKAGE = 100;
 
-export async function getFlowMemories(flowId: string, orgId: string) {
+export async function getPackageMemories(packageId: string, orgId: string) {
   return db
     .select()
-    .from(flowMemories)
-    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)))
-    .orderBy(asc(flowMemories.createdAt));
+    .from(packageMemories)
+    .where(and(eq(packageMemories.packageId, packageId), eq(packageMemories.orgId, orgId)))
+    .orderBy(asc(packageMemories.createdAt));
 }
 
-export async function addFlowMemories(
-  flowId: string,
+export async function addPackageMemories(
+  packageId: string,
   orgId: string,
   contents: string[],
   executionId: string,
@@ -493,44 +498,48 @@ export async function addFlowMemories(
   // Count existing memories
   const [row] = await db
     .select({ count: count() })
-    .from(flowMemories)
-    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)));
+    .from(packageMemories)
+    .where(and(eq(packageMemories.packageId, packageId), eq(packageMemories.orgId, orgId)));
   const existing = row?.count ?? 0;
-  const available = Math.max(0, MAX_MEMORIES_PER_FLOW - existing);
+  const available = Math.max(0, MAX_MEMORIES_PER_PACKAGE - existing);
   if (available === 0) return 0;
 
   const toInsert = contents
     .slice(0, available)
     .map((c) => c.slice(0, MAX_MEMORY_CONTENT))
-    .map((content) => ({ flowId, orgId, content, executionId }));
+    .map((content) => ({ packageId, orgId, content, executionId }));
 
   if (toInsert.length === 0) return 0;
 
   const inserted = await db
-    .insert(flowMemories)
+    .insert(packageMemories)
     .values(toInsert)
-    .returning({ id: flowMemories.id });
+    .returning({ id: packageMemories.id });
   return inserted.length;
 }
 
-export async function deleteFlowMemory(
+export async function deletePackageMemory(
   id: number,
-  flowId: string,
+  packageId: string,
   orgId: string,
 ): Promise<boolean> {
   const deleted = await db
-    .delete(flowMemories)
+    .delete(packageMemories)
     .where(
-      and(eq(flowMemories.id, id), eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)),
+      and(
+        eq(packageMemories.id, id),
+        eq(packageMemories.packageId, packageId),
+        eq(packageMemories.orgId, orgId),
+      ),
     )
-    .returning({ id: flowMemories.id });
+    .returning({ id: packageMemories.id });
   return deleted.length > 0;
 }
 
-export async function deleteAllFlowMemories(flowId: string, orgId: string): Promise<number> {
+export async function deleteAllPackageMemories(packageId: string, orgId: string): Promise<number> {
   const deleted = await db
-    .delete(flowMemories)
-    .where(and(eq(flowMemories.flowId, flowId), eq(flowMemories.orgId, orgId)))
-    .returning({ id: flowMemories.id });
+    .delete(packageMemories)
+    .where(and(eq(packageMemories.packageId, packageId), eq(packageMemories.orgId, orgId)))
+    .returning({ id: packageMemories.id });
   return deleted.length;
 }

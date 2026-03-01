@@ -8,7 +8,7 @@ Avant toute investigation, exécuter ces appels dans l'ordre :
 
 1. **L'API est-elle accessible ?** → `GET {BASE_URL}/health` — doit retourner `{ "status": "healthy" }`
 2. **L'authentification est-elle valide ?** → `GET {BASE_URL}/api/flows` — doit retourner 200
-3. **Le flow existe-t-il ?** → `GET {BASE_URL}/api/flows/{flowId}` — doit retourner 200
+3. **Le flow existe-t-il ?** → `GET {BASE_URL}/api/flows/{packageId}` — doit retourner 200
 
 Si l'étape 1 échoue, le serveur est down — rien d'autre ne fonctionnera.
 Si l'étape 2 retourne 401, la clé API est invalide/expirée — demander une nouvelle clé à l'utilisateur.
@@ -73,7 +73,7 @@ GET {BASE_URL}/api/flows
 Chercher le flow existant avec cet ID dans la réponse.
 
 **Actions de l'agent :**
-1. Si l'objectif est de mettre à jour le flow existant → utiliser `PUT /api/flows/{flowId}` au lieu de `POST`
+1. Si l'objectif est de mettre à jour le flow existant → utiliser `PUT /api/flows/{packageId}` au lieu de `POST`
 2. Si c'est un nouveau flow distinct → choisir un ID différent automatiquement (ex: `my-flow-v2`)
 
 ### 400 INVALID_MANIFEST — Erreurs de validation du manifest
@@ -103,7 +103,7 @@ Chercher le flow existant avec cet ID dans la réponse.
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/flows/{flowId}
+GET {BASE_URL}/api/flows/{packageId}
 ```
 Vérifier le champ `services` dans la réponse. Identifier les services avec `status: "disconnected"` ou `"expired"`.
 
@@ -119,25 +119,25 @@ Vérifier le `authMode` du provider pour chaque service manquant.
 | `api_key` | Demander à l'utilisateur la clé API externe → `POST /auth/connect/{providerId}/api-key` |
 | `custom` | Lire le `credentialSchema` du provider → demander les valeurs à l'utilisateur → `POST /auth/connect/{providerId}/credentials` |
 | `oauth2` | `POST /auth/connect/{providerId}` → donner l'`authUrl` à l'utilisateur → vérifier via `GET /auth/integrations` après |
-| (admin mode) | Vérifier si l'admin a une connexion active → `POST /api/flows/{flowId}/services/{serviceId}/bind` |
+| (admin mode) | Vérifier si l'admin a une connexion active → `POST /api/flows/{packageId}/services/{serviceId}/bind` |
 
 ### 400 CONFIG_INCOMPLETE — "Required config fields missing"
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/flows/{flowId}
+GET {BASE_URL}/api/flows/{packageId}
 ```
 Comparer `config` (valeurs actuelles) avec `manifest.config.schema` (champs attendus). Identifier les champs `required` qui sont manquants.
 
 **Actions de l'agent :**
-1. Si les champs manquants ont une valeur `default` dans le schema → les remplir automatiquement via `PUT /api/flows/{flowId}/config`
+1. Si les champs manquants ont une valeur `default` dans le schema → les remplir automatiquement via `PUT /api/flows/{packageId}/config`
 2. Si les champs n'ont pas de default → demander les valeurs à l'utilisateur, puis les sauvegarder
 
 ### 400 VALIDATION_ERROR — Erreur de validation de l'input
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/flows/{flowId}
+GET {BASE_URL}/api/flows/{packageId}
 ```
 Lire `manifest.input.schema` → vérifier les champs `required` et les types attendus.
 
@@ -168,7 +168,7 @@ Parcourir les logs pour identifier le point de défaillance. Les logs de type `e
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/flows/{flowId}
+GET {BASE_URL}/api/flows/{packageId}
 ```
 Lire `manifest.execution.timeout` pour connaître le délai actuel.
 
@@ -181,7 +181,7 @@ Lire `manifest.execution.timeout` pour connaître le délai actuel.
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/flows/{flowId}/executions?limit=5
+GET {BASE_URL}/api/flows/{packageId}/executions?limit=5
 ```
 Trouver l'exécution en cours (`status: "running"` ou `"pending"`).
 
@@ -234,7 +234,7 @@ La réponse contient un champ `flows` listant les flows qui référencent cette 
 **Actions de l'agent :**
 1. Pour chaque flow référencé, dissocier la ressource :
    ```
-   PUT /api/flows/{flowId}/skills
+   PUT /api/flows/{packageId}/skills
    { "skillIds": [... IDs restants sans celui à supprimer ...] }
    ```
 2. Puis réessayer la suppression
@@ -269,13 +269,13 @@ La réponse contient un champ `flows` listant les flows qui référencent cette 
 Avant de lancer un flow, **exécuter ces vérifications** (pas les demander à l'utilisateur) :
 
 ```
-GET /api/flows/{flowId}
+GET /api/flows/{packageId}
 ```
 
 Puis vérifier dans la réponse :
 
 - [ ] `services[].status === "connected"` pour tous les services → sinon, résoudre (voir DEPENDENCY_NOT_SATISFIED)
 - [ ] `services[].adminConnection` est défini pour les services en mode admin → sinon, binder
-- [ ] `config` contient tous les champs `required` du `manifest.config.schema` → sinon, remplir via `PUT /api/flows/{flowId}/config`
+- [ ] `config` contient tous les champs `required` du `manifest.config.schema` → sinon, remplir via `PUT /api/flows/{packageId}/config`
 - [ ] L'input prévu respecte `manifest.input.schema` (champs required + types) → sinon, corriger
 - [ ] `runningExecutions === 0` → sinon, attendre ou annuler l'exécution en cours

@@ -5,7 +5,7 @@ import { db } from "../lib/db.ts";
 import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
-import { getFlow } from "../services/flow-service.ts";
+import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy, getProvider } from "@appstrate/connect";
 import { getEffectiveProfileId, computeConfigHash } from "../services/connection-profiles.ts";
 
@@ -18,7 +18,7 @@ async function verifyExecutionToken(c: Context): Promise<
       ok: true;
       executionId: string;
       execution: {
-        flowId: string;
+        packageId: string;
         userId: string;
         orgId: string;
         status: string;
@@ -45,7 +45,7 @@ async function verifyExecutionToken(c: Context): Promise<
 
   const rows = await db
     .select({
-      flowId: executions.flowId,
+      packageId: executions.packageId,
       userId: executions.userId,
       orgId: executions.orgId,
       status: executions.status,
@@ -74,7 +74,7 @@ async function verifyExecutionToken(c: Context): Promise<
     ok: true,
     executionId,
     execution: {
-      flowId: execution.flowId,
+      packageId: execution.packageId,
       userId: execution.userId,
       orgId: execution.orgId,
       status: execution.status,
@@ -111,7 +111,7 @@ export function createInternalRouter() {
 
     try {
       const recentExecutions = await getRecentExecutions(
-        execution.flowId,
+        execution.packageId,
         execution.userId,
         execution.orgId,
         {
@@ -142,7 +142,7 @@ export function createInternalRouter() {
     const serviceId = c.req.param("serviceId");
 
     // Load the flow to validate the requested service
-    const flow = await getFlow(execution.flowId, execution.orgId);
+    const flow = await getPackage(execution.packageId, execution.orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
     }
@@ -152,7 +152,7 @@ export function createInternalRouter() {
       logger.warn("Credential request for unknown service", {
         executionId,
         serviceId,
-        flowId: execution.flowId,
+        packageId: execution.packageId,
       });
       return c.json(
         {
@@ -169,7 +169,7 @@ export function createInternalRouter() {
       let profileId: string;
 
       if (connectionMode === "admin") {
-        const adminConns = await getAdminConnections(execution.orgId, execution.flowId);
+        const adminConns = await getAdminConnections(execution.orgId, execution.packageId);
         const adminProfileId = adminConns[serviceId];
         if (!adminProfileId) {
           return c.json(
@@ -185,7 +185,7 @@ export function createInternalRouter() {
         // Use the connection profile snapshot from the execution, or fall back to current
         profileId =
           execution.connectionProfileId ??
-          (await getEffectiveProfileId(execution.userId, execution.flowId));
+          (await getEffectiveProfileId(execution.userId, execution.packageId));
       }
 
       // Resolve configHash for the org's provider config
@@ -209,7 +209,7 @@ export function createInternalRouter() {
         executionId,
         serviceId,
         provider: service.provider,
-        flowId: execution.flowId,
+        packageId: execution.packageId,
         connectionMode,
         profileId,
       });

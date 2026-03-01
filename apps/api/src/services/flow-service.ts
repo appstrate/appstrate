@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { flows, flowSkills, flowExtensions, orgSkills, orgExtensions } from "@appstrate/db/schema";
+import { packages, packageDependencies } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { validateManifest } from "./schema.ts";
 import {
@@ -13,38 +13,38 @@ import {
 } from "./builtin-library.ts";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
-// Module-level directory, initialized by initFlowService()
-let flowsDir: string | null = null;
+// Module-level directory, initialized by initPackageService()
+let packagesDir: string | null = null;
 
 // Immutable cache for built-in flows (loaded once at boot, never mutated)
 let builtInFlows: ReadonlyMap<string, LoadedFlow> = new Map();
 
-/** Get the flows directory path (null if DATA_DIR not configured). */
-export function getFlowsDir(): string | null {
-  return flowsDir;
+/** Get the packages directory path (null if DATA_DIR not configured). */
+export function getPackagesDir(): string | null {
+  return packagesDir;
 }
 
 /** Load built-in flows from filesystem into the immutable cache. Call once at boot. */
-export async function initFlowService(dataDir?: string): Promise<void> {
+export async function initPackageService(dataDir?: string): Promise<void> {
   if (!dataDir) {
     logger.info("Built-in flows disabled (no dataDir)");
     return;
   }
 
-  flowsDir = join(dataDir, "flows");
+  packagesDir = join(dataDir, "flows");
   const flowsMap = new Map<string, LoadedFlow>();
 
   let entries: string[];
   try {
-    entries = await readdir(flowsDir);
+    entries = await readdir(packagesDir);
   } catch {
-    logger.warn("Flows directory not found", { path: flowsDir });
+    logger.warn("Flows directory not found", { path: packagesDir });
     builtInFlows = flowsMap;
     return;
   }
 
   for (const entry of entries) {
-    const flowPath = join(flowsDir, entry);
+    const flowPath = join(packagesDir, entry);
     const manifestFile = Bun.file(join(flowPath, "manifest.json"));
     const promptFile = Bun.file(join(flowPath, "prompt.md"));
 
@@ -63,7 +63,7 @@ export async function initFlowService(dataDir?: string): Promise<void> {
       }
 
       const manifest = validation.manifest as FlowManifest;
-      const flowId = manifest.metadata.id;
+      const packageId = manifest.name;
 
       // Resolve skill/extension IDs to SkillMeta using built-in library
       const skills = (manifest.requires.skills ?? []).map((id) => {
@@ -75,8 +75,8 @@ export async function initFlowService(dataDir?: string): Promise<void> {
         return { id, name: builtIn?.name, description: builtIn?.description };
       });
 
-      flowsMap.set(flowId, {
-        id: flowId,
+      flowsMap.set(packageId, {
+        id: packageId,
         manifest,
         prompt,
         skills,
@@ -85,8 +85,8 @@ export async function initFlowService(dataDir?: string): Promise<void> {
       });
 
       logger.info("Loaded built-in flow", {
-        flowId,
-        displayName: manifest.metadata.displayName,
+        packageId,
+        displayName: manifest.displayName,
         skillCount: skills.length,
         extensionCount: extensions.length,
       });
@@ -101,29 +101,45 @@ export async function initFlowService(dataDir?: string): Promise<void> {
   builtInFlows = flowsMap;
 }
 
-interface DbFlowRow {
+interface DbPackageRow {
   id: string;
   manifest: unknown;
-  prompt: string;
-  orgSkillRefs?: { skillId: string; name: string | null; description: string | null }[];
-  orgExtRefs?: { extensionId: string; name: string | null; description: string | null }[];
+  content: string;
+  source?: string;
+  depRefs?: {
+    dependencyId: string;
+    type: string;
+    name: string | null;
+    description: string | null;
+  }[];
 }
 
-function dbRowToLoadedFlow(row: DbFlowRow): LoadedFlow {
-  const manifest = row.manifest as unknown as FlowManifest;
+function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
+  const manifest = (row.manifest ?? {
+    schemaVersion: "1.0",
+    name: row.id,
+    displayName: row.id,
+    description: "",
+    author: "",
+    requires: { services: [] },
+  }) as FlowManifest;
 
-  // Org skills/extensions from DB join tables
-  const orgSkillList = (row.orgSkillRefs ?? []).map((fs) => ({
-    id: fs.skillId,
-    name: fs.name ?? undefined,
-    description: fs.description ?? undefined,
-  }));
+  // Dependencies from packageDependencies joined with packages
+  const depSkills = (row.depRefs ?? [])
+    .filter((d) => d.type === "skill")
+    .map((d) => ({
+      id: d.dependencyId,
+      name: d.name ?? undefined,
+      description: d.description ?? undefined,
+    }));
 
-  const orgExtList = (row.orgExtRefs ?? []).map((fe) => ({
-    id: fe.extensionId,
-    name: fe.name ?? undefined,
-    description: fe.description ?? undefined,
-  }));
+  const depExtensions = (row.depRefs ?? [])
+    .filter((d) => d.type === "extension")
+    .map((d) => ({
+      id: d.dependencyId,
+      name: d.name ?? undefined,
+      description: d.description ?? undefined,
+    }));
 
   // Built-in skills/extensions declared in manifest (IDs are strings)
   const manifestSkills = (manifest.requires.skills ?? [])
@@ -148,121 +164,137 @@ function dbRowToLoadedFlow(row: DbFlowRow): LoadedFlow {
       };
     });
 
-  // Merge: org items + built-in items (deduplicate by ID)
-  const seenSkillIds = new Set(orgSkillList.map((s) => s.id));
-  const skills = [...orgSkillList, ...manifestSkills.filter((s) => !seenSkillIds.has(s.id))];
+  // Merge: dependency items + built-in items (deduplicate by ID)
+  const seenSkillIds = new Set(depSkills.map((s) => s.id));
+  const skills = [...depSkills, ...manifestSkills.filter((s) => !seenSkillIds.has(s.id))];
 
-  const seenExtIds = new Set(orgExtList.map((e) => e.id));
-  const extensions = [...orgExtList, ...manifestExtensions.filter((e) => !seenExtIds.has(e.id))];
+  const seenExtIds = new Set(depExtensions.map((e) => e.id));
+  const extensions = [...depExtensions, ...manifestExtensions.filter((e) => !seenExtIds.has(e.id))];
 
   return {
     id: row.id,
     manifest,
-    prompt: row.prompt,
+    prompt: row.content,
     skills,
     extensions,
-    source: "user",
+    source: (row.source as "built-in" | "local") ?? "local",
   };
 }
 
-/** Get a single flow by ID. Checks built-in cache first, then DB filtered by orgId. */
-export async function getFlow(id: string, orgId?: string): Promise<LoadedFlow | null> {
+/** Get a single package by ID. Checks built-in cache first, then DB filtered by orgId. */
+export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow | null> {
   // Built-in flows are global (accessible in all orgs)
   const builtIn = builtInFlows.get(id);
   if (builtIn) return builtIn;
 
-  // User flows are scoped by org
-  const conditions = [eq(flows.id, id)];
+  // User packages are scoped by org
+  const conditions = [eq(packages.id, id)];
   if (orgId) {
-    conditions.push(eq(flows.orgId, orgId));
+    conditions.push(eq(packages.orgId, orgId));
   }
 
-  const flowRows = await db
-    .select({ id: flows.id, manifest: flows.manifest, prompt: flows.prompt })
-    .from(flows)
+  const pkgRows = await db
+    .select({
+      id: packages.id,
+      manifest: packages.manifest,
+      content: packages.content,
+      source: packages.source,
+    })
+    .from(packages)
     .where(and(...conditions))
     .limit(1);
 
-  const flowRow = flowRows[0];
-  if (!flowRow) return null;
+  const pkgRow = pkgRows[0];
+  if (!pkgRow) return null;
 
-  // Fetch skill and extension joins
-  const [skillRefs, extRefs] = await Promise.all([
-    db
-      .select({
-        skillId: flowSkills.skillId,
-        name: orgSkills.name,
-        description: orgSkills.description,
-      })
-      .from(flowSkills)
-      .leftJoin(
-        orgSkills,
-        and(eq(flowSkills.skillId, orgSkills.id), eq(flowSkills.orgId, orgSkills.orgId)),
-      )
-      .where(eq(flowSkills.flowId, id)),
-    db
-      .select({
-        extensionId: flowExtensions.extensionId,
-        name: orgExtensions.name,
-        description: orgExtensions.description,
-      })
-      .from(flowExtensions)
-      .leftJoin(
-        orgExtensions,
-        and(
-          eq(flowExtensions.extensionId, orgExtensions.id),
-          eq(flowExtensions.orgId, orgExtensions.orgId),
-        ),
-      )
-      .where(eq(flowExtensions.flowId, id)),
-  ]);
+  // Fetch dependencies joined with their package metadata
+  const depRefs = await db
+    .select({
+      dependencyId: packageDependencies.dependencyId,
+      type: packages.type,
+      name: packages.displayName,
+      description: packages.description,
+    })
+    .from(packageDependencies)
+    .innerJoin(packages, eq(packageDependencies.dependencyId, packages.id))
+    .where(eq(packageDependencies.packageId, id));
 
   return dbRowToLoadedFlow({
-    id: flowRow.id,
-    manifest: flowRow.manifest,
-    prompt: flowRow.prompt,
-    orgSkillRefs: skillRefs,
-    orgExtRefs: extRefs,
+    id: pkgRow.id,
+    manifest: pkgRow.manifest,
+    content: pkgRow.content ?? "",
+    source: pkgRow.source,
+    depRefs,
   });
 }
 
-/** List all flows: built-in (from cache) + user flows (from DB, scoped by org). */
-export async function listFlows(orgId?: string): Promise<LoadedFlow[]> {
-  const conditions = orgId ? [eq(flows.orgId, orgId)] : [];
+/** List all flows: built-in (from cache) + user packages of type "flow" (from DB, scoped by org). */
+export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
+  const conditions = [eq(packages.type, "flow")];
+  if (orgId) {
+    conditions.push(eq(packages.orgId, orgId));
+  }
   const rows = await db
-    .select({ id: flows.id, manifest: flows.manifest, prompt: flows.prompt })
-    .from(flows)
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .select({
+      id: packages.id,
+      manifest: packages.manifest,
+      content: packages.content,
+      source: packages.source,
+    })
+    .from(packages)
+    .where(and(...conditions));
 
   const userFlows = rows.map((row) =>
-    dbRowToLoadedFlow({ id: row.id, manifest: row.manifest, prompt: row.prompt }),
+    dbRowToLoadedFlow({
+      id: row.id,
+      manifest: row.manifest,
+      content: row.content ?? "",
+      source: row.source,
+    }),
   );
 
   return [...builtInFlows.values(), ...userFlows];
 }
 
-/** Get all flow IDs (built-in + user, scoped by org). Used for collision checks. */
-export async function getAllFlowIds(orgId?: string): Promise<string[]> {
-  const builtInIds = [...builtInFlows.keys()];
-  const conditions = orgId ? [eq(flows.orgId, orgId)] : [];
+/** Get all package IDs (built-in + user, scoped by org). Used for collision checks. */
+export async function getAllPackageIds(orgId?: string, type?: string): Promise<string[]> {
+  // Collect built-in IDs based on type filter
+  const builtInIds: string[] = [];
+  if (!type || type === "flow") {
+    builtInIds.push(...builtInFlows.keys());
+  }
+  if (!type || type === "skill") {
+    builtInIds.push(...getBuiltInSkills().keys());
+  }
+  if (!type || type === "extension") {
+    builtInIds.push(...getBuiltInExtensions().keys());
+  }
+
+  const conditions = [];
+  if (orgId) {
+    conditions.push(eq(packages.orgId, orgId));
+  }
+  if (type) {
+    conditions.push(eq(packages.type, type as "flow" | "skill" | "extension"));
+  }
   const rows = await db
-    .select({ id: flows.id })
-    .from(flows)
+    .select({ id: packages.id })
+    .from(packages)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   const userIds = rows.map((r) => r.id);
   return [...builtInIds, ...userIds];
 }
 
-/** Check if a flow exists (built-in or user). */
-export async function flowExists(id: string): Promise<boolean> {
+/** Check if a package exists (built-in or user). */
+export async function packageExists(id: string): Promise<boolean> {
   if (builtInFlows.has(id)) return true;
-  const rows = await db.select({ cnt: count() }).from(flows).where(eq(flows.id, id));
+  const rows = await db.select({ cnt: count() }).from(packages).where(eq(packages.id, id));
   return (rows[0]?.cnt ?? 0) > 0;
 }
 
 /** Get the count of built-in flows loaded at boot. */
-export function getBuiltInFlowCount(): number {
+export function getBuiltInPackageCount(): number {
   return builtInFlows.size;
 }
 
