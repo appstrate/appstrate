@@ -81,7 +81,7 @@ appstrate/
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint)
 ```
 
-**External dependency**: `@appstrate/validation` (`file:../validation`) — manifest schemas, naming helpers, dependency extraction, ZIP parsing.
+**External dependency**: `@appstrate/validation` (npm) — manifest schemas, naming helpers, dependency extraction, ZIP parsing.
 
 ## API Overview
 
