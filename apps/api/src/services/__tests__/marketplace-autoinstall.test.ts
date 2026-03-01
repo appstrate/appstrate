@@ -574,4 +574,303 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--ext");
     expect(result.autoInstalledDeps![0]!.type).toBe("extension");
   });
+
+  test("flow avec deps mixtes skill + extension au même niveau", async () => {
+    registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
+    registryPackages.set("@acme/skill-a", makeRegistryPkg("@acme", "skill-a"));
+    registryPackages.set("@acme/ext-b", makeRegistryPkg("@acme", "ext-b"));
+
+    zipQueue.push(
+      makeZipResult("flow", {
+        displayName: "My Flow",
+        registryDependencies: {
+          skills: { "@acme/skill-a": "*" },
+          extensions: { "@acme/ext-b": "^1.0" },
+        },
+      }),
+    );
+    zipQueue.push(makeZipResult("skill", { displayName: "Skill A" }));
+    zipQueue.push(makeZipResult("extension", { displayName: "Ext B" }));
+
+    // flow: findMissingDeps → skill-a and ext-b both missing
+    // skill-a: no deps; existing check → INSERT
+    // ext-b: no deps; existing check → INSERT
+    // flow: existing check → INSERT
+    selectQueue = [
+      [], // findMissingDeps for flow → both missing
+      [], // existing check for skill-a → INSERT
+      [], // existing check for ext-b → INSERT
+      [], // existing check for flow → INSERT
+    ];
+
+    const result = await installFromMarketplace(
+      "acme",
+      "my-flow",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    expect(insertedRows).toHaveLength(3);
+    expect(insertedRows[0]!.id).toBe("acme--skill-a");
+    expect(insertedRows[0]!.autoInstalled).toBe(true);
+    expect(insertedRows[1]!.id).toBe("acme--ext-b");
+    expect(insertedRows[1]!.autoInstalled).toBe(true);
+    expect(insertedRows[2]!.id).toBe("acme--my-flow");
+    expect(insertedRows[2]!.autoInstalled).toBe(false);
+
+    expect(result.autoInstalledDeps).toHaveLength(2);
+    const types = result.autoInstalledDeps!.map((d) => d.type);
+    expect(types).toContain("skill");
+    expect(types).toContain("extension");
+  });
+
+  test("deps parallèles — A dépend de B et C sans imbrication", async () => {
+    registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
+    registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
+    registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
+
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "Parent",
+        registryDependencies: {
+          skills: { "@acme/b": "*", "@acme/c": "*" },
+        },
+      }),
+    );
+    zipQueue.push(makeZipResult("skill", { displayName: "B" }));
+    zipQueue.push(makeZipResult("skill", { displayName: "C" }));
+
+    // parent: findMissingDeps → b and c missing
+    // b: no deps; existing check → INSERT
+    // c: no deps; existing check → INSERT
+    // parent: existing check → INSERT
+    selectQueue = [
+      [], // findMissingDeps for parent → both missing
+      [], // existing check for b → INSERT
+      [], // existing check for c → INSERT
+      [], // existing check for parent → INSERT
+    ];
+
+    const result = await installFromMarketplace(
+      "acme",
+      "parent",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    expect(insertedRows).toHaveLength(3);
+    expect(insertedRows[0]!.id).toBe("acme--b");
+    expect(insertedRows[1]!.id).toBe("acme--c");
+    expect(insertedRows[2]!.id).toBe("acme--parent");
+    expect(result.autoInstalledDeps).toHaveLength(2);
+  });
+
+  test("diamond dependency A→B,C et B→D, C→D — D installé une seule fois", async () => {
+    registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
+    registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
+    registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
+    registryPackages.set("@acme/d", makeRegistryPkg("@acme", "d"));
+
+    // A depends on B and C; B depends on D; C depends on D
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "A",
+        registryDependencies: { skills: { "@acme/b": "*", "@acme/c": "*" } },
+      }),
+    );
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "B",
+        registryDependencies: { skills: { "@acme/d": "*" } },
+      }),
+    );
+    zipQueue.push(makeZipResult("skill", { displayName: "D" }));
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "C",
+        registryDependencies: { skills: { "@acme/d": "*" } },
+      }),
+    );
+
+    // A: findMissingDeps → B and C missing
+    //   B: findMissingDeps → D missing
+    //     D: no deps; existing check → INSERT
+    //   B: existing check → INSERT
+    //   C: findMissingDeps → D already installed (was just inserted by B's tree)
+    //   C: existing check → INSERT
+    // A: existing check → INSERT
+    selectQueue = [
+      [], // findMissingDeps for A → B and C missing
+      [], // findMissingDeps for B → D missing
+      [], // existing check for D → INSERT
+      [], // existing check for B → INSERT
+      [{ id: "acme--d" }], // findMissingDeps for C → D already in DB
+      [], // existing check for C → INSERT
+      [], // existing check for A → INSERT
+    ];
+
+    const result = await installFromMarketplace(
+      "acme",
+      "a",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    // D inserted once (by B's subtree), C sees it already installed
+    expect(insertedRows).toHaveLength(4);
+    expect(insertedRows[0]!.id).toBe("acme--d");
+    expect(insertedRows[1]!.id).toBe("acme--b");
+    expect(insertedRows[2]!.id).toBe("acme--c");
+    expect(insertedRows[3]!.id).toBe("acme--a");
+
+    // autoInstalledDeps: B (+ its transitive D), then C (D already handled)
+    expect(result.autoInstalledDeps).toHaveLength(3);
+    const depIds = result.autoInstalledDeps!.map((d) => d.packageId);
+    expect(depIds).toContain("acme--b");
+    expect(depIds).toContain("acme--c");
+    expect(depIds).toContain("acme--d");
+  });
+
+  test("dep circulaire à 3 niveaux A→B→C→A → skip avec warning", async () => {
+    registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
+    registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
+    registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
+
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "A",
+        registryDependencies: { skills: { "@acme/b": "*" } },
+      }),
+    );
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "B",
+        registryDependencies: { skills: { "@acme/c": "*" } },
+      }),
+    );
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "C",
+        registryDependencies: { skills: { "@acme/a": "*" } },
+      }),
+    );
+
+    // A: findMissingDeps → B missing
+    //   B: findMissingDeps → C missing
+    //     C: findMissingDeps → A "missing" from DB, but visited={acme--a, acme--b} blocks it
+    //     C: existing check → INSERT
+    //   B: existing check → INSERT
+    // A: existing check → INSERT
+    selectQueue = [
+      [], // findMissingDeps for A → B missing
+      [], // findMissingDeps for B → C missing
+      [], // findMissingDeps for C → A "missing" (visited blocks)
+      [], // existing check for C → INSERT
+      [], // existing check for B → INSERT
+      [], // existing check for A → INSERT
+    ];
+
+    await installFromMarketplace("acme", "a", undefined, "org-1", "user-1", undefined);
+
+    const circularWarns = warnCalls.filter(
+      (args) => typeof args[0] === "string" && args[0].includes("Circular dependency"),
+    );
+    expect(circularWarns.length).toBeGreaterThanOrEqual(1);
+    // All 3 installed despite the cycle (A already being installed, just skipped as dep of C)
+    expect(insertedRows).toHaveLength(3);
+    expect(insertedRows[0]!.id).toBe("acme--c");
+    expect(insertedRows[1]!.id).toBe("acme--b");
+    expect(insertedRows[2]!.id).toBe("acme--a");
+  });
+
+  test("dep introuvable dans le registry → throw", async () => {
+    registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
+    // @acme/ghost is NOT in the registry
+
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "Parent",
+        registryDependencies: { skills: { "@acme/ghost": "*" } },
+      }),
+    );
+
+    // parent: findMissingDeps → ghost missing
+    // ghost: client.getPackage returns null → throws before any DB query
+    selectQueue = [
+      [], // findMissingDeps for parent → ghost missing
+    ];
+
+    await expect(
+      installFromMarketplace("acme", "parent", undefined, "org-1", "user-1", undefined),
+    ).rejects.toThrow("not found in registry");
+
+    // Nothing should have been inserted (error during dep resolution)
+    expect(insertedRows).toHaveLength(0);
+  });
+
+  test("flow → skill → extension — deps cross-type imbriquées", async () => {
+    registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
+    registryPackages.set("@acme/my-skill", makeRegistryPkg("@acme", "my-skill"));
+    registryPackages.set("@acme/my-ext", makeRegistryPkg("@acme", "my-ext"));
+
+    zipQueue.push(
+      makeZipResult("flow", {
+        displayName: "My Flow",
+        registryDependencies: { skills: { "@acme/my-skill": "*" } },
+      }),
+    );
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "My Skill",
+        registryDependencies: { extensions: { "@acme/my-ext": "^1.0" } },
+      }),
+    );
+    zipQueue.push(makeZipResult("extension", { displayName: "My Ext" }));
+
+    // flow: findMissingDeps → skill missing
+    //   skill: findMissingDeps → ext missing
+    //     ext: no deps; existing check → INSERT
+    //   skill: existing check → INSERT
+    // flow: existing check → INSERT
+    selectQueue = [
+      [], // findMissingDeps for flow → skill missing
+      [], // findMissingDeps for skill → ext missing
+      [], // existing check for ext → INSERT
+      [], // existing check for skill → INSERT
+      [], // existing check for flow → INSERT
+    ];
+
+    const result = await installFromMarketplace(
+      "acme",
+      "my-flow",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    expect(insertedRows).toHaveLength(3);
+    expect(insertedRows[0]!.id).toBe("acme--my-ext");
+    expect(insertedRows[0]!.type).toBe("extension");
+    expect(insertedRows[0]!.autoInstalled).toBe(true);
+    expect(insertedRows[1]!.id).toBe("acme--my-skill");
+    expect(insertedRows[1]!.type).toBe("skill");
+    expect(insertedRows[1]!.autoInstalled).toBe(true);
+    expect(insertedRows[2]!.id).toBe("acme--my-flow");
+    expect(insertedRows[2]!.type).toBe("flow");
+    expect(insertedRows[2]!.autoInstalled).toBe(false);
+
+    // autoInstalledDeps: skill (+ its transitive ext)
+    expect(result.autoInstalledDeps).toHaveLength(2);
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--my-skill");
+    expect(result.autoInstalledDeps![0]!.type).toBe("skill");
+    expect(result.autoInstalledDeps![1]!.packageId).toBe("acme--my-ext");
+    expect(result.autoInstalledDeps![1]!.type).toBe("extension");
+  });
 });
