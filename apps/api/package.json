@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
+    "@appstrate/registry-client": "workspace:*",
     "@appstrate/validation": "^1.0.2",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
