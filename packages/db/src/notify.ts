@@ -2,18 +2,6 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 
 /**
- * Send a NOTIFY on a channel with JSON payload.
- */
-export async function pgNotify(
-  db: Db,
-  channel: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  const jsonPayload = JSON.stringify(payload);
-  await db.execute(drizzleSql`SELECT pg_notify(${channel}, ${jsonPayload})`);
-}
-
-/**
  * Install NOTIFY trigger functions and triggers on executions and execution_logs tables.
  * Safe to call multiple times (uses CREATE OR REPLACE).
  */

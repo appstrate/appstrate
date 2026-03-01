@@ -2,7 +2,7 @@ import type { PromptContext } from "./adapters/types.ts";
 import type { LoadedFlow, FlowServiceRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
-import type { Db } from "@appstrate/connect";
+import type { Db } from "@appstrate/db/client";
 import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
 import { buildServiceTokens } from "./token-resolver.ts";

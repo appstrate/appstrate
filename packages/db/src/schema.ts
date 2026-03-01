@@ -13,7 +13,7 @@ import {
   primaryKey,
   check,
 } from "drizzle-orm/pg-core";
-import { sql, type InferSelectModel, type InferInsertModel } from "drizzle-orm";
+import { sql, type InferSelectModel } from "drizzle-orm";
 
 // ────────────────────────────────────────────────────────────
 // Enums
@@ -701,66 +701,16 @@ export const oauthStates = pgTable(
 // Type exports
 // ────────────────────────────────────────────────────────────
 
-export type User = InferSelectModel<typeof user>;
-export type NewUser = InferInsertModel<typeof user>;
-
-export type Session = InferSelectModel<typeof session>;
-
-export type Organization = InferSelectModel<typeof organizations>;
-export type NewOrganization = InferInsertModel<typeof organizations>;
-
-export type OrganizationMember = InferSelectModel<typeof organizationMembers>;
-export type NewOrganizationMember = InferInsertModel<typeof organizationMembers>;
-
 export type Profile = InferSelectModel<typeof profiles>;
-export type NewProfile = InferInsertModel<typeof profiles>;
 
 export type Package = InferSelectModel<typeof packages>;
-export type NewPackage = InferInsertModel<typeof packages>;
-
-export type PackageVersion = InferSelectModel<typeof packageVersions>;
-
-export type PackageConfig = InferSelectModel<typeof packageConfigs>;
 
 export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
-export type NewPackageSchedule = InferInsertModel<typeof packageSchedules>;
-
-export type PackageMemory = InferSelectModel<typeof packageMemories>;
-
-export type PackageAdminConnection = InferSelectModel<typeof packageAdminConnections>;
-
-export type UserPackageProfile = InferSelectModel<typeof userPackageProfiles>;
-
-export type PackageDependency = InferSelectModel<typeof packageDependencies>;
 
 export type Execution = InferSelectModel<typeof executions>;
-export type NewExecution = InferInsertModel<typeof executions>;
 
 export type ExecutionLog = InferSelectModel<typeof executionLogs>;
-export type NewExecutionLog = InferInsertModel<typeof executionLogs>;
-
-export type ScheduleRun = InferSelectModel<typeof scheduleRuns>;
-
-export type ShareToken = InferSelectModel<typeof shareTokens>;
-export type NewShareToken = InferInsertModel<typeof shareTokens>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
-export type NewConnectionProfile = InferInsertModel<typeof connectionProfiles>;
 
 export type ProviderConfig = InferSelectModel<typeof providerConfigs>;
-export type NewProviderConfig = InferInsertModel<typeof providerConfigs>;
-
-export type ServiceConnection = InferSelectModel<typeof serviceConnections>;
-export type NewServiceConnection = InferInsertModel<typeof serviceConnections>;
-
-export type OAuthState = InferSelectModel<typeof oauthStates>;
-export type NewOAuthState = InferInsertModel<typeof oauthStates>;
-
-export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
-export type NewOrgInvitation = InferInsertModel<typeof orgInvitations>;
-
-export type ApiKey = InferSelectModel<typeof apiKeys>;
-export type NewApiKey = InferInsertModel<typeof apiKeys>;
-
-export type OrgProxy = InferSelectModel<typeof orgProxies>;
-export type NewOrgProxy = InferInsertModel<typeof orgProxies>;

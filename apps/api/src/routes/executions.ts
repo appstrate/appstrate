@@ -42,7 +42,6 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
 
 export async function executeFlowInBackground(
   executionId: string,
-  _packageId: string,
   userId: string,
   orgId: string,
   flow: LoadedFlow,
@@ -395,7 +394,6 @@ export function createExecutionsRouter() {
     // Fire-and-forget background execution
     executeFlowInBackground(
       executionId,
-      packageId,
       user.id,
       orgId,
       flow,

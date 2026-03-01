@@ -38,12 +38,8 @@ import {
   getProvider,
   getBuiltInProviders,
   validateScopes,
-  type ConnectionRecord,
-  type ProviderDefinition,
-  type InitiateOAuthResult,
   type OAuthCallbackResult,
   type OAuth1CallbackResult,
-  type ScopeValidationResult,
 } from "@appstrate/connect";
 import { computeConfigHash, buildProviderSnapshot } from "./connection-profiles.ts";
 
@@ -64,16 +60,6 @@ async function getProviderSnapshot(
     configHash: computeConfigHash(providerDef),
   };
 }
-
-// Re-export types for consumers
-export type {
-  ConnectionRecord,
-  ProviderDefinition,
-  InitiateOAuthResult,
-  OAuthCallbackResult,
-  OAuth1CallbackResult,
-  ScopeValidationResult,
-};
 
 /** Map provider authMode to the uppercase label exposed in API responses. */
 function authModeLabel(authMode: string | undefined): string {

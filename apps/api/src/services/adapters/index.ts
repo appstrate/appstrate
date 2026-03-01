@@ -15,7 +15,3 @@ export function getAdapter(): ExecutionAdapter {
       throw new Error(`Unknown execution adapter: ${type}`);
   }
 }
-
-export function getAdapterName(): string {
-  return getEnv().EXECUTION_ADAPTER;
-}

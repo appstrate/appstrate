@@ -13,7 +13,7 @@ interface PackageVersionEntry {
 }
 
 /** Create a new version snapshot for a package. Returns the version row ID and number. */
-export async function createPackageVersion(
+async function createPackageVersion(
   packageId: string,
   createdBy: string,
 ): Promise<{ id: number; versionNumber: number } | null> {
