@@ -174,6 +174,9 @@ const expectedEndpoints = [
   // Marketplace
   "GET /api/marketplace/status",
   "GET /api/marketplace/search",
+  "GET /api/marketplace/installed",
+  "GET /api/marketplace/updates",
+  "POST /api/marketplace/update",
   "GET /api/marketplace/packages/{scope}/{name}",
   "POST /api/marketplace/install",
 

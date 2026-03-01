@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { FlowList } from "./pages/flow-list";
+import { PackageList } from "./pages/package-list";
+import { PackageDetailPage } from "./pages/package-detail";
 import { FlowDetailPage } from "./pages/flow-detail";
 import { FlowEditorPage } from "./pages/flow-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
@@ -9,9 +10,9 @@ import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { ExecutionsPage } from "./pages/executions-page";
-import { LibraryPage } from "./pages/library";
 import { MarketplacePage } from "./pages/marketplace";
 import { MarketplaceDetailPage } from "./pages/marketplace-detail";
+import { MarketplaceUpdatesPage } from "./pages/marketplace-updates";
 import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
@@ -216,7 +217,7 @@ export function App() {
             <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/flows/:packageId/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
-              <Route path="/" element={<FlowList />} />
+              <Route path="/" element={<PackageList />} />
               <Route path="/flows/new" element={<FlowEditorPage />} />
               <Route path="/flows/:packageId/edit" element={<FlowEditorPage />} />
               <Route path="/flows/:packageId" element={<FlowDetailPage />} />
@@ -226,8 +227,10 @@ export function App() {
               />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
-              <Route path="/library" element={<LibraryPage />} />
+              <Route path="/packages/:packageId" element={<PackageDetailPage />} />
+              <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
+              <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
               <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/connectors" element={<ConnectorsPage />} />

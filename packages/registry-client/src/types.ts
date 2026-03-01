@@ -86,21 +86,3 @@ export interface RegistrySearchOptions {
   perPage?: number;
 }
 
-export interface OAuthTokenResponse {
-  access_token: string;
-  token_type: "bearer";
-  expires_in: number;
-  scope: string;
-}
-
-export interface OAuthClientRegistration {
-  client: {
-    id: string;
-    clientId: string;
-    name: string;
-    redirectUris: string[];
-    scopes: string[];
-    createdAt: string;
-  };
-  clientSecret?: string;
-}

@@ -208,5 +208,12 @@
   "log.copyLogs": "Copier les logs",
   "log.copied": "Copié !",
   "log.toggleTimestamps": "Horodatages",
-  "log.autoScroll": "Défilement automatique"
+  "log.autoScroll": "Défilement automatique",
+  "list.tabFlows": "Flows",
+  "list.tabSkills": "Skills",
+  "list.tabExtensions": "Extensions",
+  "list.usedByFlows": "Utilisé par {{count}} flow(s)",
+  "packages.content": "Contenu",
+  "packages.usedBy": "Utilisé par",
+  "packages.noFlows": "Aucun flow n'utilise ce package"
 }

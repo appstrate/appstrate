@@ -49,6 +49,8 @@ interface MarketplacePackageDetail {
   downloads: number;
   createdAt: string;
   updatedAt: string;
+  installedVersion: string | null;
+  distTags?: Array<{ tag: string; versionId: number }>;
 }
 
 interface SearchOpts {
@@ -57,6 +59,17 @@ interface SearchOpts {
   sort?: string;
   page?: number;
   perPage?: number;
+}
+
+export interface PackageUpdateStatus {
+  id: string;
+  type: string;
+  registryScope: string;
+  registryName: string;
+  displayName: string | null;
+  installedVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
 }
 
 export function useMarketplaceStatus() {
@@ -101,7 +114,35 @@ export function useInstallPackage() {
         packageId: string;
         type: string;
         version: string | null;
+        autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
       }>("/marketplace/install", { method: "POST", body: JSON.stringify(opts) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["marketplace"] });
+      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+    },
+  });
+}
+
+export function useMarketplaceUpdates() {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["marketplace", "updates", orgId],
+    queryFn: () => api<{ updates: PackageUpdateStatus[] }>("/marketplace/updates"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useUpdatePackage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (opts: { scope: string; name: string }) =>
+      api<{
+        packageId: string;
+        type: string;
+        version: string | null;
+        autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
+      }>("/marketplace/update", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
       qc.invalidateQueries({ queryKey: ["library"] });

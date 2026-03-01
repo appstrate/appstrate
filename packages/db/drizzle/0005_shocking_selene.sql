@@ -1,0 +1,1 @@
+ALTER TABLE "packages" ADD COLUMN "auto_installed" boolean DEFAULT false NOT NULL;

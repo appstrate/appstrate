@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Download, ExternalLink, Scale } from "lucide-react";
-import { useMarketplacePackage, useInstallPackage } from "../hooks/use-marketplace";
+import { ArrowLeft, Download, ExternalLink, Scale, CheckCircle, ArrowUpCircle } from "lucide-react";
+import {
+  useMarketplacePackage,
+  useInstallPackage,
+  useUpdatePackage,
+} from "../hooks/use-marketplace";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
@@ -23,6 +27,7 @@ export function MarketplaceDetailPage() {
 
   const { data: pkg, isLoading, error } = useMarketplacePackage(scope, name);
   const install = useInstallPackage();
+  const update = useUpdatePackage();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
 
   if (isLoading) {
@@ -41,11 +46,30 @@ export function MarketplaceDetailPage() {
     );
   }
 
+  const isInstalled = pkg.installedVersion !== null;
+
+  // Determine latest version from distTags or last version in list
+  const latestTag = pkg.distTags?.find((t: { tag: string }) => t.tag === "latest");
+  const latestVersion = latestTag
+    ? (pkg.versions.find((v) => v.id === latestTag.versionId)?.version ?? null)
+    : (pkg.versions[pkg.versions.length - 1]?.version ?? null);
+  const hasUpdate = isInstalled && !!latestVersion && latestVersion !== pkg.installedVersion;
+
   const handleInstall = () => {
     if (!scope || !name) return;
     const version = selectedVersion ?? pkg.versions[0]?.version;
     install.mutate(
       { scope, name, version },
+      {
+        onError: (err) => alert(t("error.prefix", { message: err.message })),
+      },
+    );
+  };
+
+  const handleUpdate = () => {
+    if (!scope || !name) return;
+    update.mutate(
+      { scope, name },
       {
         onError: (err) => alert(t("error.prefix", { message: err.message })),
       },
@@ -94,30 +118,77 @@ export function MarketplaceDetailPage() {
       </div>
 
       <div className="marketplace-detail-actions">
-        <div className="marketplace-detail-install-row">
-          {pkg.versions.length > 0 && (
-            <select
-              className="marketplace-version-select"
-              value={selectedVersion ?? pkg.versions[0]?.version ?? ""}
-              onChange={(e) => setSelectedVersion(e.target.value)}
+        {isInstalled ? (
+          <div className="marketplace-detail-install-row">
+            <span className="marketplace-installed-badge">
+              <CheckCircle size={14} />
+              {t("marketplace.installedVersion", { version: pkg.installedVersion })}
+            </span>
+            {hasUpdate ? (
+              <>
+                <span className="marketplace-update-badge">
+                  <ArrowUpCircle size={14} />
+                  {t("marketplace.updateAvailable", { version: latestVersion })}
+                </span>
+                <button className="btn-install" onClick={handleUpdate} disabled={update.isPending}>
+                  {update.isPending ? <Spinner /> : t("marketplace.update")}
+                </button>
+              </>
+            ) : (
+              <span className="marketplace-uptodate">{t("marketplace.upToDate")}</span>
+            )}
+          </div>
+        ) : (
+          <div className="marketplace-detail-install-row">
+            {pkg.versions.length > 0 && (
+              <select
+                className="marketplace-version-select"
+                value={selectedVersion ?? pkg.versions[0]?.version ?? ""}
+                onChange={(e) => setSelectedVersion(e.target.value)}
+              >
+                {pkg.versions.map((v) => (
+                  <option key={v.id} value={v.version}>
+                    v{v.version}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              className="btn-install"
+              onClick={handleInstall}
+              disabled={install.isPending || pkg.versions.length === 0}
             >
-              {pkg.versions.map((v) => (
-                <option key={v.id} value={v.version}>
-                  v{v.version}
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            className="btn-install"
-            onClick={handleInstall}
-            disabled={install.isPending || pkg.versions.length === 0}
-          >
-            {install.isPending ? <Spinner /> : t("marketplace.install")}
-          </button>
-        </div>
+              {install.isPending ? <Spinner /> : t("marketplace.install")}
+            </button>
+          </div>
+        )}
         {install.isSuccess && (
-          <p className="marketplace-install-success">{t("marketplace.installSuccess")}</p>
+          <p className="marketplace-install-success">
+            {t("marketplace.installSuccess")}
+            {install.data?.autoInstalledDeps && install.data.autoInstalledDeps.length > 0 && (
+              <>
+                {" "}
+                —{" "}
+                {t("marketplace.autoInstalledDeps", {
+                  count: install.data.autoInstalledDeps.length,
+                })}
+              </>
+            )}
+          </p>
+        )}
+        {update.isSuccess && (
+          <p className="marketplace-install-success">
+            {t("marketplace.updateSuccess")}
+            {update.data?.autoInstalledDeps && update.data.autoInstalledDeps.length > 0 && (
+              <>
+                {" "}
+                —{" "}
+                {t("marketplace.autoInstalledDeps", {
+                  count: update.data.autoInstalledDeps.length,
+                })}
+              </>
+            )}
+          </p>
         )}
       </div>
 

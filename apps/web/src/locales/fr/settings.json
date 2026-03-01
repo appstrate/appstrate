@@ -313,5 +313,21 @@
   "marketplace.pageInfo": "Page {{page}} sur {{total}}",
   "marketplace.repository": "Dépôt",
   "marketplace.keywords": "Mots-clés",
-  "library.sourceBuiltIn": "Intégré"
+  "library.sourceBuiltIn": "Intégré",
+  "library.viewOnMarketplace": "Voir sur le marketplace",
+  "marketplace.installedVersion": "Version installée : v{{version}}",
+  "marketplace.updateAvailable": "Mise à jour disponible : v{{version}}",
+  "marketplace.update": "Mettre à jour",
+  "marketplace.updateSuccess": "Package mis à jour avec succès",
+  "marketplace.updatesTitle": "Mises à jour",
+  "marketplace.checkUpdates": "Vérifier les mises à jour",
+  "marketplace.upToDate": "À jour",
+  "marketplace.updateAvailableBadge": "Mise à jour disponible",
+  "marketplace.colPackage": "Package",
+  "marketplace.colType": "Type",
+  "marketplace.colInstalled": "Version installée",
+  "marketplace.colLatest": "Dernière version",
+  "marketplace.colStatus": "Statut",
+  "marketplace.autoInstalledDeps": "{{count}} dépendance(s) installée(s) automatiquement",
+  "library.deleteDependedOn": "Impossible de supprimer : requis par d'autres packages"
 }

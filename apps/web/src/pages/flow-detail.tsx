@@ -39,6 +39,7 @@ import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { formatDateField } from "../lib/markdown";
+import { ExternalLink } from "lucide-react";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { getServiceStatusDisplay, computeServicesSummary } from "../lib/service-status";
@@ -212,6 +213,15 @@ export function FlowDetailPage() {
           </div>
         </div>
         <p className="description">{detail.description}</p>
+        {detail.registryScope && detail.registryName && (
+          <Link
+            to={`/marketplace/@${detail.registryScope}/${detail.registryName}`}
+            className="btn-sm marketplace-link"
+          >
+            <ExternalLink size={14} />
+            {t("library.viewOnMarketplace", { ns: "settings" })}
+          </Link>
+        )}
       </div>
 
       {(() => {

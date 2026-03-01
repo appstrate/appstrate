@@ -89,7 +89,7 @@ export function ResourceSection({
           <>
             <p className="editor-hint">{emptyLabel}</p>
             <p className="editor-hint">
-              <Link to="/library">{t("editor.goToLibrary")}</Link>
+              <Link to="/?tab=skills">{t("editor.goToLibrary")}</Link>
             </p>
           </>
         ) : (

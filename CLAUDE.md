@@ -29,15 +29,15 @@ bun run dev                   # turbo dev → Hono on :3010
 
 ## Stack — Critical Constraints
 
-| Constraint | Details |
-|------------|---------|
-| Runtime | **Bun** everywhere — NOT node. Bun auto-loads `.env` |
-| API framework | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware) |
-| Docker client | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts` |
-| DB security | **No RLS** — app-level security, all queries filter by `orgId` |
-| Logging | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls |
-| Auth | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback |
-| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example` |
+| Constraint     | Details                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                |
+| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                        |
+| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                        |
+| DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                      |
+| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
+| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback |
+| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
 
 ## Navigating the Codebase
 
@@ -68,7 +68,7 @@ appstrate/
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
-├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate Registry
+├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
@@ -147,12 +147,14 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 ## Key Conventions & Gotchas
 
 ### Development Workflow
+
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
 - **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
 - **Tests**: `bun test` in `apps/api/`. Framework: `bun:test` (NOT vitest/jest). Tests in `services/__tests__/` and `routes/__tests__/`. Mocking pattern: call `mock.module("../../services/foo.ts", () => ({ fn: mock(...) }))` BEFORE `const { handler } = await import("../route.ts")` — dynamic import is required so mocks take effect. No frontend tests currently.
 
 ### Frontend
+
 - **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `flows`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Single `styles.css` (dark theme). No CSS modules, no Tailwind, no CSS-in-JS.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
@@ -162,6 +164,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
 
 ### Backend
+
 - **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, admin connections). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler.
@@ -170,13 +173,14 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
-- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate Registry. `installFromMarketplace()` validates `registryDependencies` before install (throws `MissingDependencyError` with `MISSING_DEPENDENCIES` error code if deps not installed in org). Uses `@appstrate/validation/dependencies` for extraction and `@appstrate/validation/naming` for packageId conversion.
+- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set. Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Uses `@appstrate/validation/dependencies` for extraction and `@appstrate/validation/naming` for packageId conversion.
 - **Package management**: `package-versions.ts` + `package-storage.ts` — version tracking and ZIP artifact storage for imported packages.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
 ### Sidecar Protocol (details beyond the architecture diagram)
+
 - **Sidecar pool**: `sidecar-pool.ts` pre-warms 2 sidecar containers at startup on a standby network. `acquireSidecar()` configures a pooled container via `POST /configure` (sets `executionToken`, `platformApiUrl`, `proxyUrl`), then connects it to the execution network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
 - Agent calls `$SIDECAR_URL/proxy` with `X-Service`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
@@ -206,27 +210,27 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 
 `getEnv()` from `@appstrate/env` (Zod-validated, cached after first call, fail-fast at startup). Key variables:
 
-| Variable | Required | Default | Notes |
-|----------|----------|---------|-------|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `BETTER_AUTH_SECRET` | Yes | — | Session signing secret |
-| `CONNECTION_ENCRYPTION_KEY` | Yes | — | 32 bytes, base64-encoded. Encrypts stored credentials |
-| `DATA_DIR` | No | unset | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled (providers still load from `SYSTEM_PROVIDERS` env) |
-| `PLATFORM_API_URL` | No | — | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
-| `SYSTEM_PROVIDERS` | No | `"[]"` | JSON array, merged with `data/providers.json` |
-| `SYSTEM_PROXIES` | No | `"[]"` | JSON array, merged with `data/proxies.json` |
-| `PROXY_URL` | No | — | Outbound HTTP proxy URL injected into sidecar containers |
-| `LLM_PROVIDER` | No | `anthropic` | Passed to agent containers |
-| `LLM_MODEL_ID` | No | `claude-sonnet-4-5-20250929` | Passed to agent containers |
-| `ANTHROPIC_API_KEY` | No | — | Passed through to agent containers (or `OPENAI_API_KEY`, etc.) |
-| `LOG_LEVEL` | No | `info` | `debug`\|`info`\|`warn`\|`error` |
-| `PORT` | No | `3010` | Server port |
-| `APP_URL` | No | `http://localhost:3010` | Public URL for OAuth callbacks |
-| `TRUSTED_ORIGINS` | No | `http://localhost:3010,http://localhost:5173` | CORS origins, comma-separated |
-| `DOCKER_SOCKET` | No | `/var/run/docker.sock` | Path to Docker socket |
-| `EXECUTION_ADAPTER` | No | `pi` | Adapter type for flow execution |
-| `OAUTH_CALLBACK_URL` | No | — | Custom OAuth callback URL (computed from `APP_URL` if unset) |
-| `STORAGE_DIR` | No | `""` | Directory for file storage |
+| Variable                    | Required | Default                                       | Notes                                                                                                                                  |
+| --------------------------- | -------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                                                           |
+| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                                                 |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                                                  |
+| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled (providers still load from `SYSTEM_PROVIDERS` env) |
+| `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`)                             |
+| `SYSTEM_PROVIDERS`          | No       | `"[]"`                                        | JSON array, merged with `data/providers.json`                                                                                          |
+| `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array, merged with `data/proxies.json`                                                                                            |
+| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                                               |
+| `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                                             |
+| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Passed to agent containers                                                                                                             |
+| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed through to agent containers (or `OPENAI_API_KEY`, etc.)                                                                         |
+| `LOG_LEVEL`                 | No       | `info`                                        | `debug`\|`info`\|`warn`\|`error`                                                                                                       |
+| `PORT`                      | No       | `3010`                                        | Server port                                                                                                                            |
+| `APP_URL`                   | No       | `http://localhost:3010`                       | Public URL for OAuth callbacks                                                                                                         |
+| `TRUSTED_ORIGINS`           | No       | `http://localhost:3010,http://localhost:5173` | CORS origins, comma-separated                                                                                                          |
+| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                                                  |
+| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                                                        |
+| `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                                                           |
+| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                                             |
 
 ## Flow & Extension Gotchas
 
