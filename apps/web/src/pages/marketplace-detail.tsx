@@ -43,8 +43,9 @@ export function MarketplaceDetailPage() {
 
   const handleInstall = () => {
     if (!scope || !name) return;
+    const version = selectedVersion ?? pkg.versions[0]?.version;
     install.mutate(
-      { scope, name, version: selectedVersion },
+      { scope, name, version },
       {
         onError: (err) => alert(t("error.prefix", { message: err.message })),
       },
