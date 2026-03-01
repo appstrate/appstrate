@@ -189,6 +189,8 @@ export interface FlowDetail {
   updatedAt?: string | null;
   prompt?: string;
   executionSettings?: { timeout?: number; outputRetries?: number } | null;
+  registryScope?: string | null;
+  registryName?: string | null;
 }
 
 // --- Organization Library Types ---
@@ -208,6 +210,9 @@ export interface OrgSkill {
 export interface OrgSkillDetail extends OrgSkill {
   content: string;
   flows: { id: string; displayName: string }[];
+  registryScope?: string | null;
+  registryName?: string | null;
+  autoInstalled?: boolean;
 }
 
 export interface OrgExtension {
@@ -225,6 +230,9 @@ export interface OrgExtension {
 export interface OrgExtensionDetail extends OrgExtension {
   content: string;
   flows: { id: string; displayName: string }[];
+  registryScope?: string | null;
+  registryName?: string | null;
+  autoInstalled?: boolean;
 }
 
 // --- Flow Memory Types ---

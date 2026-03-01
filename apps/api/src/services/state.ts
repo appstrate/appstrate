@@ -334,10 +334,6 @@ export async function unbindAdminConnection(
     );
 }
 
-// Custom service credentials functions removed --- now handled by @appstrate/connect
-// via connection-manager.ts. The custom_service_credentials table has been
-// migrated to service_connections (migration 012).
-
 export async function getExecution(id: string) {
   const [row] = await db
     .select({

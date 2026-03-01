@@ -8,6 +8,4 @@ export type {
   RegistryVersionDetail,
   RegistryDependency,
   RegistrySearchOptions,
-  OAuthTokenResponse,
-  OAuthClientRegistration,
 } from "./types.ts";

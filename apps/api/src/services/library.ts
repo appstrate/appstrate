@@ -1,8 +1,10 @@
 import { zipArtifact, unzipArtifact } from "@appstrate/validation/zip";
 import { extractSkillMeta } from "@appstrate/validation";
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, desc, sql, isNotNull } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
+import { extractDependencies } from "@appstrate/validation/dependencies";
+import { depEntryToPackageId } from "@appstrate/validation/naming";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import {
@@ -24,7 +26,7 @@ interface BuiltInItem {
   content: string;
 }
 
-interface LibraryTypeConfig {
+export interface LibraryTypeConfig {
   type: "skill" | "extension";
   storageFolder: "skills" | "extensions";
   getBuiltIns: () => ReadonlyMap<string, BuiltInItem>;
@@ -32,7 +34,7 @@ interface LibraryTypeConfig {
   label: string;
 }
 
-const SKILL_CONFIG: LibraryTypeConfig = {
+export const SKILL_CONFIG: LibraryTypeConfig = {
   type: "skill",
   storageFolder: "skills",
   getBuiltIns: getBuiltInSkills,
@@ -40,17 +42,13 @@ const SKILL_CONFIG: LibraryTypeConfig = {
   label: "Skills",
 };
 
-const EXTENSION_CONFIG: LibraryTypeConfig = {
+export const EXTENSION_CONFIG: LibraryTypeConfig = {
   type: "extension",
   storageFolder: "extensions",
   getBuiltIns: getBuiltInExtensions,
   isBuiltIn: isBuiltInExtension,
   label: "Extensions",
 };
-
-export function getLibraryConfig(type: "skill" | "extension"): LibraryTypeConfig {
-  return type === "skill" ? SKILL_CONFIG : EXTENSION_CONFIG;
-}
 
 // ─────────────────────────────────────────────
 // Library storage
@@ -109,7 +107,7 @@ async function getPackageDisplayNames(
 // Unified CRUD functions (private)
 // ─────────────────────────────────────────────
 
-interface UpsertItemInput {
+export interface UpsertItemInput {
   id: string;
   name?: string;
   description?: string;
@@ -118,11 +116,17 @@ interface UpsertItemInput {
 }
 
 /** List all items of a type in the org with usedByFlows count (built-in + org). */
-async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
+export async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
   const data = await db
     .select()
     .from(packages)
-    .where(and(eq(packages.orgId, orgId), eq(packages.type, cfg.type)))
+    .where(
+      and(
+        eq(packages.orgId, orgId),
+        eq(packages.type, cfg.type),
+        eq(packages.autoInstalled, false),
+      ),
+    )
     .orderBy(desc(packages.createdAt));
 
   const depRows = await db
@@ -169,7 +173,7 @@ async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
 }
 
 /** Get a single item with content and list of flows referencing it. */
-async function getOrgItem(orgId: string, itemId: string, cfg: LibraryTypeConfig) {
+export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryTypeConfig) {
   const builtIn = cfg.getBuiltIns().get(itemId);
   if (builtIn) {
     return {
@@ -211,12 +215,15 @@ async function getOrgItem(orgId: string, itemId: string, cfg: LibraryTypeConfig)
     createdBy: data.createdBy,
     createdAt: data.createdAt?.toISOString() ?? "",
     updatedAt: data.updatedAt?.toISOString() ?? "",
+    registryScope: data.registryScope ?? null,
+    registryName: data.registryName ?? null,
+    autoInstalled: data.autoInstalled,
     flows: await getPackageDisplayNames(packageIds),
   };
 }
 
 /** Insert or update an item in the org library. */
-async function upsertOrgItem(orgId: string, item: UpsertItemInput, cfg: LibraryTypeConfig) {
+export async function upsertOrgItem(orgId: string, item: UpsertItemInput, cfg: LibraryTypeConfig) {
   const now = new Date();
 
   const [data] = await db
@@ -249,12 +256,41 @@ async function upsertOrgItem(orgId: string, item: UpsertItemInput, cfg: LibraryT
   return data!;
 }
 
+/** Find registry packages that depend on the target package (via manifest registryDependencies). */
+async function findRegistryDependents(
+  orgId: string,
+  targetPackageId: string,
+): Promise<{ id: string; displayName: string }[]> {
+  const registryPkgs = await db
+    .select({ id: packages.id, displayName: packages.displayName, manifest: packages.manifest })
+    .from(packages)
+    .where(and(eq(packages.orgId, orgId), isNotNull(packages.registryScope)));
+
+  const dependents: { id: string; displayName: string }[] = [];
+  for (const pkg of registryPkgs) {
+    if (!pkg.manifest || pkg.id === targetPackageId) continue;
+    const deps = extractDependencies(pkg.manifest as Record<string, unknown>);
+    for (const dep of deps) {
+      if (depEntryToPackageId(dep.depScope, dep.depName) === targetPackageId) {
+        dependents.push({ id: pkg.id, displayName: pkg.displayName ?? pkg.id });
+        break;
+      }
+    }
+  }
+  return dependents;
+}
+
 /** Delete an item. Returns error info if still referenced by flows. */
-async function deleteOrgItem(
+export async function deleteOrgItem(
   orgId: string,
   itemId: string,
   cfg: LibraryTypeConfig,
-): Promise<{ ok: boolean; error?: string; flows?: { id: string; displayName: string }[] }> {
+): Promise<{
+  ok: boolean;
+  error?: string;
+  flows?: { id: string; displayName: string }[];
+  dependents?: { id: string; displayName: string }[];
+}> {
   const refs = await db
     .select({ packageId: packageDependencies.packageId })
     .from(packageDependencies)
@@ -263,6 +299,11 @@ async function deleteOrgItem(
   if (refs.length > 0) {
     const flowList = await getPackageDisplayNames(refs.map((r) => r.packageId));
     return { ok: false, error: "IN_USE", flows: flowList };
+  }
+
+  const registryDeps = await findRegistryDependents(orgId, itemId);
+  if (registryDeps.length > 0) {
+    return { ok: false, error: "DEPENDED_ON", dependents: registryDeps };
   }
 
   await db
@@ -275,7 +316,7 @@ async function deleteOrgItem(
 }
 
 /** Replace all references of a type for a flow. Only org IDs are stored (built-in tracked via manifest). */
-async function setFlowItems(
+export async function setFlowItems(
   packageId: string,
   orgId: string,
   itemIds: string[],
@@ -343,7 +384,7 @@ async function setFlowItems(
 }
 
 /** Get all files for a flow's referenced items of a type. Returns Map<itemId, files>. */
-async function getFlowItemFiles(
+export async function getFlowItemFiles(
   packageId: string,
   orgId: string,
   cfg: LibraryTypeConfig,
@@ -373,36 +414,6 @@ async function getFlowItemFiles(
   }
   return result;
 }
-
-// ─────────────────────────────────────────────
-// Exported wrappers (preserve existing API surface)
-// ─────────────────────────────────────────────
-
-export const listOrgSkills = (orgId: string) => listOrgItems(orgId, SKILL_CONFIG);
-export const listOrgExtensions = (orgId: string) => listOrgItems(orgId, EXTENSION_CONFIG);
-
-export const getOrgSkill = (orgId: string, id: string) => getOrgItem(orgId, id, SKILL_CONFIG);
-export const getOrgExtension = (orgId: string, id: string) =>
-  getOrgItem(orgId, id, EXTENSION_CONFIG);
-
-export const upsertOrgSkill = (orgId: string, item: UpsertItemInput) =>
-  upsertOrgItem(orgId, item, SKILL_CONFIG);
-export const upsertOrgExtension = (orgId: string, item: UpsertItemInput) =>
-  upsertOrgItem(orgId, item, EXTENSION_CONFIG);
-
-export const deleteOrgSkill = (orgId: string, id: string) => deleteOrgItem(orgId, id, SKILL_CONFIG);
-export const deleteOrgExtension = (orgId: string, id: string) =>
-  deleteOrgItem(orgId, id, EXTENSION_CONFIG);
-
-export const setFlowSkills = (pkgId: string, orgId: string, ids: string[]) =>
-  setFlowItems(pkgId, orgId, ids, SKILL_CONFIG);
-export const setFlowExtensions = (pkgId: string, orgId: string, ids: string[]) =>
-  setFlowItems(pkgId, orgId, ids, EXTENSION_CONFIG);
-
-export const getFlowSkillFiles = (pkgId: string, orgId: string) =>
-  getFlowItemFiles(pkgId, orgId, SKILL_CONFIG);
-export const getFlowExtensionFiles = (pkgId: string, orgId: string) =>
-  getFlowItemFiles(pkgId, orgId, EXTENSION_CONFIG);
 
 // ─────────────────────────────────────────────
 // Library package Storage (full ZIP)

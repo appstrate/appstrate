@@ -76,7 +76,7 @@ export function OrgSwitcher() {
               <Calendar size={14} />
               {t("orgSwitcher.schedules")}
             </Link>
-            <Link to="/library" className="org-switcher-link" onClick={() => setOpen(false)}>
+            <Link to="/?tab=skills" className="org-switcher-link" onClick={() => setOpen(false)}>
               <BookOpen size={14} />
               {t("orgSwitcher.library")}
             </Link>

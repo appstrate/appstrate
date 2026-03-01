@@ -9,7 +9,7 @@ An open-source platform for executing one-shot AI flows in ephemeral Docker cont
 - **Ephemeral execution** — Containers are created, run, and destroyed per execution
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule flows with cron expressions, distributed lock prevents duplicates
-- **Marketplace** — Browse and install packages from the Appstrate Registry
+- **Marketplace** — Browse and install packages from the Appstrate [registry]
 - **Package import** — Import flows, skills, and extensions from ZIP files
 - **Skills & extensions** — Extend agent capabilities with SKILL.md instructions and TypeScript tool extensions
 - **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
@@ -66,7 +66,7 @@ appstrate/
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   ├── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
-│   └── registry-client/      # @appstrate/registry-client — HTTP client for Appstrate Registry
+│   └── registry-client/      # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
@@ -87,31 +87,31 @@ appstrate/
 
 The API is organized into 23 route domains with 110 documented endpoints:
 
-| Domain | Description |
-|--------|-------------|
-| **Auth** | Better Auth email/password + cookie sessions |
-| **Flows** | Flow CRUD, config, skills/extensions binding, versions |
-| **Executions** | Run flows, list executions, logs, cancel |
-| **Realtime** | SSE streams for execution monitoring |
-| **Schedules** | Cron-based flow scheduling |
-| **Connections** | OAuth2/API key service connections |
-| **Connection Profiles** | Shared connection sets across flows |
-| **Providers** | Service provider configuration |
-| **Provider Templates** | Built-in provider templates |
-| **Proxies** | Org-level and flow-level HTTP proxy config |
-| **API Keys** | Programmatic access tokens (`ask_*`) |
-| **Library** | Organization skills and extensions CRUD |
-| **Marketplace** | Browse/install packages from Appstrate Registry |
-| **Packages** | Import packages from ZIP files |
-| **Notifications** | Execution notification management |
-| **Organizations** | Org CRUD, members, invitations |
-| **Profile** | User profile management |
-| **Invitations** | Magic link invitation acceptance |
-| **Share** | Public share tokens for one-time execution |
-| **Welcome** | Post-invite profile setup |
-| **Internal** | Container-to-host routes (credentials, execution history) |
-| **Meta** | OpenAPI spec + Swagger UI |
-| **Health** | Health check |
+| Domain                  | Description                                               |
+| ----------------------- | --------------------------------------------------------- |
+| **Auth**                | Better Auth email/password + cookie sessions              |
+| **Flows**               | Flow CRUD, config, skills/extensions binding, versions    |
+| **Executions**          | Run flows, list executions, logs, cancel                  |
+| **Realtime**            | SSE streams for execution monitoring                      |
+| **Schedules**           | Cron-based flow scheduling                                |
+| **Connections**         | OAuth2/API key service connections                        |
+| **Connection Profiles** | Shared connection sets across flows                       |
+| **Providers**           | Service provider configuration                            |
+| **Provider Templates**  | Built-in provider templates                               |
+| **Proxies**             | Org-level and flow-level HTTP proxy config                |
+| **API Keys**            | Programmatic access tokens (`ask_*`)                      |
+| **Library**             | Organization skills and extensions CRUD                   |
+| **Marketplace**         | Browse/install packages from Appstrate [registry]         |
+| **Packages**            | Import packages from ZIP files                            |
+| **Notifications**       | Execution notification management                         |
+| **Organizations**       | Org CRUD, members, invitations                            |
+| **Profile**             | User profile management                                   |
+| **Invitations**         | Magic link invitation acceptance                          |
+| **Share**               | Public share tokens for one-time execution                |
+| **Welcome**             | Post-invite profile setup                                 |
+| **Internal**            | Container-to-host routes (credentials, execution history) |
+| **Meta**                | OpenAPI spec + Swagger UI                                 |
+| **Health**              | Health check                                              |
 
 Full interactive docs: `GET /api/docs` (Swagger UI).
 
@@ -141,20 +141,20 @@ Browser (React SPA)              Platform (Bun + Hono :3010)
 
 Key variables (see `.env.example` for full list):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `BETTER_AUTH_SECRET` | Yes | — | Session signing secret |
-| `CONNECTION_ENCRYPTION_KEY` | Yes | — | 32 bytes base64, encrypts stored credentials |
-| `DATA_DIR` | No | unset | Path to `data/` dir (built-in flows/skills/extensions) |
-| `LLM_PROVIDER` | No | `anthropic` | LLM provider for agent containers |
-| `LLM_MODEL_ID` | No | `claude-sonnet-4-5-20250929` | Model ID for agent containers |
-| `ANTHROPIC_API_KEY` | No | — | Passed to agent containers |
-| `PORT` | No | `3010` | Server port |
-| `APP_URL` | No | `http://localhost:3010` | Public URL for OAuth callbacks |
-| `TRUSTED_ORIGINS` | No | `http://localhost:3010,http://localhost:5173` | CORS origins |
-| `DOCKER_SOCKET` | No | `/var/run/docker.sock` | Docker socket path |
-| `PROXY_URL` | No | — | Outbound HTTP proxy for sidecar containers |
+| Variable                    | Required | Default                                       | Description                                            |
+| --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------ |
+| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                           |
+| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                 |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials           |
+| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir (built-in flows/skills/extensions) |
+| `LLM_PROVIDER`              | No       | `anthropic`                                   | LLM provider for agent containers                      |
+| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Model ID for agent containers                          |
+| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed to agent containers                             |
+| `PORT`                      | No       | `3010`                                        | Server port                                            |
+| `APP_URL`                   | No       | `http://localhost:3010`                       | Public URL for OAuth callbacks                         |
+| `TRUSTED_ORIGINS`           | No       | `http://localhost:3010,http://localhost:5173` | CORS origins                                           |
+| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                                     |
+| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers             |
 
 ## Development
 

@@ -171,7 +171,41 @@ export const libraryPaths = {
         "204": { description: "Skill deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Skill is referenced by one or more flows" },
+        "409": {
+          description: "Skill is referenced by flows or required by marketplace packages",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: ["IN_USE", "DEPENDED_ON"],
+                    description:
+                      "IN_USE: referenced by flows. DEPENDED_ON: required by marketplace packages.",
+                  },
+                  message: { type: "string" },
+                  flows: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Flows referencing this skill (for IN_USE)",
+                  },
+                  dependents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Marketplace packages depending on this skill (for DEPENDED_ON)",
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -340,7 +374,42 @@ export const libraryPaths = {
         "204": { description: "Extension deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Extension is referenced by one or more flows" },
+        "409": {
+          description: "Extension is referenced by flows or required by marketplace packages",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: ["IN_USE", "DEPENDED_ON"],
+                    description:
+                      "IN_USE: referenced by flows. DEPENDED_ON: required by marketplace packages.",
+                  },
+                  message: { type: "string" },
+                  flows: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Flows referencing this extension (for IN_USE)",
+                  },
+                  dependents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description:
+                      "Marketplace packages depending on this extension (for DEPENDED_ON)",
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
   },

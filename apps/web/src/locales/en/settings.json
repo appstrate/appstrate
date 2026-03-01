@@ -313,5 +313,21 @@
   "marketplace.pageInfo": "Page {{page}} of {{total}}",
   "marketplace.repository": "Repository",
   "marketplace.keywords": "Keywords",
-  "library.sourceBuiltIn": "Built-in"
+  "library.sourceBuiltIn": "Built-in",
+  "library.viewOnMarketplace": "View on Marketplace",
+  "marketplace.installedVersion": "Installed: v{{version}}",
+  "marketplace.updateAvailable": "Update available: v{{version}}",
+  "marketplace.update": "Update",
+  "marketplace.updateSuccess": "Package updated successfully",
+  "marketplace.updatesTitle": "Updates",
+  "marketplace.checkUpdates": "Check for updates",
+  "marketplace.upToDate": "Up to date",
+  "marketplace.updateAvailableBadge": "Update available",
+  "marketplace.colPackage": "Package",
+  "marketplace.colType": "Type",
+  "marketplace.colInstalled": "Installed",
+  "marketplace.colLatest": "Latest",
+  "marketplace.colStatus": "Status",
+  "marketplace.autoInstalledDeps": "{{count}} dependency(ies) auto-installed",
+  "library.deleteDependedOn": "Cannot delete: required by other packages"
 }

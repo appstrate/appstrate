@@ -136,6 +136,8 @@ export function createFlowsRouter() {
             updatedAt: userFlowRow.updatedAt,
             prompt: flow.prompt,
             executionSettings: m.execution ?? null,
+            registryScope: userFlowRow.registryScope ?? null,
+            registryName: userFlowRow.registryName ?? null,
           }
         : {}),
     });

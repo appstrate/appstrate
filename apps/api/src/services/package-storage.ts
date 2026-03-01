@@ -84,23 +84,17 @@ async function getBuiltInPackageZip(packageId: string): Promise<Buffer> {
 }
 
 /** Get the package ZIP for any flow (built-in or user). */
-export async function getPackageZip(flow: LoadedFlow, orgId?: string): Promise<Buffer | null> {
+export async function getPackageZip(flow: LoadedFlow, orgId: string): Promise<Buffer | null> {
   if (flow.source === "built-in") {
     return getBuiltInPackageZip(flow.id);
   }
 
-  // User flow: build ZIP on-the-fly from org library
-  if (orgId) {
-    return buildUserFlowZip(flow, orgId);
-  }
-
-  // Fallback: download from Storage (legacy)
-  return downloadPackageZip(flow.id);
+  return buildUserFlowZip(flow, orgId);
 }
 
 /** Build a user flow package ZIP on-the-fly from org library + built-in content. */
 async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer> {
-  const { getFlowSkillFiles, getFlowExtensionFiles } = await import("./library.ts");
+  const { getFlowItemFiles, SKILL_CONFIG, EXTENSION_CONFIG } = await import("./library.ts");
 
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
@@ -109,8 +103,8 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
 
   // Fetch org skill files and extension files in parallel
   const [skillFiles, extFiles] = await Promise.all([
-    getFlowSkillFiles(flow.id, orgId),
-    getFlowExtensionFiles(flow.id, orgId),
+    getFlowItemFiles(flow.id, orgId, SKILL_CONFIG),
+    getFlowItemFiles(flow.id, orgId, EXTENSION_CONFIG),
   ]);
 
   for (const [skillId, files] of skillFiles) {

@@ -3,12 +3,12 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getMarketplaceStatus,
   searchMarketplace,
-  getMarketplacePackage,
+  getMarketplacePackageWithInstallStatus,
   installFromMarketplace,
-  MissingDependencyError,
+  getInstalledRegistryPackages,
+  checkRegistryUpdates,
 } from "../services/marketplace.ts";
 import { requireAdmin } from "../middleware/guards.ts";
-import { normalizeScope } from "@appstrate/validation/naming";
 
 export function createMarketplaceRouter() {
   const router = new Hono<AppEnv>();
@@ -52,14 +52,68 @@ export function createMarketplaceRouter() {
     }
   });
 
-  // GET /api/marketplace/packages/:scope/:name — package detail from registry
-  router.get("/packages/:scope/:name", async (c) => {
-    const rawScope = c.req.param("scope");
-    const scope = normalizeScope(rawScope);
-    const name = c.req.param("name");
+  // GET /api/marketplace/installed — list installed registry packages
+  router.get("/installed", async (c) => {
+    const orgId = c.get("orgId");
+    const installed = await getInstalledRegistryPackages(orgId);
+    return c.json({ packages: installed });
+  });
+
+  // GET /api/marketplace/updates — check for updates
+  router.get("/updates", async (c) => {
+    const orgId = c.get("orgId");
+    try {
+      const updates = await checkRegistryUpdates(orgId);
+      return c.json({ updates });
+    } catch (err) {
+      return c.json(
+        { error: "REGISTRY_ERROR", message: err instanceof Error ? err.message : String(err) },
+        502,
+      );
+    }
+  });
+
+  // POST /api/marketplace/update — update an installed package to latest (admin-only)
+  router.post("/update", requireAdmin(), async (c) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+
+    const body = await c.req.json<{
+      scope: string;
+      name: string;
+      accessToken?: string;
+    }>();
+
+    if (!body.scope || !body.name) {
+      return c.json({ error: "VALIDATION_ERROR", message: "scope and name are required" }, 400);
+    }
 
     try {
-      const pkg = await getMarketplacePackage(scope, name);
+      const result = await installFromMarketplace(
+        body.scope,
+        body.name,
+        undefined, // latest
+        orgId,
+        user.id,
+        body.accessToken || undefined,
+      );
+      return c.json(result);
+    } catch (err) {
+      return c.json(
+        { error: "UPDATE_ERROR", message: err instanceof Error ? err.message : String(err) },
+        400,
+      );
+    }
+  });
+
+  // GET /api/marketplace/packages/:scope/:name — package detail from registry (with install status)
+  router.get("/packages/:scope/:name", async (c) => {
+    const rawScope = c.req.param("scope");
+    const name = c.req.param("name");
+    const orgId = c.get("orgId");
+
+    try {
+      const pkg = await getMarketplacePackageWithInstallStatus(rawScope, name, orgId);
       return c.json(pkg);
     } catch (err) {
       return c.json(
@@ -96,16 +150,6 @@ export function createMarketplaceRouter() {
       );
       return c.json(result, 201);
     } catch (err) {
-      if (err instanceof MissingDependencyError) {
-        return c.json(
-          {
-            error: "MISSING_DEPENDENCIES",
-            message: err.message,
-            missing: err.missing,
-          },
-          400,
-        );
-      }
       return c.json(
         { error: "INSTALL_ERROR", message: err instanceof Error ? err.message : String(err) },
         400,

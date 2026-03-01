@@ -6,7 +6,7 @@ import { validateManifest } from "../services/schema.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
-import { setFlowSkills, setFlowExtensions } from "../services/library.ts";
+import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/library.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
@@ -59,10 +59,10 @@ export function createUserFlowsRouter() {
 
     // Create skill/extension references
     if (skillIds && skillIds.length > 0) {
-      await setFlowSkills(packageId, orgId, skillIds);
+      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
     }
     if (extensionIds && extensionIds.length > 0) {
-      await setFlowExtensions(packageId, orgId, extensionIds);
+      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
     }
 
     // Create version + upload minimal ZIP to Storage (non-blocking)
@@ -139,10 +139,10 @@ export function createUserFlowsRouter() {
 
     // Update skill/extension references if provided
     if (skillIds !== undefined) {
-      await setFlowSkills(packageId, orgId, skillIds);
+      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
     }
     if (extensionIds !== undefined) {
-      await setFlowExtensions(packageId, orgId, extensionIds);
+      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
     }
 
     // Create version + upload minimal ZIP
@@ -250,7 +250,7 @@ export function createUserFlowsRouter() {
     }
 
     try {
-      await setFlowSkills(packageId, orgId, skillIds);
+      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
     } catch (err) {
       return c.json(
         { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
@@ -278,7 +278,7 @@ export function createUserFlowsRouter() {
     }
 
     try {
-      await setFlowExtensions(packageId, orgId, extensionIds);
+      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
     } catch (err) {
       return c.json(
         { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },

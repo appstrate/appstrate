@@ -2,15 +2,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
-  listOrgSkills,
-  getOrgSkill,
-  upsertOrgSkill,
-  deleteOrgSkill,
-  listOrgExtensions,
-  getOrgExtension,
-  upsertOrgExtension,
-  deleteOrgExtension,
+  listOrgItems,
+  getOrgItem,
+  upsertOrgItem,
+  deleteOrgItem,
   uploadLibraryPackage,
+  SKILL_CONFIG,
+  EXTENSION_CONFIG,
 } from "../services/library.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
@@ -185,7 +183,7 @@ export function createLibraryRouter() {
 
   router.get("/skills", async (c) => {
     const orgId = c.get("orgId");
-    const skills = await listOrgSkills(orgId);
+    const skills = await listOrgItems(orgId, SKILL_CONFIG);
     const enriched = await enrichWithCreatorNames(skills);
     return c.json({ skills: enriched });
   });
@@ -211,13 +209,17 @@ export function createLibraryRouter() {
       );
     }
 
-    const skill = await upsertOrgSkill(orgId, {
-      id: parsed.id,
-      name: parsed.name,
-      description: parsed.description,
-      content: parsed.content,
-      createdBy: user.id,
-    });
+    const skill = await upsertOrgItem(
+      orgId,
+      {
+        id: parsed.id,
+        name: parsed.name,
+        description: parsed.description,
+        content: parsed.content,
+        createdBy: user.id,
+      },
+      SKILL_CONFIG,
+    );
 
     if (parsed.normalizedFiles) {
       await uploadLibraryPackage("skills", orgId, parsed.id, parsed.normalizedFiles);
@@ -232,7 +234,7 @@ export function createLibraryRouter() {
   router.get("/skills/:id", async (c) => {
     const orgId = c.get("orgId");
     const skillId = c.req.param("id");
-    const skill = await getOrgSkill(orgId, skillId);
+    const skill = await getOrgItem(orgId, skillId, SKILL_CONFIG);
 
     if (!skill) {
       return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' introuvable` }, 404);
@@ -256,7 +258,7 @@ export function createLibraryRouter() {
       );
     }
 
-    const existing = await getOrgSkill(orgId, skillId);
+    const existing = await getOrgItem(orgId, skillId, SKILL_CONFIG);
     if (!existing) {
       return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' introuvable` }, 404);
     }
@@ -264,13 +266,17 @@ export function createLibraryRouter() {
     const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
 
     const finalContent = body.content ?? existing.content;
-    const skill = await upsertOrgSkill(orgId, {
-      id: skillId,
-      name: body.name ?? existing.name ?? undefined,
-      description: body.description ?? existing.description ?? undefined,
-      content: finalContent!,
-      createdBy: existing.createdBy ?? user.id,
-    });
+    const skill = await upsertOrgItem(
+      orgId,
+      {
+        id: skillId,
+        name: body.name ?? existing.name ?? undefined,
+        description: body.description ?? existing.description ?? undefined,
+        content: finalContent!,
+        createdBy: existing.createdBy ?? user.id,
+      },
+      SKILL_CONFIG,
+    );
 
     // Update storage ZIP so container packaging stays in sync
     await uploadLibraryPackage("skills", orgId, skillId, {
@@ -294,8 +300,18 @@ export function createLibraryRouter() {
       );
     }
 
-    const result = await deleteOrgSkill(orgId, skillId);
+    const result = await deleteOrgItem(orgId, skillId, SKILL_CONFIG);
     if (!result.ok) {
+      if (result.error === "DEPENDED_ON") {
+        return c.json(
+          {
+            error: "DEPENDED_ON",
+            message: `Le skill '${skillId}' est requis par ${result.dependents!.length} package(s) du marketplace`,
+            dependents: result.dependents,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           error: "IN_USE",
@@ -315,7 +331,7 @@ export function createLibraryRouter() {
 
   router.get("/extensions", async (c) => {
     const orgId = c.get("orgId");
-    const extensions = await listOrgExtensions(orgId);
+    const extensions = await listOrgItems(orgId, EXTENSION_CONFIG);
     const enriched = await enrichWithCreatorNames(extensions);
     return c.json({ extensions: enriched });
   });
@@ -354,13 +370,17 @@ export function createLibraryRouter() {
       );
     }
 
-    const ext = await upsertOrgExtension(orgId, {
-      id: parsed.id,
-      name: parsed.name,
-      description: parsed.description,
-      content: parsed.content,
-      createdBy: user.id,
-    });
+    const ext = await upsertOrgItem(
+      orgId,
+      {
+        id: parsed.id,
+        name: parsed.name,
+        description: parsed.description,
+        content: parsed.content,
+        createdBy: user.id,
+      },
+      EXTENSION_CONFIG,
+    );
 
     if (parsed.normalizedFiles) {
       await uploadLibraryPackage("extensions", orgId, parsed.id, parsed.normalizedFiles);
@@ -378,7 +398,7 @@ export function createLibraryRouter() {
   router.get("/extensions/:id", async (c) => {
     const orgId = c.get("orgId");
     const extId = c.req.param("id");
-    const ext = await getOrgExtension(orgId, extId);
+    const ext = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
 
     if (!ext) {
       return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' introuvable` }, 404);
@@ -402,7 +422,7 @@ export function createLibraryRouter() {
       );
     }
 
-    const existing = await getOrgExtension(orgId, extId);
+    const existing = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
     if (!existing) {
       return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' introuvable` }, 404);
     }
@@ -427,13 +447,17 @@ export function createLibraryRouter() {
     }
 
     const finalContent = body.content ?? existing.content;
-    const ext = await upsertOrgExtension(orgId, {
-      id: extId,
-      name: body.name ?? existing.name ?? undefined,
-      description: body.description ?? existing.description ?? undefined,
-      content: finalContent!,
-      createdBy: existing.createdBy ?? user.id,
-    });
+    const ext = await upsertOrgItem(
+      orgId,
+      {
+        id: extId,
+        name: body.name ?? existing.name ?? undefined,
+        description: body.description ?? existing.description ?? undefined,
+        content: finalContent!,
+        createdBy: existing.createdBy ?? user.id,
+      },
+      EXTENSION_CONFIG,
+    );
 
     // Update storage ZIP so container packaging stays in sync
     await uploadLibraryPackage("extensions", orgId, extId, {
@@ -460,8 +484,18 @@ export function createLibraryRouter() {
       );
     }
 
-    const result = await deleteOrgExtension(orgId, extId);
+    const result = await deleteOrgItem(orgId, extId, EXTENSION_CONFIG);
     if (!result.ok) {
+      if (result.error === "DEPENDED_ON") {
+        return c.json(
+          {
+            error: "DEPENDED_ON",
+            message: `L'extension '${extId}' est requise par ${result.dependents!.length} package(s) du marketplace`,
+            dependents: result.dependents,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           error: "IN_USE",

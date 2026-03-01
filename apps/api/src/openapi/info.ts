@@ -27,7 +27,7 @@ export const openApiInfo = {
     { name: "Providers", description: "Provider configuration (OAuth2, API key, etc.)" },
     { name: "API Keys", description: "API key management for programmatic access" },
     { name: "Library", description: "Organization skills and extensions library" },
-    { name: "Marketplace", description: "Browse and install packages from Appstrate Registry" },
+    { name: "Marketplace", description: "Browse and install packages from Appstrate [registry]" },
     { name: "Packages", description: "Package import and management" },
     { name: "Notifications", description: "Execution notification management" },
     { name: "Organizations", description: "Organization and member management" },

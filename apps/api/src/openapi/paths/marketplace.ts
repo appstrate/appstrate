@@ -4,7 +4,7 @@ export const marketplacePaths = {
       operationId: "getMarketplaceStatus",
       tags: ["Marketplace"],
       summary: "Check registry connection status",
-      description: "Returns whether the Appstrate Registry is configured and reachable.",
+      description: "Returns whether the Appstrate [registry] is configured and reachable.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -37,7 +37,7 @@ export const marketplacePaths = {
       tags: ["Marketplace"],
       summary: "Search marketplace packages",
       description:
-        "Search for packages in the Appstrate Registry. Returns paginated results with optional type and sort filters.",
+        "Search for packages in the Appstrate [registry]. Returns paginated results with optional type and sort filters.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -116,13 +116,163 @@ export const marketplacePaths = {
       },
     },
   },
+  "/api/marketplace/installed": {
+    get: {
+      operationId: "getInstalledRegistryPackages",
+      tags: ["Marketplace"],
+      summary: "List installed registry packages",
+      description: "Returns all packages in the org that were installed from the registry.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Installed registry packages",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packages: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        type: { type: "string" },
+                        registryScope: { type: "string" },
+                        registryName: { type: "string" },
+                        registryVersion: { type: "string" },
+                        displayName: { type: "string" },
+                        description: { type: "string" },
+                        updatedAt: { type: "string", format: "date-time" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/marketplace/updates": {
+    get: {
+      operationId: "checkRegistryUpdates",
+      tags: ["Marketplace"],
+      summary: "Check for registry updates",
+      description:
+        "Compares installed registry package versions against latest available versions.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Update status for each installed registry package",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  updates: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        type: { type: "string" },
+                        registryScope: { type: "string" },
+                        registryName: { type: "string" },
+                        displayName: { type: "string" },
+                        installedVersion: { type: "string" },
+                        latestVersion: { type: "string" },
+                        updateAvailable: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "502": {
+          description: "Registry communication error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/marketplace/update": {
+    post: {
+      operationId: "updateMarketplacePackage",
+      tags: ["Marketplace"],
+      summary: "Update an installed package to latest",
+      description: "Re-installs an installed registry package at the latest version. Admin only.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["scope", "name"],
+              properties: {
+                scope: { type: "string", description: "Package scope (e.g. @demo)" },
+                name: { type: "string", description: "Package name" },
+                accessToken: { type: "string", description: "Optional registry access token" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Package updated",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  type: { type: "string" },
+                  version: { type: "string" },
+                  autoInstalledDeps: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        packageId: { type: "string" },
+                        type: { type: "string" },
+                        version: { type: ["string", "null"] },
+                      },
+                    },
+                    description: "List of dependencies that were automatically installed",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Validation error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/marketplace/packages/{scope}/{name}": {
     get: {
       operationId: "getMarketplacePackage",
       tags: ["Marketplace"],
       summary: "Get marketplace package detail",
       description:
-        "Get full package details from the Appstrate Registry, including versions and metadata.",
+        "Get full package details from the Appstrate [registry], including versions, metadata, and install status.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -142,7 +292,7 @@ export const marketplacePaths = {
       ],
       responses: {
         "200": {
-          description: "Package detail from registry",
+          description: "Package detail from registry with install status",
           content: {
             "application/json": {
               schema: {
@@ -154,6 +304,10 @@ export const marketplacePaths = {
                   description: { type: "string" },
                   readme: { type: "string" },
                   versions: { type: "array", items: { type: "object" } },
+                  installedVersion: {
+                    type: ["string", "null"],
+                    description: "Currently installed version in the org (null if not installed)",
+                  },
                 },
               },
             },
@@ -176,7 +330,7 @@ export const marketplacePaths = {
       tags: ["Marketplace"],
       summary: "Install a package from marketplace",
       description:
-        "Downloads and installs a package from the Appstrate Registry into the organization. Admin only. Validates that all registryDependencies are already installed in the org before proceeding.",
+        "Downloads and installs a package from the Appstrate [registry] into the organization. Admin only. Missing registryDependencies are automatically installed and marked as auto-installed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -209,37 +363,28 @@ export const marketplacePaths = {
                   packageId: { type: "string" },
                   type: { type: "string" },
                   version: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": {
-          description: "Validation error or missing dependencies",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    description: "Error code (MISSING_DEPENDENCIES or VALIDATION_ERROR)",
-                  },
-                  message: { type: "string" },
-                  missing: {
+                  autoInstalledDeps: {
                     type: "array",
                     items: {
                       type: "object",
                       properties: {
                         packageId: { type: "string" },
                         type: { type: "string" },
+                        version: { type: ["string", "null"] },
                       },
                     },
-                    description:
-                      "List of missing dependency packages (only for MISSING_DEPENDENCIES)",
+                    description: "List of dependencies that were automatically installed",
                   },
                 },
               },
+            },
+          },
+        },
+        "400": {
+          description: "Validation error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" },
             },
           },
         },
