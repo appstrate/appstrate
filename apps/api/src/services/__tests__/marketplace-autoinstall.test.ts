@@ -168,7 +168,9 @@ mock.module("../registry-provider.ts", () => ({
   getRegistryDiscovery: () => null,
 }));
 
-mock.module("../library.ts", () => ({
+// Mock post-install-package.ts (extracted from library.ts to avoid poisoning
+// the library.ts mock scope — see oven-sh/bun#12823).
+mock.module("../post-install-package.ts", () => ({
   postInstallPackage: async (params: unknown) => {
     postInstallCalls.push(params);
   },
@@ -375,14 +377,7 @@ describe("installFromMarketplace — auto-install deps", () => {
       [], // existing check for A → INSERT
     ];
 
-    const result = await installFromMarketplace(
-      "acme",
-      "a",
-      undefined,
-      "org-1",
-      "user-1",
-      undefined,
-    );
+    await installFromMarketplace("acme", "a", undefined, "org-1", "user-1", undefined);
 
     const circularWarns = warnCalls.filter(
       (args) => typeof args[0] === "string" && args[0].includes("Circular dependency"),
@@ -452,14 +447,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     ];
 
     // Direct install (ctx.autoInstalled=false) on existing package → promote to explicit
-    const result = await installFromMarketplace(
-      "acme",
-      "promoted",
-      undefined,
-      "org-1",
-      "user-1",
-      undefined,
-    );
+    await installFromMarketplace("acme", "promoted", undefined, "org-1", "user-1", undefined);
 
     expect(updatedSets).toHaveLength(1);
     // !ctx.autoInstalled is true → spread { autoInstalled: false } into the set

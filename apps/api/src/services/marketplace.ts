@@ -13,7 +13,7 @@ import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
 import { normalizeScope, depEntryToPackageId } from "@appstrate/validation/naming";
 import { computeIntegrity } from "@appstrate/validation/integrity";
 import { extractDependencies } from "@appstrate/validation/dependencies";
-import { postInstallPackage } from "./library.ts";
+import { postInstallPackage } from "./post-install-package.ts";
 
 // --- Status ---
 

@@ -116,18 +116,7 @@ mock.module("../builtin-library.ts", () => ({
   isBuiltInExtension: () => false,
 }));
 
-mock.module("../package-versions.ts", () => ({
-  createVersionAndUpload: async () => {},
-  createPackageVersion: async () => null,
-  getLatestVersionId: async () => null,
-}));
-
 // --- Import after mocks ---
-//
-// NOTE: This file must be run in isolation (`bun test src/services/__tests__/library-autoinstall.test.ts`)
-// when marketplace-autoinstall.test.ts exists in the same directory.
-// Bun's mock.module() is global and the marketplace test replaces library.ts entirely,
-// which breaks imports here. This is a known Bun limitation (oven-sh/bun#12823).
 
 const { deleteOrgItem, listOrgItems, SKILL_CONFIG } = await import("../library.ts");
 
