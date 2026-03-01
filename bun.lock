@@ -25,6 +25,7 @@
         "@appstrate/connect": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
+        "@appstrate/registry-client": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "@appstrate/validation": "^1.0.2",
         "@hono/swagger-ui": "^0.5.3",
