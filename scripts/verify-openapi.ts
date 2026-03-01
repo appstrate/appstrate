@@ -31,26 +31,26 @@ const expectedEndpoints = [
   "GET /api/flows",
   "POST /api/flows",
   "POST /api/flows/import",
-  "GET /api/flows/{flowId}",
-  "PUT /api/flows/{flowId}",
-  "DELETE /api/flows/{flowId}",
-  "PUT /api/flows/{flowId}/config",
-  "GET /api/flows/{flowId}/versions",
-  "GET /api/flows/{flowId}/package",
-  "PUT /api/flows/{flowId}/package",
-  "POST /api/flows/{flowId}/services/{serviceId}/bind",
-  "DELETE /api/flows/{flowId}/services/{serviceId}/bind",
-  "POST /api/flows/{flowId}/share-token",
-  "GET /api/flows/{flowId}/memories",
-  "DELETE /api/flows/{flowId}/memories",
-  "DELETE /api/flows/{flowId}/memories/{memoryId}",
-  "PUT /api/flows/{flowId}/skills",
-  "PUT /api/flows/{flowId}/extensions",
+  "GET /api/flows/{packageId}",
+  "PUT /api/flows/{packageId}",
+  "DELETE /api/flows/{packageId}",
+  "PUT /api/flows/{packageId}/config",
+  "GET /api/flows/{packageId}/versions",
+  "GET /api/flows/{packageId}/package",
+  "PUT /api/flows/{packageId}/package",
+  "POST /api/flows/{packageId}/services/{serviceId}/bind",
+  "DELETE /api/flows/{packageId}/services/{serviceId}/bind",
+  "POST /api/flows/{packageId}/share-token",
+  "GET /api/flows/{packageId}/memories",
+  "DELETE /api/flows/{packageId}/memories",
+  "DELETE /api/flows/{packageId}/memories/{memoryId}",
+  "PUT /api/flows/{packageId}/skills",
+  "PUT /api/flows/{packageId}/extensions",
 
   // Executions
-  "POST /api/flows/{flowId}/run",
-  "GET /api/flows/{flowId}/executions",
-  "DELETE /api/flows/{flowId}/executions",
+  "POST /api/flows/{packageId}/run",
+  "GET /api/flows/{packageId}/executions",
+  "DELETE /api/flows/{packageId}/executions",
   "GET /api/executions/{executionId}",
   "GET /api/executions/{executionId}/logs",
   "POST /api/executions/{executionId}/cancel",
@@ -58,12 +58,12 @@ const expectedEndpoints = [
   // Realtime (SSE)
   "GET /api/realtime/executions",
   "GET /api/realtime/executions/{executionId}",
-  "GET /api/realtime/flows/{flowId}/executions",
+  "GET /api/realtime/flows/{packageId}/executions",
 
   // Schedules
   "GET /api/schedules",
-  "GET /api/flows/{flowId}/schedules",
-  "POST /api/flows/{flowId}/schedules",
+  "GET /api/flows/{packageId}/schedules",
+  "POST /api/flows/{packageId}/schedules",
   "PUT /api/schedules/{scheduleId}",
   "DELETE /api/schedules/{scheduleId}",
 
@@ -95,12 +95,12 @@ const expectedEndpoints = [
   "GET /api/connection-profiles/{profileId}/connections",
 
   // Flow Profile Override
-  "PUT /api/flows/{flowId}/profile",
-  "DELETE /api/flows/{flowId}/profile",
+  "PUT /api/flows/{packageId}/profile",
+  "DELETE /api/flows/{packageId}/profile",
 
   // Flow Proxy
-  "GET /api/flows/{flowId}/proxy",
-  "PUT /api/flows/{flowId}/proxy",
+  "GET /api/flows/{packageId}/proxy",
+  "PUT /api/flows/{packageId}/proxy",
 
   // Proxies
   "GET /api/proxies",
@@ -170,6 +170,15 @@ const expectedEndpoints = [
   "PUT /api/notifications/read/{executionId}",
   "PUT /api/notifications/read-all",
   "GET /api/executions",
+
+  // Marketplace
+  "GET /api/marketplace/status",
+  "GET /api/marketplace/search",
+  "GET /api/marketplace/packages/{scope}/{name}",
+  "POST /api/marketplace/install",
+
+  // Packages
+  "POST /api/packages/import",
 ];
 
 const specEndpoints = new Set<string>();

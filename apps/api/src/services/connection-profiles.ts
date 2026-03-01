@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { connectionProfiles, userFlowProfiles, serviceConnections } from "@appstrate/db/schema";
+import { connectionProfiles, userPackageProfiles, serviceConnections } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { encrypt, type ProviderDefinition, type ProviderSnapshot } from "@appstrate/connect";
 import { getAdminConnections } from "./state.ts";
@@ -127,15 +127,17 @@ export async function getDefaultProfileId(userId: string): Promise<string> {
 }
 
 /**
- * Get the effective profile ID for a user+flow combination.
+ * Get the effective profile ID for a user+package combination.
  * Returns the override if one exists, otherwise the default.
  */
-export async function getEffectiveProfileId(userId: string, flowId?: string): Promise<string> {
-  if (flowId) {
+export async function getEffectiveProfileId(userId: string, packageId?: string): Promise<string> {
+  if (packageId) {
     const [override] = await db
-      .select({ profileId: userFlowProfiles.profileId })
-      .from(userFlowProfiles)
-      .where(and(eq(userFlowProfiles.userId, userId), eq(userFlowProfiles.flowId, flowId)))
+      .select({ profileId: userPackageProfiles.profileId })
+      .from(userPackageProfiles)
+      .where(
+        and(eq(userPackageProfiles.userId, userId), eq(userPackageProfiles.packageId, packageId)),
+      )
       .limit(1);
 
     if (override) return override.profileId;
@@ -144,24 +146,29 @@ export async function getEffectiveProfileId(userId: string, flowId?: string): Pr
   return getDefaultProfileId(userId);
 }
 
-export async function setFlowProfileOverride(
+export async function setPackageProfileOverride(
   userId: string,
-  flowId: string,
+  packageId: string,
   profileId: string,
 ): Promise<void> {
   await db
-    .insert(userFlowProfiles)
-    .values({ userId, flowId, profileId, updatedAt: new Date() })
+    .insert(userPackageProfiles)
+    .values({ userId, packageId, profileId, updatedAt: new Date() })
     .onConflictDoUpdate({
-      target: [userFlowProfiles.userId, userFlowProfiles.flowId],
+      target: [userPackageProfiles.userId, userPackageProfiles.packageId],
       set: { profileId, updatedAt: new Date() },
     });
 }
 
-export async function removeFlowProfileOverride(userId: string, flowId: string): Promise<void> {
+export async function removePackageProfileOverride(
+  userId: string,
+  packageId: string,
+): Promise<void> {
   await db
-    .delete(userFlowProfiles)
-    .where(and(eq(userFlowProfiles.userId, userId), eq(userFlowProfiles.flowId, flowId)));
+    .delete(userPackageProfiles)
+    .where(
+      and(eq(userPackageProfiles.userId, userId), eq(userPackageProfiles.packageId, packageId)),
+    );
 }
 
 // ─── Config Hash & Provider Snapshot ────────────────────────
@@ -211,19 +218,19 @@ export function buildProviderSnapshot(provider: ProviderDefinition): ProviderSna
 // ─── Service Profile Resolution ─────────────────────────────
 
 /**
- * Resolve profile IDs for each service in a flow.
- * Admin services get their profile from flow_admin_connections.
- * User services get the effective profile for the user+flow.
+ * Resolve profile IDs for each service in a package.
+ * Admin services get their profile from package_admin_connections.
+ * User services get the effective profile for the user+package.
  */
 export async function resolveServiceProfiles(
   services: FlowServiceRequirement[],
   userId: string,
-  flowId: string,
+  packageId: string,
   orgId: string,
   profileIdOverride?: string,
 ): Promise<Record<string, string>> {
-  const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(userId, flowId));
-  const adminConns = await getAdminConnections(orgId, flowId);
+  const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(userId, packageId));
+  const adminConns = await getAdminConnections(orgId, packageId);
   const map: Record<string, string> = {};
 
   for (const svc of services) {

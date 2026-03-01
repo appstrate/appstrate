@@ -6,9 +6,9 @@ import type { Db } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
 import { buildServiceTokens } from "./token-resolver.ts";
-import { getFlowConfig, getLastExecutionState, getFlowMemories } from "./state.ts";
-import { getFlowPackage } from "./flow-package.ts";
-import { getLatestVersionId } from "./flow-versions.ts";
+import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
+import { getPackageZip } from "./package-storage.ts";
+import { getLatestVersionId } from "./package-versions.ts";
 import { resolveProxyUrl } from "./org-proxies.ts";
 
 /**
@@ -128,13 +128,13 @@ export async function buildExecutionContext(params: {
     memories,
   ] = await Promise.all([
     buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
-    params.config ?? getFlowConfig(orgId, flow.id),
+    params.config ?? getPackageConfig(orgId, flow.id),
     getLastExecutionState(flow.id, userId, orgId),
     resolveProviderDefs(db, orgId, flow.manifest.requires.services),
-    getFlowPackage(flow, orgId),
-    flow.source === "user" ? getLatestVersionId(flow.id).catch(() => null) : null,
+    getPackageZip(flow, orgId),
+    flow.source !== "built-in" ? getLatestVersionId(flow.id).catch(() => null) : null,
     resolveProxyUrl(orgId, flow.id, params.config),
-    getFlowMemories(flow.id, orgId),
+    getPackageMemories(flow.id, orgId),
   ]);
 
   const promptContext = buildPromptContext({

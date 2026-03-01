@@ -19,7 +19,7 @@ Returns all flows (built-in + user) with `id`, `displayName`, `description`, `so
 ## Get Flow Detail
 
 ```
-GET /api/flows/{flowId}
+GET /api/flows/{packageId}
 Authorization: Bearer ask_...
 ```
 
@@ -53,16 +53,16 @@ Content-Type: application/json
 }
 ```
 
-Returns `{ "flowId": "my-flow-id" }`. Rate-limited to 10/min.
+Returns `{ "packageId": "my-flow-id" }`. Rate-limited to 10/min.
 
 ## Update a Flow
 
 **Always fetch the current flow first** to get the `updatedAt` value (required for optimistic locking):
 
 ```
-GET /api/flows/{flowId}   → note updatedAt value
+GET /api/flows/{packageId}   → note updatedAt value
 
-PUT /api/flows/{flowId}
+PUT /api/flows/{packageId}
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -78,7 +78,7 @@ Content-Type: application/json
 ## Delete a Flow
 
 ```
-DELETE /api/flows/{flowId}
+DELETE /api/flows/{packageId}
 Authorization: Bearer ask_...
 ```
 
@@ -98,10 +98,10 @@ The ZIP must contain `manifest.json` and `prompt.md` at the root. Optional `skil
 
 ## Save Flow Configuration
 
-**First check what config is currently set** via `GET /api/flows/{flowId}` (look at `config` field and `manifest.config.schema` for what fields exist):
+**First check what config is currently set** via `GET /api/flows/{packageId}` (look at `config` field and `manifest.config.schema` for what fields exist):
 
 ```
-PUT /api/flows/{flowId}/config
+PUT /api/flows/{packageId}/config
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -115,7 +115,7 @@ The body is validated against the flow's `config.schema` from the manifest.
 **First check available skills** via `GET /api/library/skills`:
 
 ```
-PUT /api/flows/{flowId}/skills
+PUT /api/flows/{packageId}/skills
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -127,7 +127,7 @@ Content-Type: application/json
 **First check available extensions** via `GET /api/library/extensions`:
 
 ```
-PUT /api/flows/{flowId}/extensions
+PUT /api/flows/{packageId}/extensions
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -139,7 +139,7 @@ Content-Type: application/json
 Every create/update creates a version snapshot:
 
 ```
-GET /api/flows/{flowId}/versions
+GET /api/flows/{packageId}/versions
 Authorization: Bearer ask_...
 ```
 

@@ -3,14 +3,14 @@ import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { Execution, ExecutionLog } from "@appstrate/shared-types";
 
-export function useExecutions(flowId: string | undefined) {
+export function useExecutions(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["executions", orgId, flowId],
+    queryKey: ["executions", orgId, packageId],
     queryFn: async () => {
-      return api<Execution[]>(`/flows/${flowId}/executions`);
+      return api<Execution[]>(`/flows/${packageId}/executions`);
     },
-    enabled: !!flowId,
+    enabled: !!packageId,
   });
 }
 

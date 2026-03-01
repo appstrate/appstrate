@@ -41,19 +41,22 @@ export function useExecutionRealtime(
 /**
  * Subscribe to execution status changes for a specific flow (e.g. running count updates).
  */
-export function useFlowExecutionRealtime(flowId: string | null | undefined, callback: () => void) {
+export function useFlowExecutionRealtime(
+  packageId: string | null | undefined,
+  callback: () => void,
+) {
   const cbRef = useRef(callback);
   useEffect(() => {
     cbRef.current = callback;
   });
 
   useEffect(() => {
-    if (!flowId) return;
+    if (!packageId) return;
     const orgId = getCurrentOrgId();
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/flows/${flowId}/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      `/api/realtime/flows/${packageId}/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 
@@ -64,7 +67,7 @@ export function useFlowExecutionRealtime(flowId: string | null | undefined, call
     return () => {
       es.close();
     };
-  }, [flowId]);
+  }, [packageId]);
 }
 
 /**

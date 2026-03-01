@@ -56,6 +56,9 @@ const envSchema = z.object({
   TOGETHER_API_KEY: z.string().optional(),
   DEEPSEEK_API_KEY: z.string().optional(),
 
+  // Registry
+  REGISTRY_URL: z.string().optional(),
+
   // Outbound proxy
   PROXY_URL: z.string().optional(),
 });

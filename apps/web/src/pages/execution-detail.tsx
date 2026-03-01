@@ -31,11 +31,11 @@ function formatToolArgs(args: Record<string, unknown>): string {
 
 export function ExecutionDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { flowId, execId } = useParams<{ flowId: string; execId: string }>();
+  const { packageId, execId } = useParams<{ packageId: string; execId: string }>();
   const location = useLocation();
   const executionNumber = (location.state as { executionNumber?: number } | null)?.executionNumber;
   const orgId = useCurrentOrgId();
-  const { data: flow } = useFlowDetail(flowId);
+  const { data: flow } = useFlowDetail(packageId);
   const { data: execution, isLoading, error } = useExecution(execId);
   const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
@@ -83,7 +83,7 @@ export function ExecutionDetailPage() {
     }
   }, [execution?.notifiedAt, execution?.readAt, execId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runFlow = useRunFlow(flowId!);
+  const runFlow = useRunFlow(packageId!);
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
   const [userTab, setUserTab] = useState<"logs" | "result" | "state" | null>(null);
@@ -188,7 +188,7 @@ export function ExecutionDetailPage() {
       <nav className="breadcrumb">
         <Link to="/">{t("detail.breadcrumb")}</Link>
         <span className="separator">/</span>
-        <Link to={`/flows/${flowId}`}>{flow?.displayName || flowId}</Link>
+        <Link to={`/flows/${packageId}`}>{flow?.displayName || packageId}</Link>
         <span className="separator">/</span>
         <span className="current">
           {executionNumber

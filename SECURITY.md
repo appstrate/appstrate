@@ -325,7 +325,7 @@ Internal endpoints (`/internal/*`) use the execution ID as a bearer token. This 
 ```typescript
 // internal.ts — credential endpoint
 const rows = await db
-  .select({ flowId: executions.flowId, status: executions.status, orgId: executions.orgId })
+  .select({ packageId: executions.packageId, status: executions.status, orgId: executions.orgId })
   .from(executions)
   .where(eq(executions.id, executionId))
   .limit(1);
@@ -398,7 +398,7 @@ c.set("orgRole", membership[0].role);
 const rows = await db
   .select()
   .from(executions)
-  .where(and(eq(executions.flowId, flowId), eq(executions.orgId, orgId)));
+  .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
 ```
 
 **Standard:** Application-level org-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).

@@ -10,7 +10,7 @@ type Subscriber = {
   id: string;
   filter: {
     executionId?: string;
-    flowId?: string;
+    packageId?: string;
     orgId: string;
   };
   send: (event: RealtimeEvent) => void;
@@ -44,7 +44,7 @@ export async function initRealtime(): Promise<void> {
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.executionId && sub.filter.executionId !== raw.id) continue;
-        if (sub.filter.flowId && sub.filter.flowId !== raw.flow_id) continue;
+        if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
         sub.send({ event: "execution_update", data });
       }
     } catch (err) {

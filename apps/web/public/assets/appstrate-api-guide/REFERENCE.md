@@ -38,10 +38,10 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 
 | Error | Agent Action |
 |-------|-------------|
-| `DEPENDENCY_NOT_SATISFIED` | Call `GET /api/flows/{flowId}` → find which service has `status: "disconnected"` → call `GET /auth/integrations` to check the provider's `authMode` → if `api_key` or `custom`, ask user for credentials and connect. If `oauth2`, generate the auth URL and give it to the user. |
-| `CONFIG_INCOMPLETE` | Call `GET /api/flows/{flowId}` → read `manifest.config.schema` to find required fields → check which are missing in `config` → if fields have `default` values, set them via `PUT /api/flows/{flowId}/config`. If no defaults, ask the user for values. |
+| `DEPENDENCY_NOT_SATISFIED` | Call `GET /api/flows/{packageId}` → find which service has `status: "disconnected"` → call `GET /auth/integrations` to check the provider's `authMode` → if `api_key` or `custom`, ask user for credentials and connect. If `oauth2`, generate the auth URL and give it to the user. |
+| `CONFIG_INCOMPLETE` | Call `GET /api/flows/{packageId}` → read `manifest.config.schema` to find required fields → check which are missing in `config` → if fields have `default` values, set them via `PUT /api/flows/{packageId}/config`. If no defaults, ask the user for values. |
 | `NAME_COLLISION` | The resource already exists. Call `GET /api/flows` (or skills/extensions) to find it, then decide: update instead of create, or choose a different ID. |
-| `EXECUTION_IN_PROGRESS` | Call `GET /api/flows/{flowId}/executions?limit=5` → find the running execution → either poll it until completion, or cancel via `POST /api/executions/{execId}/cancel`. |
+| `EXECUTION_IN_PROGRESS` | Call `GET /api/flows/{packageId}/executions?limit=5` → find the running execution → either poll it until completion, or cancel via `POST /api/executions/{execId}/cancel`. |
 | `FLOW_IN_USE` | Call `GET /api/library/skills/{id}` or `GET /api/library/extensions/{id}` → read the `flows` field → unlink from those flows first. |
 | `UNAUTHORIZED` | Validate the API key with `GET /api/flows`. If it fails, tell the user their key is invalid/expired and ask for a new one. |
 
@@ -71,12 +71,12 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 3. GET /api/library/skills                    → Check available skills
 4. GET /api/library/extensions                → Check available extensions
 5. POST /api/flows                            → Create the flow (manifest + prompt + skillIds + extensionIds)
-6. GET /api/flows/{flowId}                    → Verify creation, check service status
+6. GET /api/flows/{packageId}                    → Verify creation, check service status
 7. IF services disconnected:
    → Follow Workflow 1 for each missing service
 8. IF config has required fields:
-   PUT /api/flows/{flowId}/config             → Set config values
-9. POST /api/flows/{flowId}/run               → Run with input
+   PUT /api/flows/{packageId}/config             → Set config values
+9. POST /api/flows/{packageId}/run               → Run with input
 10. Poll: GET /api/executions/{executionId}   → Until status is terminal
 11. GET /api/executions/{executionId}/logs     → Get full execution log
 ```
@@ -84,7 +84,7 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 ### Workflow 3: Monitor an execution to completion
 
 ```
-1. POST /api/flows/{flowId}/run → { executionId }
+1. POST /api/flows/{packageId}/run → { executionId }
 2. Loop:
    GET /api/executions/{executionId}
    - If status is "pending" or "running": wait 2-5 seconds, retry
@@ -97,19 +97,19 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 ### Workflow 4: Schedule a recurring flow
 
 ```
-1. GET /api/flows/{flowId}                    → Verify flow exists and is fully configured
-2. GET /api/flows/{flowId}/schedules          → Check if a schedule already exists
+1. GET /api/flows/{packageId}                    → Verify flow exists and is fully configured
+2. GET /api/flows/{packageId}/schedules          → Check if a schedule already exists
 3. IF no schedule exists:
-   POST /api/flows/{flowId}/schedules         → Create with cron expression
+   POST /api/flows/{packageId}/schedules         → Create with cron expression
 4. GET /api/schedules                         → Verify creation and next run time
 ```
 
 ### Workflow 5: Update an existing flow
 
 ```
-1. GET /api/flows/{flowId}                    → Get current manifest, prompt, updatedAt, skills, extensions
-2. PUT /api/flows/{flowId}                    → Update with new manifest/prompt + the updatedAt value
-3. GET /api/flows/{flowId}                    → Verify the update was applied
+1. GET /api/flows/{packageId}                    → Get current manifest, prompt, updatedAt, skills, extensions
+2. PUT /api/flows/{packageId}                    → Update with new manifest/prompt + the updatedAt value
+3. GET /api/flows/{packageId}                    → Verify the update was applied
 ```
 
 ---

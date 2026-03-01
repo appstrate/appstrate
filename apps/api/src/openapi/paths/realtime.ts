@@ -39,7 +39,7 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/flows/{flowId}/executions": {
+  "/api/realtime/flows/{packageId}/executions": {
     get: {
       operationId: "streamFlowExecutions",
       tags: ["Realtime"],
@@ -48,7 +48,7 @@ export const realtimePaths = {
         "Server-Sent Events stream for execution changes for a specific flow. Cookie auth only.",
       security: [{ cookieAuth: [] }],
       parameters: [
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/Verbose" },
       ],

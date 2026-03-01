@@ -2,17 +2,17 @@ import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
-  getFlowConfig,
+  getPackageConfig,
   createExecution,
   updateExecution,
   appendExecutionLog,
   getExecution,
   getExecutionFull,
-  getRunningExecutionsForFlow,
-  deleteFlowExecutions,
-  listFlowExecutions,
+  getRunningExecutionsForPackage,
+  deletePackageExecutions,
+  listPackageExecutions,
   listExecutionLogs,
-  addFlowMemories,
+  addPackageMemories,
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
@@ -42,7 +42,7 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
 
 export async function executeFlowInBackground(
   executionId: string,
-  _flowId: string,
+  _packageId: string,
   userId: string,
   orgId: string,
   flow: LoadedFlow,
@@ -227,7 +227,7 @@ export async function executeFlowInBackground(
         ? result.memories.filter((m): m is string => typeof m === "string" && m.trim().length > 0)
         : undefined;
       if (resultMemories && resultMemories.length > 0) {
-        await addFlowMemories(flow.id, orgId, resultMemories, executionId);
+        await addPackageMemories(flow.id, orgId, resultMemories, executionId);
       }
 
       await updateExecution(executionId, {
@@ -306,7 +306,7 @@ export function createExecutionsRouter() {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const flowId = flow.id;
+    const packageId = flow.id;
     const profileIdOverride = c.req.query("profileId");
 
     // Run independent pre-flight operations in parallel
@@ -314,14 +314,14 @@ export function createExecutionsRouter() {
       resolveServiceProfiles(
         flow.manifest.requires.services,
         user.id,
-        flowId,
+        packageId,
         orgId,
         profileIdOverride,
       ),
-      getFlowConfig(orgId, flowId),
+      getPackageConfig(orgId, packageId),
       profileIdOverride
         ? Promise.resolve(profileIdOverride)
-        : getEffectiveProfileId(user.id, flowId),
+        : getEffectiveProfileId(user.id, packageId),
       parseRequestInput(c, flow.manifest.input?.schema),
     ]);
 
@@ -347,7 +347,7 @@ export function createExecutionsRouter() {
         {
           error: "CONFIG_INCOMPLETE",
           message: `Parameter '${first.field}' is required`,
-          configUrl: `/api/flows/${flowId}/config`,
+          configUrl: `/api/flows/${packageId}/config`,
         },
         400,
       );
@@ -383,7 +383,7 @@ export function createExecutionsRouter() {
     // Create execution record
     await createExecution(
       executionId,
-      flowId,
+      packageId,
       user.id,
       orgId,
       parsedInput ?? null,
@@ -395,7 +395,7 @@ export function createExecutionsRouter() {
     // Fire-and-forget background execution
     executeFlowInBackground(
       executionId,
-      flowId,
+      packageId,
       user.id,
       orgId,
       flow,
@@ -417,7 +417,7 @@ export function createExecutionsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 100);
-    const rows = await listFlowExecutions(flow.id, orgId, limit);
+    const rows = await listPackageExecutions(flow.id, orgId, limit);
     return c.json(rows);
   });
 
@@ -495,7 +495,7 @@ export function createExecutionsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
 
-    const running = await getRunningExecutionsForFlow(flow.id);
+    const running = await getRunningExecutionsForPackage(flow.id);
     if (running > 0) {
       return c.json(
         { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) still running` },
@@ -503,7 +503,7 @@ export function createExecutionsRouter() {
       );
     }
 
-    const deleted = await deleteFlowExecutions(flow.id, orgId);
+    const deleted = await deletePackageExecutions(flow.id, orgId);
     return c.json({ deleted });
   });
 

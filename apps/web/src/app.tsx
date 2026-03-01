@@ -10,6 +10,8 @@ import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { ExecutionsPage } from "./pages/executions-page";
 import { LibraryPage } from "./pages/library";
+import { MarketplacePage } from "./pages/marketplace";
+import { MarketplaceDetailPage } from "./pages/marketplace-detail";
 import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
@@ -212,16 +214,21 @@ export function App() {
           <Routes>
             <Route path="/create-org" element={<CreateOrgPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
-            <Route path="/flows/:flowId/run" element={<ShareableRunPage />} />
+            <Route path="/flows/:packageId/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<FlowList />} />
               <Route path="/flows/new" element={<FlowEditorPage />} />
-              <Route path="/flows/:flowId/edit" element={<FlowEditorPage />} />
-              <Route path="/flows/:flowId" element={<FlowDetailPage />} />
-              <Route path="/flows/:flowId/executions/:execId" element={<ExecutionDetailPage />} />
+              <Route path="/flows/:packageId/edit" element={<FlowEditorPage />} />
+              <Route path="/flows/:packageId" element={<FlowDetailPage />} />
+              <Route
+                path="/flows/:packageId/executions/:execId"
+                element={<ExecutionDetailPage />}
+              />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/library" element={<LibraryPage />} />
+              <Route path="/marketplace" element={<MarketplacePage />} />
+              <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/connectors" element={<ConnectorsPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />

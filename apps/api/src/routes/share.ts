@@ -8,7 +8,7 @@ import {
   consumeShareToken,
   linkExecutionToToken,
 } from "../services/share-tokens.ts";
-import { getFlow } from "../services/flow-service.ts";
+import { getPackage } from "../services/flow-service.ts";
 import { createExecution, getAdminConnections } from "../services/state.ts";
 import { resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
@@ -31,7 +31,7 @@ export function createShareRouter() {
     }
 
     const orgId = shareToken.orgId;
-    const flow = await getFlow(shareToken.flowId, orgId);
+    const flow = await getPackage(shareToken.packageId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
@@ -46,8 +46,8 @@ export function createShareRouter() {
     );
 
     const result: Record<string, unknown> = {
-      displayName: flow.manifest.metadata.displayName,
-      description: flow.manifest.metadata.description,
+      displayName: flow.manifest.displayName,
+      description: flow.manifest.description,
       ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
       ...(serviceStatuses.length > 0 ? { services: serviceStatuses } : {}),
       consumed: !!shareToken.consumedAt,
@@ -95,9 +95,9 @@ export function createShareRouter() {
       );
     }
 
-    const { id: tokenId, flowId, createdBy: userId, orgId } = consumed;
+    const { id: tokenId, packageId, createdBy: userId, orgId } = consumed;
 
-    const flow = await getFlow(flowId, orgId);
+    const flow = await getPackage(packageId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
@@ -123,7 +123,7 @@ export function createShareRouter() {
     const serviceProfiles = await resolveServiceProfiles(
       flow.manifest.requires.services,
       userId,
-      flowId,
+      packageId,
       orgId,
     );
 
@@ -137,7 +137,7 @@ export function createShareRouter() {
       return c.json(depError, 400);
     }
 
-    const userProfileId = await getEffectiveProfileId(userId, flowId);
+    const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
@@ -153,7 +153,7 @@ export function createShareRouter() {
     // Create execution record (using admin's user_id), then link to share token
     await createExecution(
       executionId,
-      flowId,
+      packageId,
       userId,
       orgId,
       parsedInput ?? null,
@@ -166,7 +166,7 @@ export function createShareRouter() {
     // Fire-and-forget
     executeFlowInBackground(
       executionId,
-      flowId,
+      packageId,
       userId,
       orgId,
       flow,

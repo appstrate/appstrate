@@ -6,7 +6,7 @@ import { shareTokens } from "@appstrate/db/schema";
 const DEFAULT_EXPIRES_DAYS = 7;
 
 export async function createShareToken(
-  flowId: string,
+  packageId: string,
   createdBy: string,
   orgId: string,
   expiresInDays = DEFAULT_EXPIRES_DAYS,
@@ -16,7 +16,7 @@ export async function createShareToken(
 
   const [row] = await db
     .insert(shareTokens)
-    .values({ token, flowId, createdBy, orgId, expiresAt })
+    .values({ token, packageId, createdBy, orgId, expiresAt })
     .returning();
 
   return row;
@@ -48,7 +48,7 @@ export async function consumeShareToken(token: string) {
 
     return {
       id: row.id,
-      flowId: row.flowId,
+      packageId: row.packageId,
       createdBy: row.createdBy,
       orgId: row.orgId,
     };

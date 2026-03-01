@@ -48,7 +48,7 @@ appstrate/
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
-│   │   └── paths/            # One file per route domain (105 endpoints)
+│   │   └── paths/            # One file per route domain (110 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -61,13 +61,14 @@ appstrate/
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (28 tables, enums, indexes)
+│   ├── schema.ts             # Full schema (26 tables, 6 enums, indexes)
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (auto profile+org on signup)
 │
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
+├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate Registry
 │
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
@@ -83,7 +84,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`.
+**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External local dep**: `@appstrate/validation` (`file:../validation` — shared with registry).
 
 ## Architecture
 
@@ -157,7 +158,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
 - **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly. `useGlobalExecutionSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it.
 - **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
-- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["flows", orgId]`, `["flow", orgId, flowId]`, `["executions", orgId, flowId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
+- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["flows", orgId]`, `["flow", orgId, packageId]`, `["executions", orgId, packageId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
 
 ### Backend
@@ -169,6 +170,8 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
+- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate Registry. `installFromMarketplace()` validates `registryDependencies` before install (throws `MissingDependencyError` with `MISSING_DEPENDENCIES` error code if deps not installed in org). Uses `@appstrate/validation/dependencies` for extraction and `@appstrate/validation/naming` for packageId conversion.
+- **Package management**: `package-versions.ts` + `package-storage.ts` — version tracking and ZIP artifact storage for imported packages.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
@@ -186,18 +189,18 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 105 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 110 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-templates`, `proxies`, `api-keys`, `library`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-templates`, `proxies`, `api-keys`, `library`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (28 tables, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
+Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
 
 ## Environment Variables
 

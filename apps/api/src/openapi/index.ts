@@ -30,6 +30,8 @@ import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
+import { marketplacePaths } from "./paths/marketplace.ts";
+import { packagesPaths } from "./paths/packages.ts";
 
 export const openApiSpec = {
   ...openApiInfo,
@@ -55,6 +57,8 @@ export const openApiSpec = {
     ...welcomePaths,
     ...metaPaths,
     ...notificationsPaths,
+    ...marketplacePaths,
+    ...packagesPaths,
   },
   components: {
     securitySchemes,

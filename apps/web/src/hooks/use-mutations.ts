@@ -14,11 +14,11 @@ function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
   return qc.invalidateQueries({ queryKey: ["flow"] });
 }
 
-export function useSaveConfig(flowId: string) {
+export function useSaveConfig(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (config: Record<string, unknown>) => {
-      return api(`/flows/${flowId}/config`, {
+      return api(`/flows/${packageId}/config`, {
         method: "PUT",
         body: JSON.stringify(config),
       });
@@ -30,7 +30,7 @@ export function useSaveConfig(flowId: string) {
   });
 }
 
-export function useRunFlow(flowId: string) {
+export function useRunFlow(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -54,18 +54,18 @@ export function useRunFlow(flowId: string) {
             fd.append(key, file);
           }
         }
-        return uploadFormData<{ executionId: string }>(`/flows/${flowId}/run${qs}`, fd);
+        return uploadFormData<{ executionId: string }>(`/flows/${packageId}/run${qs}`, fd);
       }
 
       // JSON mode (existing behavior)
-      return api<{ executionId: string }>(`/flows/${flowId}/run${qs}`, {
+      return api<{ executionId: string }>(`/flows/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(input ? { input } : {}),
       });
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["executions"] });
-      navigate(`/flows/${flowId}/executions/${data.executionId}`);
+      navigate(`/flows/${packageId}/executions/${data.executionId}`);
     },
     onError: onMutationError,
   });
@@ -174,40 +174,43 @@ export function useDeleteAllConnections() {
   });
 }
 
-export function useBindAdminService(flowId: string) {
+export function useBindAdminService(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (serviceId: string) => {
-      return api(`/flows/${flowId}/services/${serviceId}/bind`, { method: "POST" });
+      return api(`/flows/${packageId}/services/${serviceId}/bind`, { method: "POST" });
     },
     onSuccess: () => invalidateServiceRelated(qc),
     // No onError — handled by the component (may open connect flow before retrying)
   });
 }
 
-export function useUnbindAdminService(flowId: string) {
+export function useUnbindAdminService(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (serviceId: string) => {
-      return api(`/flows/${flowId}/services/${serviceId}/bind`, { method: "DELETE" });
+      return api(`/flows/${packageId}/services/${serviceId}/bind`, { method: "DELETE" });
     },
     onSuccess: () => invalidateServiceRelated(qc),
     onError: onMutationError,
   });
 }
 
-export function useImportFlow() {
+export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
-      return uploadFormData<{ flowId: string }>("/flows/import", fd);
+      return uploadFormData<{ packageId: string; type: string }>("/packages/import", fd);
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["flows"] });
-      navigate(`/flows/${data.flowId}`);
+      qc.invalidateQueries({ queryKey: ["library"] });
+      if (data.type === "flow") {
+        navigate(`/flows/${data.packageId}`);
+      }
     },
     onError: onMutationError,
   });
@@ -223,20 +226,20 @@ export function useCreateFlow() {
       skillIds?: string[];
       extensionIds?: string[];
     }) => {
-      return api<{ flowId: string }>("/flows", {
+      return api<{ packageId: string }>("/flows", {
         method: "POST",
         body: JSON.stringify(body),
       });
     },
     onSuccess: async (data) => {
       await invalidateFlowQueries(qc);
-      navigate(`/flows/${data.flowId}`);
+      navigate(`/flows/${data.packageId}`);
     },
     onError: onMutationError,
   });
 }
 
-export function useUpdateFlow(flowId: string) {
+export function useUpdateFlow(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -247,28 +250,28 @@ export function useUpdateFlow(flowId: string) {
       skillIds?: string[];
       extensionIds?: string[];
     }) => {
-      return api<{ flowId: string; updatedAt: string }>(`/flows/${flowId}`, {
+      return api<{ packageId: string; updatedAt: string }>(`/flows/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
     },
     onSuccess: async () => {
       await invalidateFlowQueries(qc);
-      navigate(`/flows/${flowId}`);
+      navigate(`/flows/${packageId}`);
     },
     onError: onMutationError,
   });
 }
 
-export function useUploadPackage(flowId: string) {
+export function useUploadPackage(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("updatedAt", updatedAt);
-      return uploadFormData<{ flowId: string; updatedAt: string }>(
-        `/flows/${flowId}/package`,
+      return uploadFormData<{ packageId: string; updatedAt: string }>(
+        `/flows/${packageId}/package`,
         fd,
         "PUT",
       );
@@ -278,12 +281,12 @@ export function useUploadPackage(flowId: string) {
   });
 }
 
-export async function downloadPackage(flowId: string): Promise<void> {
-  const blob = await apiBlob(`/flows/${flowId}/package`);
+export async function downloadPackage(packageId: string): Promise<void> {
+  const blob = await apiBlob(`/flows/${packageId}/package`);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${flowId}.zip`;
+  a.download = `${packageId}.zip`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -326,11 +329,11 @@ export function useConnectCredentials() {
   });
 }
 
-export function useDeleteFlowExecutions(flowId: string) {
+export function useDeleteFlowExecutions(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/flows/${flowId}/executions`, { method: "DELETE" });
+      return api<{ deleted: number }>(`/flows/${packageId}/executions`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["executions"] });
@@ -345,8 +348,8 @@ export function useDeleteFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (flowId: string) => {
-      await api(`/flows/${flowId}`, { method: "DELETE" });
+    mutationFn: async (packageId: string) => {
+      await api(`/flows/${packageId}`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flows"] });
@@ -358,11 +361,11 @@ export function useDeleteFlow() {
 
 // --- Memory mutations ---
 
-export function useDeleteMemory(flowId: string) {
+export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (memoryId: number) => {
-      return api(`/flows/${flowId}/memories/${memoryId}`, { method: "DELETE" });
+      return api(`/flows/${packageId}/memories/${memoryId}`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow-memories"] });
@@ -371,11 +374,11 @@ export function useDeleteMemory(flowId: string) {
   });
 }
 
-export function useDeleteAllMemories(flowId: string) {
+export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/flows/${flowId}/memories`, { method: "DELETE" });
+      return api<{ deleted: number }>(`/flows/${packageId}/memories`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow-memories"] });

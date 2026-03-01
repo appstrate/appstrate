@@ -1,10 +1,10 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { zipSync, unzipSync, type Zippable } from "fflate";
+import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/validation/zip";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import { getFlowsDir } from "./flow-service.ts";
+import { getPackagesDir } from "./flow-service.ts";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
@@ -21,18 +21,18 @@ const builtInPackageCache = new Map<string, Buffer>();
 /** Ensure the flow-packages Storage bucket exists. Call once at boot. */
 export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
 
-/** Upload a flow package ZIP to Storage. */
-export async function uploadFlowPackage(
-  flowId: string,
+/** Upload a package ZIP to Storage. */
+export async function uploadPackageZip(
+  packageId: string,
   versionNumber: number,
   zipBuffer: Buffer,
 ): Promise<void> {
-  const path = `${flowId}/${versionNumber}.zip`;
+  const path = `${packageId}/${versionNumber}.zip`;
   try {
     await storage.uploadFile(BUCKET, path, zipBuffer);
   } catch (error) {
     logger.error("Failed to upload flow package", {
-      flowId,
+      packageId,
       versionNumber,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -40,23 +40,23 @@ export async function uploadFlowPackage(
   }
 }
 
-/** Download a specific version of a flow package from Storage. If no version, fetches the latest. */
-export async function downloadFlowPackage(
-  flowId: string,
+/** Download a specific version of a package from Storage. If no version, fetches the latest. */
+export async function downloadPackageZip(
+  packageId: string,
   versionNumber?: number,
 ): Promise<Buffer | null> {
   let path: string;
 
   if (versionNumber !== undefined) {
-    path = `${flowId}/${versionNumber}.zip`;
+    path = `${packageId}/${versionNumber}.zip`;
   } else {
     // Find the latest version by listing files
-    const files = await storage.listFiles(BUCKET, flowId);
+    const files = await storage.listFiles(BUCKET, packageId);
     if (!files || files.length === 0) return null;
 
     // Sort by name descending to get latest version number
-    const sorted = files.sort((a, b) => b.localeCompare(a));
-    path = `${flowId}/${sorted[0]}`;
+    const sorted = files.sort((a, b) => parseInt(b) - parseInt(a));
+    path = `${packageId}/${sorted[0]}`;
   }
 
   const data = await storage.downloadFile(BUCKET, path);
@@ -69,37 +69,37 @@ export async function downloadFlowPackage(
 }
 
 /** Package a built-in flow directory into a ZIP buffer (cached in memory). */
-async function getBuiltInFlowPackage(flowId: string): Promise<Buffer> {
-  const cached = builtInPackageCache.get(flowId);
+async function getBuiltInPackageZip(packageId: string): Promise<Buffer> {
+  const cached = builtInPackageCache.get(packageId);
   if (cached) return cached;
 
-  const dir = getFlowsDir();
+  const dir = getPackagesDir();
   if (!dir) throw new Error("DATA_DIR not configured — cannot package built-in flow");
-  const flowPath = join(dir, flowId);
+  const flowPath = join(dir, packageId);
   const zipData = await createZipFromDirectory(flowPath);
   const buffer = Buffer.from(zipData);
 
-  builtInPackageCache.set(flowId, buffer);
+  builtInPackageCache.set(packageId, buffer);
   return buffer;
 }
 
-/** Get the flow package for any flow (built-in or user). */
-export async function getFlowPackage(flow: LoadedFlow, orgId?: string): Promise<Buffer | null> {
+/** Get the package ZIP for any flow (built-in or user). */
+export async function getPackageZip(flow: LoadedFlow, orgId?: string): Promise<Buffer | null> {
   if (flow.source === "built-in") {
-    return getBuiltInFlowPackage(flow.id);
+    return getBuiltInPackageZip(flow.id);
   }
 
   // User flow: build ZIP on-the-fly from org library
   if (orgId) {
-    return buildUserFlowPackage(flow, orgId);
+    return buildUserFlowZip(flow, orgId);
   }
 
   // Fallback: download from Storage (legacy)
-  return downloadFlowPackage(flow.id);
+  return downloadPackageZip(flow.id);
 }
 
 /** Build a user flow package ZIP on-the-fly from org library + built-in content. */
-async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Buffer> {
+async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer> {
   const { getFlowSkillFiles, getFlowExtensionFiles } = await import("./library.ts");
 
   const entries: Zippable = {
@@ -149,7 +149,7 @@ async function buildUserFlowPackage(flow: LoadedFlow, orgId: string): Promise<Bu
 
   await Promise.all([...builtInSkillPromises, ...builtInExtPromises]);
 
-  return Buffer.from(zipSync(entries, { level: ZIP_COMPRESSION_LEVEL }));
+  return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
 }
 
 /** Build a minimal ZIP with just manifest.json + prompt.md. */
@@ -158,50 +158,31 @@ export function buildMinimalZip(manifest: Record<string, unknown>, prompt: strin
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(prompt),
   };
-  return Buffer.from(zipSync(entries, { level: ZIP_COMPRESSION_LEVEL }));
+  return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
 }
 
 /**
- * Strip macOS resource fork entries (__MACOSX/) and a common single-directory wrapper from ZIP entries.
- * e.g. if all files are under "my-skill/", strip that prefix so "my-skill/SKILL.md" → "SKILL.md".
- */
-export function stripZipDirectoryWrapper(
-  files: Record<string, Uint8Array>,
-): Record<string, Uint8Array> {
-  // Filter out directory entries and __MACOSX resource forks
-  const filePaths = Object.keys(files).filter(
-    (k) => !k.endsWith("/") && !k.startsWith("__MACOSX/"),
-  );
-  if (filePaths.length === 0) return {};
-
-  // Check if all file paths share a common single-directory prefix (e.g. "folder/")
-  const firstSlash = filePaths[0]!.indexOf("/");
-  const hasWrapper = firstSlash !== -1;
-  const prefix = hasWrapper ? filePaths[0]!.slice(0, firstSlash + 1) : "";
-  const allSharePrefix = hasWrapper && filePaths.every((p) => p.startsWith(prefix));
-
-  // Build filtered result, optionally stripping the shared prefix
-  const result: Record<string, Uint8Array> = {};
-  for (const p of filePaths) {
-    result[allSharePrefix ? p.slice(prefix.length) : p] = files[p]!;
-  }
-  return result;
-}
-
-/**
- * Unzip a buffer and normalize (strip __MACOSX, directory wrappers).
+ * Unzip a buffer and normalize (strip __MACOSX, directory entries, and folder wrappers).
  * Returns a map of path → content as Uint8Array.
  */
 export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
-  const rawFiles = unzipSync(new Uint8Array(zipBuffer));
-  return stripZipDirectoryWrapper(rawFiles);
+  const { files, prefix } = unzipArtifact(new Uint8Array(zipBuffer));
+
+  const result: Record<string, Uint8Array> = {};
+  for (const [path, data] of Object.entries(files)) {
+    // Filter out directory entries and __MACOSX resource forks
+    if (path.endsWith("/") || path.startsWith("__MACOSX/")) continue;
+    const stripped = prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
+    if (stripped) result[stripped] = data;
+  }
+  return result;
 }
 
 /** Recursively read a directory into an fflate Zippable structure. */
 async function createZipFromDirectory(dirPath: string): Promise<Uint8Array> {
   const entries: Zippable = {};
   await addDirectoryToZip(dirPath, "", entries);
-  return zipSync(entries, { level: ZIP_COMPRESSION_LEVEL });
+  return zipArtifact(entries, ZIP_COMPRESSION_LEVEL);
 }
 
 async function addDirectoryToZip(

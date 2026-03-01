@@ -44,7 +44,7 @@ export function ExecutionRow({
   return (
     <Link
       className={`exec-row${isUnread ? " unread" : ""}`}
-      to={`/flows/${execution.flowId}/executions/${execution.id}`}
+      to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber }}
     >
       <div className="exec-row-main">

@@ -2,14 +2,14 @@ import { hostname } from "node:os";
 import { Cron } from "croner";
 import { eq, and, asc } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { flowSchedules, scheduleRuns } from "@appstrate/db/schema";
+import { packageSchedules, scheduleRuns } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
 import { createExecution } from "./state.ts";
 import { getConnectionStatus } from "./connection-manager.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext } from "./env-builder.ts";
-import { getFlow, flowExists } from "./flow-service.ts";
+import { getPackage, packageExists } from "./flow-service.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
 
 // In-memory map of active cron jobs
@@ -22,7 +22,7 @@ const INSTANCE_ID = `${hostname()}-${process.pid}`;
 const scheduleOrgCache = new Map<string, string>();
 
 /** Convert a Drizzle schedule row to the Schedule type. */
-function toSchedule(row: typeof flowSchedules.$inferSelect): Schedule {
+function toSchedule(row: typeof packageSchedules.$inferSelect): Schedule {
   return {
     ...row,
     input: row.input as Record<string, unknown> | null,
@@ -34,29 +34,29 @@ function toSchedule(row: typeof flowSchedules.$inferSelect): Schedule {
 export async function listSchedules(orgId: string): Promise<Schedule[]> {
   const rows = await db
     .select()
-    .from(flowSchedules)
-    .where(eq(flowSchedules.orgId, orgId))
-    .orderBy(asc(flowSchedules.createdAt));
+    .from(packageSchedules)
+    .where(eq(packageSchedules.orgId, orgId))
+    .orderBy(asc(packageSchedules.createdAt));
   return rows.map(toSchedule);
 }
 
-export async function listFlowSchedules(flowId: string, orgId: string): Promise<Schedule[]> {
+export async function listPackageSchedules(packageId: string, orgId: string): Promise<Schedule[]> {
   const rows = await db
     .select()
-    .from(flowSchedules)
-    .where(and(eq(flowSchedules.flowId, flowId), eq(flowSchedules.orgId, orgId)))
-    .orderBy(asc(flowSchedules.createdAt));
+    .from(packageSchedules)
+    .where(and(eq(packageSchedules.packageId, packageId), eq(packageSchedules.orgId, orgId)))
+    .orderBy(asc(packageSchedules.createdAt));
   return rows.map(toSchedule);
 }
 
 export async function getSchedule(id: string): Promise<Schedule | null> {
-  const rows = await db.select().from(flowSchedules).where(eq(flowSchedules.id, id)).limit(1);
+  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.id, id)).limit(1);
   if (!rows[0]) return null;
   return toSchedule(rows[0]);
 }
 
 export async function createSchedule(
-  flowId: string,
+  packageId: string,
   userId: string,
   orgId: string,
   data: {
@@ -74,10 +74,10 @@ export async function createSchedule(
   const nextRun = cron.nextRun();
 
   const [row] = await db
-    .insert(flowSchedules)
+    .insert(packageSchedules)
     .values({
       id,
-      flowId,
+      packageId,
       userId,
       orgId,
       name: data.name ?? null,
@@ -133,9 +133,9 @@ export async function updateSchedule(
   if (data.input !== undefined) payload.input = data.input;
 
   const [row] = await db
-    .update(flowSchedules)
+    .update(packageSchedules)
     .set(payload)
-    .where(eq(flowSchedules.id, id))
+    .where(eq(packageSchedules.id, id))
     .returning();
 
   if (!row) {
@@ -157,9 +157,9 @@ export async function deleteSchedule(id: string): Promise<boolean> {
   stopCronJob(id);
   scheduleOrgCache.delete(id);
   const deleted = await db
-    .delete(flowSchedules)
-    .where(eq(flowSchedules.id, id))
-    .returning({ id: flowSchedules.id });
+    .delete(packageSchedules)
+    .where(eq(packageSchedules.id, id))
+    .returning({ id: packageSchedules.id });
   return deleted.length > 0;
 }
 
@@ -180,7 +180,7 @@ function startCronJob(schedule: Schedule, orgId: string) {
     () => {
       triggerScheduledExecution(
         schedule.id,
-        schedule.flowId,
+        schedule.packageId,
         schedule.userId,
         orgId,
         (schedule.input as Record<string, unknown>) ?? undefined,
@@ -225,7 +225,7 @@ async function tryAcquireScheduleLock(scheduleId: string, fireTime: Date): Promi
 
 async function triggerScheduledExecution(
   scheduleId: string,
-  flowId: string,
+  packageId: string,
   userId: string,
   orgId: string,
   input?: Record<string, unknown>,
@@ -243,17 +243,17 @@ async function triggerScheduledExecution(
       return;
     }
 
-    const flow = await getFlow(flowId, orgId);
+    const flow = await getPackage(packageId, orgId);
     if (!flow) {
-      logger.warn("Flow not found, skipping schedule", { flowId, scheduleId });
+      logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
       return;
     }
 
-    // Resolve service profiles for this user + flow
+    // Resolve service profiles for this user + package
     const serviceProfiles = await resolveServiceProfiles(
       flow.manifest.requires.services,
       userId,
-      flowId,
+      packageId,
       orgId,
     );
 
@@ -264,7 +264,7 @@ async function triggerScheduledExecution(
         logger.warn("Service profile not resolved, skipping schedule", {
           serviceId: svc.id,
           scheduleId,
-          flowId,
+          packageId,
         });
         return;
       }
@@ -275,14 +275,14 @@ async function triggerScheduledExecution(
           serviceId: svc.id,
           profileId,
           scheduleId,
-          flowId,
+          packageId,
         });
         return;
       }
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
-    const userProfileId = await getEffectiveProfileId(userId, flowId);
+    const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
@@ -297,7 +297,7 @@ async function triggerScheduledExecution(
     // Create execution record with schedule_id and version
     await createExecution(
       executionId,
-      flowId,
+      packageId,
       userId,
       orgId,
       input ?? null,
@@ -314,7 +314,7 @@ async function triggerScheduledExecution(
 
     logger.info("Triggering scheduled execution", {
       executionId,
-      flowId,
+      packageId,
       scheduleId,
       userId,
       orgId,
@@ -323,7 +323,7 @@ async function triggerScheduledExecution(
     // Fire-and-forget (catch to prevent unhandled rejection)
     executeFlowInBackground(
       executionId,
-      flowId,
+      packageId,
       userId,
       orgId,
       flow,
@@ -341,17 +341,17 @@ async function triggerScheduledExecution(
     const nextRun = job?.nextRun() ?? null;
 
     await db
-      .update(flowSchedules)
+      .update(packageSchedules)
       .set({
         lastRunAt: new Date(),
         nextRunAt: nextRun ?? null,
         updatedAt: new Date(),
       })
-      .where(eq(flowSchedules.id, scheduleId));
+      .where(eq(packageSchedules.id, scheduleId));
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
-      flowId,
+      packageId,
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -360,14 +360,14 @@ async function triggerScheduledExecution(
 // --- Lifecycle ---
 
 export async function initScheduler() {
-  const rows = await db.select().from(flowSchedules).where(eq(flowSchedules.enabled, true));
+  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.enabled, true));
 
   let started = 0;
   for (const row of rows) {
-    if (!(await flowExists(row.flowId))) {
-      logger.warn("Schedule references missing flow, skipping", {
+    if (!(await packageExists(row.packageId))) {
+      logger.warn("Schedule references missing package, skipping", {
         scheduleId: row.id,
-        flowId: row.flowId,
+        packageId: row.packageId,
       });
       continue;
     }

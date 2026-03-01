@@ -46,6 +46,9 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
   "cancelled",
 ]);
 
+export const packageTypeEnum = pgEnum("package_type", ["flow", "skill", "extension"]);
+export const packageSourceEnum = pgEnum("package_source", ["built-in", "local"]);
+
 // ────────────────────────────────────────────────────────────
 // Better Auth tables (managed by Better Auth)
 // We define them here so Drizzle knows about them for
@@ -233,64 +236,93 @@ export const profiles = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 3. Flow configs (org-scoped)
+// 3. Package configs (org-scoped)
 // ────────────────────────────────────────────────────────────
 
-export const flowConfigs = pgTable(
-  "flow_configs",
+export const packageConfigs = pgTable(
+  "package_configs",
   {
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     config: jsonb("config").notNull().default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.orgId, table.flowId] }),
-    index("idx_flow_configs_org_id").on(table.orgId),
+    primaryKey({ columns: [table.orgId, table.packageId] }),
+    index("idx_package_configs_org_id").on(table.orgId),
   ],
 );
 
 // ────────────────────────────────────────────────────────────
-// 4. User-imported flows
+// 4. Packages (unified: flows, skills, extensions)
 // ────────────────────────────────────────────────────────────
 
-export const flows = pgTable(
-  "flows",
+export const packages = pgTable(
+  "packages",
   {
     id: text("id").primaryKey(),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
-    manifest: jsonb("manifest").notNull(),
-    prompt: text("prompt").notNull(),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: packageTypeEnum("type").notNull(),
+    source: packageSourceEnum("source").notNull().default("local"),
+    name: text("name").notNull(),
+    manifest: jsonb("manifest"),
+    content: text("content"),
+    displayName: text("display_name"),
+    description: text("description"),
+    createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    index("idx_flows_org_id").on(table.orgId),
-    check("flows_id_slug", sql`${table.id} ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'`),
+    index("idx_packages_org_id").on(table.orgId),
+    index("idx_packages_type").on(table.type),
+    check("packages_id_slug", sql`${table.id} ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'`),
   ],
 );
 
 // ────────────────────────────────────────────────────────────
-// 5. Flow versions (audit trail)
+// 4b. Package versions (audit trail)
 // ────────────────────────────────────────────────────────────
 
-export const flowVersions = pgTable(
-  "flow_versions",
+export const packageVersions = pgTable(
+  "package_versions",
   {
     id: serial("id").primaryKey(),
-    flowId: text("flow_id").notNull(), // No FK: preserve history after deletion
+    packageId: text("package_id").notNull(),
     versionNumber: integer("version_number").notNull(),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("flow_versions_flow_version_unique").on(table.flowId, table.versionNumber),
-    index("idx_flow_versions_flow_id").on(table.flowId, table.versionNumber),
+    uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.versionNumber),
+    index("idx_package_versions_package_id").on(table.packageId, table.versionNumber),
+  ],
+);
+
+// ────────────────────────────────────────────────────────────
+// 4c. Package dependencies (replaces flowSkills + flowExtensions)
+// ────────────────────────────────────────────────────────────
+
+export const packageDependencies = pgTable(
+  "package_dependencies",
+  {
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    dependencyId: text("dependency_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageId, table.dependencyId] }),
+    index("idx_package_dependencies_dep_id").on(table.dependencyId),
   ],
 );
 
@@ -302,7 +334,7 @@ export const executions = pgTable(
   "executions",
   {
     id: text("id").primaryKey(),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
@@ -321,12 +353,12 @@ export const executions = pgTable(
     duration: integer("duration"),
     connectionProfileId: uuid("connection_profile_id"),
     scheduleId: text("schedule_id"),
-    flowVersionId: integer("flow_version_id").references(() => flowVersions.id),
+    packageVersionId: integer("package_version_id").references(() => packageVersions.id),
     notifiedAt: timestamp("notified_at"),
     readAt: timestamp("read_at"),
   },
   (table) => [
-    index("idx_executions_flow_id").on(table.flowId),
+    index("idx_executions_package_id").on(table.packageId),
     index("idx_executions_status").on(table.status),
     index("idx_executions_user_id").on(table.userId),
     index("idx_executions_org_id").on(table.orgId),
@@ -371,14 +403,14 @@ export const executionLogs = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 7b. Flow memories (org-scoped, accumulate across executions)
+// 7b. Package memories (org-scoped, accumulate across executions)
 // ────────────────────────────────────────────────────────────
 
-export const flowMemories = pgTable(
-  "flow_memories",
+export const packageMemories = pgTable(
+  "package_memories",
   {
     id: serial("id").primaryKey(),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -389,20 +421,20 @@ export const flowMemories = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [
-    index("idx_flow_memories_flow_org").on(table.flowId, table.orgId),
-    index("idx_flow_memories_org_id").on(table.orgId),
+    index("idx_package_memories_package_org").on(table.packageId, table.orgId),
+    index("idx_package_memories_org_id").on(table.orgId),
   ],
 );
 
 // ────────────────────────────────────────────────────────────
-// 8. Flow schedules (org-scoped, per-user)
+// 8. Package schedules (org-scoped, per-user)
 // ────────────────────────────────────────────────────────────
 
-export const flowSchedules = pgTable(
-  "flow_schedules",
+export const packageSchedules = pgTable(
+  "package_schedules",
   {
     id: text("id").primaryKey(),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
@@ -420,9 +452,9 @@ export const flowSchedules = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    index("idx_schedules_flow_id").on(table.flowId),
+    index("idx_schedules_package_id").on(table.packageId),
     index("idx_schedules_user_id").on(table.userId),
-    index("idx_flow_schedules_org_id").on(table.orgId),
+    index("idx_package_schedules_org_id").on(table.orgId),
   ],
 );
 
@@ -438,7 +470,7 @@ export const scheduleRuns = pgTable(
       .$defaultFn(() => crypto.randomUUID()),
     scheduleId: text("schedule_id")
       .notNull()
-      .references(() => flowSchedules.id, { onDelete: "cascade" }),
+      .references(() => packageSchedules.id, { onDelete: "cascade" }),
     fireTime: timestamp("fire_time").notNull(),
     executionId: text("execution_id").references(() => executions.id, { onDelete: "set null" }),
     instanceId: text("instance_id"),
@@ -461,7 +493,7 @@ export const shareTokens = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     token: text("token").notNull().unique(),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
@@ -475,7 +507,7 @@ export const shareTokens = pgTable(
   },
   (table) => [
     index("idx_share_tokens_token").on(table.token),
-    index("idx_share_tokens_flow_id").on(table.flowId),
+    index("idx_share_tokens_package_id").on(table.packageId),
     index("idx_share_tokens_org_id").on(table.orgId),
   ],
 );
@@ -505,32 +537,32 @@ export const connectionProfiles = pgTable(
 );
 
 // ────────────────────────────────────────────────────────────
-// 12. User flow profile overrides
+// 12. User package profile overrides
 // ────────────────────────────────────────────────────────────
 
-export const userFlowProfiles = pgTable(
-  "user_flow_profiles",
+export const userPackageProfiles = pgTable(
+  "user_package_profiles",
   {
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     profileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.userId, table.flowId] })],
+  (table) => [primaryKey({ columns: [table.userId, table.packageId] })],
 );
 
 // ────────────────────────────────────────────────────────────
-// 13. Flow admin connections
+// 13. Package admin connections
 // ────────────────────────────────────────────────────────────
 
-export const flowAdminConnections = pgTable(
-  "flow_admin_connections",
+export const packageAdminConnections = pgTable(
+  "package_admin_connections",
   {
-    flowId: text("flow_id").notNull(),
+    packageId: text("package_id").notNull(),
     serviceId: text("service_id").notNull(),
     orgId: uuid("org_id")
       .notNull()
@@ -539,79 +571,9 @@ export const flowAdminConnections = pgTable(
     connectedAt: timestamp("connected_at").defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.flowId, table.serviceId] }),
-    index("idx_flow_admin_connections_flow_id").on(table.flowId),
-    index("idx_flow_admin_connections_org_id").on(table.orgId),
-  ],
-);
-
-// ────────────────────────────────────────────────────────────
-// 14. Organization library: skills & extensions
-// ────────────────────────────────────────────────────────────
-
-export const orgSkills = pgTable(
-  "org_skills",
-  {
-    id: text("id").notNull(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    name: text("name"),
-    description: text("description"),
-    content: text("content").notNull(),
-    createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.orgId, table.id] })],
-);
-
-export const orgExtensions = pgTable(
-  "org_extensions",
-  {
-    id: text("id").notNull(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    name: text("name"),
-    description: text("description"),
-    content: text("content").notNull(),
-    createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.orgId, table.id] })],
-);
-
-export const flowSkills = pgTable(
-  "flow_skills",
-  {
-    flowId: text("flow_id")
-      .notNull()
-      .references(() => flows.id, { onDelete: "cascade" }),
-    skillId: text("skill_id").notNull(),
-    orgId: uuid("org_id").notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.flowId, table.skillId] }),
-    index("idx_flow_skills_org_skill").on(table.orgId, table.skillId),
-  ],
-);
-
-export const flowExtensions = pgTable(
-  "flow_extensions",
-  {
-    flowId: text("flow_id")
-      .notNull()
-      .references(() => flows.id, { onDelete: "cascade" }),
-    extensionId: text("extension_id").notNull(),
-    orgId: uuid("org_id").notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.flowId, table.extensionId] }),
-    index("idx_flow_extensions_org_ext").on(table.orgId, table.extensionId),
+    primaryKey({ columns: [table.packageId, table.serviceId] }),
+    index("idx_package_admin_connections_package_id").on(table.packageId),
+    index("idx_package_admin_connections_org_id").on(table.orgId),
   ],
 );
 
@@ -749,21 +711,29 @@ export type NewOrganizationMember = InferInsertModel<typeof organizationMembers>
 export type Profile = InferSelectModel<typeof profiles>;
 export type NewProfile = InferInsertModel<typeof profiles>;
 
-export type FlowConfig = InferSelectModel<typeof flowConfigs>;
+export type Package = InferSelectModel<typeof packages>;
+export type NewPackage = InferInsertModel<typeof packages>;
 
-export type Flow = InferSelectModel<typeof flows>;
-export type NewFlow = InferInsertModel<typeof flows>;
+export type PackageVersion = InferSelectModel<typeof packageVersions>;
 
-export type FlowVersion = InferSelectModel<typeof flowVersions>;
+export type PackageConfig = InferSelectModel<typeof packageConfigs>;
+
+export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
+export type NewPackageSchedule = InferInsertModel<typeof packageSchedules>;
+
+export type PackageMemory = InferSelectModel<typeof packageMemories>;
+
+export type PackageAdminConnection = InferSelectModel<typeof packageAdminConnections>;
+
+export type UserPackageProfile = InferSelectModel<typeof userPackageProfiles>;
+
+export type PackageDependency = InferSelectModel<typeof packageDependencies>;
 
 export type Execution = InferSelectModel<typeof executions>;
 export type NewExecution = InferInsertModel<typeof executions>;
 
 export type ExecutionLog = InferSelectModel<typeof executionLogs>;
 export type NewExecutionLog = InferInsertModel<typeof executionLogs>;
-
-export type FlowSchedule = InferSelectModel<typeof flowSchedules>;
-export type NewFlowSchedule = InferInsertModel<typeof flowSchedules>;
 
 export type ScheduleRun = InferSelectModel<typeof scheduleRuns>;
 
@@ -772,13 +742,6 @@ export type NewShareToken = InferInsertModel<typeof shareTokens>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 export type NewConnectionProfile = InferInsertModel<typeof connectionProfiles>;
-
-export type UserFlowProfile = InferSelectModel<typeof userFlowProfiles>;
-
-export type FlowAdminConnection = InferSelectModel<typeof flowAdminConnections>;
-
-export type OrgSkill = InferSelectModel<typeof orgSkills>;
-export type OrgExtension = InferSelectModel<typeof orgExtensions>;
 
 export type ProviderConfig = InferSelectModel<typeof providerConfigs>;
 export type NewProviderConfig = InferInsertModel<typeof providerConfigs>;
@@ -797,5 +760,3 @@ export type NewApiKey = InferInsertModel<typeof apiKeys>;
 
 export type OrgProxy = InferSelectModel<typeof orgProxies>;
 export type NewOrgProxy = InferInsertModel<typeof orgProxies>;
-
-export type FlowMemory = InferSelectModel<typeof flowMemories>;

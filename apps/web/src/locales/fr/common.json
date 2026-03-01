@@ -46,5 +46,8 @@
   "validation.minLength": "Minimum {{min}} caractères",
   "validation.passwordMismatch": "Les mots de passe ne correspondent pas",
   "validation.slugFormat": "Lettres minuscules, chiffres et tirets uniquement",
-  "validation.emailFormat": "Adresse email invalide"
+  "validation.emailFormat": "Adresse email invalide",
+  "orgSwitcher.marketplace": "Marketplace",
+  "btn.install": "Installer",
+  "btn.installing": "Installation..."
 }

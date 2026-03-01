@@ -9,6 +9,15 @@ import type { LoadedFlow } from "../../types/index.ts";
 
 // --- Mocks ---
 
+const noop = () => {};
+mock.module("../../lib/logger.ts", () => ({
+  logger: { debug: noop, info: noop, warn: noop, error: noop },
+}));
+
+mock.module("../../lib/db.ts", () => ({
+  db: {},
+}));
+
 const logs: { event: string; data: Record<string, unknown> | null }[] = [];
 const updates: { id: string; updates: Record<string, unknown> }[] = [];
 
@@ -30,16 +39,17 @@ mock.module("../../services/state.ts", () => ({
   updateExecution: mock(async (id: string, upd: Record<string, unknown>) => {
     updates.push({ id, updates: upd });
   }),
-  getFlowConfig: mock(async () => ({})),
+  getPackageConfig: mock(async () => ({})),
   getLastExecutionState: mock(async () => null),
   createExecution: mock(async () => {}),
   getAdminConnections: mock(async () => ({})),
-  getRunningExecutionsForFlow: mock(async () => 0),
+  getRunningExecutionsForPackage: mock(async () => 0),
   getExecution: mock(async () => null),
   getExecutionFull: mock(async () => null),
-  deleteFlowExecutions: mock(async () => {}),
-  listFlowExecutions: mock(async () => []),
+  deletePackageExecutions: mock(async () => {}),
+  listPackageExecutions: mock(async () => []),
   listExecutionLogs: mock(async () => []),
+  addPackageMemories: mock(async () => {}),
 }));
 
 mock.module("../../services/connection-manager.ts", () => ({
@@ -60,7 +70,7 @@ mock.module("../../services/env-builder.ts", () => ({
   })),
 }));
 
-mock.module("../../services/flow-versions.ts", () => ({
+mock.module("../../services/package-versions.ts", () => ({
   getLatestVersionId: mock(async () => null),
 }));
 
@@ -102,8 +112,8 @@ mock.module("../../services/adapters/index.ts", () => ({
     "mock retry prompt",
 }));
 
-mock.module("../../services/flow-package.ts", () => ({
-  getFlowPackage: mock(async () => null),
+mock.module("../../services/package-storage.ts", () => ({
+  getPackageZip: mock(async () => null),
 }));
 
 mock.module("../../services/file-storage.ts", () => ({
@@ -156,12 +166,10 @@ function makeFlow(overrides: {
     source: "built-in",
     manifest: {
       schemaVersion: "1.0.0",
-      metadata: {
-        id: "test-flow",
-        displayName: "Test Flow",
-        description: "A test flow",
-        author: "test",
-      },
+      name: "test-flow",
+      displayName: "Test Flow",
+      description: "A test flow",
+      author: "test",
       requires: { services: [] },
       output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
       execution: {

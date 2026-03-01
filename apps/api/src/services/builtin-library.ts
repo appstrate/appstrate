@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
-import { extractSkillMeta } from "./skill-utils.ts";
+import { extractSkillMeta } from "@appstrate/validation";
 
 // Module-level directories, initialized by initBuiltInLibrary()
 let skillsDir: string | null = null;

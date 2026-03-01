@@ -134,7 +134,7 @@ function LibraryTab({ type }: { type: LibraryType }) {
                   <td className="cell-id">
                     <code>{item.id}</code>
                     {item.source === "built-in" && (
-                      <span className="badge badge-builtin">{t("library.builtIn")}</span>
+                      <span className="badge badge-builtin">{t("library.sourceBuiltIn")}</span>
                     )}
                   </td>
                   <td className="cell-meta">

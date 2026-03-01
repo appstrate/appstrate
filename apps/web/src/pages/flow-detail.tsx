@@ -74,36 +74,36 @@ type Tab = "executions" | "schedules" | "memories";
 
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { flowId } = useParams<{ flowId: string }>();
+  const { packageId } = useParams<{ packageId: string }>();
   const { isOrgAdmin } = useOrg();
 
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
-  const { data: detail, isLoading, error } = useFlowDetail(flowId);
-  const { data: executions } = useExecutions(flowId);
-  const { data: schedules } = useSchedules(flowId);
+  const { data: detail, isLoading, error } = useFlowDetail(packageId);
+  const { data: executions } = useExecutions(packageId);
+  const { data: schedules } = useSchedules(packageId);
   const { data: providers } = useProviders();
   const { data: orgProxies } = useProxies();
-  const { data: flowProxy } = useFlowProxy(flowId);
-  const setFlowProxy = useSetFlowProxy(flowId!);
+  const { data: flowProxy } = useFlowProxy(packageId);
+  const setFlowProxy = useSetFlowProxy(packageId!);
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
-  const runFlow = useRunFlow(flowId!);
+  const runFlow = useRunFlow(packageId!);
   const deleteFlow = useDeleteFlow();
-  const deleteExecutions = useDeleteFlowExecutions(flowId!);
+  const deleteExecutions = useDeleteFlowExecutions(packageId!);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
   const credentialsMutation = useConnectCredentials();
-  const bindAdmin = useBindAdminService(flowId!);
-  const unbindAdmin = useUnbindAdminService(flowId!);
+  const bindAdmin = useBindAdminService(packageId!);
+  const unbindAdmin = useUnbindAdminService(packageId!);
   const disconnectMutation = useDisconnect();
-  const createSchedule = useCreateSchedule(flowId!);
+  const createSchedule = useCreateSchedule(packageId!);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
-  const { data: memories } = useFlowMemories(flowId);
-  const deleteMemory = useDeleteMemory(flowId!);
-  const deleteAllMemories = useDeleteAllMemories(flowId!);
+  const { data: memories } = useFlowMemories(packageId);
+  const deleteMemory = useDeleteMemory(packageId!);
+  const deleteAllMemories = useDeleteAllMemories(packageId!);
 
   const [tab, setTab] = useState<Tab>("executions");
   const [configOpen, setConfigOpen] = useState(false);
@@ -425,18 +425,22 @@ export function FlowDetailPage() {
         >
           {runFlow.isPending && <Spinner />} {t("detail.run")}
         </button>
-        <ShareDropdown flowId={flowId!} isAdmin={isOrgAdmin} services={detail.requires.services} />
+        <ShareDropdown
+          packageId={packageId!}
+          isAdmin={isOrgAdmin}
+          services={detail.requires.services}
+        />
         {isOrgAdmin && (
           <div className="actions-admin">
             {hasConfigSchema && (
               <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>
             )}
-            {detail.source === "user" && (
-              <Link to={`/flows/${flowId}/edit`}>
+            {detail.source !== "built-in" && (
+              <Link to={`/flows/${packageId}/edit`}>
                 <button>{t("btn.edit")}</button>
               </Link>
             )}
-            {detail.source === "user" && (
+            {detail.source !== "built-in" && (
               <button
                 className="btn-danger"
                 disabled={detail.runningExecutions > 0 || deleteFlow.isPending}

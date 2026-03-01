@@ -7,21 +7,19 @@ export type { OrgRole } from "@appstrate/shared-types";
 export interface FlowManifest {
   $schema?: string;
   schemaVersion: string;
-  metadata: FlowMetadata;
-  requires: FlowRequirements;
-  input?: FlowInputSpec;
-  output?: FlowOutputSpec;
-  config?: FlowConfigSpec;
-  execution?: FlowExecutionSpec;
-}
-
-export interface FlowMetadata {
-  id: string;
+  name: string;
   displayName: string;
   description: string;
   author: string;
   license?: string;
   tags?: string[];
+  type?: string;
+  version?: string;
+  requires: FlowRequirements;
+  input?: FlowInputSpec;
+  output?: FlowOutputSpec;
+  config?: FlowConfigSpec;
+  execution?: FlowExecutionSpec;
 }
 
 export interface FlowRequirements {
@@ -75,7 +73,7 @@ export interface LoadedFlow {
   prompt: string;
   skills: SkillMeta[];
   extensions: ExtensionMeta[];
-  source: "built-in" | "user";
+  source: "built-in" | "local";
 }
 
 // Hono context env — shared across all routers

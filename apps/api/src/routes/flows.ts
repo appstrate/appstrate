@@ -1,30 +1,30 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
-  getFlowConfig,
-  setFlowConfig,
+  getPackageConfig,
+  setPackageConfig,
   getLastExecution,
   getRunningExecutionsCounts,
-  getRunningExecutionsForFlow,
+  getRunningExecutionsForPackage,
   getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
-  getFlowMemories,
-  deleteFlowMemory,
-  deleteAllFlowMemories,
+  getPackageMemories,
+  deletePackageMemory,
+  deleteAllPackageMemories,
 } from "../services/state.ts";
 import { getConnectionStatus, resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateConfig } from "../services/schema.ts";
-import { getFlowById } from "../services/user-flows.ts";
-import { listFlows } from "../services/flow-service.ts";
-import { listFlowVersions } from "../services/flow-versions.ts";
-import { getFlowPackage } from "../services/flow-package.ts";
+import { getPackageById } from "../services/user-flows.ts";
+import { listPackages } from "../services/flow-service.ts";
+import { listPackageVersions } from "../services/package-versions.ts";
+import { getPackageZip } from "../services/package-storage.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
 import {
   getEffectiveProfileId,
-  setFlowProfileOverride,
-  removeFlowProfileOverride,
+  setPackageProfileOverride,
+  removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
 
 export function createFlowsRouter() {
@@ -34,17 +34,17 @@ export function createFlowsRouter() {
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const [allFlows, runningCounts] = await Promise.all([
-      listFlows(orgId),
+      listPackages(orgId),
       getRunningExecutionsCounts(orgId),
     ]);
 
     const flowList = allFlows.map((f) => ({
       id: f.id,
-      displayName: f.manifest.metadata.displayName,
-      description: f.manifest.metadata.description,
+      displayName: f.manifest.displayName,
+      description: f.manifest.description,
       schemaVersion: f.manifest.schemaVersion,
-      author: f.manifest.metadata.author,
-      tags: f.manifest.metadata.tags ?? [],
+      author: f.manifest.author,
+      tags: f.manifest.tags ?? [],
       requires: {
         services: f.manifest.requires.services.map((s) => s.id),
         skills: f.skills.map((s) => s.id),
@@ -81,10 +81,10 @@ export function createFlowsRouter() {
     // Get config (global), last execution (per-user), running count (per-user)
     // For user flows, also fetch the raw DB row for editable content
     const [currentConfig, lastExec, runningCount, userFlowRow] = await Promise.all([
-      getFlowConfig(orgId, flow.id),
+      getPackageConfig(orgId, flow.id),
       getLastExecution(flow.id, user.id, orgId),
-      getRunningExecutionsForFlow(flow.id, user.id),
-      flow.source === "user" ? getFlowById(flow.id) : Promise.resolve(null),
+      getRunningExecutionsForPackage(flow.id, user.id),
+      flow.source !== "built-in" ? getPackageById(flow.id) : Promise.resolve(null),
     ]);
 
     // Merge defaults with current config
@@ -97,11 +97,11 @@ export function createFlowsRouter() {
 
     return c.json({
       id: flow.id,
-      displayName: m.metadata.displayName,
-      description: m.metadata.description,
+      displayName: m.displayName,
+      description: m.description,
       schemaVersion: m.schemaVersion,
-      author: m.metadata.author,
-      tags: m.metadata.tags ?? [],
+      author: m.author,
+      tags: m.tags ?? [],
       source: flow.source,
       requires: {
         services: serviceStatuses,
@@ -131,7 +131,7 @@ export function createFlowsRouter() {
             duration: lastExec.duration,
           }
         : null,
-      ...(flow.source === "user" && userFlowRow
+      ...(flow.source !== "built-in" && userFlowRow
         ? {
             updatedAt: userFlowRow.updatedAt,
             prompt: flow.prompt,
@@ -168,7 +168,7 @@ export function createFlowsRouter() {
     }
 
     const orgId = c.get("orgId");
-    await setFlowConfig(orgId, flow.id, config);
+    await setPackageConfig(orgId, flow.id, config);
 
     return c.json({
       config,
@@ -181,7 +181,7 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
 
-    const zipBuffer = await getFlowPackage(flow, orgId);
+    const zipBuffer = await getPackageZip(flow, orgId);
     if (!zipBuffer) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Package not found" }, 404);
     }
@@ -195,14 +195,14 @@ export function createFlowsRouter() {
   router.get("/:id/versions", requireFlow(), async (c) => {
     const flow = c.get("flow");
 
-    if (flow.source !== "user") {
+    if (flow.source === "built-in") {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not have version history" },
         400,
       );
     }
 
-    const versions = await listFlowVersions(flow.id);
+    const versions = await listPackageVersions(flow.id);
     return c.json({ versions });
   });
 
@@ -282,7 +282,7 @@ export function createFlowsRouter() {
     if (!body.profileId) {
       return c.json({ error: "VALIDATION_ERROR", message: "profileId is required" }, 400);
     }
-    await setFlowProfileOverride(user.id, flow.id, body.profileId);
+    await setPackageProfileOverride(user.id, flow.id, body.profileId);
     return c.json({ success: true });
   });
 
@@ -290,7 +290,7 @@ export function createFlowsRouter() {
   router.delete("/:id/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
-    await removeFlowProfileOverride(user.id, flow.id);
+    await removePackageProfileOverride(user.id, flow.id);
     return c.json({ success: true });
   });
 
@@ -298,7 +298,7 @@ export function createFlowsRouter() {
   router.get("/:id/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const config = await getFlowConfig(orgId, flow.id);
+    const config = await getPackageConfig(orgId, flow.id);
     const proxyId = (config.__proxyId as string | null) ?? null;
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
@@ -311,13 +311,13 @@ export function createFlowsRouter() {
     const body = await c.req.json<{ proxyId: string | null }>();
 
     // Read existing config and merge __proxyId
-    const currentConfig = await getFlowConfig(orgId, flow.id);
+    const currentConfig = await getPackageConfig(orgId, flow.id);
     if (body.proxyId === null) {
       // Remove the override
       const { __proxyId: _, ...rest } = currentConfig;
-      await setFlowConfig(orgId, flow.id, rest);
+      await setPackageConfig(orgId, flow.id, rest);
     } else {
-      await setFlowConfig(orgId, flow.id, { ...currentConfig, __proxyId: body.proxyId });
+      await setPackageConfig(orgId, flow.id, { ...currentConfig, __proxyId: body.proxyId });
     }
 
     return c.json({ success: true });
@@ -327,7 +327,7 @@ export function createFlowsRouter() {
   router.get("/:id/memories", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const memories = await getFlowMemories(flow.id, orgId);
+    const memories = await getPackageMemories(flow.id, orgId);
     return c.json({
       memories: memories.map((m) => ({
         id: m.id,
@@ -342,7 +342,7 @@ export function createFlowsRouter() {
   router.delete("/:id/memories", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const deleted = await deleteAllFlowMemories(flow.id, orgId);
+    const deleted = await deleteAllPackageMemories(flow.id, orgId);
     return c.json({ deleted });
   });
 
@@ -354,7 +354,7 @@ export function createFlowsRouter() {
     if (isNaN(memoryId)) {
       return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
     }
-    const deleted = await deleteFlowMemory(memoryId, flow.id, orgId);
+    const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
     if (!deleted) {
       return c.json({ error: "NOT_FOUND", message: "Memory not found" }, 404);
     }

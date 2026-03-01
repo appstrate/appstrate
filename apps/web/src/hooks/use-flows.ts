@@ -15,16 +15,16 @@ export function useFlows() {
   });
 }
 
-export function useFlowDetail(flowId: string | undefined) {
+export function useFlowDetail(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const profileId = useCurrentProfileId();
   return useQuery({
-    queryKey: ["flow", orgId, flowId, profileId],
+    queryKey: ["flow", orgId, packageId, profileId],
     queryFn: async () => {
       const qs = profileId ? `?profileId=${profileId}` : "";
-      const data = await api<FlowDetail>(`/flows/${flowId}${qs}`);
+      const data = await api<FlowDetail>(`/flows/${packageId}${qs}`);
       return data;
     },
-    enabled: !!flowId,
+    enabled: !!packageId,
   });
 }

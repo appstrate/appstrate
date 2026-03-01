@@ -88,15 +88,15 @@ export function createRealtimeRouter() {
     });
   });
 
-  // GET /api/realtime/flows/:flowId/executions — stream execution changes for a flow
-  router.get("/flows/:flowId/executions", async (c) => {
+  // GET /api/realtime/flows/:packageId/executions — stream execution changes for a flow
+  router.get("/flows/:packageId/executions", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) {
       return c.json({ error: "UNAUTHORIZED", message: "Invalid session or org" }, 401);
     }
 
-    const flowId = c.req.param("flowId");
-    const subId = `flow-${flowId}-${crypto.randomUUID().slice(0, 8)}`;
+    const packageId = c.req.param("packageId");
+    const subId = `flow-${packageId}-${crypto.randomUUID().slice(0, 8)}`;
 
     const verbose = c.req.query("verbose") === "true";
 
@@ -108,7 +108,7 @@ export function createRealtimeRouter() {
 
       addSubscriber({
         id: subId,
-        filter: { flowId, orgId: validated.orgId },
+        filter: { packageId, orgId: validated.orgId },
         send,
       });
 

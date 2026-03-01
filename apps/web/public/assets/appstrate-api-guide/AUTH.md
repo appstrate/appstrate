@@ -115,10 +115,10 @@ Authorization: Bearer ask_...
 Flows can require services in `admin` connection mode. An admin binds their personal connection to the flow:
 
 ```
-POST /api/flows/{flowId}/services/{serviceId}/bind
+POST /api/flows/{packageId}/services/{serviceId}/bind
 Authorization: Bearer ask_...
 ```
 
 This makes the admin's credentials available to all executions of that flow, regardless of who runs it.
 
-**Check if a binding already exists**: The flow detail (`GET /api/flows/{flowId}`) shows `services[].adminConnection` — if it's already set, the binding is done.
+**Check if a binding already exists**: The flow detail (`GET /api/flows/{packageId}`) shows `services[].adminConnection` — if it's already set, the binding is done.

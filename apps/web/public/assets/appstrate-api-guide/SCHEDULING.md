@@ -7,14 +7,14 @@ Flows can be scheduled to run automatically via cron expressions.
 **First check existing schedules** to avoid duplicates:
 
 ```
-GET /api/flows/{flowId}/schedules
+GET /api/flows/{packageId}/schedules
 Authorization: Bearer ask_...
 ```
 
 Then create:
 
 ```
-POST /api/flows/{flowId}/schedules
+POST /api/flows/{packageId}/schedules
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -37,7 +37,7 @@ Authorization: Bearer ask_...
 Returns all schedules across all flows, or filter by flow:
 
 ```
-GET /api/flows/{flowId}/schedules
+GET /api/flows/{packageId}/schedules
 Authorization: Bearer ask_...
 ```
 

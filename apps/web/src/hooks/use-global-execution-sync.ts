@@ -8,7 +8,7 @@ const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"])
 function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
   try {
     const newRow = JSON.parse(raw) as Record<string, unknown>;
-    const flowId = newRow.flowId as string;
+    const packageId = newRow.packageId as string;
     const execId = newRow.id as string;
     const status = newRow.status as string;
 
@@ -17,7 +17,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
       return { ...prev, ...newRow } as Execution;
     });
 
-    qc.setQueryData<Execution[]>(["executions", orgId, flowId], (prev) => {
+    qc.setQueryData<Execution[]>(["executions", orgId, packageId], (prev) => {
       if (!prev) return prev;
       const exists = prev.some((ex) => ex.id === execId);
       if (exists) {
@@ -27,7 +27,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     });
 
     qc.invalidateQueries({ queryKey: ["flows", orgId] });
-    qc.invalidateQueries({ queryKey: ["flow", orgId, flowId] });
+    qc.invalidateQueries({ queryKey: ["flow", orgId, packageId] });
 
     if (TERMINAL_STATUSES.has(status)) {
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });

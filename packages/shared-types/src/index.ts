@@ -3,11 +3,23 @@ export type {
   Execution,
   ExecutionLog,
   ConnectionProfile,
-  UserFlowProfile,
+  UserPackageProfile,
+  Package,
+  PackageVersion,
+  PackageConfig,
+  PackageSchedule,
+  PackageMemory,
+  PackageAdminConnection,
+  PackageDependency,
   OrgProxy,
 } from "@appstrate/db/schema";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
+// --- Package Types ---
+
+export type PackageType = "flow" | "skill" | "extension";
+export type PackageSource = "built-in" | "local";
 
 // --- Auth Mode ---
 
@@ -25,7 +37,7 @@ export type ExecutionStatus =
 
 // --- Schedule Types ---
 
-export type { FlowSchedule as Schedule } from "@appstrate/db/schema";
+export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
 
 // --- Organization Types ---
 
@@ -143,7 +155,10 @@ export interface FlowListItem {
     extensions: string[];
   };
   runningExecutions: number;
-  source: "built-in" | "user";
+  source: "built-in" | "local";
+  scope?: string | null;
+  version?: string | null;
+  type: PackageType;
 }
 
 export interface FlowDetail {
@@ -153,7 +168,7 @@ export interface FlowDetail {
   schemaVersion: string;
   author: string;
   tags: string[];
-  source: "built-in" | "user";
+  source: "built-in" | "local";
   requires: {
     services: ServiceStatus[];
     skills: { id: string; name?: string; description?: string }[];
@@ -182,7 +197,7 @@ export interface OrgSkill {
   id: string;
   name?: string | null;
   description?: string | null;
-  source?: "built-in" | "user";
+  source?: "built-in" | "local";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;
@@ -199,7 +214,7 @@ export interface OrgExtension {
   id: string;
   name?: string | null;
   description?: string | null;
-  source?: "built-in" | "user";
+  source?: "built-in" | "local";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;

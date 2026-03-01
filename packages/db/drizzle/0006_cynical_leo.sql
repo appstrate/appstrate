@@ -1,1 +1,0 @@
-ALTER TYPE "public"."auth_mode" ADD VALUE 'proxy';
