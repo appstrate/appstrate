@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/validation": "file:../validation",
+        "@appstrate/validation": "^1.0.2",
       },
       "devDependencies": {
         "@readme/openapi-parser": "^5.5.0",
@@ -26,7 +26,7 @@
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
-        "@appstrate/validation": "file:../../../validation",
+        "@appstrate/validation": "^1.0.2",
         "@hono/swagger-ui": "^0.5.3",
         "ajv": "^8.18.0",
         "croner": "^10.0.1",
@@ -39,6 +39,7 @@
       "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/bun": "latest",
+        "@types/semver": "^7.7.1",
         "eslint": "^10.0.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.3.0",
@@ -142,7 +143,7 @@
 
     "@appstrate/shared-types": ["@appstrate/shared-types@workspace:packages/shared-types"],
 
-    "@appstrate/validation": ["@appstrate/validation@file:../validation", { "dependencies": { "fflate": "^0.8.0", "semver": "^7.7.1", "zod": "^4.3.6" }, "devDependencies": { "@eslint/js": "^10.0.1", "@types/bun": "latest", "@types/semver": "^7.5.8", "eslint": "^10.0.0", "eslint-config-prettier": "^10.1.8", "globals": "^17.3.0", "prettier": "^3.8.1", "typescript-eslint": "^8.55.0" } }],
+    "@appstrate/validation": ["@appstrate/validation@1.0.2", "", { "dependencies": { "fflate": "^0.8.0", "semver": "^7.7.1", "zod": "^4.3.6" } }, "sha512-Ckk5aJ1emdrIeNsTRQuATJmyvrngAzbsjlqw6i2MYdh/I4AYHjnoVV31uILKrBnlYUPGB08jAQbhbutjButR4w=="],
 
     "@appstrate/web": ["@appstrate/web@workspace:apps/web"],
 
@@ -1073,8 +1074,6 @@
     "zod-validation-error": ["zod-validation-error@4.0.2", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ=="],
 
     "zustand": ["zustand@5.0.11", "", { "peerDependencies": { "@types/react": ">=18.0.0", "immer": ">=9.0.6", "react": ">=18.0.0", "use-sync-external-store": ">=1.2.0" }, "optionalPeers": ["@types/react", "immer", "react", "use-sync-external-store"] }, "sha512-fdZY+dk7zn/vbWNCYmzZULHRrss0jx5pPFiOuMZ/5HJN6Yv3u+1Wswy/4MpZEkEGhtNH+pwxZB8OKgUBPzYAGg=="],
-
-    "@appstrate/api/@appstrate/validation": ["@appstrate/validation@file:../validation", { "dependencies": { "fflate": "^0.8.0", "semver": "^7.7.1", "zod": "^4.3.6" }, "devDependencies": { "@eslint/js": "^10.0.1", "@types/bun": "latest", "@types/semver": "^7.5.8", "eslint": "^10.0.0", "eslint-config-prettier": "^10.1.8", "globals": "^17.3.0", "prettier": "^3.8.1", "typescript-eslint": "^8.55.0" } }],
 
     "@babel/core/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 

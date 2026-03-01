@@ -84,7 +84,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External local dep**: `@appstrate/validation` (`file:../validation` — shared with registry).
+**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External npm dep**: `@appstrate/validation` (shared with registry).
 
 ## Architecture
 

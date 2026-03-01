@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
-    "@appstrate/validation": "file:../../../validation",
+    "@appstrate/validation": "^1.0.2",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
@@ -31,6 +31,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
+    "@types/semver": "^7.7.1",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.3.0",
