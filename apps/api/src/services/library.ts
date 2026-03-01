@@ -1,5 +1,4 @@
 import { zipArtifact, unzipArtifact } from "@appstrate/validation/zip";
-import { extractSkillMeta } from "@appstrate/validation";
 import { eq, and, inArray, desc, sql, isNotNull } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
@@ -13,7 +12,6 @@ import {
   isBuiltInSkill,
   isBuiltInExtension,
 } from "./builtin-library.ts";
-import { createVersionAndUpload } from "./package-versions.ts";
 
 // ─────────────────────────────────────────────
 // Library type configuration
@@ -460,59 +458,4 @@ async function deleteLibraryPackage(
 ): Promise<void> {
   const path = `${orgId}/${type}/${itemId}.zip`;
   await storage.deleteFile(LIBRARY_BUCKET, path);
-}
-
-// ─────────────────────────────────────────────
-// Post-install — shared per-type side-effects
-// ─────────────────────────────────────────────
-
-/**
- * Run per-type post-install side-effects after a package is saved to the DB.
- * Handles version creation (flow), skill upsert + storage, extension upsert + storage.
- */
-export async function postInstallPackage(params: {
-  packageType: "flow" | "skill" | "extension";
-  packageId: string;
-  orgId: string;
-  userId: string;
-  content: string;
-  files: Record<string, Uint8Array>;
-  zipBuffer: Buffer;
-}): Promise<void> {
-  const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
-
-  switch (packageType) {
-    case "flow": {
-      try {
-        await createVersionAndUpload(packageId, userId, zipBuffer);
-      } catch (err) {
-        logger.error("Failed to create version for flow", {
-          packageId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      break;
-    }
-    case "skill": {
-      const skillMeta = extractSkillMeta(content);
-      await upsertOrgItem(
-        orgId,
-        {
-          id: packageId,
-          name: skillMeta.name || undefined,
-          description: skillMeta.description || undefined,
-          content,
-          createdBy: userId,
-        },
-        SKILL_CONFIG,
-      );
-      await uploadLibraryPackage("skills", orgId, packageId, files);
-      break;
-    }
-    case "extension": {
-      await upsertOrgItem(orgId, { id: packageId, content, createdBy: userId }, EXTENSION_CONFIG);
-      await uploadLibraryPackage("extensions", orgId, packageId, files);
-      break;
-    }
-  }
 }

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
 import { insertPackage } from "../services/user-flows.ts";
-import { postInstallPackage } from "../services/library.ts";
+import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
