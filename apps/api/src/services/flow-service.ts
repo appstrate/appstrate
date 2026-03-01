@@ -297,8 +297,3 @@ export async function packageExists(id: string): Promise<boolean> {
 export function getBuiltInPackageCount(): number {
   return builtInFlows.size;
 }
-
-/** Check if a flow ID is a built-in flow. */
-export function isBuiltIn(id: string): boolean {
-  return builtInFlows.has(id);
-}

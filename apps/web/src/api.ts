@@ -9,7 +9,7 @@ async function throwIfNotOk(res: Response): Promise<void> {
   }
 }
 
-export function getAuthHeaders(): Record<string, string> {
+function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const orgId = getCurrentOrgId();
   if (orgId) headers["X-Org-Id"] = orgId;

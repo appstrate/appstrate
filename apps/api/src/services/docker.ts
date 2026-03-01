@@ -300,52 +300,6 @@ export async function createNetwork(name: string): Promise<string> {
   return data.Id;
 }
 
-/**
- * Execute a command inside a running container via Docker exec API.
- * Returns the exit code (0 = success). Uses detached mode + polling
- * so we don't need to parse multiplexed stream output.
- */
-export async function execInContainer(containerId: string, cmd: string[]): Promise<number> {
-  const createRes = await dockerFetch(`/containers/${containerId}/exec`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ Cmd: cmd, AttachStdout: false, AttachStderr: false }),
-  });
-
-  if (!createRes.ok) {
-    const error = await createRes.text();
-    throw new Error(`Failed to create exec: ${createRes.status} ${error}`);
-  }
-
-  const { Id: execId } = (await createRes.json()) as { Id: string };
-
-  const startRes = await dockerFetch(`/exec/${execId}/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ Detach: true }),
-  });
-
-  if (!startRes.ok) {
-    const error = await startRes.text();
-    throw new Error(`Failed to start exec: ${startRes.status} ${error}`);
-  }
-
-  // Poll for completion
-  for (let i = 0; i < 30; i++) {
-    const inspectRes = await dockerFetch(`/exec/${execId}/json`);
-    if (!inspectRes.ok) {
-      throw new Error(`Failed to inspect exec: ${inspectRes.status}`);
-    }
-    const data = (await inspectRes.json()) as { Running: boolean; ExitCode: number };
-    if (!data.Running) {
-      return data.ExitCode;
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-
-  return -1; // Polling timeout
-}
-
 export async function connectContainerToNetwork(
   networkId: string,
   containerId: string,

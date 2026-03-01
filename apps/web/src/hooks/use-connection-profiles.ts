@@ -82,14 +82,3 @@ export function useSetFlowProfile(packageId: string) {
     },
   });
 }
-
-export function useClearFlowProfile(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api(`/flows/${packageId}/profile`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow"] });
-      qc.invalidateQueries({ queryKey: ["services"] });
-    },
-  });
-}

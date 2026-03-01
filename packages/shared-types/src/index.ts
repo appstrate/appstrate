@@ -3,23 +3,11 @@ export type {
   Execution,
   ExecutionLog,
   ConnectionProfile,
-  UserPackageProfile,
-  Package,
-  PackageVersion,
-  PackageConfig,
-  PackageSchedule,
-  PackageMemory,
-  PackageAdminConnection,
-  PackageDependency,
-  OrgProxy,
 } from "@appstrate/db/schema";
-
-export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 // --- Package Types ---
 
-export type PackageType = "flow" | "skill" | "extension";
-export type PackageSource = "built-in" | "local";
+type PackageType = "flow" | "skill" | "extension";
 
 // --- Auth Mode ---
 
@@ -43,13 +31,6 @@ export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
 
 export type OrgRole = "owner" | "admin" | "member";
 
-export interface Organization {
-  id: string;
-  name: string;
-  slug: string;
-  createdAt: string;
-}
-
 export interface OrganizationMember {
   orgId: string;
   userId: string;
@@ -59,7 +40,11 @@ export interface OrganizationMember {
   email?: string;
 }
 
-export interface OrganizationWithRole extends Organization {
+export interface OrganizationWithRole {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
   role: OrgRole;
 }
 

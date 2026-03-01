@@ -26,15 +26,6 @@ export const listenClient = postgres(DATABASE_URL, {
   max_lifetime: 0,
 });
 
-// Raw sql connection for direct queries
-export { queryClient as sql };
-
-// Factory for testability
-export function createDb(connectionString: string) {
-  const client = postgres(connectionString, { max: 10 });
-  return drizzle(client, { schema });
-}
-
 // Graceful shutdown
 export async function closeDb(): Promise<void> {
   await queryClient.end();

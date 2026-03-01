@@ -26,10 +26,6 @@ export class RegistryClient {
     this.accessToken = config.accessToken;
   }
 
-  setAccessToken(token: string | undefined): void {
-    this.accessToken = token;
-  }
-
   private headers(): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

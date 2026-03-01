@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { getCurrentOrgId } from "./use-org";
 
 /**
@@ -36,70 +36,6 @@ export function useExecutionRealtime(
       es.close();
     };
   }, [executionId]);
-}
-
-/**
- * Subscribe to execution status changes for a specific flow (e.g. running count updates).
- */
-export function useFlowExecutionRealtime(
-  packageId: string | null | undefined,
-  callback: () => void,
-) {
-  const cbRef = useRef(callback);
-  useEffect(() => {
-    cbRef.current = callback;
-  });
-
-  useEffect(() => {
-    if (!packageId) return;
-    const orgId = getCurrentOrgId();
-    if (!orgId) return;
-
-    const es = new EventSource(
-      `/api/realtime/flows/${packageId}/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
-      { withCredentials: true },
-    );
-
-    es.addEventListener("execution_update", () => {
-      cbRef.current();
-    });
-
-    return () => {
-      es.close();
-    };
-  }, [packageId]);
-}
-
-/**
- * Subscribe to all execution status changes (for flow list running counts).
- */
-export function useAllExecutionsRealtime(callback: () => void) {
-  const cbRef = useRef(callback);
-  useEffect(() => {
-    cbRef.current = callback;
-  });
-
-  const stableCallback = useCallback(() => cbRef.current(), []);
-
-  useEffect(() => {
-    const orgId = getCurrentOrgId();
-    if (!orgId) return;
-
-    const es = new EventSource(
-      `/api/realtime/executions?orgId=${encodeURIComponent(orgId)}&verbose=true`,
-      {
-        withCredentials: true,
-      },
-    );
-
-    es.addEventListener("execution_update", () => {
-      stableCallback();
-    });
-
-    return () => {
-      es.close();
-    };
-  }, [stableCallback]);
 }
 
 /**

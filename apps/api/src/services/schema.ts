@@ -7,8 +7,6 @@ import {
   SLUG_REGEX,
 } from "@appstrate/validation";
 
-export { SLUG_REGEX };
-
 /**
  * Validate a flow manifest — accepts both local format (slug name, optional version)
  * and registry format (scoped @scope/name, required semver version).

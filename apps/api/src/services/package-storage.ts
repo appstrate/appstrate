@@ -40,34 +40,6 @@ export async function uploadPackageZip(
   }
 }
 
-/** Download a specific version of a package from Storage. If no version, fetches the latest. */
-export async function downloadPackageZip(
-  packageId: string,
-  versionNumber?: number,
-): Promise<Buffer | null> {
-  let path: string;
-
-  if (versionNumber !== undefined) {
-    path = `${packageId}/${versionNumber}.zip`;
-  } else {
-    // Find the latest version by listing files
-    const files = await storage.listFiles(BUCKET, packageId);
-    if (!files || files.length === 0) return null;
-
-    // Sort by name descending to get latest version number
-    const sorted = files.sort((a, b) => parseInt(b) - parseInt(a));
-    path = `${packageId}/${sorted[0]}`;
-  }
-
-  const data = await storage.downloadFile(BUCKET, path);
-  if (!data) {
-    logger.warn("Failed to download flow package", { path });
-    return null;
-  }
-
-  return Buffer.from(data);
-}
-
 /** Package a built-in flow directory into a ZIP buffer (cached in memory). */
 async function getBuiltInPackageZip(packageId: string): Promise<Buffer> {
   const cached = builtInPackageCache.get(packageId);

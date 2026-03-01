@@ -46,27 +46,3 @@ export function formatDateField(dateStr: string | Date): string {
     return String(dateStr);
   }
 }
-
-export function formatDateShort(dateStr: string): string {
-  try {
-    return new Date(dateStr).toLocaleDateString(i18n.language, {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  } catch {
-    return dateStr;
-  }
-}
-
-export function formatDateLong(dateStr: string): string {
-  try {
-    return new Date(dateStr).toLocaleDateString(i18n.language, {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
-  } catch {
-    return dateStr;
-  }
-}

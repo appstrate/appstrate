@@ -166,7 +166,6 @@ export function createShareRouter() {
     // Fire-and-forget
     executeFlowInBackground(
       executionId,
-      packageId,
       userId,
       orgId,
       flow,

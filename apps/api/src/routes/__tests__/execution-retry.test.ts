@@ -106,7 +106,6 @@ class MockTimeoutError extends Error {
 
 mock.module("../../services/adapters/index.ts", () => ({
   getAdapter: () => mockAdapter,
-  getAdapterName: () => "mock-adapter",
   TimeoutError: MockTimeoutError,
   buildRetryPrompt: (_badResult: unknown, _errors: string[], _schema: unknown) =>
     "mock retry prompt",
@@ -211,14 +210,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([result]);
 
     const flow = makeFlow({});
-    await executeFlowInBackground(
-      "exec-1",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-1", "user-1", "org-1", flow, makePromptContext());
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -230,14 +222,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([result]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground(
-      "exec-2",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-2", "user-1", "org-1", flow, makePromptContext());
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -251,14 +236,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, goodResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground(
-      "exec-3",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-3", "user-1", "org-1", flow, makePromptContext());
 
     expect(adapterCallCount).toBe(2);
     expect(findLogs("output_validation_retry")).toHaveLength(1);
@@ -272,14 +250,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, badResult, badResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 2 });
-    await executeFlowInBackground(
-      "exec-4",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-4", "user-1", "org-1", flow, makePromptContext());
 
     // 1 initial + 2 retries = 3 calls
     expect(adapterCallCount).toBe(3);
@@ -297,14 +268,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 0 });
-    await executeFlowInBackground(
-      "exec-5",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-5", "user-1", "org-1", flow, makePromptContext());
 
     expect(adapterCallCount).toBe(1);
     expect(findLogs("output_validation_retry")).toHaveLength(0);
@@ -318,14 +282,7 @@ describe("executeFlowInBackground — retry loop", () => {
     mockAdapter = createMockAdapter([badResult, "timeout"]);
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 3 });
-    await executeFlowInBackground(
-      "exec-6",
-      "test-flow",
-      "user-1",
-      "org-1",
-      flow,
-      makePromptContext(),
-    );
+    await executeFlowInBackground("exec-6", "user-1", "org-1", flow, makePromptContext());
 
     // 1 initial + 1 retry that timed out = 2 calls
     expect(adapterCallCount).toBe(2);
