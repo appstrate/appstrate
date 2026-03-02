@@ -223,11 +223,12 @@ function FlowEditorForm({
 
 export function FlowEditorPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { packageId } = useParams<{ packageId: string }>();
+  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const packageId = scope ? `${scope}/${name}` : undefined;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isOrgAdmin, currentOrg } = useOrg();
-  const isEdit = !!packageId;
+  const isEdit = !!scope;
 
   const { data: detail, isLoading } = useFlowDetail(packageId);
 

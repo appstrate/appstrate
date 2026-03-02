@@ -15,7 +15,8 @@ type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
 
 export function ShareableRunPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { packageId } = useParams<{ packageId: string }>();
+  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const packageId = `${scope}/${name}`;
   const { data: flow, isLoading, error } = useFlowDetail(packageId);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();

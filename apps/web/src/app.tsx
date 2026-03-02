@@ -215,19 +215,19 @@ export function App() {
           <Routes>
             <Route path="/create-org" element={<CreateOrgPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
-            <Route path="/flows/:packageId/run" element={<ShareableRunPage />} />
+            <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<PackageList />} />
               <Route path="/flows/new" element={<FlowEditorPage />} />
-              <Route path="/flows/:packageId/edit" element={<FlowEditorPage />} />
-              <Route path="/flows/:packageId" element={<FlowDetailPage />} />
+              <Route path="/flows/:scope/:name/edit" element={<FlowEditorPage />} />
+              <Route path="/flows/:scope/:name" element={<FlowDetailPage />} />
               <Route
-                path="/flows/:packageId/executions/:execId"
+                path="/flows/:scope/:name/executions/:execId"
                 element={<ExecutionDetailPage />}
               />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
-              <Route path="/packages/:packageId" element={<PackageDetailPage />} />
+              <Route path="/packages/:scope/:name" element={<PackageDetailPage />} />
               <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />

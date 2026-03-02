@@ -10,10 +10,11 @@ import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
-import { normalizeScope, depEntryToPackageId } from "@appstrate/validation/naming";
+import { normalizeScope, buildPackageId } from "@appstrate/validation/naming";
 import { computeIntegrity } from "@appstrate/validation/integrity";
 import { extractDependencies } from "@appstrate/validation/dependencies";
 import { postInstallPackage } from "./post-install-package.ts";
+import type { Manifest } from "@appstrate/validation";
 
 // --- Status ---
 
@@ -82,13 +83,13 @@ export async function getMarketplacePackage(rawScope: string, name: string, acce
 // --- Dependency validation ---
 
 async function findMissingDependencies(
-  manifest: Record<string, unknown>,
+  manifest: Partial<Manifest>,
   orgId: string,
 ): Promise<{ scope: string; name: string; type: string; versionRange: string }[]> {
   const deps = extractDependencies(manifest);
   if (deps.length === 0) return [];
 
-  const expectedIds = deps.map((d) => depEntryToPackageId(d.depScope, d.depName));
+  const expectedIds = deps.map((d) => buildPackageId(d.depScope, d.depName));
 
   const existing = await db
     .select({ id: packages.id })
@@ -98,7 +99,7 @@ async function findMissingDependencies(
   const existingSet = new Set(existing.map((e) => e.id));
 
   return deps
-    .filter((d) => !existingSet.has(depEntryToPackageId(d.depScope, d.depName)))
+    .filter((d) => !existingSet.has(buildPackageId(d.depScope, d.depName)))
     .map((d) => ({
       scope: d.depScope,
       name: d.depName,
@@ -196,14 +197,14 @@ async function _installInternal(
   const { manifest, content, files, type: packageType } = parsed;
   logger.info("ZIP parsed", { type: packageType, contentLength: content.length });
 
-  const packageId = depEntryToPackageId(scope, name);
+  const packageId = buildPackageId(scope, name);
 
   // Auto-install missing registry dependencies
-  const missingDeps = await findMissingDependencies(manifest as Record<string, unknown>, orgId);
+  const missingDeps = await findMissingDependencies(manifest as Partial<Manifest>, orgId);
   const autoInstalledDeps: InstallResult["autoInstalledDeps"] = [];
 
   for (const dep of missingDeps) {
-    const depId = depEntryToPackageId(dep.scope, dep.name);
+    const depId = buildPackageId(dep.scope, dep.name);
     if (ctx.visited.has(depId)) {
       logger.warn("Circular dependency detected, skipping", { depId, packageId });
       continue;
@@ -225,8 +226,6 @@ async function _installInternal(
     if (depResult.autoInstalledDeps) autoInstalledDeps.push(...depResult.autoInstalledDeps);
   }
 
-  const displayName = (manifest.displayName as string) ?? name;
-
   // Check if already installed
   const [existing] = await db
     .select({ id: packages.id })
@@ -241,8 +240,6 @@ async function _installInternal(
       .set({
         manifest,
         content,
-        displayName,
-        description: pkg.description ?? null,
         registryVersion: targetVersion,
         updatedAt: new Date(),
         // Only flip to explicit (false) when user installs directly; never demote explicit→auto
@@ -259,8 +256,6 @@ async function _installInternal(
       name: `${scope}/${name}`,
       manifest,
       content,
-      displayName,
-      description: pkg.description ?? null,
       registryScope: scope.replace(/^@/, ""),
       registryName: name,
       registryVersion: targetVersion,
@@ -311,7 +306,7 @@ export async function getMarketplacePackageWithInstallStatus(
   if (!pkg) return null;
 
   const scope = normalizeScope(rawScope);
-  const packageId = depEntryToPackageId(scope, name);
+  const packageId = buildPackageId(scope, name);
 
   const [installed] = await db
     .select({ registryVersion: packages.registryVersion })
@@ -328,21 +323,18 @@ export async function getMarketplacePackageWithInstallStatus(
 // --- Installed registry packages ---
 
 export async function getInstalledRegistryPackages(orgId: string) {
-  const rows = await db
+  return db
     .select({
       id: packages.id,
       type: packages.type,
       registryScope: packages.registryScope,
       registryName: packages.registryName,
       registryVersion: packages.registryVersion,
-      displayName: packages.displayName,
-      description: packages.description,
+      manifest: packages.manifest,
       updatedAt: packages.updatedAt,
     })
     .from(packages)
     .where(and(eq(packages.orgId, orgId), isNotNull(packages.registryScope)));
-
-  return rows;
 }
 
 // --- Check for updates ---
@@ -381,12 +373,13 @@ export async function checkRegistryUpdates(
           null)
         : (remote?.versions.at(-1)?.version ?? null);
 
+      const m = (pkg.manifest ?? {}) as Partial<Manifest>;
       return {
         id: pkg.id,
         type: pkg.type,
         registryScope: pkg.registryScope!,
         registryName: pkg.registryName!,
-        displayName: pkg.displayName,
+        displayName: m.displayName ?? null,
         installedVersion: pkg.registryVersion!,
         latestVersion,
         updateAvailable: !!latestVersion && latestVersion !== pkg.registryVersion,

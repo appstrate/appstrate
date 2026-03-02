@@ -31,7 +31,8 @@ function formatToolArgs(args: Record<string, unknown>): string {
 
 export function ExecutionDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { packageId, execId } = useParams<{ packageId: string; execId: string }>();
+  const { scope, name, execId } = useParams<{ scope: string; name: string; execId: string }>();
+  const packageId = `${scope}/${name}`;
   const location = useLocation();
   const executionNumber = (location.state as { executionNumber?: number } | null)?.executionNumber;
   const orgId = useCurrentOrgId();

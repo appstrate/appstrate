@@ -76,6 +76,89 @@ export async function setFlowItems(
   });
 }
 
+/** Build registryDependencies object from a flow's current dependency links. */
+export async function buildRegistryDependencies(
+  packageId: string,
+  orgId: string,
+): Promise<Record<string, Record<string, string>> | null> {
+  const deps = await db
+    .select({
+      dependencyId: packageDependencies.dependencyId,
+      type: packages.type,
+      registryScope: packages.registryScope,
+      registryName: packages.registryName,
+      lastPublishedVersion: packages.lastPublishedVersion,
+    })
+    .from(packageDependencies)
+    .innerJoin(packages, eq(packages.id, packageDependencies.dependencyId))
+    .where(and(eq(packageDependencies.packageId, packageId), eq(packageDependencies.orgId, orgId)));
+
+  const skills: Record<string, string> = {};
+  const extensions: Record<string, string> = {};
+
+  for (const dep of deps) {
+    if (!dep.registryScope || !dep.registryName) continue;
+    const scopedName = `@${dep.registryScope}/${dep.registryName}`;
+    const version = dep.lastPublishedVersion || "*";
+
+    if (dep.type === "skill") {
+      skills[scopedName] = version;
+    } else if (dep.type === "extension") {
+      extensions[scopedName] = version;
+    }
+  }
+
+  const hasSkills = Object.keys(skills).length > 0;
+  const hasExtensions = Object.keys(extensions).length > 0;
+  if (!hasSkills && !hasExtensions) return null;
+
+  const result: Record<string, Record<string, string>> = {};
+  if (hasSkills) result.skills = skills;
+  if (hasExtensions) result.extensions = extensions;
+  return result;
+}
+
+/** Build registryDependencies from skill/extension IDs without junction table. */
+export async function buildRegistryDepsFromIds(
+  orgId: string,
+  skillIds: string[],
+  extensionIds: string[],
+): Promise<Record<string, Record<string, string>> | null> {
+  const allIds = [...skillIds, ...extensionIds];
+  if (allIds.length === 0) return null;
+
+  const rows = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      registryScope: packages.registryScope,
+      registryName: packages.registryName,
+      lastPublishedVersion: packages.lastPublishedVersion,
+    })
+    .from(packages)
+    .where(and(eq(packages.orgId, orgId), inArray(packages.id, allIds)));
+
+  const skills: Record<string, string> = {};
+  const extensions: Record<string, string> = {};
+
+  for (const row of rows) {
+    if (!row.registryScope || !row.registryName) continue;
+    const scopedName = `@${row.registryScope}/${row.registryName}`;
+    const version = row.lastPublishedVersion || "*";
+    if (row.type === "skill") skills[scopedName] = version;
+    else if (row.type === "extension") extensions[scopedName] = version;
+  }
+
+  const hasSkills = Object.keys(skills).length > 0;
+  const hasExtensions = Object.keys(extensions).length > 0;
+  if (!hasSkills && !hasExtensions) return null;
+
+  const result: Record<string, Record<string, string>> = {};
+  if (hasSkills) result.skills = skills;
+  if (hasExtensions) result.extensions = extensions;
+  return result;
+}
+
 /** Get all files for a flow's referenced items of a type. Returns Map<itemId, files>. */
 export async function getFlowItemFiles(
   packageId: string,

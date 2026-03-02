@@ -48,7 +48,8 @@ function PublishForm({ onClose, packageId }: PublishModalProps) {
   const publishMutation = usePublishPackage();
 
   // Parse scope/name from manifest.name (@scope/name format)
-  const manifestParsed = publishInfo?.manifestName?.match(/^@([^/]+)\/(.+)$/);
+  const manifestName = publishInfo?.manifest?.name as string | undefined;
+  const manifestParsed = manifestName?.match(/^@([^/]+)\/(.+)$/);
   const manifestScope = manifestParsed?.[1] ?? null;
   const manifestBareName = manifestParsed?.[2] ?? null;
 
@@ -68,7 +69,7 @@ function PublishForm({ onClose, packageId }: PublishModalProps) {
   const [version, setVersion] = useState(
     effectiveLastVersion
       ? bumpVersion(effectiveLastVersion, "patch")
-      : (publishInfo?.manifestVersion ?? "1.0.0"),
+      : ((publishInfo?.manifest?.version as string) ?? "1.0.0"),
   );
   const [published, setPublished] = useState(false);
 

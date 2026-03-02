@@ -46,8 +46,6 @@ export const packages = pgTable(
     name: text("name").notNull(),
     manifest: jsonb("manifest"),
     content: text("content"),
-    displayName: text("display_name"),
-    description: text("description"),
     registryScope: text("registry_scope"),
     registryName: text("registry_name"),
     registryVersion: text("registry_version"),
@@ -61,7 +59,7 @@ export const packages = pgTable(
   (table) => [
     index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
-    check("packages_id_slug", sql`${table.id} ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'`),
+    check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
   ],
 );
 

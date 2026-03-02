@@ -22,16 +22,16 @@ export function createSchedulesRouter() {
     return c.json(schedules);
   });
 
-  // GET /api/flows/:id/schedules — list schedules for a flow
-  router.get("/flows/:id/schedules", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/schedules — list schedules for a flow
+  router.get("/flows/:scope{@[^/]+}/:name/schedules", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const schedules = await listPackageSchedules(flow.id, orgId);
     return c.json(schedules);
   });
 
-  // POST /api/flows/:id/schedules — create a schedule
-  router.post("/flows/:id/schedules", requireFlow(), async (c) => {
+  // POST /api/flows/:scope/:name/schedules — create a schedule
+  router.post("/flows/:scope{@[^/]+}/:name/schedules", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
 

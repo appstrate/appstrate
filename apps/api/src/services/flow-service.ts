@@ -5,13 +5,13 @@ import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { validateManifest } from "@appstrate/validation";
-import { scopedNameToPackageId, packageIdToScopedName } from "@appstrate/validation/naming";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
   getBuiltInSkills,
   getBuiltInExtensions,
 } from "./builtin-library.ts";
+import type { Manifest } from "@appstrate/validation";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
 // Module-level directory, initialized by initPackageService()
@@ -64,7 +64,7 @@ export async function initPackageService(dataDir?: string): Promise<void> {
       }
 
       const manifest = raw as FlowManifest;
-      const packageId = scopedNameToPackageId(manifest.name);
+      const packageId = manifest.name;
 
       // Resolve skill/extension IDs to SkillMeta using built-in library
       const skills = (manifest.requires.skills ?? []).map((id) => {
@@ -110,15 +110,14 @@ interface DbPackageRow {
   depRefs?: {
     dependencyId: string;
     type: string;
-    name: string | null;
-    description: string | null;
+    manifest: unknown;
   }[];
 }
 
 function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const manifest = (row.manifest ?? {
     schemaVersion: "1.0",
-    name: packageIdToScopedName(row.id) ?? row.id,
+    name: row.id,
     version: "0.0.0",
     type: "flow",
     displayName: row.id,
@@ -130,19 +129,25 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   // Dependencies from packageDependencies joined with packages
   const depSkills = (row.depRefs ?? [])
     .filter((d) => d.type === "skill")
-    .map((d) => ({
-      id: d.dependencyId,
-      name: d.name ?? undefined,
-      description: d.description ?? undefined,
-    }));
+    .map((d) => {
+      const m = (d.manifest ?? {}) as Partial<Manifest>;
+      return {
+        id: d.dependencyId,
+        name: m.displayName ?? undefined,
+        description: m.description ?? undefined,
+      };
+    });
 
   const depExtensions = (row.depRefs ?? [])
     .filter((d) => d.type === "extension")
-    .map((d) => ({
-      id: d.dependencyId,
-      name: d.name ?? undefined,
-      description: d.description ?? undefined,
-    }));
+    .map((d) => {
+      const m = (d.manifest ?? {}) as Partial<Manifest>;
+      return {
+        id: d.dependencyId,
+        name: m.displayName ?? undefined,
+        description: m.description ?? undefined,
+      };
+    });
 
   // Built-in skills/extensions declared in manifest (IDs are strings)
   const manifestSkills = (manifest.requires.skills ?? [])
@@ -215,8 +220,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
     .select({
       dependencyId: packageDependencies.dependencyId,
       type: packages.type,
-      name: packages.displayName,
-      description: packages.description,
+      manifest: packages.manifest,
     })
     .from(packageDependencies)
     .innerJoin(packages, eq(packageDependencies.dependencyId, packages.id))

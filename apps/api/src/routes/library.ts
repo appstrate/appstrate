@@ -12,6 +12,7 @@ import {
   type LibraryTypeConfig,
 } from "../services/library.ts";
 import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/validation";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { inArray } from "drizzle-orm";
@@ -211,6 +212,7 @@ function makeListHandler(rcfg: LibraryRouteConfig) {
 function makeCreateHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
     const parsed = await parseLibraryUpload(c, rcfg.parseOpts);
@@ -245,6 +247,7 @@ function makeCreateHandler(rcfg: LibraryRouteConfig) {
 
     const item = await upsertOrgItem(
       orgId,
+      orgSlug,
       {
         id: parsed.id,
         name: parsed.name,
@@ -261,7 +264,11 @@ function makeCreateHandler(rcfg: LibraryRouteConfig) {
 
     return c.json(
       {
-        [rcfg.responseKey]: { id: item.id, name: item.name, description: item.description },
+        [rcfg.responseKey]: {
+          id: item.id,
+          name: item.name,
+          description: ((item.manifest ?? {}) as Partial<Manifest>).description ?? null,
+        },
         ...(warnings.length > 0 ? { warnings } : {}),
       },
       201,
@@ -292,6 +299,7 @@ function makeGetHandler(rcfg: LibraryRouteConfig) {
 function makeUpdateHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const orgSlug = c.get("orgSlug");
     const user = c.get("user");
     const itemId = c.req.param("id");
     const label = rcfg.cfg.label.slice(0, -1);
@@ -333,6 +341,7 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
     const finalContent = body.content ?? existing.content;
     const item = await upsertOrgItem(
       orgId,
+      orgSlug,
       {
         id: itemId,
         name: body.name ?? existing.name ?? undefined,
@@ -349,7 +358,11 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
     });
 
     return c.json({
-      [rcfg.responseKey]: { id: item.id, name: item.name, description: item.description },
+      [rcfg.responseKey]: {
+        id: item.id,
+        name: item.name,
+        description: ((item.manifest ?? {}) as Partial<Manifest>).description ?? null,
+      },
       ...(warnings.length > 0 ? { warnings } : {}),
     });
   };

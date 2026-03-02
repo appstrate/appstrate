@@ -64,8 +64,8 @@ export function createFlowsRouter() {
     return c.json({ flows: flowList });
   });
 
-  // GET /api/flows/:id — flow detail with dependency status
-  router.get("/:id", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name — flow detail with dependency status
+  router.get("/:scope{@[^/]+}/:name", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
@@ -153,8 +153,8 @@ export function createFlowsRouter() {
     });
   });
 
-  // PUT /api/flows/:id/config — save flow configuration (admin-only)
-  router.put("/:id/config", requireFlow(), requireAdmin(), async (c) => {
+  // PUT /api/flows/:scope/:name/config — save flow configuration (admin-only)
+  router.put("/:scope{@[^/]+}/:name/config", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
 
     const body = await c.req.json<Record<string, unknown>>();
@@ -188,8 +188,8 @@ export function createFlowsRouter() {
     });
   });
 
-  // GET /api/flows/:id/package — download the flow ZIP
-  router.get("/:id/package", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/package — download the flow ZIP
+  router.get("/:scope{@[^/]+}/:name/package", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
 
@@ -203,8 +203,8 @@ export function createFlowsRouter() {
     return c.body(new Uint8Array(zipBuffer));
   });
 
-  // GET /api/flows/:id/versions — list flow version history (user flows only)
-  router.get("/:id/versions", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/versions — list flow version history (user flows only)
+  router.get("/:scope{@[^/]+}/:name/versions", requireFlow(), async (c) => {
     const flow = c.get("flow");
 
     if (flow.source === "built-in") {
@@ -218,76 +218,86 @@ export function createFlowsRouter() {
     return c.json({ versions });
   });
 
-  // POST /api/flows/:id/services/:serviceId/bind — bind a profile's connection to a service
-  router.post("/:id/services/:serviceId/bind", requireFlow(), requireAdmin(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const serviceId = c.req.param("serviceId");
+  // POST /api/flows/:scope/:name/services/:serviceId/bind — bind a profile's connection to a service
+  router.post(
+    "/:scope{@[^/]+}/:name/services/:serviceId/bind",
+    requireFlow(),
+    requireAdmin(),
+    async (c) => {
+      const flow = c.get("flow");
+      const user = c.get("user");
+      const serviceId = c.req.param("serviceId");
 
-    // Verify the service exists and is in admin mode
-    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
-    if (!svc) {
-      return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
-        404,
-      );
-    }
-    if ((svc.connectionMode ?? "user") !== "admin") {
-      return c.json(
-        {
-          error: "INVALID_CONNECTION_MODE",
-          message: `Service '${serviceId}' is not in admin mode`,
-        },
-        400,
-      );
-    }
+      // Verify the service exists and is in admin mode
+      const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+      if (!svc) {
+        return c.json(
+          { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
+          404,
+        );
+      }
+      if ((svc.connectionMode ?? "user") !== "admin") {
+        return c.json(
+          {
+            error: "INVALID_CONNECTION_MODE",
+            message: `Service '${serviceId}' is not in admin mode`,
+          },
+          400,
+        );
+      }
 
-    // Get profile from body or default
-    let profileId: string | undefined;
-    try {
-      const body = await c.req.json<{ profileId?: string }>();
-      profileId = body.profileId;
-    } catch {
-      // No body — use default profile
-    }
-    const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
+      // Get profile from body or default
+      let profileId: string | undefined;
+      try {
+        const body = await c.req.json<{ profileId?: string }>();
+        profileId = body.profileId;
+      } catch {
+        // No body — use default profile
+      }
+      const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
 
-    // Verify the profile has a connection for this provider
-    const orgId = c.get("orgId");
-    const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
-    if (conn.status !== "connected") {
-      return c.json(
-        {
-          error: "ADMIN_NOT_CONNECTED",
-          message: `No active connection for '${svc.provider}'`,
-        },
-        400,
-      );
-    }
+      // Verify the profile has a connection for this provider
+      const orgId = c.get("orgId");
+      const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
+      if (conn.status !== "connected") {
+        return c.json(
+          {
+            error: "ADMIN_NOT_CONNECTED",
+            message: `No active connection for '${svc.provider}'`,
+          },
+          400,
+        );
+      }
 
-    await bindAdminConnection(orgId, flow.id, serviceId, effectiveProfileId);
-    return c.json({ bound: true });
-  });
+      await bindAdminConnection(orgId, flow.id, serviceId, effectiveProfileId);
+      return c.json({ bound: true });
+    },
+  );
 
-  // DELETE /api/flows/:id/services/:serviceId/bind — unbind admin's connection from a service
-  router.delete("/:id/services/:serviceId/bind", requireFlow(), requireAdmin(), async (c) => {
-    const flow = c.get("flow");
-    const serviceId = c.req.param("serviceId");
+  // DELETE /api/flows/:scope/:name/services/:serviceId/bind — unbind admin's connection from a service
+  router.delete(
+    "/:scope{@[^/]+}/:name/services/:serviceId/bind",
+    requireFlow(),
+    requireAdmin(),
+    async (c) => {
+      const flow = c.get("flow");
+      const serviceId = c.req.param("serviceId");
 
-    const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
-    if (!svc) {
-      return c.json(
-        { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
-        404,
-      );
-    }
+      const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+      if (!svc) {
+        return c.json(
+          { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
+          404,
+        );
+      }
 
-    await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
-    return c.json({ unbound: true });
-  });
+      await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
+      return c.json({ unbound: true });
+    },
+  );
 
-  // PUT /api/flows/:id/profile — set flow profile override
-  router.put("/:id/profile", requireFlow(), async (c) => {
+  // PUT /api/flows/:scope/:name/profile — set flow profile override
+  router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
     const body = await c.req.json<{ profileId: string }>();
@@ -298,16 +308,16 @@ export function createFlowsRouter() {
     return c.json({ success: true });
   });
 
-  // DELETE /api/flows/:id/profile — remove flow profile override
-  router.delete("/:id/profile", requireFlow(), async (c) => {
+  // DELETE /api/flows/:scope/:name/profile — remove flow profile override
+  router.delete("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
     await removePackageProfileOverride(user.id, flow.id);
     return c.json({ success: true });
   });
 
-  // GET /api/flows/:id/proxy — get flow proxy configuration
-  router.get("/:id/proxy", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/proxy — get flow proxy configuration
+  router.get("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const config = await getPackageConfig(orgId, flow.id);
@@ -316,8 +326,8 @@ export function createFlowsRouter() {
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
 
-  // PUT /api/flows/:id/proxy — set flow proxy override (admin-only)
-  router.put("/:id/proxy", requireFlow(), requireAdmin(), async (c) => {
+  // PUT /api/flows/:scope/:name/proxy — set flow proxy override (admin-only)
+  router.put("/:scope{@[^/]+}/:name/proxy", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json<{ proxyId: string | null }>();
@@ -335,8 +345,8 @@ export function createFlowsRouter() {
     return c.json({ success: true });
   });
 
-  // GET /api/flows/:id/memories — list flow memories
-  router.get("/:id/memories", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/memories — list flow memories
+  router.get("/:scope{@[^/]+}/:name/memories", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const memories = await getPackageMemories(flow.id, orgId);
@@ -350,31 +360,36 @@ export function createFlowsRouter() {
     });
   });
 
-  // DELETE /api/flows/:id/memories — delete all memories (admin only)
-  router.delete("/:id/memories", requireFlow(), requireAdmin(), async (c) => {
+  // DELETE /api/flows/:scope/:name/memories — delete all memories (admin only)
+  router.delete("/:scope{@[^/]+}/:name/memories", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const deleted = await deleteAllPackageMemories(flow.id, orgId);
     return c.json({ deleted });
   });
 
-  // DELETE /api/flows/:id/memories/:memoryId — delete single memory (admin only)
-  router.delete("/:id/memories/:memoryId", requireFlow(), requireAdmin(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const memoryId = parseInt(c.req.param("memoryId"), 10);
-    if (isNaN(memoryId)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
-    }
-    const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
-    if (!deleted) {
-      return c.json({ error: "NOT_FOUND", message: "Memory not found" }, 404);
-    }
-    return c.json({ deleted: true });
-  });
+  // DELETE /api/flows/:scope/:name/memories/:memoryId — delete single memory (admin only)
+  router.delete(
+    "/:scope{@[^/]+}/:name/memories/:memoryId",
+    requireFlow(),
+    requireAdmin(),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const memoryId = parseInt(c.req.param("memoryId"), 10);
+      if (isNaN(memoryId)) {
+        return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
+      }
+      const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
+      if (!deleted) {
+        return c.json({ error: "NOT_FOUND", message: "Memory not found" }, 404);
+      }
+      return c.json({ deleted: true });
+    },
+  );
 
-  // POST /api/flows/:id/share-token — generate a one-time public share link (admin-only)
-  router.post("/:id/share-token", requireFlow(), requireAdmin(), async (c) => {
+  // POST /api/flows/:scope/:name/share-token — generate a one-time public share link (admin-only)
+  router.post("/:scope{@[^/]+}/:name/share-token", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");

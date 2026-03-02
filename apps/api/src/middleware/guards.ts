@@ -15,9 +15,11 @@ export function requireAdmin() {
 }
 
 /** Middleware: load a flow by route param and set it on context, or 404. */
-export function requireFlow(paramName = "id") {
+export function requireFlow() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const packageId = c.req.param(paramName);
+    const scope = c.req.param("scope");
+    const name = c.req.param("name");
+    const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
     const flow = await getPackage(packageId, orgId);
     if (!flow) {

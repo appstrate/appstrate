@@ -300,8 +300,8 @@ export async function executeFlowInBackground(
 export function createExecutionsRouter() {
   const router = new Hono<AppEnv>();
 
-  // POST /api/flows/:id/run — execute a flow (fire-and-forget, returns JSON)
-  router.post("/flows/:id/run", rateLimit(20), requireFlow(), async (c) => {
+  // POST /api/flows/:scope/:name/run — execute a flow (fire-and-forget, returns JSON)
+  router.post("/flows/:scope{@[^/]+}/:name/run", rateLimit(20), requireFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
@@ -410,8 +410,8 @@ export function createExecutionsRouter() {
     return c.json({ executionId });
   });
 
-  // GET /api/flows/:id/executions — list executions for a flow
-  router.get("/flows/:id/executions", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/executions — list executions for a flow
+  router.get("/flows/:scope{@[^/]+}/:name/executions", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 100);
@@ -488,22 +488,27 @@ export function createExecutionsRouter() {
     return c.json({ ok: true });
   });
 
-  // DELETE /api/flows/:id/executions — delete all executions for a flow (admin only)
-  router.delete("/flows/:id/executions", requireFlow(), requireAdmin(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
+  // DELETE /api/flows/:scope/:name/executions — delete all executions for a flow (admin only)
+  router.delete(
+    "/flows/:scope{@[^/]+}/:name/executions",
+    requireFlow(),
+    requireAdmin(),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
 
-    const running = await getRunningExecutionsForPackage(flow.id);
-    if (running > 0) {
-      return c.json(
-        { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) still running` },
-        409,
-      );
-    }
+      const running = await getRunningExecutionsForPackage(flow.id);
+      if (running > 0) {
+        return c.json(
+          { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) still running` },
+          409,
+        );
+      }
 
-    const deleted = await deletePackageExecutions(flow.id, orgId);
-    return c.json({ deleted });
-  });
+      const deleted = await deletePackageExecutions(flow.id, orgId);
+      return c.json({ deleted });
+    },
+  );
 
   return router;
 }

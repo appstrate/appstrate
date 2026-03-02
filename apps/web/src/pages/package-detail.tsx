@@ -11,7 +11,8 @@ import { marketplacePath } from "../lib/strings";
 
 export function PackageDetailPage() {
   const { t } = useTranslation(["settings", "flows", "common"]);
-  const { packageId } = useParams<{ packageId: string }>();
+  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const packageId = `${scope}/${name}`;
   const { isOrgAdmin } = useOrg();
 
   const { isLoading, data: detail, type } = usePackageDetail(packageId);
