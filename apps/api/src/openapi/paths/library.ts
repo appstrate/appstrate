@@ -16,7 +16,7 @@ export const libraryPaths = {
                 properties: {
                   skills: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgSkill" },
+                    items: { $ref: "#/components/schemas/OrgLibraryItem" },
                   },
                 },
               },
@@ -100,7 +100,7 @@ export const libraryPaths = {
           description: "Skill detail",
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/OrgSkillDetail" },
+              schema: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
             },
           },
         },
@@ -226,7 +226,7 @@ export const libraryPaths = {
                 properties: {
                   extensions: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgExtension" },
+                    items: { $ref: "#/components/schemas/OrgLibraryItem" },
                   },
                 },
               },
@@ -303,7 +303,7 @@ export const libraryPaths = {
           description: "Extension detail",
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/OrgExtensionDetail" },
+              schema: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
             },
           },
         },

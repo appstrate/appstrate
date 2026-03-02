@@ -205,12 +205,6 @@ export interface OrgLibraryItemDetail extends OrgLibraryItem {
   lastPublishedAt?: string | null;
 }
 
-// Backward-compatible aliases
-export type OrgSkill = OrgLibraryItem;
-export type OrgSkillDetail = OrgLibraryItemDetail;
-export type OrgExtension = OrgLibraryItem;
-export type OrgExtensionDetail = OrgLibraryItemDetail;
-
 // --- Flow Memory Types ---
 
 export interface FlowMemoryItem {

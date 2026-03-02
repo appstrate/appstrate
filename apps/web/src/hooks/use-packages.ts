@@ -3,10 +3,8 @@ import { api, uploadFormData } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
 import type {
-  OrgSkill,
-  OrgSkillDetail,
-  OrgExtension,
-  OrgExtensionDetail,
+  OrgLibraryItem,
+  OrgLibraryItemDetail,
   FlowListItem,
   FlowDetail,
 } from "@appstrate/shared-types";
@@ -20,29 +18,26 @@ const LIBRARY_CONFIG = {
   extension: { path: "extensions", listKey: "extensions", detailKey: "extension" },
 } as const;
 
-type ListTypeMap = { skill: OrgSkill; extension: OrgExtension };
-type DetailTypeMap = { skill: OrgSkillDetail; extension: OrgExtensionDetail };
-
-function useLibraryList<T extends LibraryType>(type: T) {
+function useLibraryList(type: LibraryType) {
   const orgId = useCurrentOrgId();
   const cfg = LIBRARY_CONFIG[type];
   return useQuery({
     queryKey: ["library", cfg.path, orgId],
     queryFn: async () => {
-      const data = await api<Record<string, ListTypeMap[T][]>>(`/library/${cfg.path}`);
-      return data[cfg.listKey] as ListTypeMap[T][];
+      const data = await api<Record<string, OrgLibraryItem[]>>(`/library/${cfg.path}`);
+      return data[cfg.listKey] as OrgLibraryItem[];
     },
   });
 }
 
-function useLibraryDetail<T extends LibraryType>(type: T, id: string | undefined) {
+function useLibraryDetail(type: LibraryType, id: string | undefined) {
   const orgId = useCurrentOrgId();
   const cfg = LIBRARY_CONFIG[type];
   return useQuery({
     queryKey: ["library", cfg.detailKey, orgId, id],
     queryFn: async () => {
-      const data = await api<Record<string, DetailTypeMap[T]>>(`/library/${cfg.path}/${id}`);
-      return data[cfg.detailKey] as DetailTypeMap[T];
+      const data = await api<Record<string, OrgLibraryItemDetail>>(`/library/${cfg.path}/${id}`);
+      return data[cfg.detailKey] as OrgLibraryItemDetail;
     },
     enabled: !!id,
   });
@@ -79,17 +74,6 @@ function useDeleteLibrary(type: LibraryType) {
   });
 }
 
-// Named exports for backward compatibility
-export const useOrgSkills = () => useLibraryList("skill");
-export const useOrgSkillDetail = (id: string | undefined) => useLibraryDetail("skill", id);
-export const useUploadSkill = () => useUploadLibrary("skill");
-export const useDeleteSkill = () => useDeleteLibrary("skill");
-
-export const useOrgExtensions = () => useLibraryList("extension");
-export const useOrgExtensionDetail = (id: string | undefined) => useLibraryDetail("extension", id);
-export const useUploadExtension = () => useUploadLibrary("extension");
-export const useDeleteExtension = () => useDeleteLibrary("extension");
-
 // Re-export factory hooks for direct use
 export { useLibraryList, useUploadLibrary, useDeleteLibrary, type LibraryType, LIBRARY_CONFIG };
 
@@ -123,8 +107,8 @@ export function useFlowDetail(packageId: string | undefined) {
 // --- Composite hooks ---
 
 export function usePackageDetail(id: string | undefined) {
-  const skill = useOrgSkillDetail(id);
-  const ext = useOrgExtensionDetail(id);
+  const skill = useLibraryDetail("skill", id);
+  const ext = useLibraryDetail("extension", id);
   return {
     isLoading: skill.isLoading || ext.isLoading,
     data: skill.data || ext.data,
