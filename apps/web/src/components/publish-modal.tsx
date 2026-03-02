@@ -47,8 +47,14 @@ function PublishForm({ onClose, packageId }: PublishModalProps) {
   const { data: publishInfo } = usePublishInfo(packageId);
   const publishMutation = usePublishPackage();
 
-  const effectiveScope = publishInfo?.registryScope;
-  const effectiveName = publishInfo?.registryName;
+  // Parse scope/name from manifest.name (@scope/name format)
+  const manifestParsed = publishInfo?.manifestName?.match(/^@([^/]+)\/(.+)$/);
+  const manifestScope = manifestParsed?.[1] ?? null;
+  const manifestBareName = manifestParsed?.[2] ?? null;
+
+  // Priority: registryScope (already published) > manifest scope
+  const effectiveScope = publishInfo?.registryScope ?? manifestScope;
+  const effectiveName = publishInfo?.registryName ?? manifestBareName;
   const effectiveLastVersion = publishInfo?.lastPublishedVersion;
   const scopes = publishInfo?.registryScopes ?? [];
 
@@ -60,7 +66,9 @@ function PublishForm({ onClose, packageId }: PublishModalProps) {
   const [scope, setScope] = useState(effectiveScope ?? "");
   const [name, setName] = useState(effectiveName ?? fallbackName);
   const [version, setVersion] = useState(
-    effectiveLastVersion ? bumpVersion(effectiveLastVersion, "patch") : "1.0.0",
+    effectiveLastVersion
+      ? bumpVersion(effectiveLastVersion, "patch")
+      : (publishInfo?.manifestVersion ?? "1.0.0"),
   );
   const [published, setPublished] = useState(false);
 

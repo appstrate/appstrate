@@ -41,7 +41,6 @@ data/
 storage/
 
 docs/
-zip-flows/
 flows/*
 
 claudedocs/

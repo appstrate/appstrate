@@ -118,6 +118,7 @@ export function createPackagesRouter() {
 
     const [pkg] = await db
       .select({
+        manifest: packages.manifest,
         registryScope: packages.registryScope,
         registryName: packages.registryName,
         lastPublishedVersion: packages.lastPublishedVersion,
@@ -130,6 +131,10 @@ export function createPackagesRouter() {
     if (!pkg) {
       return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
     }
+
+    const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
+    const manifestName = typeof manifest.name === "string" ? manifest.name : null;
+    const manifestVersion = typeof manifest.version === "string" ? manifest.version : null;
 
     // Optionally fetch registry scopes if connected
     let registryScopes: { name: string; ownerId: string }[] | undefined;
@@ -144,6 +149,9 @@ export function createPackagesRouter() {
 
     return c.json({
       ...pkg,
+      manifest: undefined,
+      manifestName,
+      manifestVersion,
       lastPublishedAt: pkg.lastPublishedAt?.toISOString() ?? null,
       registryScopes,
     });
