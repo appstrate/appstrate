@@ -251,7 +251,7 @@ export const registryPaths = {
       tags: ["Packages"],
       summary: "Get publish info for a package",
       description:
-        "Returns the publish scope, name, last published version, and available registry scopes.",
+        "Returns manifest name/version, registry scope/name, last published version, and available registry scopes.",
       parameters: [
         {
           name: "packageId",
@@ -270,6 +270,14 @@ export const registryPaths = {
               schema: {
                 type: "object",
                 properties: {
+                  manifestName: {
+                    type: ["string", "null"],
+                    description: "Package name from manifest (e.g. @scope/name)",
+                  },
+                  manifestVersion: {
+                    type: ["string", "null"],
+                    description: "Package version from manifest",
+                  },
                   registryScope: { type: ["string", "null"] },
                   registryName: { type: ["string", "null"] },
                   lastPublishedVersion: { type: ["string", "null"] },

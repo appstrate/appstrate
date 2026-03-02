@@ -116,6 +116,16 @@ export const schemas = {
       author: { type: "string" },
       tags: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["built-in", "user"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. myorg from @myorg/name)",
+      },
+      version: { type: ["string", "null"], description: "Version from manifest" },
+      type: {
+        type: "string",
+        description: "Package type from manifest",
+        enum: ["flow", "skill", "extension"],
+      },
       runningExecutions: { type: "integer" },
       requires: {
         type: "object",
@@ -134,8 +144,26 @@ export const schemas = {
       displayName: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["built-in", "user"] },
+      scope: { type: ["string", "null"], description: "Scope from manifest name" },
+      version: { type: ["string", "null"], description: "Version from manifest" },
+      manifest: { type: "object", description: "Full manifest object (user flows only)" },
       prompt: { type: "string", description: "Agent prompt markdown (user flows only)" },
-      updatedAt: { type: "string", format: "date-time" },
+      updatedAt: {
+        type: "string",
+        format: "date-time",
+        description: "Last updated timestamp (user flows only)",
+      },
+      registryScope: { type: ["string", "null"], description: "Registry scope (user flows only)" },
+      registryName: { type: ["string", "null"], description: "Registry name (user flows only)" },
+      lastPublishedVersion: {
+        type: ["string", "null"],
+        description: "Last published version (user flows only)",
+      },
+      lastPublishedAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "Last published timestamp (user flows only)",
+      },
       config: {
         type: "object",
         properties: {
@@ -164,8 +192,8 @@ export const schemas = {
         },
       },
       lastExecution: {
-        type: "object",
-        description: "Summary of the most recent execution",
+        type: ["object", "null"],
+        description: "Summary of the most recent execution (null if never executed)",
         properties: {
           id: { type: "string" },
           status: { type: "string" },
