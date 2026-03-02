@@ -182,6 +182,16 @@ const expectedEndpoints = [
 
   // Packages
   "POST /api/packages/import",
+  "POST /api/packages/{packageId}/publish",
+  "GET /api/packages/{packageId}/publish-info",
+
+  // Registry
+  "POST /api/registry/connect",
+  "GET /api/registry/callback",
+  "DELETE /api/registry/disconnect",
+  "GET /api/registry/status",
+  "GET /api/registry/scopes",
+  "POST /api/registry/scopes",
 ];
 
 const specEndpoints = new Set<string>();

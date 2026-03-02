@@ -86,3 +86,23 @@ export interface RegistrySearchOptions {
   perPage?: number;
 }
 
+export interface RegistryAccount {
+  id: string;
+  username: string;
+  email: string;
+}
+
+export interface RegistryScope {
+  name: string;
+  ownerId: string;
+}
+
+export interface PublishResult {
+  scope: string;
+  name: string;
+  version: string;
+  integrity: string;
+  size: number;
+  type: string;
+}
+

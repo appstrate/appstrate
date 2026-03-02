@@ -43,6 +43,20 @@
       "when": 1772393399358,
       "tag": "0005_shocking_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772416918527,
+      "tag": "0006_confused_arachne",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1772419719060,
+      "tag": "0007_good_zaran",
+      "breakpoints": true
     }
   ]
 }

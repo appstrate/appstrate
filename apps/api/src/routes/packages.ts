@@ -1,10 +1,15 @@
 import { Hono } from "hono";
+import { eq, and } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
 import { scopedNameToPackageId } from "@appstrate/validation/naming";
 import { insertPackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
+import { publishPackage } from "../services/registry-publish.ts";
+import { getAuthenticatedRegistryClient } from "../services/registry-auth.ts";
+import { db } from "../lib/db.ts";
+import { packages } from "@appstrate/db/schema";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
@@ -74,6 +79,74 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);
+  });
+
+  // POST /api/packages/:id/publish — publish a package to registry
+  router.post("/:id/publish", requireAdmin(), async (c) => {
+    const user = c.get("user");
+    const orgId = c.get("orgId");
+    const packageId = c.req.param("id");
+
+    try {
+      const body = await c.req.json<{
+        scope?: string;
+        name?: string;
+        version?: string;
+      }>();
+      if (!body.version?.trim()) {
+        return c.json({ error: "VALIDATION_ERROR", message: "Version is required" }, 400);
+      }
+
+      const result = await publishPackage(packageId, orgId, user.id, {
+        scope: body.scope,
+        name: body.name,
+        version: body.version.trim(),
+      });
+      return c.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to publish package";
+      logger.error("Publish failed", { packageId, error: message });
+      return c.json({ error: "PUBLISH_FAILED", message }, 500);
+    }
+  });
+
+  // GET /api/packages/:id/publish-info — get publish info for modal
+  router.get("/:id/publish-info", async (c) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+    const packageId = c.req.param("id");
+
+    const [pkg] = await db
+      .select({
+        registryScope: packages.registryScope,
+        registryName: packages.registryName,
+        lastPublishedVersion: packages.lastPublishedVersion,
+        lastPublishedAt: packages.lastPublishedAt,
+      })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+      .limit(1);
+
+    if (!pkg) {
+      return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
+    }
+
+    // Optionally fetch registry scopes if connected
+    let registryScopes: { name: string; ownerId: string }[] | undefined;
+    const client = await getAuthenticatedRegistryClient(user.id);
+    if (client) {
+      try {
+        registryScopes = await client.getMyScopes();
+      } catch {
+        // Ignore — scopes fetch is best-effort
+      }
+    }
+
+    return c.json({
+      ...pkg,
+      lastPublishedAt: pkg.lastPublishedAt?.toISOString() ?? null,
+      registryScopes,
+    });
   });
 
   return router;

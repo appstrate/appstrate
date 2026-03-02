@@ -52,6 +52,8 @@ export const packages = pgTable(
     registryName: text("registry_name"),
     registryVersion: text("registry_version"),
     autoInstalled: boolean("auto_installed").notNull().default(false),
+    lastPublishedVersion: text("last_published_version"),
+    lastPublishedAt: timestamp("last_published_at"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),

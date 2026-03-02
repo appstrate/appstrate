@@ -35,10 +35,12 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
+import { PublishModal } from "../components/publish-modal";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { formatDateField } from "../lib/markdown";
+import { marketplacePath } from "../lib/strings";
 import { ExternalLink } from "lucide-react";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
@@ -122,6 +124,7 @@ export function FlowDetailPage() {
     name?: string;
     bindAfter?: boolean;
   } | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
 
@@ -213,11 +216,13 @@ export function FlowDetailPage() {
           </div>
         </div>
         <p className="description">{detail.description}</p>
-        {detail.registryScope && detail.registryName && (
-          <Link
-            to={`/marketplace/@${detail.registryScope}/${detail.registryName}`}
-            className="btn-sm marketplace-link"
-          >
+        {detail.lastPublishedVersion && (
+          <span className="badge badge-success">
+            {t("publish.badge", { version: detail.lastPublishedVersion })}
+          </span>
+        )}
+        {marketplacePath(detail) && (
+          <Link to={marketplacePath(detail)!} className="btn-sm marketplace-link">
             <ExternalLink size={14} />
             {t("library.viewOnMarketplace", { ns: "settings" })}
           </Link>
@@ -449,6 +454,9 @@ export function FlowDetailPage() {
               <Link to={`/flows/${packageId}/edit`}>
                 <button>{t("btn.edit")}</button>
               </Link>
+            )}
+            {detail.source !== "built-in" && (
+              <button onClick={() => setPublishOpen(true)}>{t("publish.publish")}</button>
             )}
             {detail.source !== "built-in" && (
               <button
@@ -705,6 +713,11 @@ export function FlowDetailPage() {
             );
           }
         }}
+      />
+      <PublishModal
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        packageId={packageId!}
       />
       {customCredService && customCredSchema && (
         <CustomCredentialsModal

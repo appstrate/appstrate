@@ -189,6 +189,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
     registryScope: data.registryScope ?? null,
     registryName: data.registryName ?? null,
     autoInstalled: data.autoInstalled,
+    lastPublishedVersion: data.lastPublishedVersion ?? null,
+    lastPublishedAt: data.lastPublishedAt?.toISOString() ?? null,
     flows: await getPackageDisplayNames(packageIds),
   };
 }
