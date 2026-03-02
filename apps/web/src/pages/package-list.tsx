@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
-import { useFlows, useOrgSkills, useOrgExtensions } from "../hooks/use-packages";
+import { useFlows, useLibraryList } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
 import { PackageCard } from "../components/package-card";
@@ -142,13 +142,13 @@ interface LibraryTabConfig {
 const LIBRARY_TAB_CONFIGS: LibraryTabConfig[] = [
   {
     type: "skill",
-    useData: useOrgSkills,
+    useData: () => useLibraryList("skill"),
     emptyMessageKey: "library.emptyItems",
     emptyHintKey: "library.emptyItemsHint",
   },
   {
     type: "extension",
-    useData: useOrgExtensions,
+    useData: () => useLibraryList("extension"),
     emptyMessageKey: "library.emptyItems",
     emptyHintKey: "library.emptyItemsHint",
   },

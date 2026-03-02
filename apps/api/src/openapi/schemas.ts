@@ -429,10 +429,6 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgSkill: { $ref: "#/components/schemas/OrgLibraryItem" },
-  OrgSkillDetail: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
-  OrgExtension: { $ref: "#/components/schemas/OrgLibraryItem" },
-  OrgExtensionDetail: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
   ShareFlowInfo: {
     type: "object",
     properties: {
