@@ -6,7 +6,6 @@ import {
   ChevronDown,
   Check,
   Calendar,
-  BookOpen,
   ShoppingBag,
   Plug,
   Settings,
@@ -75,10 +74,6 @@ export function OrgSwitcher() {
             <Link to="/schedules" className="org-switcher-link" onClick={() => setOpen(false)}>
               <Calendar size={14} />
               {t("orgSwitcher.schedules")}
-            </Link>
-            <Link to="/?tab=skills" className="org-switcher-link" onClick={() => setOpen(false)}>
-              <BookOpen size={14} />
-              {t("orgSwitcher.library")}
             </Link>
             <Link to="/marketplace" className="org-switcher-link" onClick={() => setOpen(false)}>
               <ShoppingBag size={14} />
