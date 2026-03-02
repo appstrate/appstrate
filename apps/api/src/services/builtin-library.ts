@@ -17,6 +17,50 @@ interface BuiltInLibraryItem {
 let builtInSkills: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
 let builtInExtensions: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
 
+// --- Generic loader ---
+
+interface BuiltInLoadConfig {
+  dir: string;
+  entryFilter: (entry: string, info: Awaited<ReturnType<typeof stat>>) => boolean;
+  idFromEntry: (entry: string) => string;
+  contentPath: (baseDir: string, entry: string) => string;
+  extractMeta: boolean;
+  typeLabel: string;
+}
+
+async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, BuiltInLibraryItem>> {
+  const result = new Map<string, BuiltInLibraryItem>();
+
+  try {
+    const entries = await readdir(cfg.dir);
+    for (const entry of entries) {
+      const entryPath = join(cfg.dir, entry);
+      const info = await stat(entryPath).catch(() => null);
+      if (!info || !cfg.entryFilter(entry, info)) continue;
+
+      const id = cfg.idFromEntry(entry);
+      const contentFilePath = cfg.contentPath(cfg.dir, entry);
+      try {
+        const content = await readFile(contentFilePath, "utf-8");
+        let name = id;
+        let description = "";
+        if (cfg.extractMeta) {
+          const meta = extractSkillMeta(content);
+          name = meta.name || id;
+          description = meta.description || "";
+        }
+        result.set(id, { id, name, description, content });
+      } catch {
+        logger.warn(`Skipping built-in ${cfg.typeLabel}: unreadable`, { id });
+      }
+    }
+  } catch {
+    // directory doesn't exist — that's fine
+  }
+
+  return result;
+}
+
 /** Load built-in skills and extensions from dataDir. Call once at boot. */
 export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
   if (!dataDir) {
@@ -27,60 +71,24 @@ export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
   skillsDir = join(dataDir, "skills");
   extensionsDir = join(dataDir, "extensions");
 
-  const skills = new Map<string, BuiltInLibraryItem>();
-  const extensions = new Map<string, BuiltInLibraryItem>();
-
-  // Load skills from {dataDir}/skills/{id}/SKILL.md
-  try {
-    const entries = await readdir(skillsDir);
-    for (const entry of entries) {
-      const skillPath = join(skillsDir, entry);
-      const info = await stat(skillPath).catch(() => null);
-      if (!info?.isDirectory()) continue;
-
-      const skillFile = join(skillPath, "SKILL.md");
-      try {
-        const content = await readFile(skillFile, "utf-8");
-        const meta = extractSkillMeta(content);
-        skills.set(entry, {
-          id: entry,
-          name: meta.name || entry,
-          description: meta.description || "",
-          content,
-        });
-      } catch {
-        logger.warn("Skipping built-in skill: SKILL.md not found or unreadable", { id: entry });
-      }
-    }
-  } catch {
-    // skills/ doesn't exist — that's fine
-  }
-
-  // Load extensions from {dataDir}/extensions/{id}.ts
-  try {
-    const entries = await readdir(extensionsDir);
-    for (const entry of entries) {
-      if (!entry.endsWith(".ts")) continue;
-      const extPath = join(extensionsDir, entry);
-      const info = await stat(extPath).catch(() => null);
-      if (!info?.isFile()) continue;
-
-      const id = entry.replace(/\.ts$/, "");
-      try {
-        const content = await readFile(extPath, "utf-8");
-        extensions.set(id, {
-          id,
-          name: id,
-          description: "",
-          content,
-        });
-      } catch {
-        logger.warn("Skipping built-in extension: unreadable", { id });
-      }
-    }
-  } catch {
-    // extensions/ doesn't exist — that's fine
-  }
+  const [skills, extensions] = await Promise.all([
+    loadBuiltInType({
+      dir: skillsDir,
+      entryFilter: (_entry, info) => info.isDirectory(),
+      idFromEntry: (entry) => entry,
+      contentPath: (baseDir, entry) => join(baseDir, entry, "SKILL.md"),
+      extractMeta: true,
+      typeLabel: "skill",
+    }),
+    loadBuiltInType({
+      dir: extensionsDir,
+      entryFilter: (entry, info) => info.isFile() && entry.endsWith(".ts"),
+      idFromEntry: (entry) => entry.replace(/\.ts$/, ""),
+      contentPath: (baseDir, entry) => join(baseDir, entry),
+      extractMeta: false,
+      typeLabel: "extension",
+    }),
+  ]);
 
   builtInSkills = skills;
   builtInExtensions = extensions;

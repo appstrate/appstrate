@@ -2,8 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
-import { useFlows } from "../hooks/use-flows";
-import { useOrgSkills, useOrgExtensions } from "../hooks/use-library";
+import { useFlows, useOrgSkills, useOrgExtensions } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
 import { PackageCard } from "../components/package-card";
@@ -48,9 +47,7 @@ function PackageTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const importButton = (
-    <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>
-  );
+  const importButton = <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>;
 
   const header = (
     <div className="flow-list-header">
@@ -62,9 +59,7 @@ function PackageTab({
     </div>
   );
 
-  const modal = (
-    <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
-  );
+  const modal = <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />;
 
   if (!items || items.length === 0) {
     return (
@@ -126,51 +121,65 @@ function FlowsTab() {
   );
 }
 
-function SkillsTab() {
-  const { t } = useTranslation(["settings", "common"]);
-  const { data: rawItems, isLoading } = useOrgSkills();
+interface LibraryTabConfig {
+  type: "skill" | "extension";
+  useData: () => {
+    data:
+      | {
+          id: string;
+          name?: string | null;
+          description?: string | null;
+          source?: "built-in" | "local";
+          usedByFlows?: number;
+        }[]
+      | undefined;
+    isLoading: boolean;
+  };
+  emptyMessageKey: string;
+  emptyHintKey: string;
+}
 
-  const items: CardItem[] | undefined = rawItems?.map((s) => ({
-    id: s.id,
-    displayName: s.name || s.id,
-    description: s.description,
+const LIBRARY_TAB_CONFIGS: LibraryTabConfig[] = [
+  {
     type: "skill",
-    source: s.source,
-    usedByFlows: s.usedByFlows,
-  }));
-
-  return (
-    <PackageTab
-      items={items}
-      isLoading={isLoading}
-      emptyMessage={t("library.emptySkill")}
-      emptyHint={t("library.emptySkillHint")}
-    />
-  );
-}
-
-function ExtensionsTab() {
-  const { t } = useTranslation(["settings", "common"]);
-  const { data: rawItems, isLoading } = useOrgExtensions();
-
-  const items: CardItem[] | undefined = rawItems?.map((e) => ({
-    id: e.id,
-    displayName: e.name || e.id,
-    description: e.description,
+    useData: useOrgSkills,
+    emptyMessageKey: "library.emptyItems",
+    emptyHintKey: "library.emptyItemsHint",
+  },
+  {
     type: "extension",
-    source: e.source,
-    usedByFlows: e.usedByFlows,
+    useData: useOrgExtensions,
+    emptyMessageKey: "library.emptyItems",
+    emptyHintKey: "library.emptyItemsHint",
+  },
+];
+
+function LibraryTab({ config }: { config: LibraryTabConfig }) {
+  const { t } = useTranslation(["settings", "common"]);
+  const { data: rawItems, isLoading } = config.useData();
+
+  const typeLabel = t(`library.type.${config.type}`);
+  const items: CardItem[] | undefined = rawItems?.map((item) => ({
+    id: item.id,
+    displayName: item.name || item.id,
+    description: item.description,
+    type: config.type,
+    source: item.source,
+    usedByFlows: item.usedByFlows,
   }));
 
   return (
     <PackageTab
       items={items}
       isLoading={isLoading}
-      emptyMessage={t("library.emptyExtension")}
-      emptyHint={t("library.emptyExtensionHint")}
+      emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
+      emptyHint={t(config.emptyHintKey, { type: typeLabel })}
     />
   );
 }
+
+const skillTabConfig = LIBRARY_TAB_CONFIGS[0];
+const extensionTabConfig = LIBRARY_TAB_CONFIGS[1];
 
 export function PackageList() {
   const { t } = useTranslation(["flows", "settings", "common"]);
@@ -216,8 +225,8 @@ export function PackageList() {
       </div>
 
       {tab === "flows" && <FlowsTab />}
-      {tab === "skills" && <SkillsTab />}
-      {tab === "extensions" && <ExtensionsTab />}
+      {tab === "skills" && <LibraryTab config={skillTabConfig} />}
+      {tab === "extensions" && <LibraryTab config={extensionTabConfig} />}
     </>
   );
 }

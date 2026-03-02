@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFlowDetail } from "../hooks/use-flows";
+import { useFlowDetail } from "../hooks/use-packages";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";

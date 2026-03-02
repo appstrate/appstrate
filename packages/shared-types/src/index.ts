@@ -183,7 +183,7 @@ export interface FlowDetail {
 
 // --- Organization Library Types ---
 
-export interface OrgSkill {
+export interface OrgLibraryItem {
   id: string;
   name?: string | null;
   description?: string | null;
@@ -195,39 +195,21 @@ export interface OrgSkill {
   usedByFlows?: number;
 }
 
-export interface OrgSkillDetail extends OrgSkill {
+export interface OrgLibraryItemDetail extends OrgLibraryItem {
   content: string;
   flows: { id: string; displayName: string }[];
   registryScope?: string | null;
   registryName?: string | null;
   autoInstalled?: boolean;
-
   lastPublishedVersion?: string | null;
   lastPublishedAt?: string | null;
 }
 
-export interface OrgExtension {
-  id: string;
-  name?: string | null;
-  description?: string | null;
-  source?: "built-in" | "local";
-  createdBy?: string | null;
-  createdByName?: string;
-  createdAt: string;
-  updatedAt: string;
-  usedByFlows?: number;
-}
-
-export interface OrgExtensionDetail extends OrgExtension {
-  content: string;
-  flows: { id: string; displayName: string }[];
-  registryScope?: string | null;
-  registryName?: string | null;
-  autoInstalled?: boolean;
-
-  lastPublishedVersion?: string | null;
-  lastPublishedAt?: string | null;
-}
+// Backward-compatible aliases
+export type OrgSkill = OrgLibraryItem;
+export type OrgSkillDetail = OrgLibraryItemDetail;
+export type OrgExtension = OrgLibraryItem;
+export type OrgExtensionDetail = OrgLibraryItemDetail;
 
 // --- Flow Memory Types ---
 

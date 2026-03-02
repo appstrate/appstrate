@@ -9,8 +9,8 @@ import {
   uploadLibraryPackage,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
+  type LibraryTypeConfig,
 } from "../services/library.ts";
-import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { requireAdmin } from "../middleware/guards.ts";
@@ -171,264 +171,64 @@ async function parseLibraryUpload(
   return { id: body.id, name, description, content: body.content, normalizedFiles };
 }
 
-export function createLibraryRouter() {
-  const router = new Hono<AppEnv>();
+// --- Route configuration per library type ---
 
-  // -------------------------------------------------------
-  // Skills
-  // -------------------------------------------------------
+interface LibraryRouteConfig {
+  cfg: LibraryTypeConfig;
+  parseOpts: { requiredFile: string | null; contentFileExt: string | null; extractMeta: boolean };
+  responseKey: string;
+  validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
+  storageFileName: (id: string) => string;
+}
 
-  router.get("/skills", async (c) => {
+const ROUTE_CONFIGS: Record<string, LibraryRouteConfig> = {
+  skills: {
+    cfg: SKILL_CONFIG,
+    parseOpts: { requiredFile: "SKILL.md", contentFileExt: null, extractMeta: true },
+    responseKey: "skill",
+    storageFileName: () => "SKILL.md",
+  },
+  extensions: {
+    cfg: EXTENSION_CONFIG,
+    parseOpts: { requiredFile: null, contentFileExt: ".ts", extractMeta: false },
+    responseKey: "extension",
+    validateContent: validateExtensionSource,
+    storageFileName: (id) => `${id}.ts`,
+  },
+};
+
+// --- Handler factories ---
+
+function makeListHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const skills = await listOrgItems(orgId, SKILL_CONFIG);
-    const enriched = await enrichWithCreatorNames(skills);
-    return c.json({ skills: enriched });
-  });
+    const items = await listOrgItems(orgId, rcfg.cfg);
+    const enriched = await enrichWithCreatorNames(items);
+    return c.json({ [rcfg.cfg.storageFolder]: enriched });
+  };
+}
 
-  router.post("/skills", requireAdmin(), async (c) => {
+function makeCreateHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
 
-    const parsed = await parseLibraryUpload(c, {
-      requiredFile: "SKILL.md",
-      contentFileExt: null,
-      extractMeta: true,
-    });
+    const parsed = await parseLibraryUpload(c, rcfg.parseOpts);
     if (parsed instanceof Response) return parsed;
 
-    if (isBuiltInSkill(parsed.id)) {
+    if (rcfg.cfg.isBuiltIn(parsed.id)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Skill '${parsed.id}' is built-in and cannot be modified`,
+          message: `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is built-in and cannot be modified`,
         },
         403,
       );
     }
 
-    const skill = await upsertOrgItem(
-      orgId,
-      {
-        id: parsed.id,
-        name: parsed.name,
-        description: parsed.description,
-        content: parsed.content,
-        createdBy: user.id,
-      },
-      SKILL_CONFIG,
-    );
-
-    if (parsed.normalizedFiles) {
-      await uploadLibraryPackage("skills", orgId, parsed.id, parsed.normalizedFiles);
-    }
-
-    return c.json(
-      { skill: { id: skill.id, name: skill.name, description: skill.description } },
-      201,
-    );
-  });
-
-  router.get("/skills/:id", async (c) => {
-    const orgId = c.get("orgId");
-    const skillId = c.req.param("id");
-    const skill = await getOrgItem(orgId, skillId, SKILL_CONFIG);
-
-    if (!skill) {
-      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' not found` }, 404);
-    }
-
-    return c.json({ skill });
-  });
-
-  router.put("/skills/:id", requireAdmin(), async (c) => {
-    const orgId = c.get("orgId");
-    const user = c.get("user");
-    const skillId = c.req.param("id");
-
-    if (isBuiltInSkill(skillId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Skill '${skillId}' is built-in and cannot be modified`,
-        },
-        403,
-      );
-    }
-
-    const existing = await getOrgItem(orgId, skillId, SKILL_CONFIG);
-    if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' not found` }, 404);
-    }
-
-    const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
-
-    const finalContent = body.content ?? existing.content;
-    const skill = await upsertOrgItem(
-      orgId,
-      {
-        id: skillId,
-        name: body.name ?? existing.name ?? undefined,
-        description: body.description ?? existing.description ?? undefined,
-        content: finalContent!,
-        createdBy: existing.createdBy ?? user.id,
-      },
-      SKILL_CONFIG,
-    );
-
-    // Update storage ZIP so container packaging stays in sync
-    await uploadLibraryPackage("skills", orgId, skillId, {
-      "SKILL.md": new TextEncoder().encode(finalContent!),
-    });
-
-    return c.json({ skill: { id: skill.id, name: skill.name, description: skill.description } });
-  });
-
-  router.delete("/skills/:id", requireAdmin(), async (c) => {
-    const orgId = c.get("orgId");
-    const skillId = c.req.param("id");
-
-    if (isBuiltInSkill(skillId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Skill '${skillId}' is built-in and cannot be deleted`,
-        },
-        403,
-      );
-    }
-
-    const result = await deleteOrgItem(orgId, skillId, SKILL_CONFIG);
-    if (!result.ok) {
-      if (result.error === "DEPENDED_ON") {
-        return c.json(
-          {
-            error: "DEPENDED_ON",
-            message: `Skill '${skillId}' is required by ${result.dependents!.length} marketplace package(s)`,
-            dependents: result.dependents,
-          },
-          409,
-        );
-      }
-      return c.json(
-        {
-          error: "IN_USE",
-          message: `Skill '${skillId}' is used by ${result.flows!.length} flow(s)`,
-          flows: result.flows,
-        },
-        409,
-      );
-    }
-
-    return c.body(null, 204);
-  });
-
-  // -------------------------------------------------------
-  // Extensions
-  // -------------------------------------------------------
-
-  router.get("/extensions", async (c) => {
-    const orgId = c.get("orgId");
-    const extensions = await listOrgItems(orgId, EXTENSION_CONFIG);
-    const enriched = await enrichWithCreatorNames(extensions);
-    return c.json({ extensions: enriched });
-  });
-
-  router.post("/extensions", requireAdmin(), async (c) => {
-    const orgId = c.get("orgId");
-    const user = c.get("user");
-
-    const parsed = await parseLibraryUpload(c, {
-      requiredFile: null,
-      contentFileExt: ".ts",
-      extractMeta: false,
-    });
-    if (parsed instanceof Response) return parsed;
-
-    if (isBuiltInExtension(parsed.id)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Extension '${parsed.id}' is built-in and cannot be modified`,
-        },
-        403,
-      );
-    }
-
-    const validation = validateExtensionSource(parsed.content);
-    if (!validation.valid) {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: validation.errors[0],
-          details: validation.errors,
-          warnings: validation.warnings,
-        },
-        400,
-      );
-    }
-
-    const ext = await upsertOrgItem(
-      orgId,
-      {
-        id: parsed.id,
-        name: parsed.name,
-        description: parsed.description,
-        content: parsed.content,
-        createdBy: user.id,
-      },
-      EXTENSION_CONFIG,
-    );
-
-    if (parsed.normalizedFiles) {
-      await uploadLibraryPackage("extensions", orgId, parsed.id, parsed.normalizedFiles);
-    }
-
-    return c.json(
-      {
-        extension: { id: ext.id, name: ext.name, description: ext.description },
-        ...(validation.warnings.length > 0 ? { warnings: validation.warnings } : {}),
-      },
-      201,
-    );
-  });
-
-  router.get("/extensions/:id", async (c) => {
-    const orgId = c.get("orgId");
-    const extId = c.req.param("id");
-    const ext = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
-
-    if (!ext) {
-      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' not found` }, 404);
-    }
-
-    return c.json({ extension: ext });
-  });
-
-  router.put("/extensions/:id", requireAdmin(), async (c) => {
-    const orgId = c.get("orgId");
-    const user = c.get("user");
-    const extId = c.req.param("id");
-
-    if (isBuiltInExtension(extId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Extension '${extId}' is built-in and cannot be modified`,
-        },
-        403,
-      );
-    }
-
-    const existing = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
-    if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' not found` }, 404);
-    }
-
-    const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
-
-    let extWarnings: string[] = [];
-    if (body.content) {
-      const validation = validateExtensionSource(body.content);
+    let warnings: string[] = [];
+    if (rcfg.validateContent) {
+      const validation = rcfg.validateContent(parsed.content);
       if (!validation.valid) {
         return c.json(
           {
@@ -440,54 +240,144 @@ export function createLibraryRouter() {
           400,
         );
       }
-      extWarnings = validation.warnings;
+      warnings = validation.warnings;
     }
 
-    const finalContent = body.content ?? existing.content;
-    const ext = await upsertOrgItem(
+    const item = await upsertOrgItem(
       orgId,
       {
-        id: extId,
-        name: body.name ?? existing.name ?? undefined,
-        description: body.description ?? existing.description ?? undefined,
-        content: finalContent!,
-        createdBy: existing.createdBy ?? user.id,
+        id: parsed.id,
+        name: parsed.name,
+        description: parsed.description,
+        content: parsed.content,
+        createdBy: user.id,
       },
-      EXTENSION_CONFIG,
+      rcfg.cfg,
     );
 
-    // Update storage ZIP so container packaging stays in sync
-    await uploadLibraryPackage("extensions", orgId, extId, {
-      [`${extId}.ts`]: new TextEncoder().encode(finalContent!),
-    });
+    if (parsed.normalizedFiles) {
+      await uploadLibraryPackage(rcfg.cfg.storageFolder, orgId, parsed.id, parsed.normalizedFiles);
+    }
 
-    return c.json({
-      extension: { id: ext.id, name: ext.name, description: ext.description },
-      ...(extWarnings.length > 0 ? { warnings: extWarnings } : {}),
-    });
-  });
+    return c.json(
+      {
+        [rcfg.responseKey]: { id: item.id, name: item.name, description: item.description },
+        ...(warnings.length > 0 ? { warnings } : {}),
+      },
+      201,
+    );
+  };
+}
 
-  router.delete("/extensions/:id", requireAdmin(), async (c) => {
+function makeGetHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const extId = c.req.param("id");
+    const itemId = c.req.param("id");
+    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
 
-    if (isBuiltInExtension(extId)) {
+    if (!item) {
+      return c.json(
+        {
+          error: "NOT_FOUND",
+          message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`,
+        },
+        404,
+      );
+    }
+
+    return c.json({ [rcfg.responseKey]: item });
+  };
+}
+
+function makeUpdateHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+    const itemId = c.req.param("id");
+    const label = rcfg.cfg.label.slice(0, -1);
+
+    if (rcfg.cfg.isBuiltIn(itemId)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Extension '${extId}' is built-in and cannot be deleted`,
+          message: `${label} '${itemId}' is built-in and cannot be modified`,
         },
         403,
       );
     }
 
-    const result = await deleteOrgItem(orgId, extId, EXTENSION_CONFIG);
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing) {
+      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+    }
+
+    const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
+
+    let warnings: string[] = [];
+    if (rcfg.validateContent && body.content) {
+      const validation = rcfg.validateContent(body.content);
+      if (!validation.valid) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: validation.errors[0],
+            details: validation.errors,
+            warnings: validation.warnings,
+          },
+          400,
+        );
+      }
+      warnings = validation.warnings;
+    }
+
+    const finalContent = body.content ?? existing.content;
+    const item = await upsertOrgItem(
+      orgId,
+      {
+        id: itemId,
+        name: body.name ?? existing.name ?? undefined,
+        description: body.description ?? existing.description ?? undefined,
+        content: finalContent!,
+        createdBy: existing.createdBy ?? user.id,
+      },
+      rcfg.cfg,
+    );
+
+    // Update storage ZIP so container packaging stays in sync
+    await uploadLibraryPackage(rcfg.cfg.storageFolder, orgId, itemId, {
+      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(finalContent!),
+    });
+
+    return c.json({
+      [rcfg.responseKey]: { id: item.id, name: item.name, description: item.description },
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
+  };
+}
+
+function makeDeleteHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const itemId = c.req.param("id");
+    const label = rcfg.cfg.label.slice(0, -1);
+
+    if (rcfg.cfg.isBuiltIn(itemId)) {
+      return c.json(
+        {
+          error: "OPERATION_NOT_ALLOWED",
+          message: `${label} '${itemId}' is built-in and cannot be deleted`,
+        },
+        403,
+      );
+    }
+
+    const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
       if (result.error === "DEPENDED_ON") {
         return c.json(
           {
             error: "DEPENDED_ON",
-            message: `Extension '${extId}' is required by ${result.dependents!.length} marketplace package(s)`,
+            message: `${label} '${itemId}' is required by ${result.dependents!.length} marketplace package(s)`,
             dependents: result.dependents,
           },
           409,
@@ -496,7 +386,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "IN_USE",
-          message: `Extension '${extId}' is used by ${result.flows!.length} flow(s)`,
+          message: `${label} '${itemId}' is used by ${result.flows!.length} flow(s)`,
           flows: result.flows,
         },
         409,
@@ -504,7 +394,19 @@ export function createLibraryRouter() {
     }
 
     return c.body(null, 204);
-  });
+  };
+}
+
+export function createLibraryRouter() {
+  const router = new Hono<AppEnv>();
+
+  for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
+    router.get(`/${path}`, makeListHandler(rcfg));
+    router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
+    router.get(`/${path}/:id`, makeGetHandler(rcfg));
+    router.put(`/${path}/:id`, requireAdmin(), makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requireAdmin(), makeDeleteHandler(rcfg));
+  }
 
   return router;
 }
