@@ -16,7 +16,7 @@ export const responses = {
     content: {
       "application/json": {
         schema: { $ref: "#/components/schemas/Error" },
-        example: { error: "FORBIDDEN", message: "Acces reserve aux administrateurs" },
+        example: { error: "FORBIDDEN", message: "Admin access required" },
       },
     },
   },
@@ -45,7 +45,7 @@ export const responses = {
         schema: { $ref: "#/components/schemas/Error" },
         example: {
           error: "RATE_LIMITED",
-          message: "Trop de requetes. Reessayez dans quelques instants.",
+          message: "Too many requests. Please try again shortly.",
         },
       },
     },

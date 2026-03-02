@@ -14,9 +14,10 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@appstrate/core": "^1.0.0",
     "@appstrate/connect": "workspace:*",
     "@appstrate/registry-client": "workspace:*",
-    "@appstrate/validation": "^1.0.2",
+    "@appstrate/validation": "^1.1.1",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
@@ -26,7 +27,6 @@
     "drizzle-orm": "^0.39.3",
     "fflate": "^0.8.2",
     "hono": "^4.11.9",
-    "pino": "^10.3.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -174,7 +174,7 @@ export async function addMember(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("duplicate key") || message.includes("unique constraint")) {
-      throw new Error("Cet utilisateur est deja membre de cette organisation", { cause: err });
+      throw new Error("This user is already a member of this organization", { cause: err });
     }
     throw new Error(`Failed to add member: ${message}`, { cause: err });
   }
@@ -225,7 +225,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["pending", "running"])));
 
   if ((runningResult[0]?.runningCount ?? 0) > 0) {
-    throw new Error("Impossible de supprimer l'organisation : des executions sont en cours");
+    throw new Error("Cannot delete organization: executions are in progress");
   }
 
   // Delete in FK-safe order within a transaction

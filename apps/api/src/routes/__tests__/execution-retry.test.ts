@@ -169,13 +169,13 @@ function makeFlow(overrides: {
       displayName: "Test Flow",
       description: "A test flow",
       author: "test",
-      requires: { services: [] },
+      requires: { services: [], skills: [], extensions: [] },
       output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
       execution: {
         timeout: overrides.timeout ?? 300,
         outputRetries: overrides.outputRetries,
       },
-    },
+    } as unknown as LoadedFlow["manifest"],
   };
 }
 

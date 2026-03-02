@@ -451,7 +451,7 @@ describe("validateFlowContent", () => {
       { id: "search", description: "B", content: "..." },
     ]);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("duplique"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("duplicated"))).toBe(true);
   });
 });
 

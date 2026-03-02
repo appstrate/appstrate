@@ -8,7 +8,7 @@ export function requireAdmin() {
   return async (c: Context<AppEnv>, next: Next) => {
     const orgRole = c.get("orgRole");
     if (orgRole !== "admin" && orgRole !== "owner") {
-      return c.json({ error: "FORBIDDEN", message: "Acces reserve aux administrateurs" }, 403);
+      return c.json({ error: "FORBIDDEN", message: "Admin access required" }, 403);
     }
     return next();
   };
@@ -21,7 +21,7 @@ export function requireFlow(paramName = "id") {
     const orgId = c.get("orgId");
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${packageId}' introuvable` }, 404);
+      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${packageId}' not found` }, 404);
     }
     c.set("flow", flow);
     return next();
@@ -34,14 +34,14 @@ export function requireMutableFlow() {
     const flow = c.get("flow");
     if (flow.source === "built-in") {
       return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Impossible de modifier un flow built-in" },
+        { error: "OPERATION_NOT_ALLOWED", message: "Cannot modify a built-in flow" },
         403,
       );
     }
     const running = await getRunningExecutionsForPackage(flow.id);
     if (running > 0) {
       return c.json(
-        { error: "FLOW_IN_USE", message: `${running} execution(s) en cours pour ce flow` },
+        { error: "FLOW_IN_USE", message: `${running} execution(s) running for this flow` },
         409,
       );
     }

@@ -156,19 +156,19 @@ describe("validateExtensionSource", () => {
   test("rejects empty content", () => {
     const result = validateExtensionSource("");
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("vide"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 
   test("rejects whitespace-only content", () => {
     const result = validateExtensionSource("   \n\t  ");
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("vide"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 
   test("rejects unbalanced braces", () => {
     const result = validateExtensionSource(UNBALANCED_BRACES);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("accolades"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("braces"))).toBe(true);
   });
 
   test("handles complex TS types without false positives on param count", () => {

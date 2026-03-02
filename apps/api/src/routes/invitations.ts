@@ -20,22 +20,22 @@ router.get("/:token/info", async (c) => {
   const invitation = await getInvitationByToken(token);
 
   if (!invitation) {
-    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation introuvable" }, 404);
+    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation not found" }, 404);
   }
 
   if (invitation.status === "accepted") {
-    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation deja acceptee" }, 410);
+    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation already accepted" }, 410);
   }
   if (invitation.status === "cancelled") {
-    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation annulee" }, 410);
+    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation cancelled" }, 410);
   }
   if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
-    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expiree" }, 410);
+    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expired" }, 410);
   }
 
   const [orgName, inviterName] = await Promise.all([
     getOrgName(invitation.orgId),
-    invitation.invitedBy ? getInviterName(invitation.invitedBy) : Promise.resolve("Un membre"),
+    invitation.invitedBy ? getInviterName(invitation.invitedBy) : Promise.resolve("A member"),
   ]);
 
   return c.json({
@@ -53,17 +53,17 @@ router.post("/:token/accept", async (c) => {
   const invitation = await getInvitationByToken(token);
 
   if (!invitation) {
-    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation introuvable" }, 404);
+    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation not found" }, 404);
   }
 
   if (invitation.status === "accepted") {
-    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation deja acceptee" }, 410);
+    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation already accepted" }, 410);
   }
   if (invitation.status === "cancelled") {
-    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation annulee" }, 410);
+    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation cancelled" }, 410);
   }
   if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
-    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expiree" }, 410);
+    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expired" }, 410);
   }
 
   // Check if user already exists
@@ -91,10 +91,7 @@ router.post("/:token/accept", async (c) => {
         logger.error("Invitation signup failed — no user returned", {
           email: invitation.email,
         });
-        return c.json(
-          { error: "SIGNUP_FAILED", message: "Erreur lors de la creation du compte" },
-          500,
-        );
+        return c.json({ error: "SIGNUP_FAILED", message: "Failed to create account" }, 500);
       }
 
       const newUserId = signupRes.user.id;
@@ -139,10 +136,7 @@ router.post("/:token/accept", async (c) => {
         error: err instanceof Error ? err.message : String(err),
         email: invitation.email,
       });
-      return c.json(
-        { error: "ACCEPT_FAILED", message: "Erreur lors de l'acceptation de l'invitation" },
-        500,
-      );
+      return c.json({ error: "ACCEPT_FAILED", message: "Failed to accept invitation" }, 500);
     }
   } else {
     // --- EXISTING USER ---

@@ -19,13 +19,10 @@ export function createPackagesRouter() {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Aucun fichier fourni" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
     }
     if (!file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Seuls les fichiers .zip sont acceptes" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -49,7 +46,7 @@ export function createPackagesRouter() {
       return c.json(
         {
           error: "NAME_COLLISION",
-          message: `Un package avec l'identifiant '${packageId}' existe deja`,
+          message: `A package with identifier '${packageId}' already exists`,
         },
         400,
       );
