@@ -1,6 +1,6 @@
 {
   "list.create": "Créer un flow",
-  "list.import": "Importer un flow",
+  "list.import": "Importer un package (.zip)",
   "list.empty": "Aucun flow disponible.",
   "list.emptyHint": "Ajoutez un flow dans le répertoire <1>flows/</1> ou importez un ZIP",
   "list.badgeBuiltIn": "Intégré",
@@ -50,7 +50,7 @@
   "exec.breadcrumb": "Exécution #{{number}}",
   "exec.resultLabel": "Résultat :",
   "exec.user": "par {{name}}",
-  "import.title": "Importer un flow",
+  "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",
   "import.importing": "Import en cours...",
