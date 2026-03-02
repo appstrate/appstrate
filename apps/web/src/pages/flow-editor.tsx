@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
-import { useFlowDetail } from "../hooks/use-flows";
+import { useFlowDetail } from "../hooks/use-packages";
 import { useCreateFlow, useUpdateFlow } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
@@ -187,7 +187,7 @@ function FlowEditorForm({
 
       {activeTab === "skills" && (
         <ResourceSection
-          type="skills"
+          type="skill"
           title={t("editor.tabSkills")}
           emptyLabel={t("editor.skillsEmpty")}
           selectedIds={form.skills.map((s) => s.id)}
@@ -197,7 +197,7 @@ function FlowEditorForm({
 
       {activeTab === "extensions" && (
         <ResourceSection
-          type="extensions"
+          type="extension"
           title={t("editor.tabExtensions")}
           emptyLabel={t("editor.extensionsEmpty")}
           selectedIds={form.extensions.map((e) => e.id)}

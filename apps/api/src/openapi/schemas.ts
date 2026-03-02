@@ -385,13 +385,13 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
     },
   },
-  OrgSkill: {
+  OrgLibraryItem: {
     type: "object",
     properties: {
       id: { type: "string" },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
-      source: { type: "string", enum: ["built-in", "user"] },
+      source: { type: "string", enum: ["built-in", "local"] },
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
@@ -399,15 +399,22 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgSkillDetail: {
+  OrgLibraryItemDetail: {
     type: "object",
     properties: {
       id: { type: "string" },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
-      content: { type: "string", description: "SKILL.md content" },
-      source: { type: "string", enum: ["built-in", "user"] },
+      content: { type: "string", description: "Library item content" },
+      source: { type: "string", enum: ["built-in", "local"] },
       createdBy: { type: ["string", "null"] },
+      createdByName: { type: "string" },
+      usedByFlows: { type: "integer" },
+      registryScope: { type: ["string", "null"] },
+      registryName: { type: ["string", "null"] },
+      autoInstalled: { type: "boolean" },
+      lastPublishedVersion: { type: ["string", "null"] },
+      lastPublishedAt: { type: ["string", "null"], format: "date-time" },
       flows: {
         type: "array",
         items: {
@@ -422,43 +429,10 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgExtension: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      name: { type: ["string", "null"] },
-      description: { type: ["string", "null"] },
-      source: { type: "string", enum: ["built-in", "user"] },
-      createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
-      usedByFlows: { type: "integer" },
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
-    },
-  },
-  OrgExtensionDetail: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      name: { type: ["string", "null"] },
-      description: { type: ["string", "null"] },
-      content: { type: "string", description: "Extension TypeScript source" },
-      source: { type: "string", enum: ["built-in", "user"] },
-      createdBy: { type: ["string", "null"] },
-      flows: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            displayName: { type: "string" },
-          },
-        },
-      },
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
-    },
-  },
+  OrgSkill: { $ref: "#/components/schemas/OrgLibraryItem" },
+  OrgSkillDetail: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
+  OrgExtension: { $ref: "#/components/schemas/OrgLibraryItem" },
+  OrgExtensionDetail: { $ref: "#/components/schemas/OrgLibraryItemDetail" },
   ShareFlowInfo: {
     type: "object",
     properties: {

@@ -2,12 +2,7 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
-import {
-  useOrgSkillDetail,
-  useOrgExtensionDetail,
-  useDeleteSkill,
-  useDeleteExtension,
-} from "../hooks/use-library";
+import { usePackageDetail, useDeletePackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { TypeBadge } from "../components/type-badge";
 import { PublishModal } from "../components/publish-modal";
@@ -19,33 +14,21 @@ export function PackageDetailPage() {
   const { packageId } = useParams<{ packageId: string }>();
   const { isOrgAdmin } = useOrg();
 
-  // Try both skill and extension detail queries
-  const skillQuery = useOrgSkillDetail(packageId);
-  const extQuery = useOrgExtensionDetail(packageId);
-  const deleteSkill = useDeleteSkill();
-  const deleteExtension = useDeleteExtension();
+  const { isLoading, data: detail, type } = usePackageDetail(packageId);
+  const deleteMutation = useDeletePackage(type);
 
   const [publishOpen, setPublishOpen] = useState(false);
 
-  const isLoading = skillQuery.isLoading || extQuery.isLoading;
-  const detail = skillQuery.data || extQuery.data;
-  const isSkill = !!skillQuery.data;
-
   if (isLoading) return <LoadingState />;
   if (!detail) return <Navigate to="/" replace />;
-
-  const type = isSkill ? "skill" : "extension";
-  const deleteMutation = isSkill ? deleteSkill : deleteExtension;
   const isBuiltIn = detail.source === "built-in";
   const hasFlows = detail.flows.length > 0;
 
   const handleDelete = () => {
     if (!packageId) return;
     const name = detail.name || detail.id;
-    const msg = isSkill
-      ? t("library.deleteSkill", { name })
-      : t("library.deleteExtension", { name });
-    if (!confirm(msg)) return;
+    const typeLabel = t(`library.type.${type}`);
+    if (!confirm(t("library.deleteConfirm", { type: typeLabel, name }))) return;
     deleteMutation.mutate(packageId, {
       onError: (err) => alert(err instanceof Error ? err.message : t("library.deleteDependedOn")),
     });
@@ -54,9 +37,7 @@ export function PackageDetailPage() {
   return (
     <>
       <nav className="breadcrumb">
-        <Link to={`/?tab=${type}s`}>
-          {isSkill ? t("library.tabSkills") : t("library.tabExtensions")}
-        </Link>
+        <Link to={`/?tab=${type}s`}>{t(`library.type.${type}s`)}</Link>
         <span className="separator">/</span>
         <span className="current">{detail.name || detail.id}</span>
       </nav>

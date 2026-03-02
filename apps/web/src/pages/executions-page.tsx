@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
-import { useFlows } from "../hooks/use-flows";
+import { useFlows } from "../hooks/use-packages";
 import { useUnreadCount, useAllExecutions, useMarkAllRead } from "../hooks/use-notifications";
 import { ExecutionRow } from "../components/execution-row";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";

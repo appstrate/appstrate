@@ -2,15 +2,15 @@ import { type ChangeEvent, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
-  useOrgSkills,
-  useOrgExtensions,
-  useUploadSkill,
-  useUploadExtension,
-} from "../../hooks/use-library";
+  useLibraryList,
+  useUploadLibrary,
+  LIBRARY_CONFIG,
+  type LibraryType,
+} from "../../hooks/use-packages";
 import { Spinner } from "../spinner";
 
 interface ResourceSectionProps {
-  type: "skills" | "extensions";
+  type: LibraryType;
   title: string;
   emptyLabel: string;
   selectedIds: string[];
@@ -26,14 +26,9 @@ export function ResourceSection({
 }: ResourceSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const skillsQuery = useOrgSkills();
-  const extensionsQuery = useOrgExtensions();
-  const uploadSkill = useUploadSkill();
-  const uploadExtension = useUploadExtension();
-
-  const isLoading = type === "skills" ? skillsQuery.isLoading : extensionsQuery.isLoading;
-  const items = type === "skills" ? skillsQuery.data : extensionsQuery.data;
-  const upload = type === "skills" ? uploadSkill : uploadExtension;
+  const { data: items, isLoading } = useLibraryList(type);
+  const upload = useUploadLibrary(type);
+  const cfg = LIBRARY_CONFIG[type];
 
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -49,10 +44,7 @@ export function ResourceSection({
 
     try {
       const result = await upload.mutateAsync(file);
-      const newId =
-        type === "skills"
-          ? (result as { skill: { id: string } }).skill.id
-          : (result as { extension: { id: string } }).extension.id;
+      const newId = (result as Record<string, { id: string }>)[cfg.detailKey].id;
 
       if (!selectedIds.includes(newId)) {
         onChange([...selectedIds, newId]);

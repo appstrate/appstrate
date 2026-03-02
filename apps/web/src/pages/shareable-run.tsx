@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useFlowDetail } from "../hooks/use-flows";
+import { useFlowDetail } from "../hooks/use-packages";
 import { useExecutionRealtime } from "../hooks/use-realtime";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
 import { InputFields } from "../components/input-fields";

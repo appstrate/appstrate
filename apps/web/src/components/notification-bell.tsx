@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
-import { useFlows } from "../hooks/use-flows";
+import { useFlows } from "../hooks/use-packages";
 
 export function NotificationBell() {
   const { data: count } = useUnreadCount();

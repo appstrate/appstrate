@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useFlowDetail } from "../hooks/use-flows";
+import { useFlowDetail } from "../hooks/use-packages";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import { ProfileSelector } from "../components/profile-selector";
 import { useExecutions } from "../hooks/use-executions";

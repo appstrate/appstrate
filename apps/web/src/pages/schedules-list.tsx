@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useFlows, useFlowDetail } from "../hooks/use-flows";
+import { useFlows, useFlowDetail } from "../hooks/use-packages";
 import {
   useAllSchedules,
   useCreateSchedule,
