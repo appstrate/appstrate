@@ -26,8 +26,11 @@ export interface ResourceEntry {
 export interface FlowFormState {
   metadata: {
     id: string;
+    scope: string;
+    version: string;
     displayName: string;
     description: string;
+    author: string;
     tags: string[];
   };
   prompt: string;
@@ -38,4 +41,5 @@ export interface FlowFormState {
   outputSchema: SchemaField[];
   configSchema: SchemaField[];
   execution: ExecutionSettings;
+  _manifestBase: Record<string, unknown>;
 }

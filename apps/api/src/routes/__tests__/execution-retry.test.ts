@@ -83,6 +83,7 @@ mock.module("../../services/execution-tracker.ts", () => ({
 mock.module("../../middleware/guards.ts", () => ({
   requireFlow: mock(() => mock()),
   requireAdmin: mock(() => mock()),
+  requireMutableFlow: mock(() => mock()),
 }));
 
 mock.module("../../middleware/rate-limit.ts", () => ({

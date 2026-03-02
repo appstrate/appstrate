@@ -250,13 +250,13 @@ async function _installInternal(
       })
       .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
   } else {
-    // Insert new
+    // Insert new — store scoped name (e.g. @scope/name) for consistency with manifest
     await db.insert(packages).values({
       id: packageId,
       orgId,
       type: packageType,
       source: "local",
-      name,
+      name: `${scope}/${name}`,
       manifest,
       content,
       displayName,

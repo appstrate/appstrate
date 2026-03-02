@@ -1,19 +1,16 @@
 import { describe, test, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import {
-  validateManifest,
-  validateConfig,
-  validateInput,
-  validateOutput,
-  validateFlowContent,
-} from "../schema.ts";
+import { validateManifest } from "@appstrate/validation";
+import { validateConfig, validateInput, validateOutput, validateFlowContent } from "../schema.ts";
 import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
   schemaVersion: "1.0.0",
-  name: "test-flow",
+  name: "@test-org/test-flow",
+  version: "1.0.0",
+  type: "flow",
   displayName: "Test Flow",
   description: "A test flow",
   author: "test",
@@ -108,7 +105,9 @@ describe("validateManifest", () => {
   test("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
       schemaVersion: "1.0.0",
-      name: "minimal",
+      name: "@test-org/minimal",
+      version: "1.0.0",
+      type: "flow",
       displayName: "Minimal",
       description: "Minimal flow",
       author: "test",
@@ -142,7 +141,9 @@ describe("validateManifest", () => {
   test("rejects manifest missing required fields", () => {
     const bad = {
       schemaVersion: "1.0.0",
-      name: "test",
+      name: "@test-org/test",
+      version: "1.0.0",
+      type: "flow",
       requires: { services: [] },
     };
     const result = validateManifest(bad);

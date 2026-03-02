@@ -26,6 +26,7 @@ import {
   setPackageProfileOverride,
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
+import { parseScopedName } from "@appstrate/validation/naming";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -38,21 +39,27 @@ export function createFlowsRouter() {
       getRunningExecutionsCounts(orgId),
     ]);
 
-    const flowList = allFlows.map((f) => ({
-      id: f.id,
-      displayName: f.manifest.displayName,
-      description: f.manifest.description,
-      schemaVersion: f.manifest.schemaVersion,
-      author: f.manifest.author,
-      tags: f.manifest.tags ?? [],
-      requires: {
-        services: f.manifest.requires.services.map((s) => s.id),
-        skills: f.skills.map((s) => s.id),
-        extensions: f.extensions.map((e) => e.id),
-      },
-      runningExecutions: runningCounts[f.id] ?? 0,
-      source: f.source,
-    }));
+    const flowList = allFlows.map((f) => {
+      const parsed = parseScopedName(f.manifest.name);
+      return {
+        id: f.id,
+        displayName: f.manifest.displayName,
+        description: f.manifest.description,
+        schemaVersion: f.manifest.schemaVersion,
+        author: f.manifest.author,
+        tags: f.manifest.tags ?? [],
+        requires: {
+          services: f.manifest.requires.services.map((s) => s.id),
+          skills: f.skills.map((s) => s.id),
+          extensions: f.extensions.map((e) => e.id),
+        },
+        runningExecutions: runningCounts[f.id] ?? 0,
+        source: f.source,
+        scope: parsed?.scope ?? null,
+        version: f.manifest.version ?? null,
+        type: f.manifest.type ?? "flow",
+      };
+    });
 
     return c.json({ flows: flowList });
   });
@@ -95,14 +102,15 @@ export function createFlowsRouter() {
       }
     }
 
+    const detailParsed = parseScopedName(m.name);
+
     return c.json({
       id: flow.id,
       displayName: m.displayName,
       description: m.description,
-      schemaVersion: m.schemaVersion,
-      author: m.author,
-      tags: m.tags ?? [],
       source: flow.source,
+      scope: detailParsed?.scope ?? null,
+      version: m.version ?? null,
       requires: {
         services: serviceStatuses,
         skills: flow.skills.map((s) => ({
@@ -133,9 +141,9 @@ export function createFlowsRouter() {
         : null,
       ...(flow.source !== "built-in" && userFlowRow
         ? {
+            manifest: flow.manifest,
             updatedAt: userFlowRow.updatedAt,
             prompt: flow.prompt,
-            executionSettings: m.execution ?? null,
             registryScope: userFlowRow.registryScope ?? null,
             registryName: userFlowRow.registryName ?? null,
             lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,

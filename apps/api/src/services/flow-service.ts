@@ -4,7 +4,8 @@ import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { validateManifest } from "./schema.ts";
+import { validateManifest } from "@appstrate/validation";
+import { scopedNameToPackageId, packageIdToScopedName } from "@appstrate/validation/naming";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
@@ -62,8 +63,8 @@ export async function initPackageService(dataDir?: string): Promise<void> {
         continue;
       }
 
-      const manifest = validation.manifest as FlowManifest;
-      const packageId = manifest.name;
+      const manifest = raw as FlowManifest;
+      const packageId = scopedNameToPackageId(manifest.name);
 
       // Resolve skill/extension IDs to SkillMeta using built-in library
       const skills = (manifest.requires.skills ?? []).map((id) => {
@@ -117,7 +118,9 @@ interface DbPackageRow {
 function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const manifest = (row.manifest ?? {
     schemaVersion: "1.0",
-    name: row.id,
+    name: packageIdToScopedName(row.id) ?? row.id,
+    version: "0.0.0",
+    type: "flow",
     displayName: row.id,
     description: "",
     author: "",

@@ -2,10 +2,10 @@ import type { Context, Next } from "hono";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { organizationMembers } from "@appstrate/db/schema";
+import { organizationMembers, organizations } from "@appstrate/db/schema";
 
 /**
- * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole.
+ * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole + orgSlug.
  * Returns 400 if header is missing, 403 if user is not a member of the org.
  */
 export function requireOrgContext() {
@@ -17,8 +17,9 @@ export function requireOrgContext() {
 
     const user = c.get("user");
     const rows = await db
-      .select({ role: organizationMembers.role })
+      .select({ role: organizationMembers.role, slug: organizations.slug })
       .from(organizationMembers)
+      .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
       .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)))
       .limit(1);
 
@@ -31,6 +32,7 @@ export function requireOrgContext() {
 
     c.set("orgId", orgId);
     c.set("orgRole", rows[0].role as OrgRole);
+    c.set("orgSlug", rows[0].slug);
     return next();
   };
 }

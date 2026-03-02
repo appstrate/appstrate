@@ -1,6 +1,6 @@
 import { eq, and, isNull, lt } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { apiKeys, user as userTable, profiles } from "@appstrate/db/schema";
+import { apiKeys, user as userTable, profiles, organizations } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 
@@ -36,6 +36,7 @@ export interface ValidatedApiKey {
   email: string;
   name: string;
   orgId: string;
+  orgSlug: string;
 }
 
 /**
@@ -56,9 +57,11 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
       revokedAt: apiKeys.revokedAt,
       userName: userTable.name,
       userEmail: userTable.email,
+      orgSlug: organizations.slug,
     })
     .from(apiKeys)
     .innerJoin(userTable, eq(apiKeys.createdBy, userTable.id))
+    .innerJoin(organizations, eq(organizations.id, apiKeys.orgId))
     .where(eq(apiKeys.keyHash, hash))
     .limit(1);
 
@@ -88,6 +91,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     email: row.userEmail,
     name: row.userName,
     orgId: row.orgId,
+    orgSlug: row.orgSlug,
   };
 }
 

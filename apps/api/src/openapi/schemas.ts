@@ -133,9 +133,6 @@ export const schemas = {
       id: { type: "string" },
       displayName: { type: "string" },
       description: { type: "string" },
-      schemaVersion: { type: "string" },
-      author: { type: "string" },
-      tags: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["built-in", "user"] },
       prompt: { type: "string", description: "Agent prompt markdown (user flows only)" },
       updatedAt: { type: "string", format: "date-time" },
@@ -156,14 +153,6 @@ export const schemas = {
         type: "object",
         properties: {
           schema: { type: "object" },
-        },
-      },
-      executionSettings: {
-        type: "object",
-        description: "Execution settings (user flows only)",
-        properties: {
-          timeout: { type: "integer", description: "Timeout in seconds" },
-          outputRetries: { type: "integer", description: "Number of output validation retries" },
         },
       },
       requires: {

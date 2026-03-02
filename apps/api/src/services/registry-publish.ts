@@ -17,6 +17,7 @@ import {
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
 } from "./builtin-library.ts";
+import { parseScopedName } from "@appstrate/validation/naming";
 import { getPackage } from "./flow-service.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -55,21 +56,28 @@ export async function publishPackage(
     throw new Error("Cannot publish built-in packages");
   }
 
-  // 3. Resolve scope and name (strip leading @ for storage, add for manifest)
-  const rawScope = opts.scope || pkg.registryScope;
-  const name = opts.name || pkg.registryName || packageId;
-  if (!rawScope) {
+  // 3. Resolve scope and name from the manifest (already in @scope/name format)
+  const existingName = (pkg.manifest as Record<string, unknown>).name as string;
+  const parsed = parseScopedName(existingName);
+  const scope = opts.scope
+    ? opts.scope.startsWith("@")
+      ? opts.scope.slice(1)
+      : opts.scope
+    : parsed?.scope || pkg.registryScope;
+  const name = opts.name || parsed?.name || pkg.registryName || packageId;
+  if (!scope) {
     throw new Error("Publish scope is required");
   }
-  const scope = rawScope.startsWith("@") ? rawScope.slice(1) : rawScope;
 
-  // 4. Build manifest with registry fields
+  // 4. Build manifest — manifest already has name/type, only override version (and name if changed)
   const manifest: Record<string, unknown> = {
     ...(pkg.manifest as Record<string, unknown>),
-    name: `@${scope}/${name}`,
     version: opts.version,
-    type: pkg.type,
   };
+  // Override name only if the publish scope/name differs from the manifest
+  if (`@${scope}/${name}` !== existingName) {
+    manifest.name = `@${scope}/${name}`;
+  }
 
   // 5. Add registryDependencies for flows
   if (pkg.type === "flow") {

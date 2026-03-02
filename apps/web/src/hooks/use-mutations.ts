@@ -220,12 +220,7 @@ export function useCreateFlow() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      prompt: string;
-      skillIds?: string[];
-      extensionIds?: string[];
-    }) => {
+    mutationFn: async (body: { manifest: Record<string, unknown>; prompt: string }) => {
       return api<{ packageId: string }>("/flows", {
         method: "POST",
         body: JSON.stringify(body),
@@ -247,8 +242,6 @@ export function useUpdateFlow(packageId: string) {
       manifest: Record<string, unknown>;
       prompt: string;
       updatedAt: string;
-      skillIds?: string[];
-      extensionIds?: string[];
     }) => {
       return api<{ packageId: string; updatedAt: string }>(`/flows/${packageId}`, {
         method: "PUT",

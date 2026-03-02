@@ -33,13 +33,11 @@ function FlowEditorForm({
   detail,
   packageId,
   isEdit,
-  userEmail,
 }: {
   initialState: FlowFormState;
   detail: FlowDetail | null;
   packageId: string | undefined;
   isEdit: boolean;
-  userEmail: string;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
@@ -82,7 +80,7 @@ function FlowEditorForm({
       return;
     }
 
-    const payload = assemblePayload(form, userEmail);
+    const payload = assemblePayload(form);
 
     if (isEdit && detail) {
       updateFlow.mutate(
@@ -205,9 +203,7 @@ function FlowEditorForm({
         />
       )}
 
-      {activeTab === "json" && (
-        <JsonEditor form={form} userEmail={userEmail} onApply={handleJsonApply} />
-      )}
+      {activeTab === "json" && <JsonEditor form={form} onApply={handleJsonApply} />}
 
       {activeTab !== "json" && (
         <div className="editor-actions">
@@ -230,7 +226,7 @@ export function FlowEditorPage() {
   const { packageId } = useParams<{ packageId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isOrgAdmin } = useOrg();
+  const { isOrgAdmin, currentOrg } = useOrg();
   const isEdit = !!packageId;
 
   const { data: detail, isLoading } = useFlowDetail(packageId);
@@ -262,7 +258,8 @@ export function FlowEditorPage() {
     return null;
   }
 
-  const initialState = isEdit && detail ? detailToFormState(detail) : defaultFormState();
+  const initialState =
+    isEdit && detail ? detailToFormState(detail) : defaultFormState(currentOrg?.slug, user?.email);
 
   return (
     <FlowEditorForm
@@ -271,7 +268,6 @@ export function FlowEditorPage() {
       detail={detail ?? null}
       packageId={packageId}
       isEdit={isEdit}
-      userEmail={user?.email ?? ""}
     />
   );
 }

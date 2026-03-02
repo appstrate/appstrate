@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
+import { scopedNameToPackageId } from "@appstrate/validation/naming";
+import { validateManifest } from "@appstrate/validation";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
-import { validateManifest } from "../services/schema.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
@@ -10,22 +11,31 @@ import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/librar
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
+import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+
+async function syncFlowDepsFromManifest(
+  packageId: string,
+  orgId: string,
+  manifest: Record<string, unknown>,
+) {
+  const { skillIds, extensionIds } = extractDepsFromManifest(manifest);
+  await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
+  await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+}
 
 export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
 
-  // POST /api/flows — create a flow (manifest + prompt, optional skillIds/extensionIds)
+  // POST /api/flows — create a flow (manifest + prompt)
   router.post("/", rateLimit(10), requireAdmin(), async (c) => {
     const user = c.get("user");
 
     const body = await c.req.json<{
       manifest: Record<string, unknown>;
       prompt: string;
-      skillIds?: string[];
-      extensionIds?: string[];
     }>();
 
-    const { manifest, prompt, skillIds, extensionIds } = body;
+    const { manifest, prompt } = body;
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
@@ -40,7 +50,17 @@ export function createUserFlowsRouter() {
       return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
     }
 
-    const packageId = (manifest as { name: string }).name;
+    const scopedName = (manifest as { name: string }).name;
+    let packageId: string;
+    try {
+      packageId = scopedNameToPackageId(scopedName);
+    } catch {
+      return c.json(
+        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
+        400,
+      );
+    }
+
     const orgId = c.get("orgId");
     const existingIds = await getAllPackageIds(orgId);
 
@@ -57,13 +77,8 @@ export function createUserFlowsRouter() {
     // Store in DB
     await insertPackage(packageId, orgId, "flow", manifest, prompt);
 
-    // Create skill/extension references
-    if (skillIds && skillIds.length > 0) {
-      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
-    }
-    if (extensionIds && extensionIds.length > 0) {
-      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
-    }
+    // Sync skill/extension references from manifest.requires
+    await syncFlowDepsFromManifest(packageId, orgId, manifest);
 
     // Create version + upload minimal ZIP to Storage (non-blocking)
     try {
@@ -76,7 +91,7 @@ export function createUserFlowsRouter() {
     return c.json({ packageId, message: "Flow created" }, 201);
   });
 
-  // PUT /api/flows/:id — update manifest + prompt (optional skillIds/extensionIds)
+  // PUT /api/flows/:id — update manifest + prompt
   router.put("/:id", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
     const flow = c.get("flow");
     const user = c.get("user");
@@ -87,11 +102,9 @@ export function createUserFlowsRouter() {
       manifest: Record<string, unknown>;
       prompt: string;
       updatedAt: string;
-      skillIds?: string[];
-      extensionIds?: string[];
     }>();
 
-    const { manifest, prompt, updatedAt, skillIds, extensionIds } = body;
+    const { manifest, prompt, updatedAt } = body;
 
     if (!updatedAt) {
       return c.json(
@@ -110,15 +123,18 @@ export function createUserFlowsRouter() {
     }
 
     // Ensure ID immutability
-    const newId = (manifest as { name: string }).name;
-    if (newId !== packageId) {
+    const newScopedName = (manifest as { name: string }).name;
+    let newPackageId: string;
+    try {
+      newPackageId = scopedNameToPackageId(newScopedName);
+    } catch {
       return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: `name cannot change (current: '${packageId}', received: '${newId}')`,
-        },
+        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
         400,
       );
+    }
+    if (newPackageId !== packageId) {
+      return c.json({ error: "VALIDATION_ERROR", message: "name cannot change" }, 400);
     }
 
     if (!prompt || !prompt.trim()) {
@@ -137,13 +153,8 @@ export function createUserFlowsRouter() {
       );
     }
 
-    // Update skill/extension references if provided
-    if (skillIds !== undefined) {
-      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
-    }
-    if (extensionIds !== undefined) {
-      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
-    }
+    // Sync skill/extension references from manifest.requires
+    await syncFlowDepsFromManifest(packageId, orgId, manifest);
 
     // Create version + upload minimal ZIP
     try {
@@ -200,12 +211,21 @@ export function createUserFlowsRouter() {
     const { manifest, content } = parsed;
 
     // Ensure name matches the flow ID (immutable)
-    const zipPackageId = (manifest as { name: string }).name;
+    const zipScopedName = (manifest as { name: string }).name;
+    let zipPackageId: string;
+    try {
+      zipPackageId = scopedNameToPackageId(zipScopedName);
+    } catch {
+      return c.json(
+        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
+        400,
+      );
+    }
     if (zipPackageId !== packageId) {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: `name in ZIP ('${zipPackageId}') does not match flow ('${packageId}')`,
+          message: `name in ZIP ('${zipScopedName}') does not match flow`,
         },
         400,
       );
