@@ -93,6 +93,7 @@ app.use("*", async (c, next) => {
     }
     c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
     c.set("orgId", keyInfo.orgId);
+    c.set("orgSlug", keyInfo.orgSlug);
     c.set("orgRole", "admin");
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);

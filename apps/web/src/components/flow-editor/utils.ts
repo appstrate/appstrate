@@ -11,9 +11,17 @@ export function toResourceEntry(r: {
   return { id: r.id, name: r.name, description: r.description };
 }
 
-export function defaultFormState(): FlowFormState {
+export function defaultFormState(orgSlug?: string, userEmail?: string): FlowFormState {
   return {
-    metadata: { id: "", displayName: "", description: "", tags: [] },
+    metadata: {
+      id: "",
+      scope: orgSlug ?? "",
+      version: "1.0.0",
+      displayName: "",
+      description: "",
+      author: userEmail ?? "",
+      tags: [],
+    },
     prompt: "",
     services: [],
     skills: [],
@@ -22,6 +30,7 @@ export function defaultFormState(): FlowFormState {
     outputSchema: [],
     configSchema: [],
     execution: { timeout: 300, outputRetries: 2 },
+    _manifestBase: { schemaVersion: "1.0", type: "flow" },
   };
 }
 
@@ -122,19 +131,39 @@ export function fieldsToSchema(
 }
 
 export function detailToFormState(detail: FlowDetail): FlowFormState {
-  const services: ServiceEntry[] = detail.requires.services.map((s) => ({
-    id: s.id,
-    provider: s.provider,
-    scopes: s.scopesRequired ?? [],
-    connectionMode: s.connectionMode === "admin" ? "admin" : "user",
+  // Editor only handles user flows — manifest is always present
+  const m = (detail.manifest ?? {}) as Record<string, unknown>;
+
+  const rawName = (m.name as string) ?? "";
+  const scopeMatch = rawName.match(/^@([^/]+)\/(.+)$/);
+  const bareName = scopeMatch
+    ? scopeMatch[2]
+    : detail.id.split("--").length > 1
+      ? detail.id.split("--").slice(1).join("--")
+      : detail.id;
+
+  // Services: read from raw manifest (has scopes, description, etc.)
+  const rawRequires = (m.requires ?? {}) as Record<string, unknown>;
+  const rawServices = (rawRequires.services ?? []) as Array<Record<string, unknown>>;
+  const services: ServiceEntry[] = rawServices.map((s) => ({
+    id: (s.id as string) || "",
+    provider: (s.provider as string) || "",
+    scopes: Array.isArray(s.scopes) ? (s.scopes as string[]) : [],
+    connectionMode: (s.connectionMode as "user" | "admin") || "user",
   }));
+
+  // Execution: read from raw manifest (preserves maxTokens, etc.)
+  const rawExecution = (m.execution ?? {}) as Record<string, unknown>;
 
   return {
     metadata: {
-      id: detail.id,
-      displayName: detail.displayName,
-      description: detail.description,
-      tags: detail.tags || [],
+      id: bareName,
+      scope: scopeMatch ? scopeMatch[1] : "",
+      version: (m.version as string) ?? "1.0.0",
+      displayName: (m.displayName as string) ?? "",
+      description: (m.description as string) ?? "",
+      author: (m.author as string) ?? "",
+      tags: (m.tags as string[]) ?? [],
     },
     prompt: detail.prompt || "",
     services,
@@ -144,57 +173,149 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
     execution: {
-      timeout: detail.executionSettings?.timeout ?? 300,
-      outputRetries: detail.executionSettings?.outputRetries ?? 2,
+      timeout: (rawExecution.timeout as number) ?? 300,
+      outputRetries: (rawExecution.outputRetries as number) ?? 2,
     },
+    _manifestBase: { ...m },
   };
 }
 
-export function assemblePayload(state: FlowFormState, userEmail: string) {
+/**
+ * Merge form-derived schema with original schema, preserving
+ * properties the form doesn't track (format, pattern, etc.).
+ */
+function mergeSchemaWithBase(
+  formSchema: JSONSchemaObject | null,
+  baseContainer: { schema?: JSONSchemaObject } | undefined,
+): JSONSchemaObject | null {
+  if (!formSchema) return null;
+  const baseProps = baseContainer?.schema?.properties;
+  if (!baseProps) return formSchema;
+
+  const merged: Record<string, JSONSchemaProperty> = {};
+  for (const [key, formProp] of Object.entries(formSchema.properties)) {
+    const baseProp = baseProps[key];
+    merged[key] = baseProp ? { ...baseProp, ...formProp } : formProp;
+  }
+
+  return { ...formSchema, properties: merged };
+}
+
+export function assemblePayload(state: FlowFormState) {
+  const baseRequires = (state._manifestBase.requires ?? {}) as Record<string, unknown>;
+  const baseServices = (baseRequires.services ?? []) as Array<Record<string, unknown>>;
+
+  const filteredSkills = state.skills.map((s) => s.id).filter(Boolean);
+  const filteredExtensions = state.extensions.map((e) => e.id).filter(Boolean);
+
+  const requires: Record<string, unknown> = {
+    ...baseRequires, // Preserve unknown fields in requires
+    services: state.services
+      .filter((s) => s.id && s.provider)
+      .map((s) => {
+        // Find original service to preserve description, etc.
+        const original = baseServices.find((bs) => (bs.id as string) === s.id) ?? {};
+        const svc: Record<string, unknown> = {
+          ...original,
+          id: s.id,
+          provider: s.provider,
+        };
+        // connectionMode: write only if present in original or non-default
+        if ("connectionMode" in original || s.connectionMode !== "user") {
+          svc.connectionMode = s.connectionMode || "user";
+        } else {
+          delete svc.connectionMode;
+        }
+        // scopes: write only if present in original or non-empty
+        const scopes = s.scopes.filter(Boolean);
+        if ("scopes" in original || scopes.length > 0) {
+          svc.scopes = scopes;
+        } else {
+          delete svc.scopes;
+        }
+        return svc;
+      }),
+  };
+  if ("skills" in baseRequires || filteredSkills.length > 0) {
+    requires.skills = filteredSkills;
+  } else {
+    delete requires.skills;
+  }
+  if ("extensions" in baseRequires || filteredExtensions.length > 0) {
+    requires.extensions = filteredExtensions;
+  } else {
+    delete requires.extensions;
+  }
+
   const manifest: Record<string, unknown> = {
-    schemaVersion: "1.0",
-    name: state.metadata.id,
+    ...state._manifestBase,
+    name: `@${state.metadata.scope}/${state.metadata.id}`,
+    version: state.metadata.version,
     displayName: state.metadata.displayName,
     description: state.metadata.description,
-    author: userEmail,
-    ...(state.metadata.tags.length > 0 ? { tags: state.metadata.tags } : {}),
-    requires: {
-      services: state.services
-        .filter((s) => s.id && s.provider)
-        .map((s) => {
-          const svc: Record<string, unknown> = {
-            id: s.id,
-            provider: s.provider,
-          };
-          const scopes = s.scopes.filter(Boolean);
-          if (scopes.length > 0) svc.scopes = scopes;
-          svc.connectionMode = s.connectionMode || "user";
-          return svc;
-        }),
-      skills: state.skills.map((s) => s.id).filter(Boolean),
-      extensions: state.extensions.map((e) => e.id).filter(Boolean),
-    },
+    author: state.metadata.author,
+    requires,
   };
 
-  const inputSchema = fieldsToSchema(state.inputSchema, "input");
-  if (inputSchema) manifest.input = { schema: inputSchema };
+  // tags: write only if present in original or non-empty
+  if ("tags" in state._manifestBase || state.metadata.tags.length > 0) {
+    manifest.tags = state.metadata.tags;
+  } else {
+    delete manifest.tags;
+  }
 
-  const outputSchema = fieldsToSchema(state.outputSchema, "output");
-  if (outputSchema) manifest.output = { schema: outputSchema };
+  // Override or delete input/output/config based on form state
+  // Merge with base schema to preserve properties the form doesn't track (format, pattern, etc.)
+  const inputSchema = mergeSchemaWithBase(
+    fieldsToSchema(state.inputSchema, "input"),
+    state._manifestBase.input as { schema?: JSONSchemaObject } | undefined,
+  );
+  if (inputSchema) {
+    manifest.input = { schema: inputSchema };
+  } else {
+    delete manifest.input;
+  }
 
-  const configSchema = fieldsToSchema(state.configSchema, "config");
-  if (configSchema) manifest.config = { schema: configSchema };
+  const outputSchema = mergeSchemaWithBase(
+    fieldsToSchema(state.outputSchema, "output"),
+    state._manifestBase.output as { schema?: JSONSchemaObject } | undefined,
+  );
+  if (outputSchema) {
+    manifest.output = { schema: outputSchema };
+  } else {
+    delete manifest.output;
+  }
 
-  manifest.execution = {
-    timeout: state.execution.timeout,
-    outputRetries: state.execution.outputRetries,
-  };
+  const configSchema = mergeSchemaWithBase(
+    fieldsToSchema(state.configSchema, "config"),
+    state._manifestBase.config as { schema?: JSONSchemaObject } | undefined,
+  );
+  if (configSchema) {
+    manifest.config = { schema: configSchema };
+  } else {
+    delete manifest.config;
+  }
+
+  // Merge execution with base to preserve custom fields (maxTokens, etc.)
+  // Only write if present in original or user changed from defaults
+  if (
+    "execution" in state._manifestBase ||
+    state.execution.timeout !== 300 ||
+    state.execution.outputRetries !== 2
+  ) {
+    const baseExecution = (state._manifestBase.execution ?? {}) as Record<string, unknown>;
+    manifest.execution = {
+      ...baseExecution,
+      timeout: state.execution.timeout,
+      outputRetries: state.execution.outputRetries,
+    };
+  } else {
+    delete manifest.execution;
+  }
 
   return {
     manifest,
     prompt: state.prompt,
-    skillIds: state.skills.map((s) => s.id).filter(Boolean),
-    extensionIds: state.extensions.map((e) => e.id).filter(Boolean),
   };
 }
 
@@ -224,11 +345,17 @@ export function payloadToFormState(payload: {
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;
   const configObj = manifest.config as { schema?: JSONSchemaObject } | undefined;
 
+  const rawName = (manifest.name as string) || "";
+  const scopeMatch = rawName.match(/^@([^/]+)\/(.+)$/);
+
   return {
     metadata: {
-      id: (manifest.name as string) || "",
+      id: scopeMatch ? scopeMatch[2] : rawName,
+      scope: scopeMatch ? scopeMatch[1] : "",
+      version: (manifest.version as string) || "1.0.0",
       displayName: (manifest.displayName as string) || "",
       description: (manifest.description as string) || "",
+      author: (manifest.author as string) || "",
       tags: Array.isArray(manifest.tags) ? (manifest.tags as string[]) : [],
     },
     prompt,
@@ -242,5 +369,6 @@ export function payloadToFormState(payload: {
       timeout: (execution.timeout as number) ?? 300,
       outputRetries: (execution.outputRetries as number) ?? 2,
     },
+    _manifestBase: { ...manifest },
   };
 }

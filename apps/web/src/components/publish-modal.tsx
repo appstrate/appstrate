@@ -52,8 +52,13 @@ function PublishForm({ onClose, packageId }: PublishModalProps) {
   const effectiveLastVersion = publishInfo?.lastPublishedVersion;
   const scopes = publishInfo?.registryScopes ?? [];
 
+  // Derive bare name fallback from packageId (scope--name → name)
+  const fallbackName = packageId.includes("--")
+    ? packageId.split("--").slice(1).join("--")
+    : packageId;
+
   const [scope, setScope] = useState(effectiveScope ?? "");
-  const [name, setName] = useState(effectiveName ?? packageId);
+  const [name, setName] = useState(effectiveName ?? fallbackName);
   const [version, setVersion] = useState(
     effectiveLastVersion ? bumpVersion(effectiveLastVersion, "patch") : "1.0.0",
   );

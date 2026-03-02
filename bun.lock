@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/validation": "^1.1.1",
+        "@appstrate/validation": "^1.2.0",
       },
       "devDependencies": {
         "@readme/openapi-parser": "^5.5.0",
@@ -28,7 +28,7 @@
         "@appstrate/env": "workspace:*",
         "@appstrate/registry-client": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
-        "@appstrate/validation": "^1.1.1",
+        "@appstrate/validation": "^1.2.0",
         "@hono/swagger-ui": "^0.5.3",
         "ajv": "^8.18.0",
         "croner": "^10.0.1",
@@ -148,7 +148,7 @@
 
     "@appstrate/shared-types": ["@appstrate/shared-types@workspace:packages/shared-types"],
 
-    "@appstrate/validation": ["@appstrate/validation@1.1.1", "", { "dependencies": { "fflate": "^0.8.0", "semver": "^7.7.1", "zod": "^4.3.6" } }, "sha512-dFPHX4DrSAgXEH6FNlMsZkBFCR/aXWAczdI2ibFeEzHDh6k9/NmD22I5uP3tvML6MHIYNNptHI+2s65Pe9emyA=="],
+    "@appstrate/validation": ["@appstrate/validation@1.2.0", "", { "dependencies": { "fflate": "^0.8.0", "semver": "^7.7.1", "zod": "^4.3.6" } }, "sha512-yThCyAZ8PwlJJQ8/sm/trxOL21lx3JjPXhHlpO4KYRsedqxvqi5PAzPJqvgt9RXlXkwug7aRY4sj3ft1Jpsc/Q=="],
 
     "@appstrate/web": ["@appstrate/web@workspace:apps/web"],
 

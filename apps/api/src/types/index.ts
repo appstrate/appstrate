@@ -46,6 +46,7 @@ export type AppEnv = {
     user: { id: string; email: string; name: string };
     flow: LoadedFlow;
     orgId: string;
+    orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     authMethod?: "session" | "api_key";
     apiKeyId?: string;

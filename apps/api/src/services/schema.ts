@@ -1,32 +1,7 @@
 import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
-import {
-  validateLocalFlowManifest,
-  validateManifest as validateRegistryManifest,
-  SLUG_REGEX,
-} from "@appstrate/validation";
-
-/**
- * Validate a flow manifest — accepts both local format (slug name, optional version)
- * and registry format (scoped @scope/name, required semver version).
- */
-export function validateManifest(raw: unknown): {
-  valid: boolean;
-  errors: string[];
-  manifest?: unknown;
-} {
-  // Try local format first (most common path)
-  const localResult = validateLocalFlowManifest(raw);
-  if (localResult.valid) return localResult;
-
-  // Fall back to registry format (scoped name, semver version)
-  const registryResult = validateRegistryManifest(raw);
-  if (registryResult.valid) return registryResult;
-
-  // Return local errors as default
-  return localResult;
-}
+import { SLUG_REGEX } from "@appstrate/validation";
 
 // --- AJV runtime validation ---
 

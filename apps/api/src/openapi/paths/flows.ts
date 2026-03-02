@@ -48,8 +48,6 @@ export const flowsPaths = {
               properties: {
                 manifest: { type: "object", description: "Flow manifest JSON" },
                 prompt: { type: "string", description: "Agent prompt (markdown)" },
-                skillIds: { type: "array", items: { type: "string" } },
-                extensionIds: { type: "array", items: { type: "string" } },
               },
             },
           },
@@ -158,7 +156,8 @@ export const flowsPaths = {
       operationId: "updateFlow",
       tags: ["Flows"],
       summary: "Update a user flow",
-      description: "Update manifest, prompt, skills, and extensions of a user flow. Admin only.",
+      description:
+        "Update manifest and prompt of a user flow. Skills and extensions are extracted from manifest.requires. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "packageId", in: "path", required: true, schema: { type: "string" } },
@@ -174,8 +173,6 @@ export const flowsPaths = {
                 manifest: { type: "object" },
                 prompt: { type: "string" },
                 updatedAt: { type: "string", format: "date-time" },
-                skillIds: { type: "array", items: { type: "string" } },
-                extensionIds: { type: "array", items: { type: "string" } },
               },
             },
           },

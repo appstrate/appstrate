@@ -6,19 +6,18 @@ import { assemblePayload, payloadToFormState } from "./utils";
 
 interface JsonEditorProps {
   form: FlowFormState;
-  userEmail: string;
   onApply: (newState: FlowFormState) => void;
 }
 
-export function JsonEditor({ form, userEmail, onApply }: JsonEditorProps) {
+export function JsonEditor({ form, onApply }: JsonEditorProps) {
   const { t } = useTranslation(["flows", "common"]);
 
-  const initialJson = useMemo(
-    () => JSON.stringify(assemblePayload(form, userEmail), null, 2),
+  const initialJson = useMemo(() => {
+    const { manifest, prompt } = assemblePayload(form);
+    return JSON.stringify({ manifest, prompt }, null, 2);
     // Only compute once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  }, []);
 
   const [jsonValue, setJsonValue] = useState(initialJson);
   const [parseError, setParseError] = useState<string | null>(null);

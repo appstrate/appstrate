@@ -10,6 +10,7 @@ export interface FormFieldProps {
   description?: string;
   enumValues?: string[];
   error?: string;
+  disabled?: boolean;
 }
 
 export function FormField({
@@ -24,6 +25,7 @@ export function FormField({
   description,
   enumValues,
   error,
+  disabled,
 }: FormFieldProps) {
   const hintId = description ? `hint-${id}` : undefined;
   const errorId = error ? `error-${id}` : undefined;
@@ -58,6 +60,7 @@ export function FormField({
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={placeholder}
+          disabled={disabled}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={error ? "input-error" : undefined}

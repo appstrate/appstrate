@@ -5,8 +5,11 @@ import { toSlug, toLiveSlug } from "../../lib/strings";
 
 interface MetadataState {
   id: string;
+  scope: string;
+  version: string;
   displayName: string;
   description: string;
+  author: string;
   tags: string[];
 }
 
@@ -71,6 +74,23 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
         />
         {isEdit && <input type="hidden" value={value.id} />}
+        <FormField
+          id="meta-scope"
+          label={t("editor.metaScope")}
+          value={value.scope}
+          onChange={() => {}}
+          description={t("editor.metaScopeDesc")}
+          disabled
+        />
+        <FormField
+          id="meta-version"
+          label={t("editor.metaVersion")}
+          required
+          value={value.version}
+          onChange={(v) => update({ version: v })}
+          placeholder="1.0.0"
+          description={t("editor.metaVersionDesc")}
+        />
         <div className="form-group">
           <label htmlFor="meta-description">{t("editor.metaDescription")}</label>
           <textarea

@@ -150,9 +150,6 @@ export interface FlowDetail {
   id: string;
   displayName: string;
   description: string;
-  schemaVersion: string;
-  author: string;
-  tags: string[];
   source: "built-in" | "local";
   requires: {
     services: ServiceStatus[];
@@ -173,9 +170,12 @@ export interface FlowDetail {
   lastExecution: Partial<import("@appstrate/db/schema").Execution> | null;
   updatedAt?: string | null;
   prompt?: string;
-  executionSettings?: { timeout?: number; outputRetries?: number } | null;
+  scope?: string | null;
+  version?: string | null;
   registryScope?: string | null;
   registryName?: string | null;
+
+  manifest?: Record<string, unknown>;  // Raw manifest from DB (user flows only)
 
   lastPublishedVersion?: string | null;
   lastPublishedAt?: string | null;

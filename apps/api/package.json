@@ -17,7 +17,7 @@
     "@appstrate/core": "^1.0.0",
     "@appstrate/connect": "workspace:*",
     "@appstrate/registry-client": "workspace:*",
-    "@appstrate/validation": "^1.1.1",
+    "@appstrate/validation": "^1.2.0",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
