@@ -31,13 +31,13 @@ export function createUserFlowsRouter() {
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
       return c.json(
-        { error: "INVALID_MANIFEST", message: "Manifest invalide", details: manifestResult.errors },
+        { error: "INVALID_MANIFEST", message: "Invalid manifest", details: manifestResult.errors },
         400,
       );
     }
 
     if (!prompt || !prompt.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Le prompt ne peut pas etre vide" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
     }
 
     const packageId = (manifest as { name: string }).name;
@@ -48,7 +48,7 @@ export function createUserFlowsRouter() {
       return c.json(
         {
           error: "NAME_COLLISION",
-          message: `Un flow avec l'identifiant '${packageId}' existe deja`,
+          message: `A flow with identifier '${packageId}' already exists`,
         },
         400,
       );
@@ -73,7 +73,7 @@ export function createUserFlowsRouter() {
       logger.warn("Version upload failed (non-fatal)", { packageId, error });
     }
 
-    return c.json({ packageId, message: "Flow cree" }, 201);
+    return c.json({ packageId, message: "Flow created" }, 201);
   });
 
   // PUT /api/flows/:id — update manifest + prompt (optional skillIds/extensionIds)
@@ -95,7 +95,7 @@ export function createUserFlowsRouter() {
 
     if (!updatedAt) {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "updatedAt est requis pour la mise a jour" },
+        { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
         400,
       );
     }
@@ -104,7 +104,7 @@ export function createUserFlowsRouter() {
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
       return c.json(
-        { error: "INVALID_MANIFEST", message: "Manifest invalide", details: manifestResult.errors },
+        { error: "INVALID_MANIFEST", message: "Invalid manifest", details: manifestResult.errors },
         400,
       );
     }
@@ -115,14 +115,14 @@ export function createUserFlowsRouter() {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: `name ne peut pas changer (actuel: '${packageId}', recu: '${newId}')`,
+          message: `name cannot change (current: '${packageId}', received: '${newId}')`,
         },
         400,
       );
     }
 
     if (!prompt || !prompt.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Le prompt ne peut pas etre vide" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
     }
 
     // Update DB: manifest + prompt
@@ -131,7 +131,7 @@ export function createUserFlowsRouter() {
       return c.json(
         {
           error: "CONFLICT",
-          message: "Le flow a ete modifie depuis votre derniere lecture. Rechargez et reessayez.",
+          message: "Flow has been modified since your last read. Reload and try again.",
         },
         409,
       );
@@ -153,7 +153,7 @@ export function createUserFlowsRouter() {
       logger.warn("Version upload failed (non-fatal)", { packageId, error });
     }
 
-    return c.json({ packageId, message: "Flow mis a jour", updatedAt: updated.updatedAt });
+    return c.json({ packageId, message: "Flow updated", updatedAt: updated.updatedAt });
   });
 
   // PUT /api/flows/:id/package — upload a new ZIP for an existing user flow
@@ -167,19 +167,16 @@ export function createUserFlowsRouter() {
     const updatedAt = formData.get("updatedAt") as string | null;
 
     if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Aucun fichier fourni" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
     }
 
     if (!file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Seuls les fichiers .zip sont acceptes" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
     }
 
     if (!updatedAt) {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "updatedAt est requis pour la mise a jour" },
+        { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
         400,
       );
     }
@@ -197,7 +194,7 @@ export function createUserFlowsRouter() {
     }
 
     if (parsed.type !== "flow") {
-      return c.json({ error: "INVALID_TYPE", message: "Type attendu: flow" }, 400);
+      return c.json({ error: "INVALID_TYPE", message: "Expected type: flow" }, 400);
     }
 
     const { manifest, content } = parsed;
@@ -208,7 +205,7 @@ export function createUserFlowsRouter() {
       return c.json(
         {
           error: "VALIDATION_ERROR",
-          message: `name dans le ZIP ('${zipPackageId}') ne correspond pas au flow ('${packageId}')`,
+          message: `name in ZIP ('${zipPackageId}') does not match flow ('${packageId}')`,
         },
         400,
       );
@@ -220,7 +217,7 @@ export function createUserFlowsRouter() {
       return c.json(
         {
           error: "CONFLICT",
-          message: "Le flow a ete modifie depuis votre derniere lecture. Rechargez et reessayez.",
+          message: "Flow has been modified since your last read. Reload and try again.",
         },
         409,
       );
@@ -233,7 +230,7 @@ export function createUserFlowsRouter() {
       logger.warn("Version upload failed (non-fatal)", { packageId, error });
     }
 
-    return c.json({ packageId, message: "Package mis a jour", updatedAt: updated.updatedAt });
+    return c.json({ packageId, message: "Package updated", updatedAt: updated.updatedAt });
   });
 
   // PUT /api/flows/:id/skills — set skill references for a flow
@@ -246,7 +243,7 @@ export function createUserFlowsRouter() {
     const { skillIds } = body;
 
     if (!Array.isArray(skillIds)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "skillIds doit etre un tableau" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "skillIds must be an array" }, 400);
     }
 
     try {
@@ -258,7 +255,7 @@ export function createUserFlowsRouter() {
       );
     }
 
-    return c.json({ packageId, skillIds, message: "References skills mises a jour" });
+    return c.json({ packageId, skillIds, message: "Skill references updated" });
   });
 
   // PUT /api/flows/:id/extensions — set extension references for a flow
@@ -271,10 +268,7 @@ export function createUserFlowsRouter() {
     const { extensionIds } = body;
 
     if (!Array.isArray(extensionIds)) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "extensionIds doit etre un tableau" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "extensionIds must be an array" }, 400);
     }
 
     try {
@@ -286,7 +280,7 @@ export function createUserFlowsRouter() {
       );
     }
 
-    return c.json({ packageId, extensionIds, message: "References extensions mises a jour" });
+    return c.json({ packageId, extensionIds, message: "Extension references updated" });
   });
 
   // DELETE /api/flows/:id — delete a user flow (admin-only)

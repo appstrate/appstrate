@@ -2,31 +2,12 @@
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";
 
-// --- Flow Manifest Types (backend-only) ---
+// --- Flow Manifest Types ---
+// Re-exported from @appstrate/validation. The FlowManifest type is Zod-inferred
+// and covers all flow manifest fields (name, version, type, requires, input/output/config, execution).
 
-export interface FlowManifest {
-  $schema?: string;
-  schemaVersion: string;
-  name: string;
-  displayName: string;
-  description: string;
-  author: string;
-  license?: string;
-  tags?: string[];
-  type?: string;
-  version?: string;
-  requires: FlowRequirements;
-  input?: FlowInputSpec;
-  output?: FlowOutputSpec;
-  config?: FlowConfigSpec;
-  execution?: FlowExecutionSpec;
-}
-
-export interface FlowRequirements {
-  services: FlowServiceRequirement[];
-  skills?: string[];
-  extensions?: string[];
-}
+import type { FlowManifest } from "@appstrate/validation";
+export type { FlowManifest };
 
 export interface FlowServiceRequirement {
   id: string;
@@ -34,23 +15,6 @@ export interface FlowServiceRequirement {
   description?: string;
   scopes?: string[];
   connectionMode?: "user" | "admin";
-}
-
-export interface FlowInputSpec {
-  schema: import("@appstrate/shared-types").JSONSchemaObject;
-}
-
-export interface FlowOutputSpec {
-  schema: import("@appstrate/shared-types").JSONSchemaObject;
-}
-
-export interface FlowConfigSpec {
-  schema: import("@appstrate/shared-types").JSONSchemaObject;
-}
-
-export interface FlowExecutionSpec {
-  timeout?: number;
-  outputRetries?: number;
 }
 
 // --- Loaded Flow (manifest + prompt from DB) ---

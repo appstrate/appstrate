@@ -1,0 +1,172 @@
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  jsonb,
+  uuid,
+  index,
+  uniqueIndex,
+  primaryKey,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { authModeEnum } from "./enums.ts";
+import { user } from "./auth.ts";
+import { organizations } from "./organizations.ts";
+
+export const connectionProfiles = pgTable(
+  "connection_profiles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_connection_profiles_default")
+      .on(table.userId)
+      .where(sql`${table.isDefault} = true`),
+    index("idx_connection_profiles_user_id").on(table.userId),
+  ],
+);
+
+export const userPackageProfiles = pgTable(
+  "user_package_profiles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    packageId: text("package_id").notNull(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.packageId] })],
+);
+
+export const packageAdminConnections = pgTable(
+  "package_admin_connections",
+  {
+    packageId: text("package_id").notNull(),
+    serviceId: text("service_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    profileId: uuid("profile_id").references(() => connectionProfiles.id, { onDelete: "set null" }),
+    connectedAt: timestamp("connected_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageId, table.serviceId] }),
+    index("idx_package_admin_connections_package_id").on(table.packageId),
+    index("idx_package_admin_connections_org_id").on(table.orgId),
+  ],
+);
+
+export const providerConfigs = pgTable(
+  "provider_configs",
+  {
+    id: text("id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    authMode: authModeEnum("auth_mode").notNull(),
+    displayName: text("display_name").notNull(),
+    // OAuth2 fields (encrypted)
+    clientIdEncrypted: text("client_id_encrypted"),
+    clientSecretEncrypted: text("client_secret_encrypted"),
+    authorizationUrl: text("authorization_url"),
+    tokenUrl: text("token_url"),
+    refreshUrl: text("refresh_url"),
+    defaultScopes: text("default_scopes")
+      .array()
+      .default(sql`'{}'::text[]`),
+    scopeSeparator: text("scope_separator").default(" "),
+    pkceEnabled: boolean("pkce_enabled").default(true),
+    tokenAuthMethod: text("token_auth_method"),
+    authorizationParams: jsonb("authorization_params").default({}),
+    tokenParams: jsonb("token_params").default({}),
+    // Credential fields
+    credentialSchema: jsonb("credential_schema"),
+    credentialFieldName: text("credential_field_name"),
+    credentialHeaderName: text("credential_header_name"),
+    credentialHeaderPrefix: text("credential_header_prefix"),
+    // Available scopes
+    availableScopes: jsonb("available_scopes").default([]),
+    // URI restrictions
+    authorizedUris: text("authorized_uris")
+      .array()
+      .default(sql`'{}'::text[]`),
+    allowAllUris: boolean("allow_all_uris").default(false),
+    // OAuth1 fields
+    requestTokenUrl: text("request_token_url"),
+    accessTokenUrl: text("access_token_url"),
+    // Common
+    iconUrl: text("icon_url"),
+    categories: text("categories")
+      .array()
+      .default(sql`'{}'::text[]`),
+    docsUrl: text("docs_url"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.orgId, table.id] })],
+);
+
+export const serviceConnections = pgTable(
+  "service_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
+    authMode: authModeEnum("auth_mode").notNull(),
+    credentialsEncrypted: text("credentials_encrypted").notNull(),
+    scopesGranted: text("scopes_granted")
+      .array()
+      .default(sql`'{}'::text[]`),
+    expiresAt: timestamp("expires_at"),
+    rawTokenResponse: jsonb("raw_token_response"),
+    providerSnapshot: jsonb("provider_snapshot").notNull(),
+    configHash: text("config_hash").notNull(),
+    metadata: jsonb("metadata").default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId, table.configHash),
+    index("idx_service_connections_profile").on(table.profileId),
+  ],
+);
+
+export const oauthStates = pgTable(
+  "oauth_states",
+  {
+    state: text("state").primaryKey(),
+    orgId: uuid("org_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
+    codeVerifier: text("code_verifier").notNull(),
+    oauthTokenSecret: text("oauth_token_secret"),
+    authMode: text("auth_mode").notNull().default("oauth2"),
+    scopesRequested: text("scopes_requested")
+      .array()
+      .default(sql`'{}'::text[]`),
+    redirectUri: text("redirect_uri").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    expiresAt: timestamp("expires_at")
+      .notNull()
+      .default(sql`NOW() + INTERVAL '10 minutes'`),
+  },
+  (table) => [index("idx_oauth_states_expires").on(table.expiresAt)],
+);

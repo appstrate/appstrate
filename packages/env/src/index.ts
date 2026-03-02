@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createEnvGetter } from "@appstrate/core/env";
 
 // ─── Schema ──────────────────────────────────────────────────
 
@@ -67,18 +68,10 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
-let cached: Env | null = null;
+const { getEnv, resetCache } = createEnvGetter(envSchema);
 
-export function getEnv(): Env {
-  if (cached) return cached;
-  const result = envSchema.safeParse(process.env);
-  if (!result.success) {
-    const issues = result.error.issues.map((i) => `  - ${String(i.path.join("."))}: ${i.message}`);
-    throw new Error(`[env] Invalid environment variables:\n${issues.join("\n")}`);
-  }
-  cached = result.data;
-  return cached;
-}
+export { getEnv };
+export const _resetCacheForTesting = resetCache;
 
 // ─── Constants ───────────────────────────────────────────────
 

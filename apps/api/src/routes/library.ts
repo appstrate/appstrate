@@ -71,20 +71,17 @@ async function parseLibraryUpload(
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Fichier requis" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "File is required" }, 400);
     }
 
     if (!file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Seuls les fichiers .zip sont acceptes" },
-        400,
-      );
+      return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
     }
 
     const id = file.name.replace(/\.zip$/i, "");
     if (!SLUG_RE.test(id)) {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "Nom de fichier invalide (slug kebab-case requis)" },
+        { error: "VALIDATION_ERROR", message: "Invalid file name (kebab-case slug required)" },
         400,
       );
     }
@@ -93,7 +90,7 @@ async function parseLibraryUpload(
     try {
       normalizedFiles = unzipAndNormalize(Buffer.from(await file.arrayBuffer()));
     } catch {
-      return c.json({ error: "VALIDATION_ERROR", message: "Fichier ZIP invalide" }, 400);
+      return c.json({ error: "VALIDATION_ERROR", message: "Invalid ZIP file" }, 400);
     }
 
     // Find the content file
@@ -101,7 +98,7 @@ async function parseLibraryUpload(
     if (opts.requiredFile) {
       if (!normalizedFiles[opts.requiredFile]) {
         return c.json(
-          { error: "VALIDATION_ERROR", message: `Le ZIP doit contenir ${opts.requiredFile}` },
+          { error: "VALIDATION_ERROR", message: `ZIP must contain ${opts.requiredFile}` },
           400,
         );
       }
@@ -113,7 +110,7 @@ async function parseLibraryUpload(
         return c.json(
           {
             error: "VALIDATION_ERROR",
-            message: `Le ZIP doit contenir un fichier ${opts.contentFileExt}`,
+            message: `ZIP must contain a ${opts.contentFileExt} file`,
           },
           400,
         );
@@ -148,12 +145,12 @@ async function parseLibraryUpload(
   }>();
 
   if (!body.id || !body.content) {
-    return c.json({ error: "VALIDATION_ERROR", message: "id et content sont requis" }, 400);
+    return c.json({ error: "VALIDATION_ERROR", message: "id and content are required" }, 400);
   }
 
   if (!SLUG_RE.test(body.id)) {
     return c.json(
-      { error: "VALIDATION_ERROR", message: "id invalide (slug kebab-case requis)" },
+      { error: "VALIDATION_ERROR", message: "Invalid id (kebab-case slug required)" },
       400,
     );
   }
@@ -203,7 +200,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Le skill '${parsed.id}' est integre et ne peut pas etre modifie`,
+          message: `Skill '${parsed.id}' is built-in and cannot be modified`,
         },
         403,
       );
@@ -237,7 +234,7 @@ export function createLibraryRouter() {
     const skill = await getOrgItem(orgId, skillId, SKILL_CONFIG);
 
     if (!skill) {
-      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' introuvable` }, 404);
+      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' not found` }, 404);
     }
 
     return c.json({ skill });
@@ -252,7 +249,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Le skill '${skillId}' est integre et ne peut pas etre modifie`,
+          message: `Skill '${skillId}' is built-in and cannot be modified`,
         },
         403,
       );
@@ -260,7 +257,7 @@ export function createLibraryRouter() {
 
     const existing = await getOrgItem(orgId, skillId, SKILL_CONFIG);
     if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' introuvable` }, 404);
+      return c.json({ error: "NOT_FOUND", message: `Skill '${skillId}' not found` }, 404);
     }
 
     const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
@@ -294,7 +291,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Le skill '${skillId}' est integre et ne peut pas etre supprime`,
+          message: `Skill '${skillId}' is built-in and cannot be deleted`,
         },
         403,
       );
@@ -306,7 +303,7 @@ export function createLibraryRouter() {
         return c.json(
           {
             error: "DEPENDED_ON",
-            message: `Le skill '${skillId}' est requis par ${result.dependents!.length} package(s) du marketplace`,
+            message: `Skill '${skillId}' is required by ${result.dependents!.length} marketplace package(s)`,
             dependents: result.dependents,
           },
           409,
@@ -315,7 +312,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "IN_USE",
-          message: `Le skill '${skillId}' est utilise par ${result.flows!.length} flow(s)`,
+          message: `Skill '${skillId}' is used by ${result.flows!.length} flow(s)`,
           flows: result.flows,
         },
         409,
@@ -351,7 +348,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `L'extension '${parsed.id}' est integree et ne peut pas etre modifiee`,
+          message: `Extension '${parsed.id}' is built-in and cannot be modified`,
         },
         403,
       );
@@ -401,7 +398,7 @@ export function createLibraryRouter() {
     const ext = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
 
     if (!ext) {
-      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' introuvable` }, 404);
+      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' not found` }, 404);
     }
 
     return c.json({ extension: ext });
@@ -416,7 +413,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `L'extension '${extId}' est integree et ne peut pas etre modifiee`,
+          message: `Extension '${extId}' is built-in and cannot be modified`,
         },
         403,
       );
@@ -424,7 +421,7 @@ export function createLibraryRouter() {
 
     const existing = await getOrgItem(orgId, extId, EXTENSION_CONFIG);
     if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' introuvable` }, 404);
+      return c.json({ error: "NOT_FOUND", message: `Extension '${extId}' not found` }, 404);
     }
 
     const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
@@ -478,7 +475,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `L'extension '${extId}' est integree et ne peut pas etre supprimee`,
+          message: `Extension '${extId}' is built-in and cannot be deleted`,
         },
         403,
       );
@@ -490,7 +487,7 @@ export function createLibraryRouter() {
         return c.json(
           {
             error: "DEPENDED_ON",
-            message: `L'extension '${extId}' est requise par ${result.dependents!.length} package(s) du marketplace`,
+            message: `Extension '${extId}' is required by ${result.dependents!.length} marketplace package(s)`,
             dependents: result.dependents,
           },
           409,
@@ -499,7 +496,7 @@ export function createLibraryRouter() {
       return c.json(
         {
           error: "IN_USE",
-          message: `L'extension '${extId}' est utilisee par ${result.flows!.length} flow(s)`,
+          message: `Extension '${extId}' is used by ${result.flows!.length} flow(s)`,
           flows: result.flows,
         },
         409,

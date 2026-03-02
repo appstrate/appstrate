@@ -104,18 +104,18 @@ export function validateFileInputs(
     const isRequired = schema.required?.includes(key);
 
     if (isRequired && fieldFiles.length === 0) {
-      errors.push({ field: key, message: `Le fichier '${key}' est requis` });
+      errors.push({ field: key, message: `File '${key}' is required` });
       continue;
     }
 
     if (!prop.multiple && fieldFiles.length > 1) {
-      errors.push({ field: key, message: `Le champ '${key}' n'accepte qu'un seul fichier` });
+      errors.push({ field: key, message: `Field '${key}' accepts only one file` });
     }
 
     if (prop.maxFiles && fieldFiles.length > prop.maxFiles) {
       errors.push({
         field: key,
-        message: `Le champ '${key}' accepte au maximum ${prop.maxFiles} fichiers`,
+        message: `Field '${key}' accepts at most ${prop.maxFiles} files`,
       });
     }
 
@@ -130,7 +130,7 @@ export function validateFileInputs(
         const maxMB = (prop.maxSize / (1024 * 1024)).toFixed(1);
         errors.push({
           field: key,
-          message: `Le fichier '${file.name}' depasse la taille max (${maxMB} MB)`,
+          message: `File '${file.name}' exceeds max size (${maxMB} MB)`,
         });
       }
 
@@ -139,7 +139,7 @@ export function validateFileInputs(
         if (!allowedExts.some((a) => a === ext)) {
           errors.push({
             field: key,
-            message: `Le fichier '${file.name}' a une extension non autorisee (accepte: ${prop.accept})`,
+            message: `File '${file.name}' has a disallowed extension (accepted: ${prop.accept})`,
           });
         }
       }
@@ -224,15 +224,15 @@ export function validateFlowContent(
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   if (!prompt || prompt.trim().length === 0) {
-    errors.push("prompt ne peut pas etre vide");
+    errors.push("prompt cannot be empty");
   }
   const seenIds = new Set<string>();
   for (const skill of skills) {
     if (!SLUG_REGEX.test(skill.id)) {
-      errors.push(`skill.id '${skill.id}' n'est pas un slug valide`);
+      errors.push(`skill.id '${skill.id}' is not a valid slug`);
     }
     if (seenIds.has(skill.id)) {
-      errors.push(`skill.id '${skill.id}' est duplique`);
+      errors.push(`skill.id '${skill.id}' is duplicated`);
     }
     seenIds.add(skill.id);
   }

@@ -46,19 +46,19 @@ router.post("/", async (c) => {
   const body = await c.req.json<{ name: string; slug?: string }>();
 
   if (!body.name?.trim()) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Le nom est requis" }, 400);
+    return c.json({ error: "VALIDATION_ERROR", message: "Name is required" }, 400);
   }
 
   const slug = body.slug?.trim() || slugify(body.name);
   if (!slug || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)) {
     return c.json(
-      { error: "VALIDATION_ERROR", message: "Le slug est invalide (kebab-case requis)" },
+      { error: "VALIDATION_ERROR", message: "Invalid slug (kebab-case required)" },
       400,
     );
   }
 
   if (!(await isSlugAvailable(slug))) {
-    return c.json({ error: "SLUG_TAKEN", message: `Le slug '${slug}' est deja utilise` }, 400);
+    return c.json({ error: "SLUG_TAKEN", message: `Slug '${slug}' is already in use` }, 400);
   }
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
@@ -84,7 +84,7 @@ router.get("/:orgId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member) {
-    return c.json({ error: "FORBIDDEN", message: "Non membre de cette organisation" }, 403);
+    return c.json({ error: "FORBIDDEN", message: "Not a member of this organization" }, 403);
   }
 
   const [org, members, invitations] = await Promise.all([
@@ -93,7 +93,7 @@ router.get("/:orgId", async (c) => {
     getOrgInvitations(orgId),
   ]);
   if (!org) {
-    return c.json({ error: "NOT_FOUND", message: "Organisation introuvable" }, 404);
+    return c.json({ error: "NOT_FOUND", message: "Organization not found" }, 404);
   }
 
   return c.json({
@@ -127,7 +127,7 @@ router.put("/:orgId", async (c) => {
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
     return c.json(
-      { error: "FORBIDDEN", message: "Seul le proprietaire peut modifier l'organisation" },
+      { error: "FORBIDDEN", message: "Only the owner can modify the organization" },
       403,
     );
   }
@@ -137,15 +137,12 @@ router.put("/:orgId", async (c) => {
   if (body.slug) {
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "Le slug est invalide (kebab-case requis)" },
+        { error: "VALIDATION_ERROR", message: "Invalid slug (kebab-case required)" },
         400,
       );
     }
     if (!(await isSlugAvailable(body.slug))) {
-      return c.json(
-        { error: "SLUG_TAKEN", message: `Le slug '${body.slug}' est deja utilise` },
-        400,
-      );
+      return c.json({ error: "SLUG_TAKEN", message: `Slug '${body.slug}' is already in use` }, 400);
     }
   }
 
@@ -165,7 +162,7 @@ router.delete("/:orgId", async (c) => {
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
     return c.json(
-      { error: "FORBIDDEN", message: "Seul le proprietaire peut supprimer l'organisation" },
+      { error: "FORBIDDEN", message: "Only the owner can delete the organization" },
       403,
     );
   }
@@ -173,7 +170,7 @@ router.delete("/:orgId", async (c) => {
   try {
     await deleteOrganization(orgId);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erreur lors de la suppression";
+    const msg = err instanceof Error ? err.message : "Failed to delete organization";
     return c.json({ error: "DELETE_FAILED", message: msg }, 400);
   }
 
@@ -187,23 +184,17 @@ router.post("/:orgId/members", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json(
-      { error: "FORBIDDEN", message: "Seuls les admins peuvent ajouter des membres" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Only admins can add members" }, 403);
   }
 
   const body = await c.req.json<{ email: string; role?: string }>();
   if (!body.email?.trim()) {
-    return c.json({ error: "VALIDATION_ERROR", message: "L'email est requis" }, 400);
+    return c.json({ error: "VALIDATION_ERROR", message: "Email is required" }, 400);
   }
 
   const role = (body.role as "member" | "admin") || "member";
   if (!["member", "admin"].includes(role)) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: "Le role doit etre 'member' ou 'admin'" },
-      400,
-    );
+    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
   }
 
   const targetUser = await findUserByEmail(body.email.trim());
@@ -216,7 +207,7 @@ router.post("/:orgId/members", async (c) => {
       return c.json(
         {
           error: "ADD_MEMBER_FAILED",
-          message: err instanceof Error ? err.message : "Impossible d'ajouter le membre",
+          message: err instanceof Error ? err.message : "Failed to add member",
         },
         400,
       );
@@ -238,7 +229,7 @@ router.post("/:orgId/members", async (c) => {
     return c.json(
       {
         error: "INVITATION_FAILED",
-        message: err instanceof Error ? err.message : "Impossible d'envoyer l'invitation",
+        message: err instanceof Error ? err.message : "Failed to send invitation",
       },
       500,
     );
@@ -253,10 +244,7 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json(
-      { error: "FORBIDDEN", message: "Seuls les admins peuvent annuler des invitations" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Only admins can cancel invitations" }, 403);
   }
 
   await cancelInvitation(invitationId);
@@ -271,23 +259,17 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json(
-      { error: "FORBIDDEN", message: "Seul le proprietaire peut changer les roles" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Only the owner can change roles" }, 403);
   }
 
   const body = await c.req.json<{ role: string }>();
   if (!["member", "admin"].includes(body.role)) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: "Le role doit etre 'member' ou 'admin'" },
-      400,
-    );
+    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
   }
 
   const updated = await updateInvitationRole(invitationId, orgId, body.role as "member" | "admin");
   if (!updated) {
-    return c.json({ error: "NOT_FOUND", message: "Invitation introuvable ou deja acceptee" }, 404);
+    return c.json({ error: "NOT_FOUND", message: "Invitation not found or already accepted" }, 404);
   }
 
   return c.json({ id: updated.id, role: updated.role });
@@ -301,19 +283,16 @@ router.delete("/:orgId/members/:userId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json(
-      { error: "FORBIDDEN", message: "Seuls les admins peuvent retirer des membres" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Only admins can remove members" }, 403);
   }
 
   // Cannot remove the owner
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
-    return c.json({ error: "NOT_FOUND", message: "Membre introuvable" }, 404);
+    return c.json({ error: "NOT_FOUND", message: "Member not found" }, 404);
   }
   if (target.role === "owner") {
-    return c.json({ error: "FORBIDDEN", message: "Impossible de retirer le proprietaire" }, 403);
+    return c.json({ error: "FORBIDDEN", message: "Cannot remove the owner" }, 403);
   }
 
   await removeMember(orgId, targetUserId);
@@ -328,23 +307,17 @@ router.put("/:orgId/members/:userId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json(
-      { error: "FORBIDDEN", message: "Seul le proprietaire peut changer les roles" },
-      403,
-    );
+    return c.json({ error: "FORBIDDEN", message: "Only the owner can change roles" }, 403);
   }
 
   const body = await c.req.json<{ role: string }>();
   if (!["member", "admin"].includes(body.role)) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: "Le role doit etre 'member' ou 'admin'" },
-      400,
-    );
+    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
   }
 
   // Cannot change own role
   if (targetUserId === user.id) {
-    return c.json({ error: "FORBIDDEN", message: "Impossible de changer votre propre role" }, 400);
+    return c.json({ error: "FORBIDDEN", message: "Cannot change your own role" }, 400);
   }
 
   await updateMemberRole(orgId, targetUserId, body.role as "member" | "admin");
