@@ -77,7 +77,8 @@ type Tab = "executions" | "schedules" | "memories";
 
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { packageId } = useParams<{ packageId: string }>();
+  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const packageId = `${scope}/${name}`;
   const { isOrgAdmin } = useOrg();
 
   const profileId = useCurrentProfileId();

@@ -63,8 +63,6 @@ const schemaExports: Record<string, unknown> = {
     name: col("name"),
     manifest: col("manifest"),
     content: col("content"),
-    displayName: col("display_name"),
-    description: col("description"),
     registryScope: col("registry_scope"),
     registryName: col("registry_name"),
     registryVersion: col("registry_version"),
@@ -137,8 +135,7 @@ describe("listOrgItems — filtre autoInstalled", () => {
       id: "my-skill",
       orgId: "org-1",
       name: "my-skill",
-      displayName: "My Skill",
-      description: "A skill",
+      manifest: { type: "skill", displayName: "My Skill", description: "A skill" },
       source: "local",
       type: "skill",
       createdBy: "user-1",
@@ -173,8 +170,8 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "acme--parent",
-          displayName: "Parent Pkg",
           manifest: {
+            displayName: "Parent Pkg",
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
         },
@@ -210,8 +207,8 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "acme--target",
-          displayName: "Self",
           manifest: {
+            displayName: "Self",
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
         },
@@ -231,7 +228,6 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "acme--other",
-          displayName: "Other",
           manifest: null,
         },
       ],
@@ -248,7 +244,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // flow refs exist → IN_USE
       [{ packageId: "flow-1" }],
       // getPackageDisplayNames for flows
-      [{ id: "flow-1", displayName: "My Flow" }],
+      [{ id: "flow-1", manifest: { displayName: "My Flow" } }],
       // findRegistryDependents would find dependents but is never reached
     ];
 
@@ -263,11 +259,10 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
   test("retourne dependents avec displayName fallback sur id", async () => {
     selectQueue = [
       [], // no flow refs
-      // registry package with null displayName
+      // registry package with no displayName in manifest → fallback to id
       [
         {
           id: "acme--dep",
-          displayName: null,
           manifest: {
             registryDependencies: { skills: { "@acme/target": "*" } },
           },

@@ -2,8 +2,9 @@ import { eq, and } from "drizzle-orm";
 import type { PublishResult } from "@appstrate/registry-client";
 import { zipArtifact, type Zippable } from "@appstrate/validation/zip";
 import { db } from "../lib/db.ts";
-import { packages, packageDependencies } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
+import type { Manifest } from "@appstrate/validation";
 import { getAuthenticatedRegistryClient } from "./registry-auth.ts";
 import {
   getFlowItemFiles,
@@ -24,8 +25,6 @@ import { logger } from "../lib/logger.ts";
 const ZIP_COMPRESSION_LEVEL = 6;
 
 interface PublishOptions {
-  scope?: string;
-  name?: string;
   version: string;
 }
 
@@ -56,47 +55,31 @@ export async function publishPackage(
     throw new Error("Cannot publish built-in packages");
   }
 
-  // 3. Resolve scope and name from the manifest (already in @scope/name format)
-  const existingName = (pkg.manifest as Record<string, unknown>).name as string;
-  const parsed = parseScopedName(existingName);
-  const scope = opts.scope
-    ? opts.scope.startsWith("@")
-      ? opts.scope.slice(1)
-      : opts.scope
-    : parsed?.scope || pkg.registryScope;
-  const name = opts.name || parsed?.name || pkg.registryName || packageId;
-  if (!scope) {
-    throw new Error("Publish scope is required");
-  }
-
-  // 4. Build manifest — manifest already has name/type, only override version (and name if changed)
-  const manifest: Record<string, unknown> = {
-    ...(pkg.manifest as Record<string, unknown>),
+  // 3. Build manifest — manifest already has name/type/registryDependencies, only set version
+  const currentManifest = (pkg.manifest ?? {}) as Partial<Manifest>;
+  const manifest: Partial<Manifest> = {
+    ...currentManifest,
     version: opts.version,
   };
-  // Override name only if the publish scope/name differs from the manifest
-  if (`@${scope}/${name}` !== existingName) {
-    manifest.name = `@${scope}/${name}`;
-  }
 
-  // 5. Add registryDependencies for flows
-  if (pkg.type === "flow") {
-    const registryDeps = await resolveRegistryDeps(packageId, orgId);
-    if (registryDeps) {
-      manifest.registryDependencies = registryDeps;
-    }
+  // Extract scope/name from manifest.name (which IS the packageId: @scope/name)
+  const parsed = parseScopedName(currentManifest.name!);
+  if (!parsed) {
+    throw new Error("manifest.name must be in @scope/name format");
   }
+  const { scope, name } = parsed;
 
-  // 6. Build artifact
+  // 4. Build artifact
   const artifact = await buildPublishableArtifact(pkg, orgId, manifest);
 
-  // 7. Publish to registry
+  // 5. Publish to registry
   const result = await client.publish(artifact);
 
-  // 8. Update local package with registry identity
+  // 6. Update local package with registry identity + persist updated manifest
   await db
     .update(packages)
     .set({
+      manifest,
       registryScope: scope,
       registryName: name,
       lastPublishedVersion: opts.version,
@@ -118,7 +101,7 @@ export async function publishPackage(
 async function buildPublishableArtifact(
   pkg: Package,
   orgId: string,
-  manifest: Record<string, unknown>,
+  manifest: Partial<Manifest>,
 ): Promise<Uint8Array> {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
@@ -195,45 +178,4 @@ async function buildPublishableArtifact(
   }
 
   return zipArtifact(entries, ZIP_COMPRESSION_LEVEL);
-}
-
-async function resolveRegistryDeps(
-  packageId: string,
-  orgId: string,
-): Promise<Record<string, Record<string, string>> | null> {
-  const deps = await db
-    .select({
-      dependencyId: packageDependencies.dependencyId,
-      type: packages.type,
-      registryScope: packages.registryScope,
-      registryName: packages.registryName,
-      lastPublishedVersion: packages.lastPublishedVersion,
-    })
-    .from(packageDependencies)
-    .innerJoin(packages, eq(packages.id, packageDependencies.dependencyId))
-    .where(and(eq(packageDependencies.packageId, packageId), eq(packageDependencies.orgId, orgId)));
-
-  const skills: Record<string, string> = {};
-  const extensions: Record<string, string> = {};
-
-  for (const dep of deps) {
-    if (!dep.registryScope || !dep.registryName) continue;
-    const scopedName = `@${dep.registryScope}/${dep.registryName}`;
-    const version = dep.lastPublishedVersion || "*";
-
-    if (dep.type === "skill") {
-      skills[scopedName] = version;
-    } else if (dep.type === "extension") {
-      extensions[scopedName] = version;
-    }
-  }
-
-  const hasSkills = Object.keys(skills).length > 0;
-  const hasExtensions = Object.keys(extensions).length > 0;
-  if (!hasSkills && !hasExtensions) return null;
-
-  const result: Record<string, Record<string, string>> = {};
-  if (hasSkills) result.skills = skills;
-  if (hasExtensions) result.extensions = extensions;
-  return result;
 }

@@ -140,8 +140,6 @@ mock.module("@appstrate/db/schema", () => ({
     name: "name",
     manifest: "manifest",
     content: "content",
-    displayName: "display_name",
-    description: "description",
     registryScope: "registry_scope",
     registryName: "registry_name",
     registryVersion: "registry_version",

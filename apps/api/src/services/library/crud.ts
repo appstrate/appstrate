@@ -2,7 +2,8 @@ import { eq, and, inArray, desc, sql, isNotNull } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/validation/dependencies";
-import { depEntryToPackageId } from "@appstrate/validation/naming";
+import { buildPackageId } from "@appstrate/validation/naming";
+import type { Manifest } from "@appstrate/validation";
 import { type LibraryTypeConfig } from "./config.ts";
 import { deleteLibraryPackage } from "./storage.ts";
 
@@ -40,14 +41,17 @@ async function getPackageDisplayNames(
 ): Promise<{ id: string; displayName: string }[]> {
   if (packageIds.length === 0) return [];
   const rows = await db
-    .select({ id: packages.id, displayName: packages.displayName })
+    .select({ id: packages.id, manifest: packages.manifest })
     .from(packages)
     .where(inArray(packages.id, packageIds));
 
-  return rows.map((r) => ({
-    id: r.id,
-    displayName: r.displayName ?? r.id,
-  }));
+  return rows.map((r) => {
+    const m = (r.manifest ?? {}) as Partial<Manifest>;
+    return {
+      id: r.id,
+      displayName: m.displayName ?? r.id,
+    };
+  });
 }
 
 /** Find registry packages that depend on the target package (via manifest registryDependencies). */
@@ -56,17 +60,18 @@ async function findRegistryDependents(
   targetPackageId: string,
 ): Promise<{ id: string; displayName: string }[]> {
   const registryPkgs = await db
-    .select({ id: packages.id, displayName: packages.displayName, manifest: packages.manifest })
+    .select({ id: packages.id, manifest: packages.manifest })
     .from(packages)
     .where(and(eq(packages.orgId, orgId), isNotNull(packages.registryScope)));
 
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of registryPkgs) {
     if (!pkg.manifest || pkg.id === targetPackageId) continue;
-    const deps = extractDependencies(pkg.manifest as Record<string, unknown>);
+    const m = pkg.manifest as Partial<Manifest>;
+    const deps = extractDependencies(m);
     for (const dep of deps) {
-      if (depEntryToPackageId(dep.depScope, dep.depName) === targetPackageId) {
-        dependents.push({ id: pkg.id, displayName: pkg.displayName ?? pkg.id });
+      if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
+        dependents.push({ id: pkg.id, displayName: m.displayName ?? pkg.id });
         break;
       }
     }
@@ -128,17 +133,20 @@ export async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
       usedByFlows: builtInCounts.get(item.id) ?? 0,
     }));
 
-  const orgItems = data.map((row) => ({
-    id: row.id,
-    orgId: row.orgId,
-    name: row.displayName ?? row.name,
-    description: row.description,
-    source: "local" as const,
-    createdBy: row.createdBy,
-    createdAt: row.createdAt?.toISOString() ?? "",
-    updatedAt: row.updatedAt?.toISOString() ?? "",
-    usedByFlows: countMap.get(row.id) ?? 0,
-  }));
+  const orgItems = data.map((row) => {
+    const m = (row.manifest ?? {}) as Partial<Manifest>;
+    return {
+      id: row.id,
+      orgId: row.orgId,
+      name: m.displayName ?? row.name,
+      description: m.description ?? null,
+      source: "local" as const,
+      createdBy: row.createdBy,
+      createdAt: row.createdAt?.toISOString() ?? "",
+      updatedAt: row.updatedAt?.toISOString() ?? "",
+      usedByFlows: countMap.get(row.id) ?? 0,
+    };
+  });
 
   return [...builtInItems, ...orgItems];
 }
@@ -176,11 +184,12 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
 
   const packageIds = depRefs.map((d) => d.packageId);
 
+  const m = (data.manifest ?? {}) as Partial<Manifest>;
   return {
     id: data.id,
     orgId: data.orgId,
-    name: data.displayName ?? data.name,
-    description: data.description,
+    name: m.displayName ?? data.name,
+    description: m.description ?? null,
     content: data.content,
     source: "local" as const,
     createdBy: data.createdBy,
@@ -195,20 +204,37 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
   };
 }
 
-/** Insert or update an item in the org library. */
-export async function upsertOrgItem(orgId: string, item: UpsertItemInput, cfg: LibraryTypeConfig) {
+/** Insert or update an item in the org library.
+ *  When orgSlug is provided, packageId = @orgSlug/item.id (local creation).
+ *  When orgSlug is null, item.id IS the full packageId (marketplace installs).
+ */
+export async function upsertOrgItem(
+  orgId: string,
+  orgSlug: string | null,
+  item: UpsertItemInput,
+  cfg: LibraryTypeConfig,
+) {
   const now = new Date();
 
+  const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
+
+  // Build manifest for skills/extensions (source of truth for displayName/description)
+  const manifest = {
+    type: cfg.type,
+    name: packageId,
+    version: "0.0.0",
+    ...(item.name && { displayName: item.name }),
+    ...(item.description && { description: item.description }),
+  };
   const [data] = await db
     .insert(packages)
     .values({
-      id: item.id,
+      id: packageId,
       orgId,
       type: cfg.type,
       source: "local",
       name: item.id,
-      displayName: item.name ?? null,
-      description: item.description ?? null,
+      manifest: manifest,
       content: item.content,
       createdBy: item.createdBy ?? null,
       updatedAt: now,
@@ -216,8 +242,7 @@ export async function upsertOrgItem(orgId: string, item: UpsertItemInput, cfg: L
     .onConflictDoUpdate({
       target: [packages.id],
       set: {
-        displayName: item.name ?? null,
-        description: item.description ?? null,
+        manifest: manifest,
         content: item.content,
         createdBy: item.createdBy ?? null,
         updatedAt: now,

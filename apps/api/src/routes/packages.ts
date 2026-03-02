@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { eq, and } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
-import { scopedNameToPackageId } from "@appstrate/validation/naming";
 import { insertPackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
@@ -44,8 +43,7 @@ export function createPackagesRouter() {
     }
 
     const { manifest, content, files, type: packageType } = parsed;
-    const scopedName = manifest.name as string;
-    const packageId = scopedNameToPackageId(scopedName);
+    const packageId = manifest.name as string;
 
     // Check collision
     const existingIds = await getAllPackageIds(orgId);
@@ -60,11 +58,7 @@ export function createPackagesRouter() {
     }
 
     // Insert into DB (generic — works for all types)
-    const displayName = (manifest.displayName as string | undefined) ?? scopedName.split("/")[1];
-    await insertPackage(packageId, orgId, packageType, manifest, content, {
-      name: scopedName,
-      displayName,
-    });
+    await insertPackage(packageId, orgId, packageType, manifest, content);
 
     // Per-type post-install (version, library upsert, storage upload)
     await postInstallPackage({
@@ -81,16 +75,14 @@ export function createPackagesRouter() {
     return c.json({ packageId, type: packageType }, 201);
   });
 
-  // POST /api/packages/:id/publish — publish a package to registry
-  router.post("/:id/publish", requireAdmin(), async (c) => {
+  // POST /api/packages/:scope/:name/publish — publish a package to registry
+  router.post("/:scope{@[^/]+}/:name/publish", requireAdmin(), async (c) => {
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const packageId = c.req.param("id");
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
     try {
       const body = await c.req.json<{
-        scope?: string;
-        name?: string;
         version?: string;
       }>();
       if (!body.version?.trim()) {
@@ -98,8 +90,6 @@ export function createPackagesRouter() {
       }
 
       const result = await publishPackage(packageId, orgId, user.id, {
-        scope: body.scope,
-        name: body.name,
         version: body.version.trim(),
       });
       return c.json(result);
@@ -110,11 +100,11 @@ export function createPackagesRouter() {
     }
   });
 
-  // GET /api/packages/:id/publish-info — get publish info for modal
-  router.get("/:id/publish-info", async (c) => {
+  // GET /api/packages/:scope/:name/publish-info — get publish info for modal
+  router.get("/:scope{@[^/]+}/:name/publish-info", async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const packageId = c.req.param("id");
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
     const [pkg] = await db
       .select({
@@ -132,10 +122,6 @@ export function createPackagesRouter() {
       return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
     }
 
-    const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
-    const manifestName = typeof manifest.name === "string" ? manifest.name : null;
-    const manifestVersion = typeof manifest.version === "string" ? manifest.version : null;
-
     // Optionally fetch registry scopes if connected
     let registryScopes: { name: string; ownerId: string }[] | undefined;
     const client = await getAuthenticatedRegistryClient(user.id);
@@ -149,9 +135,6 @@ export function createPackagesRouter() {
 
     return c.json({
       ...pkg,
-      manifest: undefined,
-      manifestName,
-      manifestVersion,
       lastPublishedAt: pkg.lastPublishedAt?.toISOString() ?? null,
       registryScopes,
     });

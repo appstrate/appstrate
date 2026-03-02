@@ -1,0 +1,2 @@
+ALTER TABLE "packages" DROP CONSTRAINT "packages_id_slug";--> statement-breakpoint
+ALTER TABLE "packages" ADD CONSTRAINT "packages_id_format" CHECK ("packages"."id" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$');

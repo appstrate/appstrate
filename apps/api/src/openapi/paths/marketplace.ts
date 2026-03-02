@@ -141,8 +141,11 @@ export const marketplacePaths = {
                         registryScope: { type: "string" },
                         registryName: { type: "string" },
                         registryVersion: { type: "string" },
-                        displayName: { type: "string" },
-                        description: { type: "string" },
+                        manifest: {
+                          type: ["object", "null"],
+                          description:
+                            "Package manifest (source of truth for displayName, description, etc.)",
+                        },
                         updatedAt: { type: "string", format: "date-time" },
                       },
                     },

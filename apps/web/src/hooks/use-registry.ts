@@ -122,8 +122,7 @@ export function usePublishInfo(packageId: string | undefined) {
     queryKey: ["publish-info", orgId, packageId],
     queryFn: () =>
       api<{
-        manifestName: string | null;
-        manifestVersion: string | null;
+        manifest: Record<string, unknown>;
         registryScope: string | null;
         registryName: string | null;
         lastPublishedVersion: string | null;

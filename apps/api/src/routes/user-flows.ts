@@ -1,24 +1,41 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
-import { scopedNameToPackageId } from "@appstrate/validation/naming";
 import { validateManifest } from "@appstrate/validation";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
-import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/library.ts";
+import {
+  setFlowItems,
+  buildRegistryDepsFromIds,
+  SKILL_CONFIG,
+  EXTENSION_CONFIG,
+} from "../services/library.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 
-async function syncFlowDepsFromManifest(
-  packageId: string,
+/** Enrich manifest with registryDependencies before save (single write). */
+async function enrichManifestWithRegistryDeps(
   orgId: string,
   manifest: Record<string, unknown>,
-) {
+): Promise<{ skillIds: string[]; extensionIds: string[] }> {
   const { skillIds, extensionIds } = extractDepsFromManifest(manifest);
+  const registryDeps = await buildRegistryDepsFromIds(orgId, skillIds, extensionIds);
+  if (registryDeps) manifest.registryDependencies = registryDeps;
+  else delete manifest.registryDependencies;
+  return { skillIds, extensionIds };
+}
+
+/** Synchronise the junction table after save. */
+async function syncFlowDepsJunctionTable(
+  packageId: string,
+  orgId: string,
+  skillIds: string[],
+  extensionIds: string[],
+) {
   await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
   await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
 }
@@ -45,22 +62,13 @@ export function createUserFlowsRouter() {
         400,
       );
     }
+    const validatedManifest = manifestResult.manifest;
 
     if (!prompt || !prompt.trim()) {
       return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
     }
 
-    const scopedName = (manifest as { name: string }).name;
-    let packageId: string;
-    try {
-      packageId = scopedNameToPackageId(scopedName);
-    } catch {
-      return c.json(
-        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
-        400,
-      );
-    }
-
+    const packageId = validatedManifest.name;
     const orgId = c.get("orgId");
     const existingIds = await getAllPackageIds(orgId);
 
@@ -74,15 +82,21 @@ export function createUserFlowsRouter() {
       );
     }
 
-    // Store in DB
-    await insertPackage(packageId, orgId, "flow", manifest, prompt);
+    // Enrich manifest with registryDependencies before save
+    const { skillIds, extensionIds } = await enrichManifestWithRegistryDeps(
+      orgId,
+      validatedManifest,
+    );
 
-    // Sync skill/extension references from manifest.requires
-    await syncFlowDepsFromManifest(packageId, orgId, manifest);
+    // Store in DB (single write with registryDependencies already included)
+    await insertPackage(packageId, orgId, "flow", validatedManifest, prompt);
+
+    // Sync junction table for dependency tracking
+    await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
 
     // Create version + upload minimal ZIP to Storage (non-blocking)
     try {
-      const zipBuffer = buildMinimalZip(manifest, prompt);
+      const zipBuffer = buildMinimalZip(validatedManifest, prompt);
       await createVersionAndUpload(packageId, user.id, zipBuffer);
     } catch (error) {
       logger.warn("Version upload failed (non-fatal)", { packageId, error });
@@ -91,224 +105,243 @@ export function createUserFlowsRouter() {
     return c.json({ packageId, message: "Flow created" }, 201);
   });
 
-  // PUT /api/flows/:id — update manifest + prompt
-  router.put("/:id", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const orgId = c.get("orgId");
-    const packageId = flow.id;
+  // PUT /api/flows/:scope/:name — update manifest + prompt
+  router.put(
+    "/:scope{@[^/]+}/:name",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const user = c.get("user");
+      const orgId = c.get("orgId");
+      const packageId = flow.id;
 
-    const body = await c.req.json<{
-      manifest: Record<string, unknown>;
-      prompt: string;
-      updatedAt: string;
-    }>();
+      const body = await c.req.json<{
+        manifest: Record<string, unknown>;
+        prompt: string;
+        updatedAt: string;
+      }>();
 
-    const { manifest, prompt, updatedAt } = body;
+      const { manifest, prompt, updatedAt } = body;
 
-    if (!updatedAt) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
-        400,
-      );
-    }
-
-    // Validate manifest
-    const manifestResult = validateManifest(manifest);
-    if (!manifestResult.valid) {
-      return c.json(
-        { error: "INVALID_MANIFEST", message: "Invalid manifest", details: manifestResult.errors },
-        400,
-      );
-    }
-
-    // Ensure ID immutability
-    const newScopedName = (manifest as { name: string }).name;
-    let newPackageId: string;
-    try {
-      newPackageId = scopedNameToPackageId(newScopedName);
-    } catch {
-      return c.json(
-        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
-        400,
-      );
-    }
-    if (newPackageId !== packageId) {
-      return c.json({ error: "VALIDATION_ERROR", message: "name cannot change" }, 400);
-    }
-
-    if (!prompt || !prompt.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
-    }
-
-    // Update DB: manifest + prompt
-    const updated = await updatePackage(packageId, { manifest, content: prompt }, updatedAt);
-    if (!updated) {
-      return c.json(
-        {
-          error: "CONFLICT",
-          message: "Flow has been modified since your last read. Reload and try again.",
-        },
-        409,
-      );
-    }
-
-    // Sync skill/extension references from manifest.requires
-    await syncFlowDepsFromManifest(packageId, orgId, manifest);
-
-    // Create version + upload minimal ZIP
-    try {
-      const zipBuffer = buildMinimalZip(manifest, prompt);
-      await createVersionAndUpload(packageId, user.id, zipBuffer);
-    } catch (error) {
-      logger.warn("Version upload failed (non-fatal)", { packageId, error });
-    }
-
-    return c.json({ packageId, message: "Flow updated", updatedAt: updated.updatedAt });
-  });
-
-  // PUT /api/flows/:id/package — upload a new ZIP for an existing user flow
-  router.put("/:id/package", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const packageId = flow.id;
-
-    const formData = await c.req.formData();
-    const file = formData.get("file");
-    const updatedAt = formData.get("updatedAt") as string | null;
-
-    if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
-    }
-
-    if (!file.name.endsWith(".zip")) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
-    }
-
-    if (!updatedAt) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
-        400,
-      );
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    let parsed;
-    try {
-      parsed = parsePackageZip(new Uint8Array(buffer));
-    } catch (err) {
-      if (err instanceof PackageZipError) {
-        return c.json({ error: err.code, message: err.message, details: err.details }, 400);
+      if (!updatedAt) {
+        return c.json(
+          { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
+          400,
+        );
       }
-      throw err;
-    }
 
-    if (parsed.type !== "flow") {
-      return c.json({ error: "INVALID_TYPE", message: "Expected type: flow" }, 400);
-    }
+      // Validate manifest
+      const manifestResult = validateManifest(manifest);
+      if (!manifestResult.valid) {
+        return c.json(
+          {
+            error: "INVALID_MANIFEST",
+            message: "Invalid manifest",
+            details: manifestResult.errors,
+          },
+          400,
+        );
+      }
 
-    const { manifest, content } = parsed;
+      // Ensure ID immutability
+      const newScopedName = (manifest as { name: string }).name;
+      if (newScopedName !== packageId) {
+        return c.json({ error: "VALIDATION_ERROR", message: "name cannot change" }, 400);
+      }
 
-    // Ensure name matches the flow ID (immutable)
-    const zipScopedName = (manifest as { name: string }).name;
-    let zipPackageId: string;
-    try {
-      zipPackageId = scopedNameToPackageId(zipScopedName);
-    } catch {
-      return c.json(
-        { error: "INVALID_NAME", message: "manifest.name must follow @scope/name format" },
-        400,
-      );
-    }
-    if (zipPackageId !== packageId) {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: `name in ZIP ('${zipScopedName}') does not match flow`,
-        },
-        400,
-      );
-    }
+      if (!prompt || !prompt.trim()) {
+        return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
+      }
 
-    // Update DB with new metadata from ZIP
-    const updated = await updatePackage(packageId, { manifest, content }, updatedAt);
-    if (!updated) {
-      return c.json(
-        {
-          error: "CONFLICT",
-          message: "Flow has been modified since your last read. Reload and try again.",
-        },
-        409,
-      );
-    }
+      // Enrich manifest with registryDependencies before save
+      const { skillIds, extensionIds } = await enrichManifestWithRegistryDeps(orgId, manifest);
 
-    // Create version + upload ZIP to Storage
-    try {
-      await createVersionAndUpload(packageId, user.id, buffer);
-    } catch (error) {
-      logger.warn("Version upload failed (non-fatal)", { packageId, error });
-    }
+      // Update DB: manifest + prompt (single write with registryDependencies already included)
+      const updated = await updatePackage(packageId, { manifest, content: prompt }, updatedAt);
+      if (!updated) {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "Flow has been modified since your last read. Reload and try again.",
+          },
+          409,
+        );
+      }
 
-    return c.json({ packageId, message: "Package updated", updatedAt: updated.updatedAt });
-  });
+      // Sync junction table for dependency tracking
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
 
-  // PUT /api/flows/:id/skills — set skill references for a flow
-  router.put("/:id/skills", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const packageId = flow.id;
+      // Create version + upload minimal ZIP
+      try {
+        const zipBuffer = buildMinimalZip(manifest, prompt);
+        await createVersionAndUpload(packageId, user.id, zipBuffer);
+      } catch (error) {
+        logger.warn("Version upload failed (non-fatal)", { packageId, error });
+      }
 
-    const body = await c.req.json<{ skillIds: string[] }>();
-    const { skillIds } = body;
+      return c.json({ packageId, message: "Flow updated", updatedAt: updated.updatedAt });
+    },
+  );
 
-    if (!Array.isArray(skillIds)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "skillIds must be an array" }, 400);
-    }
+  // PUT /api/flows/:scope/:name/package — upload a new ZIP for an existing user flow
+  router.put(
+    "/:scope{@[^/]+}/:name/package",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const user = c.get("user");
+      const packageId = flow.id;
 
-    try {
-      await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
-    } catch (err) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
-        400,
-      );
-    }
+      const formData = await c.req.formData();
+      const file = formData.get("file");
+      const updatedAt = formData.get("updatedAt") as string | null;
 
-    return c.json({ packageId, skillIds, message: "Skill references updated" });
-  });
+      if (!file || !(file instanceof File)) {
+        return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
+      }
 
-  // PUT /api/flows/:id/extensions — set extension references for a flow
-  router.put("/:id/extensions", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const packageId = flow.id;
+      if (!file.name.endsWith(".zip")) {
+        return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
+      }
 
-    const body = await c.req.json<{ extensionIds: string[] }>();
-    const { extensionIds } = body;
+      if (!updatedAt) {
+        return c.json(
+          { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
+          400,
+        );
+      }
 
-    if (!Array.isArray(extensionIds)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "extensionIds must be an array" }, 400);
-    }
+      const buffer = Buffer.from(await file.arrayBuffer());
 
-    try {
-      await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
-    } catch (err) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
-        400,
-      );
-    }
+      let parsed;
+      try {
+        parsed = parsePackageZip(new Uint8Array(buffer));
+      } catch (err) {
+        if (err instanceof PackageZipError) {
+          return c.json({ error: err.code, message: err.message, details: err.details }, 400);
+        }
+        throw err;
+      }
 
-    return c.json({ packageId, extensionIds, message: "Extension references updated" });
-  });
+      if (parsed.type !== "flow") {
+        return c.json({ error: "INVALID_TYPE", message: "Expected type: flow" }, 400);
+      }
 
-  // DELETE /api/flows/:id — delete a user flow (admin-only)
-  router.delete("/:id", requireFlow(), requireAdmin(), requireMutableFlow(), async (c) => {
-    const flow = c.get("flow");
-    await deletePackage(flow.id);
-    return c.body(null, 204);
-  });
+      const { manifest, content } = parsed;
+
+      // Ensure name matches the flow ID (immutable)
+      const zipScopedName = (manifest as { name: string }).name;
+      if (zipScopedName !== packageId) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: `name in ZIP ('${zipScopedName}') does not match flow`,
+          },
+          400,
+        );
+      }
+
+      // Update DB with new metadata from ZIP
+      const updated = await updatePackage(packageId, { manifest, content }, updatedAt);
+      if (!updated) {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "Flow has been modified since your last read. Reload and try again.",
+          },
+          409,
+        );
+      }
+
+      // Create version + upload ZIP to Storage
+      try {
+        await createVersionAndUpload(packageId, user.id, buffer);
+      } catch (error) {
+        logger.warn("Version upload failed (non-fatal)", { packageId, error });
+      }
+
+      return c.json({ packageId, message: "Package updated", updatedAt: updated.updatedAt });
+    },
+  );
+
+  // PUT /api/flows/:scope/:name/skills — set skill references for a flow
+  router.put(
+    "/:scope{@[^/]+}/:name/skills",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const packageId = flow.id;
+
+      const body = await c.req.json<{ skillIds: string[] }>();
+      const { skillIds } = body;
+
+      if (!Array.isArray(skillIds)) {
+        return c.json({ error: "VALIDATION_ERROR", message: "skillIds must be an array" }, 400);
+      }
+
+      try {
+        await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
+      } catch (err) {
+        return c.json(
+          { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
+          400,
+        );
+      }
+
+      return c.json({ packageId, skillIds, message: "Skill references updated" });
+    },
+  );
+
+  // PUT /api/flows/:scope/:name/extensions — set extension references for a flow
+  router.put(
+    "/:scope{@[^/]+}/:name/extensions",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const packageId = flow.id;
+
+      const body = await c.req.json<{ extensionIds: string[] }>();
+      const { extensionIds } = body;
+
+      if (!Array.isArray(extensionIds)) {
+        return c.json({ error: "VALIDATION_ERROR", message: "extensionIds must be an array" }, 400);
+      }
+
+      try {
+        await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+      } catch (err) {
+        return c.json(
+          { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
+          400,
+        );
+      }
+
+      return c.json({ packageId, extensionIds, message: "Extension references updated" });
+    },
+  );
+
+  // DELETE /api/flows/:scope/:name — delete a user flow (admin-only)
+  router.delete(
+    "/:scope{@[^/]+}/:name",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      await deletePackage(flow.id);
+      return c.body(null, 204);
+    },
+  );
 
   return router;
 }

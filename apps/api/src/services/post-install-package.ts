@@ -36,6 +36,7 @@ export async function postInstallPackage(params: {
       const skillMeta = extractSkillMeta(content);
       await upsertOrgItem(
         orgId,
+        null,
         {
           id: packageId,
           name: skillMeta.name || undefined,
@@ -49,7 +50,12 @@ export async function postInstallPackage(params: {
       break;
     }
     case "extension": {
-      await upsertOrgItem(orgId, { id: packageId, content, createdBy: userId }, EXTENSION_CONFIG);
+      await upsertOrgItem(
+        orgId,
+        null,
+        { id: packageId, content, createdBy: userId },
+        EXTENSION_CONFIG,
+      );
       await uploadLibraryPackage("extensions", orgId, packageId, files);
       break;
     }

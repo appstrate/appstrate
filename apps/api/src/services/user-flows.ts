@@ -9,6 +9,7 @@ import {
   packageAdminConnections,
 } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
+import type { Manifest } from "@appstrate/validation";
 
 export async function getPackageById(id: string): Promise<Package | null> {
   const rows = await db.select().from(packages).where(eq(packages.id, id)).limit(1);
@@ -19,20 +20,15 @@ export async function insertPackage(
   id: string,
   orgId: string,
   type: "flow" | "skill" | "extension",
-  manifest: Record<string, unknown>,
+  manifest: Manifest,
   content: string,
   opts?: {
     source?: "built-in" | "local";
-    displayName?: string;
-    description?: string;
     name?: string;
   },
 ): Promise<Package> {
   const now = new Date();
-  const m = manifest as Record<string, unknown>;
-  const name = opts?.name ?? (m.name as string | undefined) ?? id;
-  const displayName = opts?.displayName ?? (m.displayName as string | undefined) ?? undefined;
-  const description = opts?.description ?? (m.description as string | undefined) ?? undefined;
+  const name = opts?.name ?? manifest.name ?? id;
 
   const [row] = await db
     .insert(packages)
@@ -44,8 +40,6 @@ export async function insertPackage(
       name,
       manifest,
       content,
-      displayName,
-      description,
       createdAt: now,
       updatedAt: now,
     })
@@ -62,17 +56,11 @@ export async function updatePackage(
   },
   expectedUpdatedAt: string,
 ): Promise<Package | null> {
-  const m = payload.manifest as Record<string, unknown>;
-  const displayName = (m.displayName as string | undefined) ?? undefined;
-  const description = (m.description as string | undefined) ?? undefined;
-
   const rows = await db
     .update(packages)
     .set({
       manifest: payload.manifest,
       content: payload.content,
-      displayName,
-      description,
       updatedAt: new Date(),
     })
     .where(and(eq(packages.id, id), eq(packages.updatedAt, new Date(expectedUpdatedAt))))
