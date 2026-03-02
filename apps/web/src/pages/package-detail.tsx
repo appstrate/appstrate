@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
@@ -9,7 +10,9 @@ import {
 } from "../hooks/use-library";
 import { useOrg } from "../hooks/use-org";
 import { TypeBadge } from "../components/type-badge";
+import { PublishModal } from "../components/publish-modal";
 import { LoadingState } from "../components/page-states";
+import { marketplacePath } from "../lib/strings";
 
 export function PackageDetailPage() {
   const { t } = useTranslation(["settings", "flows", "common"]);
@@ -21,6 +24,8 @@ export function PackageDetailPage() {
   const extQuery = useOrgExtensionDetail(packageId);
   const deleteSkill = useDeleteSkill();
   const deleteExtension = useDeleteExtension();
+
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const isLoading = skillQuery.isLoading || extQuery.isLoading;
   const detail = skillQuery.data || extQuery.data;
@@ -66,14 +71,16 @@ export function PackageDetailPage() {
         </div>
         {detail.description && <p className="description">{detail.description}</p>}
         <code className="detail-id">{detail.id}</code>
+        {detail.lastPublishedVersion && (
+          <span className="badge badge-success">
+            {t("publish.badge", { version: detail.lastPublishedVersion, ns: "flows" })}
+          </span>
+        )}
       </div>
 
-      {detail.registryScope && detail.registryName && (
+      {marketplacePath(detail) && (
         <div className="actions">
-          <Link
-            to={`/marketplace/@${detail.registryScope}/${detail.registryName}`}
-            className="btn-sm"
-          >
+          <Link to={marketplacePath(detail)!} className="btn-sm">
             <ExternalLink size={14} />
             {t("library.viewOnMarketplace")}
           </Link>
@@ -100,13 +107,28 @@ export function PackageDetailPage() {
         <pre className="state-json">{detail.content}</pre>
       </div>
 
-      {isOrgAdmin && !isBuiltIn && !hasFlows && (
+      {isOrgAdmin && !isBuiltIn && (
         <div className="actions">
-          <button className="btn-danger" onClick={handleDelete} disabled={deleteMutation.isPending}>
-            {t("btn.delete")}
+          <button onClick={() => setPublishOpen(true)}>
+            {t("publish.publish", { ns: "flows" })}
           </button>
+          {!hasFlows && (
+            <button
+              className="btn-danger"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {t("btn.delete")}
+            </button>
+          )}
         </div>
       )}
+
+      <PublishModal
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        packageId={packageId!}
+      />
     </>
   );
 }

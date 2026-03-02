@@ -25,6 +25,7 @@ import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createMarketplaceRouter } from "./routes/marketplace.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
+import { createRegistryAuthRouter } from "./routes/registry-auth.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -77,6 +78,8 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/realtime/")) return next();
   // OAuth callback is a redirect from the provider — no session
   if (path === "/auth/callback") return next();
+  // Registry OAuth callback is a redirect — no session
+  if (path === "/api/registry/callback") return next();
   // OpenAPI docs are public
   if (path === "/api/docs" || path === "/api/openapi.json") return next();
 
@@ -129,6 +132,9 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/auth/")) return next();
   if (path.startsWith("/api/realtime/")) return next();
   if (path === "/auth/callback") return next();
+  // Registry routes are user-scoped, not org-scoped
+  if (path === "/api/registry/callback") return next();
+  if (path.startsWith("/api/registry/")) return next();
   // OpenAPI docs are public
   if (path === "/api/docs" || path === "/api/openapi.json") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
@@ -172,6 +178,7 @@ app.route("/api", schedulesRouter);
 app.route("/api/library", createLibraryRouter());
 app.route("/api/marketplace", createMarketplaceRouter());
 app.route("/api/packages", createPackagesRouter());
+app.route("/api/registry", createRegistryAuthRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/provider-templates", createProviderTemplatesRouter());
 app.route("/api/api-keys", createApiKeysRouter());

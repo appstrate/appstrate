@@ -59,6 +59,8 @@ const envSchema = z.object({
 
   // Registry
   REGISTRY_URL: z.string().optional(),
+  REGISTRY_CLIENT_ID: z.string().optional(),
+  REGISTRY_CLIENT_SECRET: z.string().optional(),
 
   // Outbound proxy
   PROXY_URL: z.string().optional(),

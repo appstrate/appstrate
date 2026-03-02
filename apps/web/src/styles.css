@@ -3875,3 +3875,35 @@ button:disabled {
   border-radius: 3px;
   line-height: 1.3;
 }
+
+/* Publish modal */
+.publish-version-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.publish-bumps {
+  display: flex;
+  gap: 0.25rem;
+}
+.publish-bumps button {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+}
+.publish-bumps button.active {
+  background: var(--accent);
+  color: #fff;
+}
+.publish-not-connected {
+  text-align: center;
+  padding: 1rem 0;
+}
+.publish-not-connected p {
+  margin-bottom: 0.75rem;
+  color: var(--text-dim);
+}
+.publish-success {
+  text-align: center;
+  padding: 1rem 0;
+  color: var(--green);
+}

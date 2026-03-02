@@ -7,6 +7,7 @@ import {
   useInstallPackage,
   useUpdatePackage,
 } from "../hooks/use-marketplace";
+import { useRegistryStatus, useRegistryScopes } from "../hooks/use-registry";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
@@ -28,6 +29,8 @@ export function MarketplaceDetailPage() {
   const { data: pkg, isLoading, error } = useMarketplacePackage(scope, name);
   const install = useInstallPackage();
   const update = useUpdatePackage();
+  const { data: registryStatus } = useRegistryStatus();
+  const { data: registryScopes } = useRegistryScopes();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
 
   if (isLoading) {
@@ -113,6 +116,12 @@ export function MarketplaceDetailPage() {
               <ExternalLink size={14} />
               {t("marketplace.repository")}
             </a>
+          )}
+          {registryStatus?.connected && registryScopes?.some((s) => s.name === scope) && (
+            <span className="marketplace-detail-meta-item">
+              <CheckCircle size={14} />
+              {t("marketplace.ownedByYou")}
+            </span>
           )}
         </div>
       </div>

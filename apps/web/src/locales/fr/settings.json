@@ -329,5 +329,20 @@
   "marketplace.colLatest": "Dernière version",
   "marketplace.colStatus": "Statut",
   "marketplace.autoInstalledDeps": "{{count}} dépendance(s) installée(s) automatiquement",
-  "library.deleteDependedOn": "Impossible de supprimer : requis par d'autres packages"
+  "library.deleteDependedOn": "Impossible de supprimer : requis par d'autres packages",
+  "registry.tabTitle": "Registre",
+  "registry.description": "Connectez-vous au registre Appstrate pour publier et gérer vos packages.",
+  "registry.connected": "Connecté",
+  "registry.disconnected": "Déconnecté",
+  "registry.connect": "Se connecter au registre",
+  "registry.disconnect": "Déconnecter",
+  "registry.expiresAt": "Expire le {{date}}",
+  "registry.expired": "Connexion expirée",
+  "registry.scopes": "Scopes",
+  "registry.noScopes": "Aucun scope. Créez-en un pour publier des packages.",
+  "registry.createScope": "Créer un scope",
+  "registry.scopeName": "Nom du scope",
+  "registry.notConfigured": "Registre non configuré",
+  "marketplace.ownedByYou": "Vous êtes propriétaire",
+  "marketplace.manageOnRegistry": "Gérer sur le registre"
 }

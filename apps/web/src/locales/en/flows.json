@@ -215,5 +215,19 @@
   "list.usedByFlows": "Used by {{count}} flow(s)",
   "packages.content": "Content",
   "packages.usedBy": "Used by",
-  "packages.noFlows": "No flows use this package"
+  "packages.noFlows": "No flows use this package",
+  "publish.title": "Publish to registry",
+  "publish.scope": "Scope",
+  "publish.name": "Name",
+  "publish.version": "Version",
+  "publish.publish": "Publish",
+  "publish.publishing": "Publishing...",
+  "publish.success": "Package published successfully!",
+  "publish.notConnected": "Connect to the registry to publish packages.",
+  "publish.goToSettings": "Go to settings",
+  "publish.firstVersion": "First version",
+  "publish.bump.patch": "Patch",
+  "publish.bump.minor": "Minor",
+  "publish.bump.major": "Major",
+  "publish.badge": "Published v{{version}}"
 }

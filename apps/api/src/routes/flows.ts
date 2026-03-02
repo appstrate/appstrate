@@ -138,6 +138,8 @@ export function createFlowsRouter() {
             executionSettings: m.execution ?? null,
             registryScope: userFlowRow.registryScope ?? null,
             registryName: userFlowRow.registryName ?? null,
+            lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,
+            lastPublishedAt: userFlowRow.lastPublishedAt ?? null,
           }
         : {}),
     });
