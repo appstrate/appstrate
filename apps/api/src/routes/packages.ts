@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
+import { scopedNameToPackageId } from "@appstrate/validation/naming";
 import { insertPackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
@@ -38,7 +39,8 @@ export function createPackagesRouter() {
     }
 
     const { manifest, content, files, type: packageType } = parsed;
-    const packageId = manifest.name as string;
+    const scopedName = manifest.name as string;
+    const packageId = scopedNameToPackageId(scopedName);
 
     // Check collision
     const existingIds = await getAllPackageIds(orgId);
@@ -53,7 +55,11 @@ export function createPackagesRouter() {
     }
 
     // Insert into DB (generic — works for all types)
-    await insertPackage(packageId, orgId, packageType, manifest, content);
+    const displayName = (manifest.displayName as string | undefined) ?? scopedName.split("/")[1];
+    await insertPackage(packageId, orgId, packageType, manifest, content, {
+      name: scopedName,
+      displayName,
+    });
 
     // Per-type post-install (version, library upsert, storage upload)
     await postInstallPackage({
