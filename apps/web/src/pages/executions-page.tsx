@@ -60,7 +60,9 @@ export function ExecutionsPage() {
               key={exec.id}
               execution={exec}
               executionNumber={total - page * limit - index}
-              flowName={flowNameMap.get(exec.packageId) ?? exec.packageId}
+              flowName={
+                (exec.packageId && flowNameMap.get(exec.packageId)) ?? exec.packageId ?? "—"
+              }
             />
           ))}
 

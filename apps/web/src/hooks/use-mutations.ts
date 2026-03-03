@@ -241,9 +241,9 @@ export function useUpdateFlow(packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       prompt: string;
-      updatedAt: string;
+      lockVersion: number;
     }) => {
-      return api<{ packageId: string; updatedAt: string }>(`/flows/${packageId}`, {
+      return api<{ packageId: string; lockVersion: number }>(`/flows/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
@@ -259,11 +259,11 @@ export function useUpdateFlow(packageId: string) {
 export function useUploadPackage(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ file, updatedAt }: { file: File; updatedAt: string }) => {
+    mutationFn: async ({ file, lockVersion }: { file: File; lockVersion: number }) => {
       const fd = new FormData();
       fd.append("file", file);
-      fd.append("updatedAt", updatedAt);
-      return uploadFormData<{ packageId: string; updatedAt: string }>(
+      fd.append("lockVersion", String(lockVersion));
+      return uploadFormData<{ packageId: string; lockVersion: number }>(
         `/flows/${packageId}/package`,
         fd,
         "PUT",

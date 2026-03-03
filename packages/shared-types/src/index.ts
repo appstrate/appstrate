@@ -169,6 +169,7 @@ export interface FlowDetail {
   runningExecutions: number;
   lastExecution: Partial<import("@appstrate/db/schema").Execution> | null;
   updatedAt?: string | null;
+  lockVersion?: number;
   prompt?: string;
   scope?: string | null;
   version?: string | null;

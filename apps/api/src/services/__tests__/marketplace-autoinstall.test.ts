@@ -33,26 +33,32 @@ function chainable(result: unknown[]) {
   return obj;
 }
 
-mock.module("../../lib/db.ts", () => ({
-  db: {
-    select: () => {
-      const result = selectQueue.shift() ?? [];
-      return chainable(result);
+const dbOps = {
+  select: () => {
+    const result = selectQueue.shift() ?? [];
+    return chainable(result);
+  },
+  insert: () => ({
+    values: (vals: Record<string, unknown>) => {
+      insertedRows.push(vals);
+      return Promise.resolve();
     },
-    insert: () => ({
-      values: (vals: Record<string, unknown>) => {
-        insertedRows.push(vals);
+  }),
+  update: () => ({
+    set: (vals: Record<string, unknown>) => ({
+      where: () => {
+        updatedSets.push(vals);
         return Promise.resolve();
       },
     }),
-    update: () => ({
-      set: (vals: Record<string, unknown>) => ({
-        where: () => {
-          updatedSets.push(vals);
-          return Promise.resolve();
-        },
-      }),
-    }),
+  }),
+  execute: () => Promise.resolve(),
+};
+
+mock.module("../../lib/db.ts", () => ({
+  db: {
+    ...dbOps,
+    transaction: async (fn: (tx: typeof dbOps) => Promise<void>) => fn(dbOps),
   },
 }));
 
@@ -342,11 +348,10 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(insertedRows[2]!.id).toBe("@acme/a");
     expect(insertedRows[2]!.autoInstalled).toBe(false);
 
-    // autoInstalledDeps order: A pushes B first, then B's transitive deps (C)
-    // So order is [B, C] at A's level
+    // autoInstalledDeps order: collect phase pushes deepest deps first (C, then B)
     expect(result.autoInstalledDeps).toHaveLength(2);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/b");
-    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/c");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/c");
+    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/b");
   });
 
   test("dep circulaire A→B→A → skip avec warning", async () => {
@@ -696,19 +701,25 @@ describe("installFromMarketplace — auto-install deps", () => {
       }),
     );
 
-    // A: findMissingDeps → B and C missing
+    // Phase A (collect): findMissingDeps queries only (no writes yet)
+    //   A: findMissingDeps → B and C missing
     //   B: findMissingDeps → D missing
-    //     D: no deps; existing check → INSERT
+    //   D: no deps (no SELECT); pushed to collected
+    //   B: pushed to collected
+    //   C: findMissingDeps → D NOT in DB (no writes yet), but diamond dedup skips collect
+    //   C: pushed to collected
+    //   A: pushed to collected
+    // Phase B (commit): collected = [D, B, C, A]
+    //   D: existing check → INSERT
     //   B: existing check → INSERT
-    //   C: findMissingDeps → D already installed (was just inserted by B's tree)
     //   C: existing check → INSERT
-    // A: existing check → INSERT
+    //   A: existing check → INSERT
     selectQueue = [
       [], // findMissingDeps for A → B and C missing
       [], // findMissingDeps for B → D missing
+      [], // findMissingDeps for C → D "missing" (not in DB yet, diamond dedup handles it)
       [], // existing check for D → INSERT
       [], // existing check for B → INSERT
-      [{ id: "@acme/d" }], // findMissingDeps for C → D already in DB
       [], // existing check for C → INSERT
       [], // existing check for A → INSERT
     ];
@@ -866,11 +877,11 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(insertedRows[2]!.type).toBe("flow");
     expect(insertedRows[2]!.autoInstalled).toBe(false);
 
-    // autoInstalledDeps: skill (+ its transitive ext)
+    // autoInstalledDeps: collect phase pushes deepest deps first (ext, then skill)
     expect(result.autoInstalledDeps).toHaveLength(2);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/my-skill");
-    expect(result.autoInstalledDeps![0]!.type).toBe("skill");
-    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/my-ext");
-    expect(result.autoInstalledDeps![1]!.type).toBe("extension");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/my-ext");
+    expect(result.autoInstalledDeps![0]!.type).toBe("extension");
+    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/my-skill");
+    expect(result.autoInstalledDeps![1]!.type).toBe("skill");
   });
 });

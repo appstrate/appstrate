@@ -74,7 +74,7 @@ async function verifyExecutionToken(c: Context): Promise<
     ok: true,
     executionId,
     execution: {
-      packageId: execution.packageId,
+      packageId: execution.packageId!,
       userId: execution.userId,
       orgId: execution.orgId,
       status: execution.status,

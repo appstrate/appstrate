@@ -125,14 +125,14 @@ export function createUserFlowsRouter() {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
         prompt: string;
-        updatedAt: string;
+        lockVersion: number;
       }>();
 
-      const { manifest, prompt, updatedAt } = body;
+      const { manifest, prompt, lockVersion } = body;
 
-      if (!updatedAt) {
+      if (lockVersion == null || typeof lockVersion !== "number") {
         return c.json(
-          { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
+          { error: "VALIDATION_ERROR", message: "lockVersion (integer) is required for updates" },
           400,
         );
       }
@@ -164,7 +164,7 @@ export function createUserFlowsRouter() {
       const { skillIds, extensionIds } = extractDepsFromManifest(manifest);
 
       // Update DB: manifest + prompt
-      const updated = await updatePackage(packageId, { manifest, content: prompt }, updatedAt);
+      const updated = await updatePackage(packageId, { manifest, content: prompt }, lockVersion);
       if (!updated) {
         return c.json(
           {
@@ -182,7 +182,7 @@ export function createUserFlowsRouter() {
       const zipBuffer = buildMinimalZip(manifest, prompt);
       await createVersionSafe({ packageId, orgId, userId: user.id, zipBuffer, manifest });
 
-      return c.json({ packageId, message: "Flow updated", updatedAt: updated.updatedAt });
+      return c.json({ packageId, message: "Flow updated", lockVersion: updated.version });
     },
   );
 
@@ -199,7 +199,7 @@ export function createUserFlowsRouter() {
 
       const formData = await c.req.formData();
       const file = formData.get("file");
-      const updatedAt = formData.get("updatedAt") as string | null;
+      const lockVersionRaw = formData.get("lockVersion") as string | null;
 
       if (!file || !(file instanceof File)) {
         return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
@@ -209,9 +209,10 @@ export function createUserFlowsRouter() {
         return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
       }
 
-      if (!updatedAt) {
+      const lockVersion = lockVersionRaw != null ? parseInt(lockVersionRaw, 10) : NaN;
+      if (isNaN(lockVersion)) {
         return c.json(
-          { error: "VALIDATION_ERROR", message: "updatedAt is required for updates" },
+          { error: "VALIDATION_ERROR", message: "lockVersion (integer) is required for updates" },
           400,
         );
       }
@@ -247,7 +248,7 @@ export function createUserFlowsRouter() {
       }
 
       // Update DB with new metadata from ZIP
-      const updated = await updatePackage(packageId, { manifest, content }, updatedAt);
+      const updated = await updatePackage(packageId, { manifest, content }, lockVersion);
       if (!updated) {
         return c.json(
           {
@@ -268,7 +269,7 @@ export function createUserFlowsRouter() {
         manifest: manifest as Record<string, unknown>,
       });
 
-      return c.json({ packageId, message: "Package updated", updatedAt: updated.updatedAt });
+      return c.json({ packageId, message: "Package updated", lockVersion: updated.version });
     },
   );
 

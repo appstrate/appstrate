@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
-import { verifyArtifactIntegrity, buildDownloadHeaders } from "@appstrate/core/download";
+import { buildDownloadHeaders } from "@appstrate/core/download";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
@@ -118,21 +118,14 @@ export function createPackagesRouter() {
       return c.json({ error: "NOT_FOUND", message: "Version not found" }, 404);
     }
 
-    const data = await downloadVersionZip(packageId, ver.version);
+    let data: Buffer | null;
+    try {
+      data = await downloadVersionZip(packageId, ver.version, ver.integrity);
+    } catch {
+      return c.json({ error: "INTEGRITY_ERROR", message: "Artifact integrity check failed" }, 500);
+    }
     if (!data) {
       return c.json({ error: "NOT_FOUND", message: "Artifact not found in storage" }, 404);
-    }
-
-    // Verify integrity before serving
-    const check = verifyArtifactIntegrity(new Uint8Array(data), ver.integrity);
-    if (!check.valid) {
-      logger.error("Integrity mismatch on download", {
-        packageId,
-        version: ver.version,
-        expected: ver.integrity,
-        actual: check.computed,
-      });
-      return c.json({ error: "INTEGRITY_ERROR", message: "Artifact integrity check failed" }, 500);
     }
 
     const downloadHeaders = buildDownloadHeaders({

@@ -13,6 +13,7 @@ import { sql } from "drizzle-orm";
 import { authModeEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
+import { packages } from "./packages.ts";
 
 export const connectionProfiles = pgTable(
   "connection_profiles",
@@ -40,23 +41,30 @@ export const userPackageProfiles = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     profileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.userId, table.packageId] })],
+  (table) => [
+    primaryKey({ columns: [table.userId, table.packageId] }),
+    index("idx_user_package_profiles_package_id").on(table.packageId),
+  ],
 );
 
 export const packageAdminConnections = pgTable(
   "package_admin_connections",
   {
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     serviceId: text("service_id").notNull(),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     profileId: uuid("profile_id").references(() => connectionProfiles.id, { onDelete: "set null" }),
     connectedAt: timestamp("connected_at").defaultNow(),
   },
@@ -165,7 +173,9 @@ export const oauthStates = pgTable(
   "oauth_states",
   {
     state: text("state").primaryKey(),
-    orgId: uuid("org_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),

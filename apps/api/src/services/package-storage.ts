@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
+import { verifyArtifactIntegrity } from "@appstrate/core/download";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
@@ -22,14 +23,30 @@ const builtInPackageCache = new Map<string, Buffer>();
 /** Ensure the flow-packages Storage bucket exists. Call once at boot. */
 export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
 
-/** Download a versioned package ZIP from Storage. Returns null if not found. */
+/** Download a versioned package ZIP from Storage. Optionally verifies integrity. Returns null if not found. */
 export async function downloadVersionZip(
   packageId: string,
   version: string,
+  expectedIntegrity?: string | null,
 ): Promise<Buffer | null> {
   const path = `${packageId}/${version}.zip`;
   const data = await storage.downloadFile(BUCKET, path);
-  return data ? Buffer.from(data) : null;
+  if (!data) return null;
+
+  if (expectedIntegrity) {
+    const result = verifyArtifactIntegrity(new Uint8Array(data), expectedIntegrity);
+    if (!result.valid) {
+      logger.error("Integrity mismatch on version download", {
+        packageId,
+        version,
+        expected: expectedIntegrity,
+        computed: result.computed,
+      });
+      throw new Error(`Integrity check failed for ${packageId}@${version}`);
+    }
+  }
+
+  return Buffer.from(data);
 }
 
 /** Upload a package ZIP to Storage. */

@@ -1,13 +1,6 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import {
-  packages,
-  executions,
-  packageSchedules,
-  packageConfigs,
-  packageVersions,
-  packageAdminConnections,
-} from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 
@@ -54,7 +47,7 @@ export async function updatePackage(
     manifest: Record<string, unknown>;
     content: string;
   },
-  expectedUpdatedAt: string,
+  expectedVersion: number,
 ): Promise<Package | null> {
   const rows = await db
     .update(packages)
@@ -62,22 +55,15 @@ export async function updatePackage(
       manifest: payload.manifest,
       content: payload.content,
       updatedAt: new Date(),
+      version: sql`${packages.version} + 1`,
     })
-    .where(and(eq(packages.id, id), eq(packages.updatedAt, new Date(expectedUpdatedAt))))
+    .where(and(eq(packages.id, id), eq(packages.version, expectedVersion)))
     .returning();
 
   return rows[0] ?? null;
 }
 
 export async function deletePackage(id: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    // packageDependencies cascade-deleted via packages FK
-    // execution_logs cascade-deleted via executions FK
-    await tx.delete(executions).where(eq(executions.packageId, id));
-    await tx.delete(packageSchedules).where(eq(packageSchedules.packageId, id));
-    await tx.delete(packageConfigs).where(eq(packageConfigs.packageId, id));
-    await tx.delete(packageVersions).where(eq(packageVersions.packageId, id));
-    await tx.delete(packageAdminConnections).where(eq(packageAdminConnections.packageId, id));
-    await tx.delete(packages).where(eq(packages.id, id));
-  });
+  // All related rows cascade-deleted or set-null via FK constraints
+  await db.delete(packages).where(eq(packages.id, id));
 }
