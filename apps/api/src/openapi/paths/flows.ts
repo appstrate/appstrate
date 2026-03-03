@@ -296,7 +296,17 @@ export const flowsPaths = {
       ],
       responses: {
         "200": {
-          description: "ZIP file",
+          description: "ZIP file with integrity headers",
+          headers: {
+            "X-Integrity": {
+              description: "SHA256 SRI hash of the artifact",
+              schema: { type: "string" },
+            },
+            "Content-Disposition": {
+              description: "Attachment filename in scope-name-version.zip format",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/zip": {
               schema: { type: "string", format: "binary" },

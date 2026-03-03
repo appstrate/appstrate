@@ -179,6 +179,35 @@ export async function resolveVersion(packageId: string, query: string): Promise<
   return resolveVersionFromCatalog(query, allVersions, allDistTags);
 }
 
+/** Get a version row suitable for download (via 3-step resolution). Returns null if not found. */
+export async function getVersionForDownload(
+  packageId: string,
+  versionQuery: string,
+): Promise<{
+  id: number;
+  version: string;
+  integrity: string;
+  artifactSize: number;
+  yanked: boolean;
+} | null> {
+  const versionId = await resolveVersion(packageId, versionQuery);
+  if (!versionId) return null;
+
+  const [row] = await db
+    .select({
+      id: packageVersions.id,
+      version: packageVersions.version,
+      integrity: packageVersions.integrity,
+      artifactSize: packageVersions.artifactSize,
+      yanked: packageVersions.yanked,
+    })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, versionId))
+    .limit(1);
+
+  return row ?? null;
+}
+
 // ─────────────────────────────────────────────
 // Yank
 // ─────────────────────────────────────────────
