@@ -35,13 +35,12 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
-import { useRegistryStatus, usePublishPackage } from "../hooks/use-registry";
+
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { formatDateField } from "../lib/markdown";
-import { marketplacePath } from "../lib/strings";
-import { ExternalLink } from "lucide-react";
+
 import { LoadingState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { getServiceStatusDisplay, computeServicesSummary } from "../lib/service-status";
@@ -125,8 +124,6 @@ export function FlowDetailPage() {
     name?: string;
     bindAfter?: boolean;
   } | null>(null);
-  const { data: registryStatus } = useRegistryStatus();
-  const publishMutation = usePublishPackage();
 
   if (isLoading) return <LoadingState />;
 
@@ -218,17 +215,6 @@ export function FlowDetailPage() {
           </div>
         </div>
         <p className="description">{detail.description}</p>
-        {detail.lastPublishedVersion && (
-          <span className="badge badge-success">
-            {t("publish.badge", { version: detail.lastPublishedVersion })}
-          </span>
-        )}
-        {marketplacePath(detail) && (
-          <Link to={marketplacePath(detail)!} className="btn-sm marketplace-link">
-            <ExternalLink size={14} />
-            {t("library.viewOnMarketplace", { ns: "settings" })}
-          </Link>
-        )}
       </div>
 
       {(() => {
@@ -457,26 +443,6 @@ export function FlowDetailPage() {
                 <button>{t("btn.edit")}</button>
               </Link>
             )}
-            {detail.source !== "built-in" &&
-              (registryStatus?.connected ? (
-                <>
-                  <button
-                    onClick={() => publishMutation.mutate({ packageId: packageId! })}
-                    disabled={publishMutation.isPending}
-                  >
-                    {publishMutation.isPending ? <Spinner /> : t("publish.publish")}
-                  </button>
-                  {detail.lastPublishedVersion && (
-                    <span className="publish-version-hint">
-                      {t("publish.lastPublished", { version: detail.lastPublishedVersion })}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <Link to="/preferences">
-                  <button>{t("publish.publish")}</button>
-                </Link>
-              ))}
             {detail.source !== "built-in" && (
               <button
                 className="btn-danger"

@@ -138,13 +138,18 @@ export const marketplacePaths = {
                       properties: {
                         id: { type: "string" },
                         type: { type: "string" },
-                        registryScope: { type: "string" },
-                        registryName: { type: "string" },
-                        registryVersion: { type: "string" },
+                        registryScope: {
+                          type: ["string", "null"],
+                          description: "Derived from package ID",
+                        },
+                        registryName: {
+                          type: ["string", "null"],
+                          description: "Derived from package ID",
+                        },
                         manifest: {
                           type: ["object", "null"],
                           description:
-                            "Package manifest (source of truth for displayName, description, etc.)",
+                            "Package manifest (source of truth for displayName, description, version, etc.)",
                         },
                         updatedAt: { type: "string", format: "date-time" },
                       },
@@ -181,8 +186,8 @@ export const marketplacePaths = {
                       properties: {
                         id: { type: "string" },
                         type: { type: "string" },
-                        registryScope: { type: "string" },
-                        registryName: { type: "string" },
+                        scope: { type: "string" },
+                        name: { type: "string" },
                         displayName: { type: "string" },
                         installedVersion: { type: "string" },
                         latestVersion: { type: "string" },
