@@ -223,6 +223,7 @@ export function App() {
               <Route path="/flows/new" element={<FlowEditorPage />} />
               <Route path="/flows/:scope/:name/edit" element={<FlowEditorPage />} />
               <Route path="/flows/:scope/:name" element={<FlowDetailPage />} />
+              <Route path="/flows/:scope/:name/:version" element={<FlowDetailPage />} />
               <Route
                 path="/flows/:scope/:name/executions/:execId"
                 element={<ExecutionDetailPage />}
@@ -231,7 +232,15 @@ export function App() {
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/skills/:scope/:name" element={<PackageDetailPage type="skill" />} />
               <Route
+                path="/skills/:scope/:name/:version"
+                element={<PackageDetailPage type="skill" />}
+              />
+              <Route
                 path="/extensions/:scope/:name"
+                element={<PackageDetailPage type="extension" />}
+              />
+              <Route
+                path="/extensions/:scope/:name/:version"
                 element={<PackageDetailPage type="extension" />}
               />
               <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />

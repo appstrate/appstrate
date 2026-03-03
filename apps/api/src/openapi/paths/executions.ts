@@ -17,6 +17,14 @@ export const executionsPaths = {
           description:
             "Connection profile ID to use for this execution. Overrides the user's default or flow-specific profile.",
         },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Version query to execute (exact version, dist-tag, or semver range). When provided, the execution uses the versioned manifest and prompt instead of the live flow.",
+        },
       ],
       requestBody: {
         content: {

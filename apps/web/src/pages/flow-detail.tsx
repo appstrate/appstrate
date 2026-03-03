@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useFlowDetail } from "../hooks/use-packages";
+import { useFlowDetail, useVersionDetail } from "../hooks/use-packages";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
+import { VersionSelector } from "../components/version-selector";
+import { VersionBanners } from "../components/version-banners";
 import { ProfileSelector } from "../components/profile-selector";
 import { useExecutions } from "../hooks/use-executions";
 import { useProfiles } from "../hooks/use-profiles";
@@ -42,6 +44,7 @@ import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies"
 import { formatDateField } from "../lib/markdown";
 
 import { LoadingState, EmptyState } from "../components/page-states";
+import { getVersionRedirect } from "../lib/version-helpers";
 import { Spinner } from "../components/spinner";
 import { getServiceStatusDisplay, computeServicesSummary } from "../lib/service-status";
 import type { Schedule, JSONSchemaObject } from "@appstrate/shared-types";
@@ -76,13 +79,27 @@ type Tab = "executions" | "schedules" | "memories";
 
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const {
+    scope,
+    name,
+    version: versionParam,
+  } = useParams<{
+    scope: string;
+    name: string;
+    version?: string;
+  }>();
   const packageId = `${scope}/${name}`;
   const { isOrgAdmin } = useOrg();
 
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
   const { data: detail, isLoading, error } = useFlowDetail(packageId);
+  const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
+    "flow",
+    packageId,
+    versionParam,
+  );
+  const isVersionView = !!versionParam;
   const { data: executions } = useExecutions(packageId);
   const { data: schedules } = useSchedules(packageId);
   const { data: providers } = useProviders();
@@ -125,9 +142,24 @@ export function FlowDetailPage() {
     bindAfter?: boolean;
   } | null>(null);
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
 
   if (error || !detail) return <Navigate to="/" replace />;
+
+  const versionResult = getVersionRedirect({
+    type: "flow",
+    packageId,
+    versionParam,
+    versionCount: detail.versionCount,
+    versionDetail,
+    liveVersion: detail.version,
+  });
+
+  if ("redirect" in versionResult) {
+    return <Navigate to={versionResult.redirect} replace />;
+  }
+
+  const { isHistoricalVersion } = versionResult;
 
   // Look up provider's credentialSchema for custom credential modal
   const customCredProviderDef = customCredService
@@ -150,11 +182,17 @@ export function FlowDetailPage() {
   const hasConfigSchema =
     detail.config?.schema?.properties && Object.keys(detail.config.schema.properties).length > 0;
 
+  // Resolved version string for execution
+  const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
+
   const handleRun = () => {
     if (hasInputSchema) {
       setInputOpen(true);
     } else {
-      runFlow.mutate(profileId ? { profileId } : undefined);
+      runFlow.mutate({
+        profileId: profileId ?? undefined,
+        version: resolvedVersion,
+      });
     }
   };
 
@@ -185,10 +223,19 @@ export function FlowDetailPage() {
         <span className="current">{detail.displayName}</span>
       </nav>
 
+      <VersionBanners isHistorical={isHistoricalVersion} versionDetail={versionDetail} />
+
       <div className="flow-detail-header">
         <div className="header-row">
           <h2>{detail.displayName}</h2>
           <div className="header-selectors">
+            {detail.versionCount && detail.versionCount > 0 && (
+              <VersionSelector
+                packageId={packageId}
+                currentVersion={versionDetail?.version ?? versionParam}
+                type="flow"
+              />
+            )}
             {isOrgAdmin && orgProxies && orgProxies.length > 0 && (
               <div className="profile-selector">
                 <label>{t("proxies.flow.label", { ns: "settings" })}</label>
@@ -438,10 +485,13 @@ export function FlowDetailPage() {
             {hasConfigSchema && (
               <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>
             )}
-            {detail.source !== "built-in" && (
+            {detail.source !== "built-in" && !isHistoricalVersion && (
               <Link to={`/flows/${packageId}/edit`}>
                 <button>{t("btn.edit")}</button>
               </Link>
+            )}
+            {isHistoricalVersion && (
+              <span className="version-readonly-badge">{t("version.readOnly")}</span>
             )}
             {detail.source !== "built-in" && (
               <button
@@ -647,7 +697,12 @@ export function FlowDetailPage() {
         onClose={() => setInputOpen(false)}
         flow={detail}
         onSubmit={(input, files) =>
-          runFlow.mutate({ input, files, profileId: profileId ?? undefined })
+          runFlow.mutate({
+            input,
+            files,
+            profileId: profileId ?? undefined,
+            version: resolvedVersion,
+          })
         }
         isPending={runFlow.isPending}
       />

@@ -245,5 +245,10 @@
   "publish.error.VERSION_NOT_HIGHER": "Version must be greater than last published ({{lastVersion}}).",
   "publish.error.REGISTRY_CONFLICT": "This version already exists on the registry.",
   "publish.error.generic": "Publish failed: {{message}}",
-  "publish.badge": "Published v{{version}}"
+  "publish.badge": "Published v{{version}}",
+  "version.viewing": "Version {{version}}",
+  "version.selector": "Version",
+  "version.yanked": "This version has been yanked",
+  "version.readOnly": "Read-only",
+  "version.notFound": "Version not found"
 }

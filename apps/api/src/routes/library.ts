@@ -20,6 +20,12 @@ import { isValidVersion } from "@appstrate/core/semver";
 import { inArray } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { profiles } from "@appstrate/db/schema";
+import {
+  getVersionDetail,
+  getVersionCount,
+  getMatchingDistTags,
+  listPackageVersions,
+} from "../services/package-versions.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -311,7 +317,10 @@ function makeGetHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+    const [item, versionCount] = await Promise.all([
+      getOrgItem(orgId, itemId, rcfg.cfg),
+      getVersionCount(itemId),
+    ]);
 
     if (!item) {
       return c.json(
@@ -323,7 +332,7 @@ function makeGetHandler(rcfg: LibraryRouteConfig) {
       );
     }
 
-    return c.json({ [rcfg.responseKey]: item });
+    return c.json({ [rcfg.responseKey]: { ...item, versionCount } });
   };
 }
 
@@ -469,6 +478,72 @@ function makeDeleteHandler(rcfg: LibraryRouteConfig) {
   };
 }
 
+function makeListVersionsHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const itemId = getItemId(c);
+    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!item) {
+      return c.json(
+        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
+        404,
+      );
+    }
+    const versions = await listPackageVersions(itemId);
+    return c.json({ versions });
+  };
+}
+
+function makeVersionDetailHandler(rcfg: LibraryRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const itemId = getItemId(c);
+    const versionQuery = c.req.param("version");
+
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing) {
+      return c.json(
+        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
+        404,
+      );
+    }
+
+    const detail = await getVersionDetail(itemId, versionQuery);
+    if (!detail) {
+      return c.json(
+        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+        404,
+      );
+    }
+
+    const matchingTags = await getMatchingDistTags(itemId, detail.version);
+
+    // Extract primary content file from the ZIP
+    let content: string | null = null;
+    if (detail.content) {
+      // For skills, look for SKILL.md; for extensions, look for .ts file
+      const fileName = rcfg.storageFileName(itemId);
+      const fileData = detail.content[fileName];
+      if (fileData) {
+        content = new TextDecoder().decode(fileData);
+      }
+    }
+
+    return c.json({
+      id: detail.id,
+      version: detail.version,
+      manifest: detail.manifest,
+      content,
+      yanked: detail.yanked,
+      yankedReason: detail.yankedReason,
+      integrity: detail.integrity,
+      artifactSize: detail.artifactSize,
+      createdAt: detail.createdAt,
+      distTags: matchingTags,
+    });
+  };
+}
+
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
 
@@ -476,6 +551,9 @@ export function createLibraryRouter() {
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
     router.get(`/${path}`, makeListHandler(rcfg));
     router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
+    // Version routes — must be registered before generic get to avoid conflict
+    router.get(`/${path}/:scope{@[^/]+}/:name/versions`, makeListVersionsHandler(rcfg));
+    router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(`/${path}/:scope{@[^/]+}/:name`, makeGetHandler(rcfg));
     router.put(`/${path}/:scope{@[^/]+}/:name`, requireAdmin(), makeUpdateHandler(rcfg));

@@ -36,6 +36,7 @@ const expectedEndpoints = [
   "DELETE /api/flows/{packageId}",
   "PUT /api/flows/{packageId}/config",
   "GET /api/flows/{packageId}/versions",
+  "GET /api/flows/{packageId}/versions/{version}",
   "GET /api/flows/{packageId}/package",
   "PUT /api/flows/{packageId}/package",
   "POST /api/flows/{packageId}/services/{serviceId}/bind",
@@ -120,6 +121,8 @@ const expectedEndpoints = [
   "GET /api/library/skills/{skillId}",
   "PUT /api/library/skills/{skillId}",
   "DELETE /api/library/skills/{skillId}",
+  "GET /api/library/skills/{skillId}/versions",
+  "GET /api/library/skills/{skillId}/versions/{version}",
 
   // Library — Extensions
   "GET /api/library/extensions",
@@ -127,6 +130,8 @@ const expectedEndpoints = [
   "GET /api/library/extensions/{extensionId}",
   "PUT /api/library/extensions/{extensionId}",
   "DELETE /api/library/extensions/{extensionId}",
+  "GET /api/library/extensions/{extensionId}/versions",
+  "GET /api/library/extensions/{extensionId}/versions/{version}",
 
   // Organizations
   "GET /api/orgs",

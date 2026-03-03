@@ -20,6 +20,7 @@ import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
+import { getVersionDetail } from "../services/package-versions.ts";
 import { validateConfig, validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
@@ -357,6 +358,32 @@ export function createExecutionsRouter() {
     }
     const { input: parsedInput, uploadedFiles } = inputResult.data;
 
+    // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
+    const versionOverride = c.req.query("version");
+
+    // If a specific version is requested, resolve and override flow data
+    let effectiveFlow = flow;
+    let overrideVersionId: number | undefined;
+    if (versionOverride && flow.source !== "built-in") {
+      const versionDetail = await getVersionDetail(flow.id, versionOverride);
+      if (!versionDetail) {
+        return c.json(
+          { error: "VERSION_NOT_FOUND", message: `Version '${versionOverride}' not found` },
+          404,
+        );
+      }
+      overrideVersionId = versionDetail.id;
+      // Override manifest and prompt on the flow object for this execution
+      effectiveFlow = {
+        ...flow,
+        manifest: {
+          ...flow.manifest,
+          ...(versionDetail.manifest as typeof flow.manifest),
+        },
+        prompt: versionDetail.prompt ?? flow.prompt,
+      };
+    }
+
     const executionId = `exec_${crypto.randomUUID()}`;
 
     // Build file metadata for prompt context (no URLs — files injected directly into container)
@@ -370,13 +397,14 @@ export function createExecutionsRouter() {
     // Build execution context (tokens, config, state, providers, package, version)
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
-      flow,
+      flow: effectiveFlow,
       serviceProfiles,
       orgId,
       userId: user.id,
       input: parsedInput,
       files: fileRefs,
       config,
+      overrideVersionId,
     });
 
     // Create execution record
@@ -396,7 +424,7 @@ export function createExecutionsRouter() {
       executionId,
       user.id,
       orgId,
-      flow,
+      effectiveFlow,
       promptContext,
       flowPackage,
       uploadedFiles,

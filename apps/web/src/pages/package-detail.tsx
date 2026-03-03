@@ -7,13 +7,17 @@ import {
   useLibraryDetail,
   useDeleteLibrary,
   useUpdateLibraryMetadata,
+  useVersionDetail,
   type LibraryType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 
 import { TypeBadge } from "../components/type-badge";
+import { VersionSelector } from "../components/version-selector";
+import { VersionBanners } from "../components/version-banners";
 import { Spinner } from "../components/spinner";
 import { LoadingState } from "../components/page-states";
+import { getVersionRedirect } from "../lib/version-helpers";
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 const SCOPED_NAME_RE = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
@@ -150,15 +154,45 @@ function PackageMetadataEditor({
 
 export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
   const { t } = useTranslation(["settings", "flows", "common"]);
-  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const {
+    scope,
+    name,
+    version: versionParam,
+  } = useParams<{
+    scope: string;
+    name: string;
+    version?: string;
+  }>();
   const packageId = scope && name ? `${scope}/${name}` : undefined;
   const { isOrgAdmin } = useOrg();
+  const isVersionView = !!versionParam;
 
   const { isLoading, data: detail } = useLibraryDetail(type, packageId);
+  const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
+    type,
+    packageId,
+    versionParam,
+  );
   const deleteMutation = useDeleteLibrary(type);
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (!detail) return <Navigate to="/" replace />;
+
+  const versionResult = getVersionRedirect({
+    type,
+    packageId: packageId!,
+    versionParam,
+    versionCount: detail.versionCount,
+    versionDetail,
+    liveVersion: detail.version,
+  });
+
+  if ("redirect" in versionResult) {
+    return <Navigate to={versionResult.redirect} replace />;
+  }
+
+  const { isHistoricalVersion } = versionResult;
+
   const isBuiltIn = detail.source === "built-in";
   const hasFlows = detail.flows.length > 0;
 
@@ -186,13 +220,23 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
           <div className="flow-card-badges">
             <TypeBadge type={type} />
             {isBuiltIn && <span className="source-badge">{t("library.sourceBuiltIn")}</span>}
+            {isHistoricalVersion && (
+              <span className="version-readonly-badge">
+                {t("version.readOnly", { ns: "flows" })}
+              </span>
+            )}
           </div>
+          {packageId && detail.versionCount && detail.versionCount > 0 && (
+            <VersionSelector packageId={packageId} currentVersion={versionParam} type={type} />
+          )}
         </div>
         {detail.description && <p className="description">{detail.description}</p>}
         <code className="detail-id">{detail.id}</code>
       </div>
 
-      {isOrgAdmin && !isBuiltIn && packageId && (
+      <VersionBanners isHistorical={isHistoricalVersion} versionDetail={versionDetail} />
+
+      {isOrgAdmin && !isBuiltIn && packageId && !isHistoricalVersion && (
         <PackageMetadataEditor
           key={detail.updatedAt}
           detail={detail}
@@ -218,10 +262,14 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
 
       <div className="detail-section">
         <h3>{t("packages.content", { ns: "flows" })}</h3>
-        <pre className="state-json">{detail.content}</pre>
+        <pre className="state-json">
+          {isHistoricalVersion && versionDetail?.content != null
+            ? versionDetail.content
+            : detail.content}
+        </pre>
       </div>
 
-      {isOrgAdmin && !isBuiltIn && !hasFlows && (
+      {isOrgAdmin && !isBuiltIn && !hasFlows && !isHistoricalVersion && (
         <div className="actions">
           <button className="btn-danger" onClick={handleDelete} disabled={deleteMutation.isPending}>
             {t("btn.delete")}

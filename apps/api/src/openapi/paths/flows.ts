@@ -284,6 +284,53 @@ export const flowsPaths = {
       },
     },
   },
+  "/api/flows/{packageId}/versions/{version}": {
+    get: {
+      operationId: "getFlowVersionDetail",
+      tags: ["Flows"],
+      summary: "Get flow version detail",
+      description:
+        "Resolve a version query (exact, dist-tag, or semver range) and return full version data including prompt extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description:
+            "Version query — exact version (1.2.0), dist-tag (latest), or semver range (^1.0.0)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version detail with prompt and metadata",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: { type: "object" },
+                  prompt: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yankedReason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifactSize: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  distTags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/flows/{packageId}/package": {
     get: {
       operationId: "downloadFlowPackage",

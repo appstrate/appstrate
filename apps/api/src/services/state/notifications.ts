@@ -1,6 +1,6 @@
 import { eq, and, isNotNull, isNull, desc, count } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
-import { executions } from "@appstrate/db/schema";
+import { executions, packageVersions } from "@appstrate/db/schema";
 
 // --- Notifications ---
 
@@ -69,12 +69,20 @@ export async function listUserExecutions(
     .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)));
 
   const rows = await db
-    .select()
+    .select({
+      execution: executions,
+      packageVersion: packageVersions.version,
+    })
     .from(executions)
+    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
     .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit)
     .offset(offset);
 
-  return { executions: rows as unknown as Record<string, unknown>[], total: countRow?.count ?? 0 };
+  const mapped = rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+  return {
+    executions: mapped as unknown as Record<string, unknown>[],
+    total: countRow?.count ?? 0,
+  };
 }

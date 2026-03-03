@@ -135,3 +135,64 @@ export function useFlowDetail(packageId: string | undefined) {
     enabled: !!packageId,
   });
 }
+
+// --- Version queries ---
+
+export interface VersionDetailResponse {
+  id: number;
+  version: string;
+  manifest: Record<string, unknown>;
+  prompt?: string | null;
+  content?: string | null;
+  yanked: boolean;
+  yankedReason: string | null;
+  integrity: string;
+  artifactSize: number;
+  createdAt: string | null;
+  distTags: string[];
+}
+
+export interface VersionListItem {
+  id: number;
+  version: string;
+  integrity: string;
+  artifactSize: number;
+  yanked: boolean;
+  createdBy: string | null;
+  createdAt: string | null;
+}
+
+function libraryBasePath(type: "flow" | "skill" | "extension", packageId: string | undefined) {
+  return type === "flow" ? `/flows/${packageId}` : `/library/${type}s/${packageId}`;
+}
+
+export function useVersionDetail(
+  type: "flow" | "skill" | "extension",
+  packageId: string | undefined,
+  version: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["version-detail", orgId, type, packageId, version],
+    queryFn: () =>
+      api<VersionDetailResponse>(`${libraryBasePath(type, packageId)}/versions/${version}`),
+    enabled: !!packageId && !!version,
+  });
+}
+
+export function usePackageVersions(
+  type: "flow" | "skill" | "extension",
+  packageId: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["package-versions", orgId, type, packageId],
+    queryFn: async () => {
+      const data = await api<{ versions: VersionListItem[] }>(
+        `${libraryBasePath(type, packageId)}/versions`,
+      );
+      return data.versions;
+    },
+    enabled: !!packageId,
+  });
+}

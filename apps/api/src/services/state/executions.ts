@@ -1,6 +1,6 @@
 import { eq, and, ne, desc, isNotNull, inArray, count } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
-import { executions, executionLogs } from "@appstrate/db/schema";
+import { executions, executionLogs, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 
 // --- Executions ---
@@ -248,17 +248,31 @@ export async function deletePackageExecutions(packageId: string, orgId: string):
 }
 
 export async function listPackageExecutions(packageId: string, orgId: string, limit = 50) {
-  return db
-    .select()
+  const rows = await db
+    .select({
+      execution: executions,
+      packageVersion: packageVersions.version,
+    })
     .from(executions)
+    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
     .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit);
+  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
 }
 
 export async function getExecutionFull(id: string) {
-  const [row] = await db.select().from(executions).where(eq(executions.id, id)).limit(1);
-  return row ?? null;
+  const [row] = await db
+    .select({
+      execution: executions,
+      packageVersion: packageVersions.version,
+    })
+    .from(executions)
+    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
+    .where(eq(executions.id, id))
+    .limit(1);
+  if (!row) return null;
+  return { ...row.execution, packageVersion: row.packageVersion };
 }
 
 export async function listExecutionLogs(executionId: string, orgId: string) {
