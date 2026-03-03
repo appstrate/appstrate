@@ -78,6 +78,20 @@
       "when": 1772544889374,
       "tag": "0010_amusing_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1772558400000,
+      "tag": "0011_version_alignment_additive",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1772558400001,
+      "tag": "0012_version_alignment_cleanup",
+      "breakpoints": true
     }
   ]
 }

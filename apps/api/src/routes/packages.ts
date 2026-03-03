@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
-import { insertPackage } from "../services/user-flows.ts";
+import { eq } from "drizzle-orm";
+import { packages } from "@appstrate/db/schema";
+import { db } from "../lib/db.ts";
+import { getPackageById, insertPackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { getAllPackageIds } from "../services/flow-service.ts";
+import { isBuiltInFlow } from "../services/flow-service.ts";
+import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
@@ -41,20 +45,50 @@ export function createPackagesRouter() {
     const { manifest, content, files, type: packageType } = parsed;
     const packageId = manifest.name as string;
 
-    // Check collision
-    const existingIds = await getAllPackageIds(orgId);
-    if (existingIds.includes(packageId)) {
+    // Built-in packages are immutable
+    const isBuiltIn =
+      isBuiltInFlow(packageId) || isBuiltInSkill(packageId) || isBuiltInExtension(packageId);
+    if (isBuiltIn) {
       return c.json(
         {
           error: "NAME_COLLISION",
-          message: `A package with identifier '${packageId}' already exists`,
+          message: `'${packageId}' is a built-in package and cannot be overwritten`,
         },
         400,
       );
     }
 
-    // Insert into DB (generic — works for all types)
-    await insertPackage(packageId, orgId, packageType, manifest, content);
+    // Check for existing user package
+    const existing = await getPackageById(packageId);
+
+    if (existing) {
+      if (existing.orgId !== orgId) {
+        return c.json(
+          {
+            error: "NAME_COLLISION",
+            message: `A package with identifier '${packageId}' already exists`,
+          },
+          400,
+        );
+      }
+      if (existing.type !== packageType) {
+        return c.json(
+          {
+            error: "TYPE_MISMATCH",
+            message: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
+          },
+          400,
+        );
+      }
+      // Update existing package manifest and content
+      await db
+        .update(packages)
+        .set({ manifest, content, updatedAt: new Date() })
+        .where(eq(packages.id, packageId));
+    } else {
+      // New package — insert
+      await insertPackage(packageId, orgId, packageType, manifest, content);
+    }
 
     // Per-type post-install (version, library upsert, storage upload)
     await postInstallPackage({

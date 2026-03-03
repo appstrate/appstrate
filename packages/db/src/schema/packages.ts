@@ -64,14 +64,62 @@ export const packageVersions = pgTable(
   "package_versions",
   {
     id: serial("id").primaryKey(),
-    packageId: text("package_id").notNull(),
-    versionNumber: integer("version_number").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    integrity: text("integrity").notNull(),
+    artifactSize: integer("artifact_size").notNull(),
+    manifest: jsonb("manifest").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    yanked: boolean("yanked").notNull().default(false),
+    yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.versionNumber),
-    index("idx_package_versions_package_id").on(table.packageId, table.versionNumber),
+    uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
+    index("idx_package_versions_package_id").on(table.packageId),
+  ],
+);
+
+export const packageDistTags = pgTable(
+  "package_dist_tags",
+  {
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+    versionId: integer("version_id")
+      .notNull()
+      .references(() => packageVersions.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.packageId, table.tag] })],
+);
+
+export const packageVersionDependencies = pgTable(
+  "package_version_dependencies",
+  {
+    id: serial("id").primaryKey(),
+    versionId: integer("version_id")
+      .notNull()
+      .references(() => packageVersions.id, { onDelete: "cascade" }),
+    depScope: text("dep_scope").notNull(),
+    depName: text("dep_name").notNull(),
+    depType: packageTypeEnum("dep_type").notNull(),
+    versionRange: text("version_range").notNull(),
+  },
+  (table) => [
+    uniqueIndex("pkg_ver_deps_unique").on(
+      table.versionId,
+      table.depScope,
+      table.depName,
+      table.depType,
+    ),
+    index("idx_pkg_ver_deps_version_id").on(table.versionId),
   ],
 );
 

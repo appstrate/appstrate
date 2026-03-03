@@ -176,6 +176,9 @@ export interface FlowDetail {
 
   lastPublishedVersion?: string | null;
   lastPublishedAt?: string | null;
+
+  versions?: PackageVersionInfo[];
+  distTags?: DistTagInfo[];
 }
 
 // --- Organization Library Types ---
@@ -200,6 +203,25 @@ export interface OrgLibraryItemDetail extends OrgLibraryItem {
   lastPublishedAt?: string | null;
   version?: string | null;
   manifestName?: string | null;
+
+  versions?: PackageVersionInfo[];
+  distTags?: DistTagInfo[];
+}
+
+// --- Package Version Types ---
+
+export interface PackageVersionInfo {
+  id: number;
+  version: string;
+  integrity: string;
+  artifactSize: number;
+  yanked: boolean;
+  createdAt: string;
+}
+
+export interface DistTagInfo {
+  tag: string;
+  version: string;
 }
 
 // --- Flow Memory Types ---

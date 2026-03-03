@@ -15,6 +15,8 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { resolveLatestVersion } from "@appstrate/core/semver";
 import { checkUpdateAvailable } from "@appstrate/core/update-check";
 import { postInstallPackage } from "./post-install-package.ts";
+import { getLatestVersionId } from "./package-versions.ts";
+import { packageVersions } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 
 // --- Status ---
@@ -263,6 +265,7 @@ async function _installInternal(
   }
 
   // Per-type post-install (version, library upsert, storage upload)
+  // Pass exact registry version for mirror-exact install
   await postInstallPackage({
     packageType,
     packageId,
@@ -271,6 +274,7 @@ async function _installInternal(
     content,
     files,
     zipBuffer: Buffer.from(artifactData),
+    version: targetVersion,
   });
 
   logger.info("Installed package from marketplace", {
@@ -291,6 +295,35 @@ async function _installInternal(
   };
 }
 
+// --- Installed version resolution ---
+
+/** Resolve installed version: dist-tag → version row → manifest fallback. */
+async function resolveInstalledVersion(
+  packageId: string,
+  orgId: string,
+  cachedManifest?: Record<string, unknown> | null,
+): Promise<string | null> {
+  const latestVersionId = await getLatestVersionId(packageId);
+  if (latestVersionId) {
+    const [ver] = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.id, latestVersionId))
+      .limit(1);
+    if (ver?.version) return ver.version;
+  }
+  // Fallback to manifest if no version row exists (pre-migration packages)
+  if (cachedManifest !== undefined) {
+    return (((cachedManifest ?? {}) as Partial<Manifest>).version as string) ?? null;
+  }
+  const [row] = await db
+    .select({ manifest: packages.manifest })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .limit(1);
+  return (((row?.manifest ?? {}) as Partial<Manifest>).version as string) ?? null;
+}
+
 // --- Package detail with install status ---
 
 export async function getMarketplacePackageWithInstallStatus(
@@ -306,15 +339,16 @@ export async function getMarketplacePackageWithInstallStatus(
   const packageId = buildPackageId(scope, name);
 
   const [installed] = await db
-    .select({ manifest: packages.manifest })
+    .select({ id: packages.id })
     .from(packages)
     .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
     .limit(1);
 
-  const m = (installed?.manifest ?? {}) as Partial<Manifest>;
+  const installedVersion = installed ? await resolveInstalledVersion(packageId, orgId) : null;
+
   return {
     ...pkg,
-    installedVersion: (m.version as string) ?? null,
+    installedVersion,
   };
 }
 
@@ -381,8 +415,12 @@ export async function checkRegistryUpdates(
       }
       if (!remote) return null;
 
-      const m = (pkg.manifest ?? {}) as Partial<Manifest>;
-      const installedVersion = (m.version as string) ?? null;
+      // Read installed version from packageVersions via dist-tag, fallback to manifest
+      const installedVersion = await resolveInstalledVersion(
+        pkg.id,
+        orgId,
+        pkg.manifest as Record<string, unknown> | null,
+      );
 
       // Use shared update check logic — fixes the bug of using !== instead of semver comparison
       const { latestVersion, updateAvailable } = checkUpdateAvailable({
@@ -391,12 +429,14 @@ export async function checkRegistryUpdates(
         remoteDistTags: remote.distTags?.map((t) => ({ tag: t.tag, versionId: t.versionId })) ?? [],
       });
 
+      const manifest = (pkg.manifest ?? {}) as Partial<Manifest>;
       return {
         id: pkg.id,
         type: pkg.type,
         scope: parsed.scope,
         name: parsed.name,
-        displayName: m.displayName ?? null,
+        displayName: manifest.displayName ?? null,
+        // "0.0.0" ensures any registry version satisfies the update check
         installedVersion: installedVersion ?? "0.0.0",
         latestVersion,
         updateAvailable,

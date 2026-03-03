@@ -109,37 +109,6 @@ export async function buildRegistryDependencies(
   return buildRegistryDepsFromRows(rows);
 }
 
-/** Build registryDependencies from skill/extension IDs without junction table. */
-export async function buildRegistryDepsFromIds(
-  orgId: string,
-  skillIds: string[],
-  extensionIds: string[],
-): Promise<RegistryDependencies | null> {
-  const allIds = [...skillIds, ...extensionIds];
-  if (allIds.length === 0) return null;
-
-  const dbRows = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      lastPublishedVersion: packages.lastPublishedVersion,
-    })
-    .from(packages)
-    .where(and(eq(packages.orgId, orgId), inArray(packages.id, allIds)));
-
-  const rows = dbRows.map((row) => {
-    const parsed = parseScopedName(row.id);
-    return {
-      type: row.type,
-      registryScope: parsed?.scope ?? null,
-      registryName: parsed?.name ?? null,
-      lastPublishedVersion: row.lastPublishedVersion,
-    };
-  });
-
-  return buildRegistryDepsFromRows(rows);
-}
-
 /** Get all files for a flow's referenced items of a type. Returns Map<itemId, files>. */
 export async function getFlowItemFiles(
   packageId: string,

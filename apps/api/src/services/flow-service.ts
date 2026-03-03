@@ -302,6 +302,11 @@ export async function packageExists(id: string): Promise<boolean> {
   return (rows[0]?.cnt ?? 0) > 0;
 }
 
+/** Check if a package ID is a built-in flow. */
+export function isBuiltInFlow(id: string): boolean {
+  return builtInFlows.has(id);
+}
+
 /** Get the count of built-in flows loaded at boot. */
 export function getBuiltInPackageCount(): number {
   return builtInFlows.size;
