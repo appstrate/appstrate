@@ -1,4 +1,4 @@
-export { RegistryClient } from "./client.ts";
+export { RegistryClient, RegistryClientError } from "./client.ts";
 export type {
   RegistryConfig,
   RegistryDiscovery,

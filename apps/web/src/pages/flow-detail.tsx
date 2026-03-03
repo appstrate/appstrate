@@ -35,7 +35,7 @@ import { ScheduleRow } from "../components/schedule-row";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { ShareDropdown } from "../components/share-dropdown";
-import { PublishModal } from "../components/publish-modal";
+import { useRegistryStatus, usePublishPackage } from "../hooks/use-registry";
 import { useOrg } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
@@ -125,7 +125,8 @@ export function FlowDetailPage() {
     name?: string;
     bindAfter?: boolean;
   } | null>(null);
-  const [publishOpen, setPublishOpen] = useState(false);
+  const { data: registryStatus } = useRegistryStatus();
+  const publishMutation = usePublishPackage();
 
   if (isLoading) return <LoadingState />;
 
@@ -456,9 +457,26 @@ export function FlowDetailPage() {
                 <button>{t("btn.edit")}</button>
               </Link>
             )}
-            {detail.source !== "built-in" && (
-              <button onClick={() => setPublishOpen(true)}>{t("publish.publish")}</button>
-            )}
+            {detail.source !== "built-in" &&
+              (registryStatus?.connected ? (
+                <>
+                  <button
+                    onClick={() => publishMutation.mutate({ packageId: packageId! })}
+                    disabled={publishMutation.isPending}
+                  >
+                    {publishMutation.isPending ? <Spinner /> : t("publish.publish")}
+                  </button>
+                  {detail.lastPublishedVersion && (
+                    <span className="publish-version-hint">
+                      {t("publish.lastPublished", { version: detail.lastPublishedVersion })}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <Link to="/preferences">
+                  <button>{t("publish.publish")}</button>
+                </Link>
+              ))}
             {detail.source !== "built-in" && (
               <button
                 className="btn-danger"
@@ -714,11 +732,6 @@ export function FlowDetailPage() {
             );
           }
         }}
-      />
-      <PublishModal
-        open={publishOpen}
-        onClose={() => setPublishOpen(false)}
-        packageId={packageId!}
       />
       {customCredService && customCredSchema && (
         <CustomCredentialsModal

@@ -13,8 +13,10 @@ import {
 } from "../services/library.ts";
 import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
 import type { Manifest } from "@appstrate/validation";
+import { parseScopedName } from "@appstrate/validation/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { isValidVersion } from "@appstrate/validation/semver";
 import { inArray } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { profiles } from "@appstrate/db/schema";
@@ -49,6 +51,8 @@ interface ParsedUpload {
   description?: string;
   content: string;
   normalizedFiles?: Record<string, Uint8Array>;
+  /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
+  manifest?: Record<string, unknown>;
 }
 
 /**
@@ -128,13 +132,31 @@ async function parseLibraryUpload(
       description = meta.description || undefined;
     }
 
+    // Parse manifest.json from ZIP if present — store as-is (like the registry)
+    let manifest: Record<string, unknown> | undefined;
+    const manifestBytes = normalizedFiles["manifest.json"];
+    if (manifestBytes) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(manifestBytes));
+        if (typeof parsed === "object" && parsed !== null) {
+          manifest = parsed as Record<string, unknown>;
+          // Extract display fields as fallbacks (not for manifest storage)
+          if (!name && typeof parsed.displayName === "string") name = parsed.displayName;
+          if (!description && typeof parsed.description === "string")
+            description = parsed.description;
+        }
+      } catch {
+        // Ignore invalid manifest.json — not required for library uploads
+      }
+    }
+
     // Allow overriding name/description from form fields
     const formName = formData.get("name") as string | null;
     const formDesc = formData.get("description") as string | null;
     if (formName) name = formName;
     if (formDesc) description = formDesc;
 
-    return { id, name, description, content, normalizedFiles };
+    return { id, name, description, content, normalizedFiles, manifest };
   }
 
   // JSON body
@@ -256,6 +278,7 @@ function makeCreateHandler(rcfg: LibraryRouteConfig) {
         createdBy: user.id,
       },
       rcfg.cfg,
+      parsed.manifest,
     );
 
     if (parsed.normalizedFiles) {
@@ -307,7 +330,6 @@ function makeGetHandler(rcfg: LibraryRouteConfig) {
 function makeUpdateHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const orgSlug = c.get("orgSlug");
     const user = c.get("user");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
@@ -327,7 +349,23 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
       return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
     }
 
-    const body = await c.req.json<{ name?: string; description?: string; content?: string }>();
+    const body = await c.req.json<{
+      name?: string;
+      description?: string;
+      content?: string;
+      version?: string;
+      scopedName?: string;
+    }>();
+
+    if (body.version && !isValidVersion(body.version)) {
+      return c.json({ error: "VALIDATION_ERROR", message: "Invalid semver version (X.Y.Z)" }, 400);
+    }
+    if (body.scopedName && !parseScopedName(body.scopedName)) {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Invalid scoped name (@scope/name)" },
+        400,
+      );
+    }
 
     let warnings: string[] = [];
     if (rcfg.validateContent && body.content) {
@@ -347,9 +385,21 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
     }
 
     const finalContent = body.content ?? existing.content;
+    const existingManifest = ((existing as { manifest?: Record<string, unknown> }).manifest ??
+      {}) as Record<string, unknown>;
+
+    // Merge body overrides into manifest (version, scopedName are manifest fields now)
+    const mergedManifest = {
+      ...existingManifest,
+      ...(body.version && { version: body.version }),
+      ...(body.scopedName && { name: body.scopedName }),
+    };
+
+    // Pass null for orgSlug — itemId is already the full package ID from the DB,
+    // so upsertOrgItem should use it directly instead of reconstructing it.
     const item = await upsertOrgItem(
       orgId,
-      orgSlug,
+      null,
       {
         id: itemId,
         name: body.name ?? existing.name ?? undefined,
@@ -358,6 +408,7 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
         createdBy: existing.createdBy ?? user.id,
       },
       rcfg.cfg,
+      mergedManifest,
     );
 
     // Update storage ZIP so container packaging stays in sync

@@ -2,10 +2,24 @@ import { getCurrentOrgId } from "./hooks/use-org";
 
 const API_BASE = "/api";
 
+export class ApiError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message || `API Error: ${res.status}`);
+    const body = await res.json().catch(() => ({ message: res.statusText }));
+    if (body.error) {
+      throw new ApiError(body.error, body.message || `API Error: ${res.status}`, res.status);
+    }
+    throw new Error(body.message || `API Error: ${res.status}`);
   }
 }
 

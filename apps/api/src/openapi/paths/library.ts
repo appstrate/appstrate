@@ -124,9 +124,14 @@ export const libraryPaths = {
             schema: {
               type: "object",
               properties: {
-                name: { type: "string" },
+                name: { type: "string", description: "Display name" },
                 description: { type: "string" },
                 content: { type: "string" },
+                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                scopedName: {
+                  type: "string",
+                  description: "Registry scoped name (@scope/name)",
+                },
               },
             },
           },
@@ -153,6 +158,7 @@ export const libraryPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -327,9 +333,14 @@ export const libraryPaths = {
             schema: {
               type: "object",
               properties: {
-                name: { type: "string" },
+                name: { type: "string", description: "Display name" },
                 description: { type: "string" },
                 content: { type: "string" },
+                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                scopedName: {
+                  type: "string",
+                  description: "Registry scoped name (@scope/name)",
+                },
               },
             },
           },
@@ -356,6 +367,7 @@ export const libraryPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },

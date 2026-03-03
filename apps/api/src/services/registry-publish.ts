@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import type { PublishResult } from "@appstrate/registry-client";
+import { RegistryClientError, type PublishResult } from "@appstrate/registry-client";
 import { zipArtifact, type Zippable } from "@appstrate/validation/zip";
 import { db } from "../lib/db.ts";
 import { packages } from "@appstrate/db/schema";
@@ -22,20 +22,25 @@ import { parseScopedName } from "@appstrate/validation/naming";
 import { getPackage } from "./flow-service.ts";
 import { buildRegistryDependencies } from "./library/dependencies.ts";
 import { logger } from "../lib/logger.ts";
+import { isValidVersion, versionGt } from "@appstrate/validation/semver";
 
 const ZIP_COMPRESSION_LEVEL = 6;
 
-interface PublishOptions {
-  version: string;
-  scope?: string; // registry scope (without @), e.g. "pierre"
-  name?: string; // registry name, e.g. "my-flow"
+export class PublishValidationError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public statusCode: number = 400,
+  ) {
+    super(message);
+    this.name = "PublishValidationError";
+  }
 }
 
 export async function publishPackage(
   packageId: string,
   orgId: string,
   userId: string,
-  opts: PublishOptions,
 ): Promise<PublishResult> {
   // 1. Verify registry connection
   const client = await getAuthenticatedRegistryClient(userId);
@@ -58,45 +63,69 @@ export async function publishPackage(
     throw new Error("Cannot publish built-in packages");
   }
 
-  // 3. Resolve registry scope/name via fallback chain:
-  //    1. opts.scope/opts.name (explicit from publish form)
-  //    2. pkg.registryScope/pkg.registryName (previously published)
-  //    3. Parse from manifest.name (last resort)
+  // 3. Derive scope/name from manifest (single source of truth)
   const currentManifest = (pkg.manifest ?? {}) as Partial<Manifest>;
   const parsed = parseScopedName(currentManifest.name!);
   if (!parsed) {
     throw new Error("manifest.name must be in @scope/name format");
   }
 
-  const scope = opts.scope || pkg.registryScope || parsed.scope;
-  const name = opts.name || pkg.registryName || parsed.name;
+  const { scope, name } = parsed;
 
-  // 4. Build publish manifest — local manifest stays untouched,
+  // 4. Version comes from manifest (user-controlled, npm model)
+  const version = currentManifest.version as string | undefined;
+
+  if (!version) {
+    throw new PublishValidationError("VERSION_MISSING", "manifest.version is required");
+  }
+  if (!isValidVersion(version)) {
+    throw new PublishValidationError("VERSION_INVALID", `"${version}" is not valid semver (X.Y.Z)`);
+  }
+  if (pkg.lastPublishedVersion && !versionGt(version, pkg.lastPublishedVersion)) {
+    throw new PublishValidationError(
+      "VERSION_NOT_HIGHER",
+      `Version "${version}" must be greater than last published "${pkg.lastPublishedVersion}"`,
+    );
+  }
+
+  // 5. Build publish manifest — local manifest stays untouched,
   //    only the ZIP sent to registry uses registry scope/name
   const publishManifest: Partial<Manifest> = {
     ...currentManifest,
     name: `@${scope}/${name}`,
-    version: opts.version,
+    version,
   };
 
-  // 5. Compute registryDependencies fresh from junction table
+  // 6. Compute registryDependencies fresh from junction table
   const registryDeps = await buildRegistryDependencies(packageId, orgId);
   if (registryDeps) publishManifest.registryDependencies = registryDeps;
   else delete publishManifest.registryDependencies;
 
-  // 6. Build artifact
+  // 7. Build artifact
   const artifact = await buildPublishableArtifact(pkg, orgId, publishManifest);
 
-  // 7. Publish to registry
-  const result = await client.publish(artifact);
+  // 8. Publish to registry
+  let result: PublishResult;
+  try {
+    result = await client.publish(artifact);
+  } catch (err) {
+    if (err instanceof RegistryClientError) {
+      throw new PublishValidationError(
+        err.status === 409 ? "REGISTRY_CONFLICT" : err.code,
+        err.message,
+        err.status >= 400 && err.status < 500 ? err.status : 502,
+      );
+    }
+    throw err;
+  }
 
-  // 8. Update local package with registry tracking — local manifest stays intact
+  // 9. Update local package with registry tracking — local manifest stays intact
   await db
     .update(packages)
     .set({
       registryScope: scope,
       registryName: name,
-      lastPublishedVersion: opts.version,
+      lastPublishedVersion: version,
       lastPublishedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -106,7 +135,7 @@ export async function publishPackage(
     packageId,
     scope,
     name,
-    version: opts.version,
+    version,
   });
 
   return result;

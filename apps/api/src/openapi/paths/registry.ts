@@ -194,25 +194,6 @@ export const registryPaths = {
         },
         { $ref: "#/components/parameters/XOrgId" },
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["version"],
-              properties: {
-                scope: {
-                  type: "string",
-                  description: "Registry scope (required on first publish)",
-                },
-                name: { type: "string", description: "Package name on registry" },
-                version: { type: "string", description: "Semver version to publish" },
-              },
-            },
-          },
-        },
-      },
       responses: {
         "200": {
           description: "Package published",
@@ -234,6 +215,14 @@ export const registryPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description: "Version conflict (already exists on registry)",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" },
+            },
+          },
+        },
         "500": {
           description: "Internal server error",
           content: {
@@ -242,62 +231,6 @@ export const registryPaths = {
             },
           },
         },
-      },
-    },
-  },
-  "/api/packages/{packageId}/publish-info": {
-    get: {
-      operationId: "getPublishInfo",
-      tags: ["Packages"],
-      summary: "Get publish info for a package",
-      description:
-        "Returns manifest name/version, registry scope/name, last published version, and available registry scopes.",
-      parameters: [
-        {
-          name: "packageId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID",
-        },
-        { $ref: "#/components/parameters/XOrgId" },
-      ],
-      responses: {
-        "200": {
-          description: "Publish info",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  manifestName: {
-                    type: ["string", "null"],
-                    description: "Package name from manifest (e.g. @scope/name)",
-                  },
-                  manifestVersion: {
-                    type: ["string", "null"],
-                    description: "Package version from manifest",
-                  },
-                  registryScope: { type: ["string", "null"] },
-                  registryName: { type: ["string", "null"] },
-                  lastPublishedVersion: { type: ["string", "null"] },
-                  lastPublishedAt: { type: ["string", "null"], format: "date-time" },
-                  registryScopes: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        name: { type: "string" },
-                        ownerId: { type: "string" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

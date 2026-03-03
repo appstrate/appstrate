@@ -432,6 +432,11 @@ export const schemas = {
       autoInstalled: { type: "boolean" },
       lastPublishedVersion: { type: ["string", "null"] },
       lastPublishedAt: { type: ["string", "null"], format: "date-time" },
+      version: { type: ["string", "null"], description: "Manifest version (semver)" },
+      manifestName: {
+        type: ["string", "null"],
+        description: "Manifest name (@scope/name) — may differ from package ID",
+      },
       flows: {
         type: "array",
         items: {

@@ -200,6 +200,9 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
     autoInstalled: data.autoInstalled,
     lastPublishedVersion: data.lastPublishedVersion ?? null,
     lastPublishedAt: data.lastPublishedAt?.toISOString() ?? null,
+    version: (m.version as string) ?? null,
+    manifestName: (m.name as string) ?? null,
+    manifest: (data.manifest ?? {}) as Record<string, unknown>,
     flows: await getPackageDisplayNames(packageIds),
   };
 }
@@ -207,25 +210,35 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
 /** Insert or update an item in the org library.
  *  When orgSlug is provided, packageId = @orgSlug/item.id (local creation).
  *  When orgSlug is null, item.id IS the full packageId (marketplace installs).
+ *
+ *  The `manifest` parameter is the source of truth (like the registry approach).
+ *  When provided (ZIP upload or DB existing), it is used as-is as the base.
+ *  When undefined (JSON body without manifest), a minimal default is created.
  */
 export async function upsertOrgItem(
   orgId: string,
   orgSlug: string | null,
   item: UpsertItemInput,
   cfg: LibraryTypeConfig,
+  manifest?: Record<string, unknown>,
 ) {
   const now = new Date();
 
   const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
 
-  // Build manifest for skills/extensions (source of truth for displayName/description)
-  const manifest = {
-    type: cfg.type,
-    name: packageId,
-    version: "0.0.0",
-    ...(item.name && { displayName: item.name }),
-    ...(item.description && { description: item.description }),
-  };
+  // Build manifest: use provided manifest as base, or create minimal default
+  const finalManifest: Record<string, unknown> = manifest
+    ? { ...manifest }
+    : { version: "0.0.0", name: packageId };
+
+  // Always ensure type and name
+  finalManifest.type = cfg.type;
+  if (!finalManifest.name) finalManifest.name = packageId;
+
+  // Overlay displayName/description if provided
+  if (item.name) finalManifest.displayName = item.name;
+  if (item.description) finalManifest.description = item.description;
+
   const [data] = await db
     .insert(packages)
     .values({
@@ -234,7 +247,7 @@ export async function upsertOrgItem(
       type: cfg.type,
       source: "local",
       name: item.id,
-      manifest: manifest,
+      manifest: finalManifest,
       content: item.content,
       createdBy: item.createdBy ?? null,
       updatedAt: now,
@@ -242,7 +255,7 @@ export async function upsertOrgItem(
     .onConflictDoUpdate({
       target: [packages.id],
       set: {
-        manifest: manifest,
+        manifest: finalManifest,
         content: item.content,
         createdBy: item.createdBy ?? null,
         updatedAt: now,

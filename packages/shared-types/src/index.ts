@@ -203,6 +203,8 @@ export interface OrgLibraryItemDetail extends OrgLibraryItem {
   autoInstalled?: boolean;
   lastPublishedVersion?: string | null;
   lastPublishedAt?: string | null;
+  version?: string | null;
+  manifestName?: string | null;
 }
 
 // --- Flow Memory Types ---

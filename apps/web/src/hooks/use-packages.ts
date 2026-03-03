@@ -74,12 +74,37 @@ function useDeleteLibrary(type: LibraryType) {
   });
 }
 
+function useUpdateLibraryMetadata(type: LibraryType) {
+  const qc = useQueryClient();
+  const cfg = LIBRARY_CONFIG[type];
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: {
+      id: string;
+      name?: string;
+      description?: string;
+      version?: string;
+      scopedName?: string;
+    }) =>
+      api(`/library/${cfg.path}/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+}
+
 // Re-export factory hooks for direct use
 export {
   useLibraryList,
   useLibraryDetail,
   useUploadLibrary,
   useDeleteLibrary,
+  useUpdateLibraryMetadata,
   type LibraryType,
   LIBRARY_CONFIG,
 };
