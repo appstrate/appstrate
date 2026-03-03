@@ -2777,6 +2777,56 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* Package metadata editor */
+
+.pkg-metadata-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.pkg-metadata-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.pkg-metadata-grid .form-group {
+  margin-bottom: 0;
+}
+
+.pkg-metadata-grid .form-group:nth-child(3),
+.pkg-metadata-grid .form-group:nth-child(4) {
+  grid-column: span 2;
+}
+
+.pkg-metadata-hint {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.pkg-metadata-error {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--danger);
+  margin-top: 0.2rem;
+}
+
+.pkg-metadata-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.pkg-metadata-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 /* Resource section checkboxes (flow editor) */
 
 .library-checkbox-list {
@@ -3901,6 +3951,11 @@ button:disabled {
 .publish-not-connected p {
   margin-bottom: 0.75rem;
   color: var(--text-dim);
+}
+.publish-version-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 .publish-success {
   text-align: center;

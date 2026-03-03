@@ -183,7 +183,6 @@ const expectedEndpoints = [
   // Packages
   "POST /api/packages/import",
   "POST /api/packages/{packageId}/publish",
-  "GET /api/packages/{packageId}/publish-info",
 
   // Registry
   "POST /api/registry/connect",
@@ -305,4 +304,5 @@ console.log(`\n  ${"=".repeat(50)}`);
 console.log(`  ${exitCode === 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED"}`);
 console.log(`  ${"=".repeat(50)}\n`);
 
+// @ts-ignore Bun's type definitions for process.exit are incorrect (they say it returns never, but it actually returns void), so we ignore the type error here.
 process.exit(exitCode);

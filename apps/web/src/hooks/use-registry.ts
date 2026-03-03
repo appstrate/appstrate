@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
-import { api } from "../api";
-import { useOrg } from "./use-org";
+import { api, ApiError } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -90,20 +89,9 @@ export function useClaimScope() {
 export function usePublishPackage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      scope,
-      name,
-      version,
-    }: {
-      packageId: string;
-      scope?: string;
-      name?: string;
-      version: string;
-    }) =>
+    mutationFn: ({ packageId }: { packageId: string }) =>
       api<{ scope: string; name: string; version: string }>(`/packages/${packageId}/publish`, {
         method: "POST",
-        body: JSON.stringify({ scope, name, version }),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow"] });
@@ -111,24 +99,16 @@ export function usePublishPackage() {
       qc.invalidateQueries({ queryKey: ["library"] });
       qc.invalidateQueries({ queryKey: ["registry"] });
     },
-    onError: onMutationError,
-  });
-}
-
-export function usePublishInfo(packageId: string | undefined) {
-  const { currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
-  return useQuery({
-    queryKey: ["publish-info", orgId, packageId],
-    queryFn: () =>
-      api<{
-        manifest: Record<string, unknown>;
-        registryScope: string | null;
-        registryName: string | null;
-        lastPublishedVersion: string | null;
-        lastPublishedAt: string | null;
-        registryScopes: { name: string; ownerId: string }[];
-      }>(`/packages/${packageId}/publish-info`),
-    enabled: !!packageId && !!orgId,
+    onError: (err: Error) => {
+      if (err instanceof ApiError) {
+        const key = `publish.error.${err.code}`;
+        const translated = i18n.t(key, { ns: "flows", defaultValue: "" });
+        const message =
+          translated || i18n.t("publish.error.generic", { ns: "flows", message: err.message });
+        alert(message);
+        return;
+      }
+      onMutationError(err);
+    },
   });
 }
