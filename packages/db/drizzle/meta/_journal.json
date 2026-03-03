@@ -92,6 +92,13 @@
       "when": 1772558400001,
       "tag": "0012_version_alignment_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1772668800000,
+      "tag": "0013_fk_constraints_and_lock_version",
+      "breakpoints": true
     }
   ]
 }

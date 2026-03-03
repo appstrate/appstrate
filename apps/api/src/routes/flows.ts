@@ -145,6 +145,7 @@ export function createFlowsRouter() {
         ? {
             manifest: flow.manifest,
             updatedAt: userFlowRow.updatedAt,
+            lockVersion: userFlowRow.version,
             prompt: flow.prompt,
             lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,
             lastPublishedAt: userFlowRow.lastPublishedAt ?? null,

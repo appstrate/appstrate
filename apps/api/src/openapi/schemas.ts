@@ -153,6 +153,10 @@ export const schemas = {
         format: "date-time",
         description: "Last updated timestamp (user flows only)",
       },
+      lockVersion: {
+        type: "integer",
+        description: "Optimistic lock version (user flows only)",
+      },
       lastPublishedVersion: {
         type: ["string", "null"],
         description: "Last published version (user flows only)",

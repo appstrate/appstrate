@@ -22,7 +22,7 @@ export const packageConfigs = pgTable(
   {
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     packageId: text("package_id").notNull(),
     config: jsonb("config").notNull().default({}),
     createdAt: timestamp("created_at").defaultNow(),
@@ -52,6 +52,7 @@ export const packages = pgTable(
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
+    version: integer("version").notNull().default(1),
   },
   (table) => [
     index("idx_packages_org_id").on(table.orgId),

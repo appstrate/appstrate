@@ -84,7 +84,7 @@ function FlowEditorForm({
 
     if (isEdit && detail) {
       updateFlow.mutate(
-        { ...payload, updatedAt: detail.updatedAt! },
+        { ...payload, lockVersion: detail.lockVersion! },
         { onError: (err) => setError(err.message) },
       );
     } else {
@@ -95,7 +95,7 @@ function FlowEditorForm({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
-  const canEdit = isEdit && detail?.source !== "built-in" && !!detail?.updatedAt;
+  const canEdit = isEdit && detail?.source !== "built-in" && detail?.lockVersion != null;
 
   const handleJsonApply = (newState: FlowFormState) => {
     setForm(newState);

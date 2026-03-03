@@ -15,19 +15,19 @@ import { sql } from "drizzle-orm";
 import { executionStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { packageVersions } from "./packages.ts";
+import { packages, packageVersions } from "./packages.ts";
 
 export const executions = pgTable(
   "executions",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     status: executionStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result"),
@@ -70,7 +70,7 @@ export const executionLogs = pgTable(
       .references(() => user.id),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     type: text("type").notNull().default("progress"),
     event: text("event"),
     message: text("message"),
@@ -89,7 +89,9 @@ export const packageMemories = pgTable(
   "package_memories",
   {
     id: serial("id").primaryKey(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -109,13 +111,15 @@ export const packageSchedules = pgTable(
   "package_schedules",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true),
     cronExpression: text("cron_expression").notNull(),
@@ -160,10 +164,12 @@ export const shareTokens = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     token: text("token").notNull().unique(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
-      .references(() => organizations.id),
+      .references(() => organizations.id, { onDelete: "cascade" }),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),

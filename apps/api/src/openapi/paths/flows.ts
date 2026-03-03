@@ -168,11 +168,11 @@ export const flowsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "prompt", "updatedAt"],
+              required: ["manifest", "prompt", "lockVersion"],
               properties: {
                 manifest: { type: "object" },
                 prompt: { type: "string" },
-                updatedAt: { type: "string", format: "date-time" },
+                lockVersion: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -188,7 +188,7 @@ export const flowsPaths = {
                 properties: {
                   packageId: { type: "string" },
                   message: { type: "string" },
-                  updatedAt: { type: "string" },
+                  lockVersion: { type: "integer", description: "New optimistic lock version" },
                 },
               },
             },
@@ -331,13 +331,12 @@ export const flowsPaths = {
           "multipart/form-data": {
             schema: {
               type: "object",
-              required: ["file", "updatedAt"],
+              required: ["file", "lockVersion"],
               properties: {
                 file: { type: "string", format: "binary", description: "ZIP file" },
-                updatedAt: {
-                  type: "string",
-                  format: "date-time",
-                  description: "Current updatedAt for optimistic concurrency",
+                lockVersion: {
+                  type: "integer",
+                  description: "Current lock version for optimistic concurrency",
                 },
               },
             },
@@ -354,7 +353,7 @@ export const flowsPaths = {
                 properties: {
                   packageId: { type: "string" },
                   message: { type: "string" },
-                  updatedAt: { type: "string" },
+                  lockVersion: { type: "integer", description: "New optimistic lock version" },
                 },
               },
             },
@@ -363,7 +362,7 @@ export const flowsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Stale updatedAt (concurrent edit conflict)" },
+        "409": { description: "Stale version (concurrent edit conflict)" },
       },
     },
   },

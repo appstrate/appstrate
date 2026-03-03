@@ -219,7 +219,7 @@ export async function getRunningExecutionsCounts(orgId: string): Promise<Record<
 
   const counts: Record<string, number> = {};
   for (const row of rows) {
-    counts[row.packageId] = row.count;
+    if (row.packageId) counts[row.packageId] = row.count;
   }
   return counts;
 }

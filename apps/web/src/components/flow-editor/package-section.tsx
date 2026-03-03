@@ -38,11 +38,11 @@ export function PackageSection({
 
   const handleUploadZip = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !packageId || !detail?.updatedAt) return;
+    if (!file || !packageId || detail?.lockVersion == null) return;
 
     setUploadSuccess(false);
     uploadMutation.mutate(
-      { file, updatedAt: detail.updatedAt },
+      { file, lockVersion: detail.lockVersion },
       {
         onSuccess: () => {
           setUploadSuccess(true);
