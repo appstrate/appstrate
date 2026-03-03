@@ -75,7 +75,14 @@ function useDeleteLibrary(type: LibraryType) {
 }
 
 // Re-export factory hooks for direct use
-export { useLibraryList, useUploadLibrary, useDeleteLibrary, type LibraryType, LIBRARY_CONFIG };
+export {
+  useLibraryList,
+  useLibraryDetail,
+  useUploadLibrary,
+  useDeleteLibrary,
+  type LibraryType,
+  LIBRARY_CONFIG,
+};
 
 // --- Flows ---
 
@@ -102,20 +109,4 @@ export function useFlowDetail(packageId: string | undefined) {
     },
     enabled: !!packageId,
   });
-}
-
-// --- Composite hooks ---
-
-export function usePackageDetail(id: string | undefined) {
-  const skill = useLibraryDetail("skill", id);
-  const ext = useLibraryDetail("extension", id);
-  return {
-    isLoading: skill.isLoading || ext.isLoading,
-    data: skill.data || ext.data,
-    type: skill.data ? ("skill" as const) : ("extension" as const),
-  };
-}
-
-export function useDeletePackage(type: "skill" | "extension") {
-  return useDeleteLibrary(type);
 }

@@ -27,7 +27,8 @@ export function PackageCard({
   usedByFlows,
 }: PackageCardProps) {
   const { t } = useTranslation(["flows", "settings", "common"]);
-  const href = type === "flow" ? `/flows/${id}` : `/packages/${id}`;
+  const PREFIX = { flow: "flows", skill: "skills", extension: "extensions" } as const;
+  const href = `/${PREFIX[type]}/${id}`;
 
   return (
     <Link className="flow-card" to={href}>
