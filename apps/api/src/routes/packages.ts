@@ -84,6 +84,8 @@ export function createPackagesRouter() {
     try {
       const body = await c.req.json<{
         version?: string;
+        scope?: string;
+        name?: string;
       }>();
       if (!body.version?.trim()) {
         return c.json({ error: "VALIDATION_ERROR", message: "Version is required" }, 400);
@@ -91,6 +93,8 @@ export function createPackagesRouter() {
 
       const result = await publishPackage(packageId, orgId, user.id, {
         version: body.version.trim(),
+        scope: body.scope?.trim() || undefined,
+        name: body.name?.trim() || undefined,
       });
       return c.json(result);
     } catch (err) {

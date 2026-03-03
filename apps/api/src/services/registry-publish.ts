@@ -20,12 +20,15 @@ import {
 } from "./builtin-library.ts";
 import { parseScopedName } from "@appstrate/validation/naming";
 import { getPackage } from "./flow-service.ts";
+import { buildRegistryDependencies } from "./library/dependencies.ts";
 import { logger } from "../lib/logger.ts";
 
 const ZIP_COMPRESSION_LEVEL = 6;
 
 interface PublishOptions {
   version: string;
+  scope?: string; // registry scope (without @), e.g. "pierre"
+  name?: string; // registry name, e.g. "my-flow"
 }
 
 export async function publishPackage(
@@ -55,31 +58,42 @@ export async function publishPackage(
     throw new Error("Cannot publish built-in packages");
   }
 
-  // 3. Build manifest — manifest already has name/type/registryDependencies, only set version
+  // 3. Resolve registry scope/name via fallback chain:
+  //    1. opts.scope/opts.name (explicit from publish form)
+  //    2. pkg.registryScope/pkg.registryName (previously published)
+  //    3. Parse from manifest.name (last resort)
   const currentManifest = (pkg.manifest ?? {}) as Partial<Manifest>;
-  const manifest: Partial<Manifest> = {
-    ...currentManifest,
-    version: opts.version,
-  };
-
-  // Extract scope/name from manifest.name (which IS the packageId: @scope/name)
   const parsed = parseScopedName(currentManifest.name!);
   if (!parsed) {
     throw new Error("manifest.name must be in @scope/name format");
   }
-  const { scope, name } = parsed;
 
-  // 4. Build artifact
-  const artifact = await buildPublishableArtifact(pkg, orgId, manifest);
+  const scope = opts.scope || pkg.registryScope || parsed.scope;
+  const name = opts.name || pkg.registryName || parsed.name;
 
-  // 5. Publish to registry
+  // 4. Build publish manifest — local manifest stays untouched,
+  //    only the ZIP sent to registry uses registry scope/name
+  const publishManifest: Partial<Manifest> = {
+    ...currentManifest,
+    name: `@${scope}/${name}`,
+    version: opts.version,
+  };
+
+  // 5. Compute registryDependencies fresh from junction table
+  const registryDeps = await buildRegistryDependencies(packageId, orgId);
+  if (registryDeps) publishManifest.registryDependencies = registryDeps;
+  else delete publishManifest.registryDependencies;
+
+  // 6. Build artifact
+  const artifact = await buildPublishableArtifact(pkg, orgId, publishManifest);
+
+  // 7. Publish to registry
   const result = await client.publish(artifact);
 
-  // 6. Update local package with registry identity + persist updated manifest
+  // 8. Update local package with registry tracking — local manifest stays intact
   await db
     .update(packages)
     .set({
-      manifest,
       registryScope: scope,
       registryName: name,
       lastPublishedVersion: opts.version,
