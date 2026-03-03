@@ -83,7 +83,7 @@ mock.module("@appstrate/registry-client", () => ({
 
 let zipQueue: Record<string, unknown>[] = [];
 
-mock.module("@appstrate/validation/zip", () => ({
+mock.module("@appstrate/core/zip", () => ({
   parsePackageZip: () => {
     const parsed = zipQueue.shift();
     if (!parsed) throw new Error("zipQueue empty — test setup error");
@@ -100,16 +100,16 @@ mock.module("@appstrate/validation/zip", () => ({
   unzipArtifact: () => ({ files: {} }),
 }));
 
-mock.module("@appstrate/validation/integrity", () => ({
+mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-fixed",
 }));
 
-mock.module("@appstrate/validation", () => ({
+mock.module("@appstrate/core/validation", () => ({
   extractSkillMeta: () => ({ name: "test", description: "test" }),
 }));
 
-// @appstrate/validation/naming — NOT mocked (pure functions, use real impl)
-// @appstrate/validation/dependencies — NOT mocked (pure function, use real impl)
+// @appstrate/core/naming — NOT mocked (pure functions, use real impl)
+// @appstrate/core/dependencies — NOT mocked (pure function, use real impl)
 
 mock.module("@appstrate/db/storage", () => ({
   ensureBucket: async () => {},
@@ -143,9 +143,6 @@ mock.module("@appstrate/db/schema", () => ({
     name: "name",
     manifest: "manifest",
     content: "content",
-    registryScope: "registry_scope",
-    registryName: "registry_name",
-    registryVersion: "registry_version",
     autoInstalled: "auto_installed",
     createdBy: "created_by",
     createdAt: "created_at",

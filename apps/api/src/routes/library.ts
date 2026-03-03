@@ -11,12 +11,12 @@ import {
   EXTENSION_CONFIG,
   type LibraryTypeConfig,
 } from "../services/library.ts";
-import { extractSkillMeta, validateExtensionSource } from "@appstrate/validation";
-import type { Manifest } from "@appstrate/validation";
-import { parseScopedName } from "@appstrate/validation/naming";
+import { extractSkillMeta, validateExtensionSource } from "@appstrate/core/validation";
+import type { Manifest } from "@appstrate/core/validation";
+import { parseScopedName } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { requireAdmin } from "../middleware/guards.ts";
-import { isValidVersion } from "@appstrate/validation/semver";
+import { isValidVersion } from "@appstrate/core/semver";
 import { inArray } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { profiles } from "@appstrate/db/schema";

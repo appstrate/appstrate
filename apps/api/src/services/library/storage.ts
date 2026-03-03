@@ -1,4 +1,4 @@
-import { zipArtifact, unzipArtifact } from "@appstrate/validation/zip";
+import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../../lib/logger.ts";
 import { LIBRARY_BUCKET } from "./config.ts";

@@ -6,7 +6,7 @@ export type { OrgRole } from "@appstrate/shared-types";
 // Re-exported from @appstrate/validation. The FlowManifest type is Zod-inferred
 // and covers all flow manifest fields (name, version, type, requires, input/output/config, execution).
 
-import type { FlowManifest } from "@appstrate/validation";
+import type { FlowManifest } from "@appstrate/core/validation";
 export type { FlowManifest };
 
 export interface FlowServiceRequirement {

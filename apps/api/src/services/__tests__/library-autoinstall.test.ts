@@ -63,9 +63,6 @@ const schemaExports: Record<string, unknown> = {
     name: col("name"),
     manifest: col("manifest"),
     content: col("content"),
-    registryScope: col("registry_scope"),
-    registryName: col("registry_name"),
-    registryVersion: col("registry_version"),
     autoInstalled: col("auto_installed"),
     createdBy: col("created_by"),
     createdAt: col("created_at"),
@@ -88,8 +85,8 @@ const schemaExports: Record<string, unknown> = {
 
 mock.module("@appstrate/db/schema", () => schemaExports);
 
-// @appstrate/validation/dependencies — NOT mocked (pure function)
-// @appstrate/validation/naming — NOT mocked (pure functions)
+// @appstrate/core/dependencies — NOT mocked (pure function)
+// @appstrate/core/naming — NOT mocked (pure functions)
 
 mock.module("../package-storage.ts", () => ({
   getPackageZip: async () => null,
@@ -144,8 +141,6 @@ describe("listOrgItems — filtre autoInstalled", () => {
       createdBy: "user-1",
       createdAt: new Date(),
       updatedAt: new Date(),
-      registryScope: null,
-      registryName: null,
       autoInstalled: false,
     };
 

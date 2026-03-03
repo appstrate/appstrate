@@ -84,7 +84,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External npm dep**: `@appstrate/validation` (shared with registry).
+**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External npm dep**: `@appstrate/core` (shared with registry — validation, zip, naming, dependencies, integrity, semver, registry-deps, update-check, publish-manifest).
 
 ## Architecture
 
@@ -173,7 +173,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
-- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set. Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Uses `@appstrate/validation/dependencies` for extraction and `@appstrate/validation/naming` for packageId conversion.
+- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set. Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Uses `@appstrate/core/dependencies` for extraction and `@appstrate/core/naming` for packageId conversion.
 - **Package management**: `package-versions.ts` + `package-storage.ts` — version tracking and ZIP artifact storage for imported packages.
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.

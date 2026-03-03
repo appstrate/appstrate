@@ -4,7 +4,7 @@ import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { validateManifest } from "@appstrate/validation";
+import { validateManifest } from "@appstrate/core/validation";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
@@ -13,7 +13,7 @@ import {
   getBuiltInSkills,
   getBuiltInExtensions,
 } from "./builtin-library.ts";
-import type { Manifest } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/core/validation";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
 // Module-level directory, initialized by initPackageService()

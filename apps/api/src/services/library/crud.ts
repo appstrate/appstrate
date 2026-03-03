@@ -1,9 +1,9 @@
-import { eq, and, inArray, desc, sql, isNotNull } from "drizzle-orm";
+import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
-import { extractDependencies } from "@appstrate/validation/dependencies";
-import { buildPackageId } from "@appstrate/validation/naming";
-import type { Manifest } from "@appstrate/validation";
+import { extractDependencies } from "@appstrate/core/dependencies";
+import { buildPackageId } from "@appstrate/core/naming";
+import type { Manifest } from "@appstrate/core/validation";
 import { type LibraryTypeConfig } from "./config.ts";
 import { deleteLibraryPackage } from "./storage.ts";
 
@@ -62,7 +62,7 @@ async function findRegistryDependents(
   const registryPkgs = await db
     .select({ id: packages.id, manifest: packages.manifest })
     .from(packages)
-    .where(and(eq(packages.orgId, orgId), isNotNull(packages.registryScope)));
+    .where(eq(packages.orgId, orgId));
 
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of registryPkgs) {
@@ -195,8 +195,6 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
     createdBy: data.createdBy,
     createdAt: data.createdAt?.toISOString() ?? "",
     updatedAt: data.updatedAt?.toISOString() ?? "",
-    registryScope: data.registryScope ?? null,
-    registryName: data.registryName ?? null,
     autoInstalled: data.autoInstalled,
     lastPublishedVersion: data.lastPublishedVersion ?? null,
     lastPublishedAt: data.lastPublishedAt?.toISOString() ?? null,

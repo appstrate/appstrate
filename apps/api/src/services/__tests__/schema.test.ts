@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import { validateManifest } from "@appstrate/validation";
+import { validateManifest } from "@appstrate/core/validation";
 import { validateConfig, validateInput, validateOutput, validateFlowContent } from "../schema.ts";
 import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 

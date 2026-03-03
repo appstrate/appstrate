@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
-import { PACKAGE_REF_REGEX } from "@appstrate/validation";
+import { PACKAGE_REF_REGEX } from "@appstrate/core/validation";
 
 // --- AJV runtime validation ---
 

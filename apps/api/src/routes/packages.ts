@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
+import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
 import { insertPackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";

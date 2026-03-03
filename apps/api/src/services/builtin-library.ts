@@ -1,8 +1,8 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
-import { extractSkillMeta } from "@appstrate/validation";
-import { parseScopedName } from "@appstrate/validation/naming";
+import { extractSkillMeta } from "@appstrate/core/validation";
+import { parseScopedName } from "@appstrate/core/naming";
 
 export const BUILTIN_SCOPE = "appstrate";
 

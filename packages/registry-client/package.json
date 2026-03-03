@@ -4,5 +4,8 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@appstrate/core": "^2.0.0"
   }
 }
