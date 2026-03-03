@@ -276,10 +276,18 @@ function makeCreateHandler(rcfg: LibraryRouteConfig) {
   };
 }
 
+/** Extract item ID from either `:id` (unscoped) or `:scope/:name` (scoped) route params. */
+function getItemId(c: Context<AppEnv>): string {
+  const scope = c.req.param("scope");
+  const name = c.req.param("name");
+  if (scope && name) return `${scope}/${name}`;
+  return c.req.param("id");
+}
+
 function makeGetHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const itemId = c.req.param("id");
+    const itemId = getItemId(c);
     const item = await getOrgItem(orgId, itemId, rcfg.cfg);
 
     if (!item) {
@@ -301,7 +309,7 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
-    const itemId = c.req.param("id");
+    const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (rcfg.cfg.isBuiltIn(itemId)) {
@@ -371,7 +379,7 @@ function makeUpdateHandler(rcfg: LibraryRouteConfig) {
 function makeDeleteHandler(rcfg: LibraryRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const itemId = c.req.param("id");
+    const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (rcfg.cfg.isBuiltIn(itemId)) {
@@ -413,9 +421,15 @@ function makeDeleteHandler(rcfg: LibraryRouteConfig) {
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
 
+  // --- Type-specific CRUD routes ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
     router.get(`/${path}`, makeListHandler(rcfg));
     router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
+    // Scoped IDs (@scope/name) — must be registered before unscoped to match first
+    router.get(`/${path}/:scope{@[^/]+}/:name`, makeGetHandler(rcfg));
+    router.put(`/${path}/:scope{@[^/]+}/:name`, requireAdmin(), makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:scope{@[^/]+}/:name`, requireAdmin(), makeDeleteHandler(rcfg));
+    // Unscoped IDs
     router.get(`/${path}/:id`, makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requireAdmin(), makeUpdateHandler(rcfg));
     router.delete(`/${path}/:id`, requireAdmin(), makeDeleteHandler(rcfg));
