@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
 import * as storage from "@appstrate/db/storage";
@@ -25,16 +25,16 @@ export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
 /** Upload a package ZIP to Storage. */
 export async function uploadPackageZip(
   packageId: string,
-  versionNumber: number,
+  version: string,
   zipBuffer: Buffer,
 ): Promise<void> {
-  const path = `${packageId}/${versionNumber}.zip`;
+  const path = `${packageId}/${version}.zip`;
   try {
     await storage.uploadFile(BUCKET, path, zipBuffer);
   } catch (error) {
     logger.error("Failed to upload flow package", {
       packageId,
-      versionNumber,
+      version,
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -168,14 +168,15 @@ async function addDirectoryToZip(
   for (const item of items) {
     const fullPath = join(basePath, item);
     const zipPath = prefix ? `${prefix}/${item}` : item;
+    const file = Bun.file(fullPath);
 
-    const info = await stat(fullPath).catch(() => null);
+    const info = await file.stat().catch(() => null);
     if (!info) continue;
 
     if (info.isDirectory()) {
       await addDirectoryToZip(fullPath, zipPath, entries);
     } else {
-      const content = await Bun.file(fullPath).arrayBuffer();
+      const content = await file.arrayBuffer();
       entries[zipPath] = new Uint8Array(content);
     }
   }

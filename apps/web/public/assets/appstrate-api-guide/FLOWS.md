@@ -143,7 +143,7 @@ GET /api/flows/{packageId}/versions
 Authorization: Bearer ask_...
 ```
 
-Returns version history (newest first) with `versionNumber`, `createdBy`, `createdAt`.
+Returns version history (newest first) with `version` (semver string), `integrity`, `artifactSize`, `yanked`, `createdBy`, `createdAt`.
 
 ---
 

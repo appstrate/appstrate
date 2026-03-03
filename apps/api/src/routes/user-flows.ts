@@ -4,7 +4,7 @@ import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
-import { createVersionAndUpload } from "../services/package-versions.ts";
+import { createVersionAndUpload, getNextVersion } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
 import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/library.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -21,6 +21,29 @@ async function syncFlowDepsJunctionTable(
 ) {
   await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
   await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+}
+
+/** Create a version snapshot + upload ZIP (non-fatal on error). */
+async function createVersionSafe(params: {
+  packageId: string;
+  orgId: string;
+  userId: string;
+  zipBuffer: Buffer;
+  manifest: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const version = await getNextVersion(params.packageId);
+    await createVersionAndUpload({
+      packageId: params.packageId,
+      version,
+      orgId: params.orgId,
+      createdBy: params.userId,
+      zipBuffer: params.zipBuffer,
+      manifest: params.manifest,
+    });
+  } catch (error) {
+    logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
+  }
 }
 
 export function createUserFlowsRouter() {
@@ -74,13 +97,15 @@ export function createUserFlowsRouter() {
     // Sync junction table for dependency tracking
     await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
 
-    // Create version + upload minimal ZIP to Storage (non-blocking)
-    try {
-      const zipBuffer = buildMinimalZip(validatedManifest, prompt);
-      await createVersionAndUpload(packageId, user.id, zipBuffer);
-    } catch (error) {
-      logger.warn("Version upload failed (non-fatal)", { packageId, error });
-    }
+    // Create version + upload minimal ZIP to Storage (non-fatal)
+    const zipBuffer = buildMinimalZip(validatedManifest, prompt);
+    await createVersionSafe({
+      packageId,
+      orgId,
+      userId: user.id,
+      zipBuffer,
+      manifest: validatedManifest,
+    });
 
     return c.json({ packageId, message: "Flow created" }, 201);
   });
@@ -154,12 +179,8 @@ export function createUserFlowsRouter() {
       await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
 
       // Create version + upload minimal ZIP
-      try {
-        const zipBuffer = buildMinimalZip(manifest, prompt);
-        await createVersionAndUpload(packageId, user.id, zipBuffer);
-      } catch (error) {
-        logger.warn("Version upload failed (non-fatal)", { packageId, error });
-      }
+      const zipBuffer = buildMinimalZip(manifest, prompt);
+      await createVersionSafe({ packageId, orgId, userId: user.id, zipBuffer, manifest });
 
       return c.json({ packageId, message: "Flow updated", updatedAt: updated.updatedAt });
     },
@@ -238,11 +259,14 @@ export function createUserFlowsRouter() {
       }
 
       // Create version + upload ZIP to Storage
-      try {
-        await createVersionAndUpload(packageId, user.id, buffer);
-      } catch (error) {
-        logger.warn("Version upload failed (non-fatal)", { packageId, error });
-      }
+      const orgId = c.get("orgId");
+      await createVersionSafe({
+        packageId,
+        orgId,
+        userId: user.id,
+        zipBuffer: buffer,
+        manifest: manifest as Record<string, unknown>,
+      });
 
       return c.json({ packageId, message: "Package updated", updatedAt: updated.updatedAt });
     },

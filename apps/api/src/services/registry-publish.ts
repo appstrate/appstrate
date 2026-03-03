@@ -19,7 +19,8 @@ import {
   getBuiltInExtensionFile,
 } from "./builtin-library.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { isValidVersion, versionGt } from "@appstrate/core/semver";
+import { isValidVersion } from "@appstrate/core/semver";
+import { validateForwardVersion } from "@appstrate/core/version-policy";
 import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
 import { getPackage } from "./flow-service.ts";
 import { buildRegistryDependencies } from "./library/dependencies.ts";
@@ -82,10 +83,14 @@ export async function publishPackage(
   if (!isValidVersion(version)) {
     throw new PublishValidationError("VERSION_INVALID", `"${version}" is not valid semver (X.Y.Z)`);
   }
-  if (pkg.lastPublishedVersion && !versionGt(version, pkg.lastPublishedVersion)) {
+
+  // Forward-only enforcement using core helper
+  const publishedVersions = pkg.lastPublishedVersion ? [pkg.lastPublishedVersion] : [];
+  const forwardCheck = validateForwardVersion(version, publishedVersions);
+  if (!forwardCheck.ok) {
     throw new PublishValidationError(
-      "VERSION_NOT_HIGHER",
-      `Version "${version}" must be greater than last published "${pkg.lastPublishedVersion}"`,
+      forwardCheck.error === "VERSION_EXISTS" ? "VERSION_EXISTS" : "VERSION_NOT_HIGHER",
+      `Version "${version}" must be greater than last published "${forwardCheck.highest ?? pkg.lastPublishedVersion}"`,
     );
   }
 
@@ -99,10 +104,10 @@ export async function publishPackage(
     registryDeps,
   ) as Partial<Manifest>;
 
-  // 7. Build artifact
+  // 6. Build artifact
   const artifact = await buildPublishableArtifact(pkg, orgId, publishManifest);
 
-  // 8. Publish to registry
+  // 7. Publish to registry
   let result: PublishResult;
   try {
     result = await client.publish(artifact);
@@ -117,7 +122,7 @@ export async function publishPackage(
     throw err;
   }
 
-  // 9. Update local package with registry tracking — local manifest stays intact
+  // 8. Update local package with registry tracking — local manifest stays intact
   await db
     .update(packages)
     .set({

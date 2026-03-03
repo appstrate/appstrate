@@ -74,6 +74,7 @@ mock.module("@appstrate/registry-client", () => ({
       return {
         data: new Uint8Array([1, 2, 3]),
         integrity: "sha256-fixed",
+        verified: true,
       };
     }
   },
@@ -130,6 +131,7 @@ mock.module("../builtin-library.ts", () => ({
 
 mock.module("../package-versions.ts", () => ({
   createVersionAndUpload: async () => {},
+  getLatestVersionId: async () => null,
 }));
 
 // --- DB schema stubs ---

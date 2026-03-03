@@ -207,7 +207,10 @@ export const schemas = {
     properties: {
       id: { type: "integer" },
       packageId: { type: "string" },
-      versionNumber: { type: "integer" },
+      version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
+      integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
+      artifactSize: { type: "integer", description: "Artifact ZIP size in bytes" },
+      yanked: { type: "boolean", description: "Whether this version has been yanked" },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
     },

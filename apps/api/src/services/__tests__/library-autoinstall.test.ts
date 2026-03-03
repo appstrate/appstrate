@@ -77,9 +77,29 @@ const schemaExports: Record<string, unknown> = {
   packageVersions: {
     id: col("id"),
     packageId: col("package_id"),
-    versionNumber: col("version_number"),
+    version: col("version"),
+    integrity: col("integrity"),
+    artifactSize: col("artifact_size"),
+    manifest: col("manifest"),
+    orgId: col("org_id"),
+    yanked: col("yanked"),
+    yankedReason: col("yanked_reason"),
     createdBy: col("created_by"),
     createdAt: col("created_at"),
+  },
+  packageDistTags: {
+    packageId: col("package_id"),
+    tag: col("tag"),
+    versionId: col("version_id"),
+    updatedAt: col("updated_at"),
+  },
+  packageVersionDependencies: {
+    id: col("id"),
+    versionId: col("version_id"),
+    depScope: col("dep_scope"),
+    depName: col("dep_name"),
+    depType: col("dep_type"),
+    versionRange: col("version_range"),
   },
 };
 
