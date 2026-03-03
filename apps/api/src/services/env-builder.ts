@@ -110,6 +110,7 @@ export async function buildExecutionContext(params: {
   input?: Record<string, unknown>;
   files?: FileReference[];
   config?: Record<string, unknown>;
+  overrideVersionId?: number;
 }): Promise<{
   promptContext: PromptContext;
   flowPackage: Buffer | null;
@@ -132,7 +133,11 @@ export async function buildExecutionContext(params: {
     getLastExecutionState(flow.id, userId, orgId),
     resolveProviderDefs(db, orgId, flow.manifest.requires.services),
     getPackageZip(flow, orgId),
-    flow.source !== "built-in" ? getLatestVersionId(flow.id).catch(() => null) : null,
+    params.overrideVersionId
+      ? Promise.resolve(params.overrideVersionId)
+      : flow.source !== "built-in"
+        ? getLatestVersionId(flow.id).catch(() => null)
+        : null,
     resolveProxyUrl(orgId, flow.id, params.config),
     getPackageMemories(flow.id, orgId),
   ]);

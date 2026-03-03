@@ -85,6 +85,82 @@ export const libraryPaths = {
       },
     },
   },
+  "/api/library/skills/{skillId}/versions": {
+    get: {
+      operationId: "listSkillVersions",
+      tags: ["Library"],
+      summary: "List skill versions",
+      description: "List all published versions for a skill.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FlowVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/library/skills/{skillId}/versions/{version}": {
+    get: {
+      operationId: "getSkillVersionDetail",
+      tags: ["Library"],
+      summary: "Get skill version detail",
+      description:
+        "Resolve a version query and return versioned skill data including content extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version query — exact version, dist-tag, or semver range",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Versioned skill detail",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: { type: "object" },
+                  content: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yankedReason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifactSize: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  distTags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/library/skills/{skillId}": {
     get: {
       operationId: "getSkill",
@@ -291,6 +367,82 @@ export const libraryPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/library/extensions/{extensionId}/versions": {
+    get: {
+      operationId: "listExtensionVersions",
+      tags: ["Library"],
+      summary: "List extension versions",
+      description: "List all published versions for an extension.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FlowVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/library/extensions/{extensionId}/versions/{version}": {
+    get: {
+      operationId: "getExtensionVersionDetail",
+      tags: ["Library"],
+      summary: "Get extension version detail",
+      description:
+        "Resolve a version query and return versioned extension data including content extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version query — exact version, dist-tag, or semver range",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Versioned extension detail",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: { type: "object" },
+                  content: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yankedReason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifactSize: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  distTags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

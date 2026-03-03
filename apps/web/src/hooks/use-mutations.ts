@@ -38,9 +38,13 @@ export function useRunFlow(packageId: string) {
       input?: Record<string, unknown>;
       files?: Record<string, File[]>;
       profileId?: string;
+      version?: string;
     }) => {
-      const { input, files, profileId } = params ?? {};
-      const qs = profileId ? `?profileId=${encodeURIComponent(profileId)}` : "";
+      const { input, files, profileId, version } = params ?? {};
+      const qsParts: string[] = [];
+      if (profileId) qsParts.push(`profileId=${encodeURIComponent(profileId)}`);
+      if (version) qsParts.push(`version=${encodeURIComponent(version)}`);
+      const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
 
       // If files are present, use FormData
       const hasFiles = files && Object.values(files).some((f) => f.length > 0);

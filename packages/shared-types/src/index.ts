@@ -1,9 +1,7 @@
-export type {
-  Profile,
-  Execution,
-  ExecutionLog,
-  ConnectionProfile,
-} from "@appstrate/db/schema";
+export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
+
+import type { Execution as _Execution } from "@appstrate/db/schema";
+export type Execution = _Execution & { packageVersion?: string | null };
 
 // --- Package Types ---
 
@@ -180,6 +178,7 @@ export interface FlowDetail {
 
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
+  versionCount?: number;
 }
 
 // --- Organization Library Types ---
@@ -207,6 +206,7 @@ export interface OrgLibraryItemDetail extends OrgLibraryItem {
 
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
+  versionCount?: number;
 }
 
 // --- Package Version Types ---

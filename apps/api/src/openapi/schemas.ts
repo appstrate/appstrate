@@ -204,6 +204,10 @@ export const schemas = {
         },
       },
       runningExecutions: { type: "integer" },
+      versionCount: {
+        type: "integer",
+        description: "Number of published versions (0 for built-in flows)",
+      },
     },
   },
   FlowVersion: {

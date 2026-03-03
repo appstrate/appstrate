@@ -1,8 +1,8 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { uploadPackageZip } from "./package-storage.ts";
+import { uploadPackageZip, downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { storeVersionDependencies } from "./package-version-deps.ts";
@@ -209,6 +209,97 @@ export async function getVersionForDownload(
 }
 
 // ─────────────────────────────────────────────
+// Version detail
+// ─────────────────────────────────────────────
+
+export interface VersionDetail {
+  id: number;
+  version: string;
+  manifest: Record<string, unknown>;
+  prompt: string | null;
+  content: Record<string, Uint8Array> | null;
+  yanked: boolean;
+  yankedReason: string | null;
+  integrity: string;
+  artifactSize: number;
+  createdAt: string | null;
+}
+
+/**
+ * Resolve a version query and return full version data including prompt extracted from ZIP.
+ * Returns null if the version cannot be resolved.
+ */
+export async function getVersionDetail(
+  packageId: string,
+  versionQuery: string,
+): Promise<VersionDetail | null> {
+  const versionId = await resolveVersion(packageId, versionQuery);
+  if (!versionId) return null;
+
+  const [row] = await db
+    .select({
+      id: packageVersions.id,
+      version: packageVersions.version,
+      manifest: packageVersions.manifest,
+      integrity: packageVersions.integrity,
+      artifactSize: packageVersions.artifactSize,
+      yanked: packageVersions.yanked,
+      yankedReason: packageVersions.yankedReason,
+      createdAt: packageVersions.createdAt,
+    })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, versionId))
+    .limit(1);
+
+  if (!row) return null;
+
+  // Try to download and extract ZIP content
+  let prompt: string | null = null;
+  let content: Record<string, Uint8Array> | null = null;
+
+  try {
+    const zipBuffer = await downloadVersionZip(packageId, row.version);
+    if (zipBuffer) {
+      const files = unzipAndNormalize(zipBuffer);
+      content = files;
+      // Extract prompt.md from ZIP
+      const promptData = files["prompt.md"];
+      if (promptData) {
+        prompt = new TextDecoder().decode(promptData);
+      }
+    }
+  } catch (err) {
+    logger.warn("Failed to extract ZIP for version detail", {
+      packageId,
+      version: row.version,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return {
+    id: row.id,
+    version: row.version,
+    manifest: row.manifest as Record<string, unknown>,
+    prompt,
+    content,
+    yanked: row.yanked,
+    yankedReason: row.yankedReason,
+    integrity: row.integrity,
+    artifactSize: row.artifactSize,
+    createdAt: row.createdAt?.toISOString() ?? null,
+  };
+}
+
+/** Count the number of published versions for a package. */
+export async function getVersionCount(packageId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: count() })
+    .from(packageVersions)
+    .where(eq(packageVersions.packageId, packageId));
+  return row?.count ?? 0;
+}
+
+// ─────────────────────────────────────────────
 // Yank
 // ─────────────────────────────────────────────
 
@@ -280,12 +371,18 @@ export async function removeDistTag(packageId: string, tag: string): Promise<voi
     .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, tag)));
 }
 
-export async function listDistTags(packageId: string): Promise<{ tag: string; version: string }[]> {
+async function listDistTags(packageId: string): Promise<{ tag: string; version: string }[]> {
   return db
     .select({ tag: packageDistTags.tag, version: packageVersions.version })
     .from(packageDistTags)
     .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
     .where(eq(packageDistTags.packageId, packageId));
+}
+
+/** Get the dist-tag names that point to a specific version. */
+export async function getMatchingDistTags(packageId: string, version: string): Promise<string[]> {
+  const distTags = await listDistTags(packageId);
+  return distTags.filter((dt) => dt.version === version).map((dt) => dt.tag);
 }
 
 // ─────────────────────────────────────────────

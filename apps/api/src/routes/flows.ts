@@ -17,7 +17,12 @@ import { getConnectionStatus, resolveServiceStatuses } from "../services/connect
 import { validateConfig } from "../services/schema.ts";
 import { getPackageById } from "../services/user-flows.ts";
 import { listPackages } from "../services/flow-service.ts";
-import { listPackageVersions } from "../services/package-versions.ts";
+import {
+  listPackageVersions,
+  getVersionDetail,
+  getVersionCount,
+  getMatchingDistTags,
+} from "../services/package-versions.ts";
 import { getPackageZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { buildDownloadHeaders } from "@appstrate/core/download";
@@ -87,13 +92,14 @@ export function createFlowsRouter() {
       userProfileId,
     );
 
-    // Get config (global), last execution (per-user), running count (per-user)
+    // Get config (global), last execution (per-user), running count (per-user), version count
     // For user flows, also fetch the raw DB row for editable content
-    const [currentConfig, lastExec, runningCount, userFlowRow] = await Promise.all([
+    const [currentConfig, lastExec, runningCount, userFlowRow, versionCount] = await Promise.all([
       getPackageConfig(orgId, flow.id),
       getLastExecution(flow.id, user.id, orgId),
       getRunningExecutionsForPackage(flow.id, user.id),
       flow.source !== "built-in" ? getPackageById(flow.id) : Promise.resolve(null),
+      flow.source !== "built-in" ? getVersionCount(flow.id) : Promise.resolve(0),
     ]);
 
     // Merge defaults with current config
@@ -141,6 +147,7 @@ export function createFlowsRouter() {
             duration: lastExec.duration,
           }
         : null,
+      versionCount,
       ...(flow.source !== "built-in" && userFlowRow
         ? {
             manifest: flow.manifest,
@@ -224,6 +231,42 @@ export function createFlowsRouter() {
 
     const versions = await listPackageVersions(flow.id);
     return c.json({ versions });
+  });
+
+  // GET /api/flows/:scope/:name/versions/:version — get version detail with prompt from ZIP
+  router.get("/:scope{@[^/]+}/:name/versions/:version", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+
+    if (flow.source === "built-in") {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not have version history" },
+        400,
+      );
+    }
+
+    const versionQuery = c.req.param("version");
+    const detail = await getVersionDetail(flow.id, versionQuery);
+    if (!detail) {
+      return c.json(
+        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+        404,
+      );
+    }
+
+    const matchingTags = await getMatchingDistTags(flow.id, detail.version);
+
+    return c.json({
+      id: detail.id,
+      version: detail.version,
+      manifest: detail.manifest,
+      prompt: detail.prompt,
+      yanked: detail.yanked,
+      yankedReason: detail.yankedReason,
+      integrity: detail.integrity,
+      artifactSize: detail.artifactSize,
+      createdAt: detail.createdAt,
+      distTags: matchingTags,
+    });
   });
 
   // POST /api/flows/:scope/:name/services/:serviceId/bind — bind a profile's connection to a service
