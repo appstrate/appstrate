@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Download, ExternalLink, Scale, CheckCircle, ArrowUpCircle } from "lucide-react";
+import { apiBlob } from "../api";
 import {
   useMarketplacePackage,
   useInstallPackage,
@@ -67,6 +68,23 @@ export function MarketplaceDetailPage() {
         onError: (err) => alert(t("error.prefix", { message: err.message })),
       },
     );
+  };
+
+  const handleDownloadVersion = async (version: string) => {
+    if (!scope || !name) return;
+    try {
+      const blob = await apiBlob(`/packages/@${scope}/${name}/${version}/download`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${scope}-${name}-${version}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // Silently fail — user sees no file downloaded
+    }
   };
 
   const handleUpdate = () => {
@@ -217,6 +235,13 @@ export function MarketplaceDetailPage() {
                 <span className="version-tag">v{v.version}</span>
                 <span className="version-size">{formatBytes(v.artifactSize)}</span>
                 <span className="version-date">{new Date(v.createdAt).toLocaleDateString()}</span>
+                <button
+                  className="btn-icon"
+                  title={t("marketplace.downloadVersion")}
+                  onClick={() => handleDownloadVersion(v.version)}
+                >
+                  <Download size={14} />
+                </button>
               </div>
             ))}
           </div>

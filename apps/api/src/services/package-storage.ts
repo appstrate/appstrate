@@ -22,6 +22,16 @@ const builtInPackageCache = new Map<string, Buffer>();
 /** Ensure the flow-packages Storage bucket exists. Call once at boot. */
 export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
 
+/** Download a versioned package ZIP from Storage. Returns null if not found. */
+export async function downloadVersionZip(
+  packageId: string,
+  version: string,
+): Promise<Buffer | null> {
+  const path = `${packageId}/${version}.zip`;
+  const data = await storage.downloadFile(BUCKET, path);
+  return data ? Buffer.from(data) : null;
+}
+
 /** Upload a package ZIP to Storage. */
 export async function uploadPackageZip(
   packageId: string,

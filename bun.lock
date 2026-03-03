@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.1.0",
+        "@appstrate/core": "^2.1.1",
       },
       "devDependencies": {
         "@readme/openapi-parser": "^5.5.0",
@@ -140,7 +140,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.1.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-yRyhO3rfPWct5OU9AQmkUmr3guZ0FpYmaa0HPXzYHPwHJtyIizwo9BxwffNnmzes2vmb35GuITHuNx0Ff2g+Sw=="],
+    "@appstrate/core": ["@appstrate/core@2.1.1", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-Th1XPKbv8fgrc1IFif2kjK1jgSZjexws0sShOvHYB7RyyojBywsekIK39ajzDC0R9YFTh8t1M2LACGjaxy0HMA=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 

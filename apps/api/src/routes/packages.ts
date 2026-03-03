@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
+import { verifyArtifactIntegrity, buildDownloadHeaders } from "@appstrate/core/download";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
@@ -9,6 +10,8 @@ import { postInstallPackage } from "../services/post-install-package.ts";
 import { isBuiltInFlow } from "../services/flow-service.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-library.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
+import { getVersionForDownload } from "../services/package-versions.ts";
+import { downloadVersionZip } from "../services/package-storage.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
@@ -103,6 +106,43 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);
+  });
+
+  // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
+  router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const versionQuery = c.req.param("version");
+
+    const ver = await getVersionForDownload(packageId, versionQuery);
+    if (!ver) {
+      return c.json({ error: "NOT_FOUND", message: "Version not found" }, 404);
+    }
+
+    const data = await downloadVersionZip(packageId, ver.version);
+    if (!data) {
+      return c.json({ error: "NOT_FOUND", message: "Artifact not found in storage" }, 404);
+    }
+
+    // Verify integrity before serving
+    const check = verifyArtifactIntegrity(new Uint8Array(data), ver.integrity);
+    if (!check.valid) {
+      logger.error("Integrity mismatch on download", {
+        packageId,
+        version: ver.version,
+        expected: ver.integrity,
+        actual: check.computed,
+      });
+      return c.json({ error: "INTEGRITY_ERROR", message: "Artifact integrity check failed" }, 500);
+    }
+
+    const downloadHeaders = buildDownloadHeaders({
+      integrity: ver.integrity,
+      yanked: ver.yanked,
+      scope: c.req.param("scope"),
+      name: c.req.param("name"),
+      version: ver.version,
+    });
+    return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
   });
 
   // POST /api/packages/:scope/:name/publish — publish a package to registry
