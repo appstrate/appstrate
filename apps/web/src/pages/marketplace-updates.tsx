@@ -55,12 +55,12 @@ export function MarketplaceUpdatesPage() {
               {updates.map((pkg) => (
                 <tr key={pkg.id}>
                   <td>
-                    <Link to={`/marketplace/@${pkg.registryScope}/${pkg.registryName}`}>
-                      {pkg.displayName || `${pkg.registryScope}/${pkg.registryName}`}
+                    <Link to={`/marketplace/@${pkg.scope}/${pkg.name}`}>
+                      {pkg.displayName || `${pkg.scope}/${pkg.name}`}
                     </Link>
                   </td>
                   <td>
-                    <TypeBadge type={pkg.type as "flow" | "skill" | "extension"} />
+                    <TypeBadge type={pkg.type} />
                   </td>
                   <td>v{pkg.installedVersion}</td>
                   <td>{pkg.latestVersion ? `v${pkg.latestVersion}` : "-"}</td>
@@ -79,7 +79,7 @@ export function MarketplaceUpdatesPage() {
                         className="btn-sm"
                         onClick={() =>
                           update.mutate(
-                            { scope: `@${pkg.registryScope}`, name: pkg.registryName },
+                            { scope: `@${pkg.scope}`, name: pkg.name },
                             {
                               onError: (err) => alert(t("error.prefix", { message: err.message })),
                             },

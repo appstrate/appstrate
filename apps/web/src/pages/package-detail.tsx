@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import type { OrgLibraryItemDetail } from "@appstrate/shared-types";
 import {
   useLibraryDetail,
@@ -10,11 +10,10 @@ import {
   type LibraryType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
-import { useRegistryStatus, usePublishPackage } from "../hooks/use-registry";
+
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
 import { LoadingState } from "../components/page-states";
-import { marketplacePath } from "../lib/strings";
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 const SCOPED_NAME_RE = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
@@ -157,8 +156,6 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
 
   const { isLoading, data: detail } = useLibraryDetail(type, packageId);
   const deleteMutation = useDeleteLibrary(type);
-  const { data: registryStatus } = useRegistryStatus();
-  const publishMutation = usePublishPackage();
 
   if (isLoading) return <LoadingState />;
   if (!detail) return <Navigate to="/" replace />;
@@ -193,21 +190,7 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
         </div>
         {detail.description && <p className="description">{detail.description}</p>}
         <code className="detail-id">{detail.id}</code>
-        {detail.lastPublishedVersion && (
-          <span className="badge badge-success">
-            {t("publish.badge", { version: detail.lastPublishedVersion, ns: "flows" })}
-          </span>
-        )}
       </div>
-
-      {marketplacePath(detail) && (
-        <div className="actions">
-          <Link to={marketplacePath(detail)!} className="btn-sm">
-            <ExternalLink size={14} />
-            {t("library.viewOnMarketplace")}
-          </Link>
-        </div>
-      )}
 
       {isOrgAdmin && !isBuiltIn && packageId && (
         <PackageMetadataEditor
@@ -238,39 +221,11 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
         <pre className="state-json">{detail.content}</pre>
       </div>
 
-      {isOrgAdmin && !isBuiltIn && (
+      {isOrgAdmin && !isBuiltIn && !hasFlows && (
         <div className="actions">
-          {registryStatus?.connected ? (
-            <>
-              <button
-                onClick={() => publishMutation.mutate({ packageId: packageId! })}
-                disabled={publishMutation.isPending}
-              >
-                {publishMutation.isPending ? <Spinner /> : t("publish.publish", { ns: "flows" })}
-              </button>
-              {detail.lastPublishedVersion && (
-                <span className="publish-version-hint">
-                  {t("publish.lastPublished", {
-                    ns: "flows",
-                    version: detail.lastPublishedVersion,
-                  })}
-                </span>
-              )}
-            </>
-          ) : (
-            <Link to="/preferences">
-              <button>{t("publish.publish", { ns: "flows" })}</button>
-            </Link>
-          )}
-          {!hasFlows && (
-            <button
-              className="btn-danger"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {t("btn.delete")}
-            </button>
-          )}
+          <button className="btn-danger" onClick={handleDelete} disabled={deleteMutation.isPending}>
+            {t("btn.delete")}
+          </button>
         </div>
       )}
     </>

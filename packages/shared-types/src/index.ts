@@ -172,9 +172,6 @@ export interface FlowDetail {
   prompt?: string;
   scope?: string | null;
   version?: string | null;
-  registryScope?: string | null;
-  registryName?: string | null;
-
   manifest?: Record<string, unknown>;  // Raw manifest from DB (user flows only)
 
   lastPublishedVersion?: string | null;
@@ -198,8 +195,6 @@ export interface OrgLibraryItem {
 export interface OrgLibraryItemDetail extends OrgLibraryItem {
   content: string;
   flows: { id: string; displayName: string }[];
-  registryScope?: string | null;
-  registryName?: string | null;
   autoInstalled?: boolean;
   lastPublishedVersion?: string | null;
   lastPublishedAt?: string | null;

@@ -153,8 +153,6 @@ export const schemas = {
         format: "date-time",
         description: "Last updated timestamp (user flows only)",
       },
-      registryScope: { type: ["string", "null"], description: "Registry scope (user flows only)" },
-      registryName: { type: ["string", "null"], description: "Registry name (user flows only)" },
       lastPublishedVersion: {
         type: ["string", "null"],
         description: "Last published version (user flows only)",
@@ -427,8 +425,6 @@ export const schemas = {
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
-      registryScope: { type: ["string", "null"] },
-      registryName: { type: ["string", "null"] },
       autoInstalled: { type: "boolean" },
       lastPublishedVersion: { type: ["string", "null"] },
       lastPublishedAt: { type: ["string", "null"], format: "date-time" },

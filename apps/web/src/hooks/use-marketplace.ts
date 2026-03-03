@@ -61,11 +61,18 @@ interface SearchOpts {
   perPage?: number;
 }
 
-export interface PackageUpdateStatus {
-  id: string;
+interface InstallResult {
+  packageId: string;
   type: string;
-  registryScope: string;
-  registryName: string;
+  version: string | null;
+  autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
+}
+
+interface PackageUpdateStatus {
+  id: string;
+  type: "flow" | "skill" | "extension";
+  scope: string;
+  name: string;
   displayName: string | null;
   installedVersion: string;
   latestVersion: string | null;
@@ -110,12 +117,7 @@ export function useInstallPackage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (opts: { scope: string; name: string; version?: string }) =>
-      api<{
-        packageId: string;
-        type: string;
-        version: string | null;
-        autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
-      }>("/marketplace/install", { method: "POST", body: JSON.stringify(opts) }),
+      api<InstallResult>("/marketplace/install", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
       qc.invalidateQueries({ queryKey: ["library"] });
@@ -137,12 +139,7 @@ export function useUpdatePackage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (opts: { scope: string; name: string }) =>
-      api<{
-        packageId: string;
-        type: string;
-        version: string | null;
-        autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
-      }>("/marketplace/update", { method: "POST", body: JSON.stringify(opts) }),
+      api<InstallResult>("/marketplace/update", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
       qc.invalidateQueries({ queryKey: ["library"] });

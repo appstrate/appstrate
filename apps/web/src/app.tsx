@@ -13,6 +13,8 @@ import { ExecutionsPage } from "./pages/executions-page";
 import { MarketplacePage } from "./pages/marketplace";
 import { MarketplaceDetailPage } from "./pages/marketplace-detail";
 import { MarketplaceUpdatesPage } from "./pages/marketplace-updates";
+import { MarketplaceInstalledPage } from "./pages/marketplace-installed";
+import { MarketplacePublishPage } from "./pages/marketplace-publish";
 import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
@@ -234,7 +236,9 @@ export function App() {
               />
               <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
+              <Route path="/marketplace/installed" element={<MarketplaceInstalledPage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
+              <Route path="/marketplace/publish" element={<MarketplacePublishPage />} />
               <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/connectors" element={<ConnectorsPage />} />
