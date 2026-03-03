@@ -1,4 +1,4 @@
-import { extractSkillMeta } from "@appstrate/validation";
+import { extractSkillMeta } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { upsertOrgItem, uploadLibraryPackage, SKILL_CONFIG, EXTENSION_CONFIG } from "./library.ts";

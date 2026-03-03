@@ -1,4 +1,4 @@
-import type { Manifest } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/core/validation";
 
 /** Extract skill and extension IDs from a manifest's requires section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {

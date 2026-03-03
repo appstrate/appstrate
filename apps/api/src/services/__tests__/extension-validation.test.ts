@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { validateExtensionSource } from "@appstrate/validation";
+import { validateExtensionSource } from "@appstrate/core/validation";
 
 // --- Fixtures ---
 

@@ -1,6 +1,14 @@
+import type { Manifest } from "@appstrate/core/validation";
+
 export interface RegistryConfig {
   baseUrl: string;
   accessToken?: string;
+  /** Request timeout in ms. Default: 30_000 (120_000 for downloads). */
+  timeout?: number;
+  /** Max retries on network/5xx errors. Default: 2. */
+  maxRetries?: number;
+  /** Optional logger for request debugging. */
+  logger?: { debug: (msg: string, data?: Record<string, unknown>) => void };
 }
 
 export interface RegistryDiscovery {
@@ -41,7 +49,7 @@ export interface RegistryVersionDetail {
   integrity: string;
   artifactPath: string;
   artifactSize: number;
-  manifest: Record<string, unknown>;
+  manifest: Manifest;
   yanked: boolean;
   yankedReason: string | null;
   publishedBy: string;
@@ -105,4 +113,3 @@ export interface PublishResult {
   size: number;
   type: string;
 }
-

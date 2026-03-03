@@ -9,7 +9,7 @@ import {
   packageAdminConnections,
 } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/core/validation";
 
 export async function getPackageById(id: string): Promise<Package | null> {
   const rows = await db.select().from(packages).where(eq(packages.id, id)).limit(1);

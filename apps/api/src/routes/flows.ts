@@ -26,7 +26,7 @@ import {
   setPackageProfileOverride,
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
-import { parseScopedName } from "@appstrate/validation/naming";
+import { parseScopedName } from "@appstrate/core/naming";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -144,8 +144,6 @@ export function createFlowsRouter() {
             manifest: flow.manifest,
             updatedAt: userFlowRow.updatedAt,
             prompt: flow.prompt,
-            registryScope: userFlowRow.registryScope ?? null,
-            registryName: userFlowRow.registryName ?? null,
             lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,
             lastPublishedAt: userFlowRow.lastPublishedAt ?? null,
           }

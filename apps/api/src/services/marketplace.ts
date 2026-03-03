@@ -6,15 +6,16 @@ import {
 } from "./registry-provider.ts";
 import { db } from "../lib/db.ts";
 import { packages } from "@appstrate/db/schema";
-import { eq, and, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
-import { parsePackageZip, PackageZipError } from "@appstrate/validation/zip";
-import { normalizeScope, buildPackageId } from "@appstrate/validation/naming";
-import { computeIntegrity } from "@appstrate/validation/integrity";
-import { extractDependencies } from "@appstrate/validation/dependencies";
+import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
+import { normalizeScope, buildPackageId, parseScopedName } from "@appstrate/core/naming";
+import { extractDependencies } from "@appstrate/core/dependencies";
+import { resolveLatestVersion } from "@appstrate/core/semver";
+import { checkUpdateAvailable } from "@appstrate/core/update-check";
 import { postInstallPackage } from "./post-install-package.ts";
-import type { Manifest } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/core/validation";
 
 // --- Status ---
 
@@ -155,32 +156,32 @@ async function _installInternal(
     throw new Error(`Package ${scope}/${name} not found in registry`);
   }
 
-  const latestTag = pkg.distTags?.find((t: { tag: string }) => t.tag === "latest");
-  const latestVersion = latestTag
-    ? (pkg.versions.find((v: { id: number }) => v.id === latestTag.versionId)?.version ?? null)
-    : (pkg.versions.at(-1)?.version ?? null);
+  // Resolve target version using shared logic
+  const latestVersion = resolveLatestVersion(
+    pkg.versions.map((v) => ({ id: v.id, version: v.version })),
+    pkg.distTags?.map((t) => ({ tag: t.tag, versionId: t.versionId })) ?? [],
+  );
   const targetVersion = version ?? latestVersion;
   if (!targetVersion) {
     throw new Error(`No version available for ${scope}/${name}`);
   }
 
-  // Download artifact ZIP and extract manifest + content
+  // Download artifact ZIP with integrity verification
   logger.info("Downloading artifact", { scope, name, version: targetVersion });
-  const { data: artifactData, integrity } = await client.downloadArtifact(
-    scope,
-    name,
-    targetVersion,
-  );
-  logger.info("Artifact downloaded", { size: artifactData.length, integrity });
+  const {
+    data: artifactData,
+    integrity,
+    verified,
+  } = await client.downloadArtifact(scope, name, targetVersion, { verifyIntegrity: true });
+  logger.info("Artifact downloaded", { size: artifactData.length, integrity, verified });
 
   // Verify integrity (mandatory)
   if (!integrity) {
     throw new Error(`Integrity header missing for ${scope}/${name}@${targetVersion}`);
   }
-  const computed = computeIntegrity(new Uint8Array(artifactData));
-  if (computed !== integrity) {
+  if (!verified) {
     throw new Error(
-      `Integrity check failed for ${scope}/${name}@${targetVersion}: expected ${integrity}, got ${computed}`,
+      `Integrity check failed for ${scope}/${name}@${targetVersion}: expected ${integrity}`,
     );
   }
 
@@ -240,7 +241,6 @@ async function _installInternal(
       .set({
         manifest,
         content,
-        registryVersion: targetVersion,
         updatedAt: new Date(),
         // Only flip to explicit (false) when user installs directly; never demote explicit→auto
         ...(!ctx.autoInstalled && { autoInstalled: false }),
@@ -256,9 +256,6 @@ async function _installInternal(
       name: `${scope}/${name}`,
       manifest,
       content,
-      registryScope: scope.replace(/^@/, ""),
-      registryName: name,
-      registryVersion: targetVersion,
       autoInstalled: ctx.autoInstalled,
       createdBy: userId,
       updatedAt: new Date(),
@@ -309,32 +306,39 @@ export async function getMarketplacePackageWithInstallStatus(
   const packageId = buildPackageId(scope, name);
 
   const [installed] = await db
-    .select({ registryVersion: packages.registryVersion })
+    .select({ manifest: packages.manifest })
     .from(packages)
     .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
     .limit(1);
 
+  const m = (installed?.manifest ?? {}) as Partial<Manifest>;
   return {
     ...pkg,
-    installedVersion: installed?.registryVersion ?? null,
+    installedVersion: (m.version as string) ?? null,
   };
 }
 
 // --- Installed registry packages ---
 
 export async function getInstalledRegistryPackages(orgId: string) {
-  return db
+  const rows = await db
     .select({
       id: packages.id,
       type: packages.type,
-      registryScope: packages.registryScope,
-      registryName: packages.registryName,
-      registryVersion: packages.registryVersion,
       manifest: packages.manifest,
       updatedAt: packages.updatedAt,
     })
     .from(packages)
-    .where(and(eq(packages.orgId, orgId), isNotNull(packages.registryScope)));
+    .where(eq(packages.orgId, orgId));
+
+  return rows.map((row) => {
+    const parsed = parseScopedName(row.id);
+    return {
+      ...row,
+      registryScope: parsed?.scope ?? null,
+      registryName: parsed?.name ?? null,
+    };
+  });
 }
 
 // --- Check for updates ---
@@ -342,8 +346,8 @@ export async function getInstalledRegistryPackages(orgId: string) {
 export interface PackageUpdateStatus {
   id: string;
   type: string;
-  registryScope: string;
-  registryName: string;
+  scope: string;
+  name: string;
   displayName: string | null;
   installedVersion: string;
   latestVersion: string | null;
@@ -365,29 +369,45 @@ export async function checkRegistryUpdates(
     : client;
 
   const results = await Promise.allSettled(
-    installed.map(async (pkg): Promise<PackageUpdateStatus> => {
-      const remote = await authedClient.getPackage(`@${pkg.registryScope}`, pkg.registryName!);
-      const latestTag = remote?.distTags?.find((t: { tag: string }) => t.tag === "latest");
-      const latestVersion = latestTag
-        ? (remote.versions.find((v: { id: number }) => v.id === latestTag.versionId)?.version ??
-          null)
-        : (remote?.versions.at(-1)?.version ?? null);
+    installed.map(async (pkg): Promise<PackageUpdateStatus | null> => {
+      const parsed = parseScopedName(pkg.id);
+      if (!parsed) return null;
+
+      let remote;
+      try {
+        remote = await authedClient.getPackage(`@${parsed.scope}`, parsed.name);
+      } catch {
+        return null;
+      }
+      if (!remote) return null;
 
       const m = (pkg.manifest ?? {}) as Partial<Manifest>;
+      const installedVersion = (m.version as string) ?? null;
+
+      // Use shared update check logic — fixes the bug of using !== instead of semver comparison
+      const { latestVersion, updateAvailable } = checkUpdateAvailable({
+        installedVersion,
+        remoteVersions: remote.versions.map((v) => ({ id: v.id, version: v.version })),
+        remoteDistTags: remote.distTags?.map((t) => ({ tag: t.tag, versionId: t.versionId })) ?? [],
+      });
+
       return {
         id: pkg.id,
         type: pkg.type,
-        registryScope: pkg.registryScope!,
-        registryName: pkg.registryName!,
+        scope: parsed.scope,
+        name: parsed.name,
         displayName: m.displayName ?? null,
-        installedVersion: pkg.registryVersion!,
+        installedVersion: installedVersion ?? "0.0.0",
         latestVersion,
-        updateAvailable: !!latestVersion && latestVersion !== pkg.registryVersion,
+        updateAvailable,
       };
     }),
   );
 
   return results
-    .filter((r): r is PromiseFulfilledResult<PackageUpdateStatus> => r.status === "fulfilled")
+    .filter(
+      (r): r is PromiseFulfilledResult<PackageUpdateStatus> =>
+        r.status === "fulfilled" && r.value !== null,
+    )
     .map((r) => r.value);
 }

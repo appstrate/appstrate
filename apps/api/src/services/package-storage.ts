@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/validation/zip";
+import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
@@ -11,7 +11,7 @@ import {
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
 } from "./builtin-library.ts";
-import { parseScopedName } from "@appstrate/validation/naming";
+import { parseScopedName } from "@appstrate/core/naming";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;

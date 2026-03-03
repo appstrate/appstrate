@@ -1,10 +1,10 @@
 import { eq, and } from "drizzle-orm";
 import { RegistryClientError, type PublishResult } from "@appstrate/registry-client";
-import { zipArtifact, type Zippable } from "@appstrate/validation/zip";
+import { zipArtifact, type Zippable } from "@appstrate/core/zip";
 import { db } from "../lib/db.ts";
 import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/validation";
+import type { Manifest } from "@appstrate/core/validation";
 import { getAuthenticatedRegistryClient } from "./registry-auth.ts";
 import {
   getFlowItemFiles,
@@ -18,11 +18,12 @@ import {
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
 } from "./builtin-library.ts";
-import { parseScopedName } from "@appstrate/validation/naming";
+import { parseScopedName } from "@appstrate/core/naming";
+import { isValidVersion, versionGt } from "@appstrate/core/semver";
+import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
 import { getPackage } from "./flow-service.ts";
 import { buildRegistryDependencies } from "./library/dependencies.ts";
 import { logger } from "../lib/logger.ts";
-import { isValidVersion, versionGt } from "@appstrate/validation/semver";
 
 const ZIP_COMPRESSION_LEVEL = 6;
 
@@ -88,18 +89,15 @@ export async function publishPackage(
     );
   }
 
-  // 5. Build publish manifest — local manifest stays untouched,
-  //    only the ZIP sent to registry uses registry scope/name
-  const publishManifest: Partial<Manifest> = {
-    ...currentManifest,
-    name: `@${scope}/${name}`,
-    version,
-  };
-
-  // 6. Compute registryDependencies fresh from junction table
+  // 5. Build publish manifest with registry deps — local manifest stays untouched
   const registryDeps = await buildRegistryDependencies(packageId, orgId);
-  if (registryDeps) publishManifest.registryDependencies = registryDeps;
-  else delete publishManifest.registryDependencies;
+  const publishManifest = prepareManifestForPublish(
+    currentManifest as Record<string, unknown>,
+    scope,
+    name,
+    version,
+    registryDeps,
+  ) as Partial<Manifest>;
 
   // 7. Build artifact
   const artifact = await buildPublishableArtifact(pkg, orgId, publishManifest);
@@ -123,8 +121,6 @@ export async function publishPackage(
   await db
     .update(packages)
     .set({
-      registryScope: scope,
-      registryName: name,
       lastPublishedVersion: version,
       lastPublishedAt: new Date(),
       updatedAt: new Date(),
