@@ -2,6 +2,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
 import { extractSkillMeta } from "@appstrate/validation";
+import { parseScopedName } from "@appstrate/validation/naming";
+
+export const BUILTIN_SCOPE = "appstrate";
 
 // Module-level directories, initialized by initBuiltInLibrary()
 let skillsDir: string | null = null;
@@ -24,6 +27,7 @@ interface BuiltInLoadConfig {
   entryFilter: (entry: string, info: Awaited<ReturnType<typeof stat>>) => boolean;
   idFromEntry: (entry: string) => string;
   contentPath: (baseDir: string, entry: string) => string;
+  manifestPath?: (baseDir: string, entry: string) => string;
   extractMeta: boolean;
   typeLabel: string;
 }
@@ -38,7 +42,19 @@ async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, Buil
       const info = await stat(entryPath).catch(() => null);
       if (!info || !cfg.entryFilter(entry, info)) continue;
 
-      const id = cfg.idFromEntry(entry);
+      // Determine ID: read manifest.json if available, fallback to entry-based ID
+      let id = cfg.idFromEntry(entry);
+      if (cfg.manifestPath) {
+        const mPath = cfg.manifestPath(cfg.dir, entry);
+        try {
+          const raw = await readFile(mPath, "utf-8");
+          const manifest = JSON.parse(raw);
+          if (manifest.name) id = manifest.name;
+        } catch {
+          // No manifest — use entry-based ID
+        }
+      }
+
       const contentFilePath = cfg.contentPath(cfg.dir, entry);
       try {
         const content = await readFile(contentFilePath, "utf-8");
@@ -77,14 +93,16 @@ export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
       entryFilter: (_entry, info) => info.isDirectory(),
       idFromEntry: (entry) => entry,
       contentPath: (baseDir, entry) => join(baseDir, entry, "SKILL.md"),
+      manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
       extractMeta: true,
       typeLabel: "skill",
     }),
     loadBuiltInType({
       dir: extensionsDir,
-      entryFilter: (entry, info) => info.isFile() && entry.endsWith(".ts"),
-      idFromEntry: (entry) => entry.replace(/\.ts$/, ""),
-      contentPath: (baseDir, entry) => join(baseDir, entry),
+      entryFilter: (_entry, info) => info.isDirectory(),
+      idFromEntry: (entry) => entry,
+      contentPath: (baseDir, entry) => join(baseDir, entry, "extension.ts"),
+      manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
       extractMeta: false,
       typeLabel: "extension",
     }),
@@ -108,18 +126,29 @@ export function getBuiltInExtensions(): ReadonlyMap<string, BuiltInLibraryItem> 
 }
 
 export function isBuiltInSkill(id: string): boolean {
-  return builtInSkills.has(id);
+  return builtInSkills.has(id) || builtInSkills.has(`@${BUILTIN_SCOPE}/${id}`);
 }
 
 export function isBuiltInExtension(id: string): boolean {
-  return builtInExtensions.has(id);
+  return builtInExtensions.has(id) || builtInExtensions.has(`@${BUILTIN_SCOPE}/${id}`);
+}
+
+/** Resolve a built-in skill by ID (supports both bare slug and scoped name). */
+export function resolveBuiltInSkill(id: string): BuiltInLibraryItem | undefined {
+  return builtInSkills.get(id) ?? builtInSkills.get(`@${BUILTIN_SCOPE}/${id}`);
+}
+
+/** Resolve a built-in extension by ID (supports both bare slug and scoped name). */
+export function resolveBuiltInExtension(id: string): BuiltInLibraryItem | undefined {
+  return builtInExtensions.get(id) ?? builtInExtensions.get(`@${BUILTIN_SCOPE}/${id}`);
 }
 
 /** Get all files for a built-in skill (for ZIP packaging). */
 export async function getBuiltInSkillFiles(id: string): Promise<Record<string, Uint8Array> | null> {
-  if (!builtInSkills.has(id) || !skillsDir) return null;
+  if (!resolveBuiltInSkill(id) || !skillsDir) return null;
 
-  const skillDir = join(skillsDir, id);
+  const slug = parseScopedName(id)?.name ?? id;
+  const skillDir = join(skillsDir, slug);
   const files: Record<string, Uint8Array> = {};
 
   async function readDirRecursive(dir: string, prefix: string) {
@@ -149,9 +178,10 @@ export async function getBuiltInSkillFiles(id: string): Promise<Record<string, U
 
 /** Get the file content for a built-in extension (for ZIP packaging). */
 export async function getBuiltInExtensionFile(id: string): Promise<Uint8Array | null> {
-  if (!builtInExtensions.has(id) || !extensionsDir) return null;
+  if (!resolveBuiltInExtension(id) || !extensionsDir) return null;
 
-  const extPath = join(extensionsDir, `${id}.ts`);
+  const slug = parseScopedName(id)?.name ?? id;
+  const extPath = join(extensionsDir, slug, "extension.ts");
   try {
     const content = await readFile(extPath);
     return new Uint8Array(content);

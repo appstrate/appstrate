@@ -227,7 +227,11 @@ export function App() {
               />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
-              <Route path="/packages/:scope/:name" element={<PackageDetailPage />} />
+              <Route path="/skills/:scope/:name" element={<PackageDetailPage type="skill" />} />
+              <Route
+                path="/extensions/:scope/:name"
+                element={<PackageDetailPage type="extension" />}
+              />
               <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />

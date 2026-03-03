@@ -4,6 +4,8 @@ import {
   getBuiltInExtensions,
   isBuiltInSkill,
   isBuiltInExtension,
+  resolveBuiltInSkill,
+  resolveBuiltInExtension,
 } from "../builtin-library.ts";
 
 // ─────────────────────────────────────────────
@@ -22,6 +24,7 @@ export interface LibraryTypeConfig {
   storageFolder: "skills" | "extensions";
   getBuiltIns: () => ReadonlyMap<string, BuiltInItem>;
   isBuiltIn: (id: string) => boolean;
+  resolveBuiltIn: (id: string) => BuiltInItem | undefined;
   label: string;
 }
 
@@ -30,6 +33,7 @@ export const SKILL_CONFIG: LibraryTypeConfig = {
   storageFolder: "skills",
   getBuiltIns: getBuiltInSkills,
   isBuiltIn: isBuiltInSkill,
+  resolveBuiltIn: resolveBuiltInSkill,
   label: "Skills",
 };
 
@@ -38,6 +42,7 @@ export const EXTENSION_CONFIG: LibraryTypeConfig = {
   storageFolder: "extensions",
   getBuiltIns: getBuiltInExtensions,
   isBuiltIn: isBuiltInExtension,
+  resolveBuiltIn: resolveBuiltInExtension,
   label: "Extensions",
 };
 

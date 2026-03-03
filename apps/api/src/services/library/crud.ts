@@ -153,7 +153,7 @@ export async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
 
 /** Get a single item with content and list of flows referencing it. */
 export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryTypeConfig) {
-  const builtIn = cfg.getBuiltIns().get(itemId);
+  const builtIn = cfg.resolveBuiltIn(itemId);
   if (builtIn) {
     return {
       id: builtIn.id,

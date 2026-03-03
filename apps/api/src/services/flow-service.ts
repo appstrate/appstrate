@@ -8,6 +8,8 @@ import { validateManifest } from "@appstrate/validation";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
+  resolveBuiltInSkill,
+  resolveBuiltInExtension,
   getBuiltInSkills,
   getBuiltInExtensions,
 } from "./builtin-library.ts";
@@ -68,11 +70,11 @@ export async function initPackageService(dataDir?: string): Promise<void> {
 
       // Resolve skill/extension IDs to SkillMeta using built-in library
       const skills = (manifest.requires.skills ?? []).map((id) => {
-        const builtIn = getBuiltInSkills().get(id);
+        const builtIn = resolveBuiltInSkill(id);
         return { id, name: builtIn?.name, description: builtIn?.description };
       });
       const extensions = (manifest.requires.extensions ?? []).map((id) => {
-        const builtIn = getBuiltInExtensions().get(id);
+        const builtIn = resolveBuiltInExtension(id);
         return { id, name: builtIn?.name, description: builtIn?.description };
       });
 
@@ -153,7 +155,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const manifestSkills = (manifest.requires.skills ?? [])
     .filter((id) => isBuiltInSkill(id))
     .map((id) => {
-      const builtIn = getBuiltInSkills().get(id);
+      const builtIn = resolveBuiltInSkill(id);
       return {
         id,
         name: builtIn?.name,
@@ -164,7 +166,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const manifestExtensions = (manifest.requires.extensions ?? [])
     .filter((id) => isBuiltInExtension(id))
     .map((id) => {
-      const builtIn = getBuiltInExtensions().get(id);
+      const builtIn = resolveBuiltInExtension(id);
       return {
         id,
         name: builtIn?.name,
