@@ -163,7 +163,8 @@ async function buildPublishableArtifact(
         .map(async (e) => {
           const file = await getBuiltInExtensionFile(e.id);
           if (file) {
-            entries[`extensions/${e.id}.ts`] = file;
+            const slug = parseScopedName(e.id)?.name ?? e.id;
+            entries[`extensions/${slug}.ts`] = file;
           }
         });
 

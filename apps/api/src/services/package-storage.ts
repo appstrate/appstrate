@@ -11,6 +11,7 @@ import {
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
 } from "./builtin-library.ts";
+import { parseScopedName } from "@appstrate/validation/naming";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -109,7 +110,8 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
     .map(async (ext) => {
       const file = await getBuiltInExtensionFile(ext.id);
       if (file) {
-        entries[`extensions/${ext.id}.ts`] = file;
+        const slug = parseScopedName(ext.id)?.name ?? ext.id;
+        entries[`extensions/${slug}.ts`] = file;
       }
     });
 

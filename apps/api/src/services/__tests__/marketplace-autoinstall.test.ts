@@ -123,6 +123,9 @@ mock.module("../builtin-library.ts", () => ({
   getBuiltInExtensions: () => new Map(),
   isBuiltInSkill: () => false,
   isBuiltInExtension: () => false,
+  resolveBuiltInSkill: () => undefined,
+  resolveBuiltInExtension: () => undefined,
+  BUILTIN_SCOPE: "appstrate",
 }));
 
 mock.module("../package-versions.ts", () => ({
@@ -243,7 +246,7 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(result.packageId).toBe("acme--solo");
+    expect(result.packageId).toBe("@acme/solo");
     expect(result.type).toBe("skill");
     expect(result.version).toBe("1.0.0");
     expect(result.autoInstalledDeps).toBeUndefined();
@@ -282,13 +285,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(2);
-    expect(insertedRows[0]!.id).toBe("acme--helper");
+    expect(insertedRows[0]!.id).toBe("@acme/helper");
     expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("acme--parent");
+    expect(insertedRows[1]!.id).toBe("@acme/parent");
     expect(insertedRows[1]!.autoInstalled).toBe(false);
 
     expect(result.autoInstalledDeps).toHaveLength(1);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--helper");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/helper");
   });
 
   test("deps transitives A→B→C → installe C puis B puis A", async () => {
@@ -333,18 +336,18 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("acme--c");
+    expect(insertedRows[0]!.id).toBe("@acme/c");
     expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("acme--b");
+    expect(insertedRows[1]!.id).toBe("@acme/b");
     expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("acme--a");
+    expect(insertedRows[2]!.id).toBe("@acme/a");
     expect(insertedRows[2]!.autoInstalled).toBe(false);
 
     // autoInstalledDeps order: A pushes B first, then B's transitive deps (C)
     // So order is [B, C] at A's level
     expect(result.autoInstalledDeps).toHaveLength(2);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--b");
-    expect(result.autoInstalledDeps![1]!.packageId).toBe("acme--c");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/b");
+    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/c");
   });
 
   test("dep circulaire A→B→A → skip avec warning", async () => {
@@ -401,7 +404,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Parent: existing check → not installed → INSERT
     selectQueue = [
       [], // findMissingDeps for parent → dep missing
-      [{ id: "acme--dep" }], // existing check for dep → UPDATE
+      [{ id: "@acme/dep" }], // existing check for dep → UPDATE
       [], // existing check for parent → INSERT
     ];
 
@@ -409,7 +412,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     expect(updatedSets).toHaveLength(1);
     expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]!.id).toBe("acme--parent");
+    expect(insertedRows[0]!.id).toBe("@acme/parent");
   });
 
   test("update d'un package existant — le met à jour", async () => {
@@ -418,7 +421,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // No deps → no SELECT for deps; existing check → already installed
     selectQueue = [
-      [{ id: "acme--existing" }], // existing check → UPDATE
+      [{ id: "@acme/existing" }], // existing check → UPDATE
     ];
 
     const result = await installFromMarketplace(
@@ -432,7 +435,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     expect(updatedSets).toHaveLength(1);
     expect(insertedRows).toHaveLength(0);
-    expect(result.packageId).toBe("acme--existing");
+    expect(result.packageId).toBe("@acme/existing");
   });
 
   test("promotion auto→explicit — autoInstalled passe à false", async () => {
@@ -441,7 +444,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // No deps; existing check → already installed
     selectQueue = [
-      [{ id: "acme--promoted" }], // existing check → UPDATE
+      [{ id: "@acme/promoted" }], // existing check → UPDATE
     ];
 
     // Direct install (ctx.autoInstalled=false) on existing package → promote to explicit
@@ -473,7 +476,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Parent: existing check → not installed → INSERT
     selectQueue = [
       [], // findMissingDeps for parent → dep missing
-      [{ id: "acme--dep" }], // existing check for dep → UPDATE
+      [{ id: "@acme/dep" }], // existing check for dep → UPDATE
       [], // existing check for parent → INSERT
     ];
 
@@ -524,8 +527,8 @@ describe("installFromMarketplace — auto-install deps", () => {
     // autoInstalledDeps must be flat: root pushes [mid, ...mid.autoInstalledDeps(leaf)]
     expect(result.autoInstalledDeps).toHaveLength(2);
     const depIds = result.autoInstalledDeps!.map((d) => d.packageId);
-    expect(depIds).toContain("acme--leaf");
-    expect(depIds).toContain("acme--mid");
+    expect(depIds).toContain("@acme/leaf");
+    expect(depIds).toContain("@acme/mid");
     // Each entry should be a simple object with 3 keys
     for (const dep of result.autoInstalledDeps!) {
       expect(dep).toHaveProperty("packageId");
@@ -566,10 +569,10 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(2);
-    expect(insertedRows[0]!.id).toBe("acme--ext");
+    expect(insertedRows[0]!.id).toBe("@acme/ext");
     expect(insertedRows[0]!.autoInstalled).toBe(true);
     expect(result.autoInstalledDeps).toHaveLength(1);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--ext");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/ext");
     expect(result.autoInstalledDeps![0]!.type).toBe("extension");
   });
 
@@ -611,11 +614,11 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("acme--skill-a");
+    expect(insertedRows[0]!.id).toBe("@acme/skill-a");
     expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("acme--ext-b");
+    expect(insertedRows[1]!.id).toBe("@acme/ext-b");
     expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("acme--my-flow");
+    expect(insertedRows[2]!.id).toBe("@acme/my-flow");
     expect(insertedRows[2]!.autoInstalled).toBe(false);
 
     expect(result.autoInstalledDeps).toHaveLength(2);
@@ -661,9 +664,9 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("acme--b");
-    expect(insertedRows[1]!.id).toBe("acme--c");
-    expect(insertedRows[2]!.id).toBe("acme--parent");
+    expect(insertedRows[0]!.id).toBe("@acme/b");
+    expect(insertedRows[1]!.id).toBe("@acme/c");
+    expect(insertedRows[2]!.id).toBe("@acme/parent");
     expect(result.autoInstalledDeps).toHaveLength(2);
   });
 
@@ -706,7 +709,7 @@ describe("installFromMarketplace — auto-install deps", () => {
       [], // findMissingDeps for B → D missing
       [], // existing check for D → INSERT
       [], // existing check for B → INSERT
-      [{ id: "acme--d" }], // findMissingDeps for C → D already in DB
+      [{ id: "@acme/d" }], // findMissingDeps for C → D already in DB
       [], // existing check for C → INSERT
       [], // existing check for A → INSERT
     ];
@@ -722,17 +725,17 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // D inserted once (by B's subtree), C sees it already installed
     expect(insertedRows).toHaveLength(4);
-    expect(insertedRows[0]!.id).toBe("acme--d");
-    expect(insertedRows[1]!.id).toBe("acme--b");
-    expect(insertedRows[2]!.id).toBe("acme--c");
-    expect(insertedRows[3]!.id).toBe("acme--a");
+    expect(insertedRows[0]!.id).toBe("@acme/d");
+    expect(insertedRows[1]!.id).toBe("@acme/b");
+    expect(insertedRows[2]!.id).toBe("@acme/c");
+    expect(insertedRows[3]!.id).toBe("@acme/a");
 
     // autoInstalledDeps: B (+ its transitive D), then C (D already handled)
     expect(result.autoInstalledDeps).toHaveLength(3);
     const depIds = result.autoInstalledDeps!.map((d) => d.packageId);
-    expect(depIds).toContain("acme--b");
-    expect(depIds).toContain("acme--c");
-    expect(depIds).toContain("acme--d");
+    expect(depIds).toContain("@acme/b");
+    expect(depIds).toContain("@acme/c");
+    expect(depIds).toContain("@acme/d");
   });
 
   test("dep circulaire à 3 niveaux A→B→C→A → skip avec warning", async () => {
@@ -782,9 +785,9 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(circularWarns.length).toBeGreaterThanOrEqual(1);
     // All 3 installed despite the cycle (A already being installed, just skipped as dep of C)
     expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("acme--c");
-    expect(insertedRows[1]!.id).toBe("acme--b");
-    expect(insertedRows[2]!.id).toBe("acme--a");
+    expect(insertedRows[0]!.id).toBe("@acme/c");
+    expect(insertedRows[1]!.id).toBe("@acme/b");
+    expect(insertedRows[2]!.id).toBe("@acme/a");
   });
 
   test("dep introuvable dans le registry → throw", async () => {
@@ -854,21 +857,21 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("acme--my-ext");
+    expect(insertedRows[0]!.id).toBe("@acme/my-ext");
     expect(insertedRows[0]!.type).toBe("extension");
     expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("acme--my-skill");
+    expect(insertedRows[1]!.id).toBe("@acme/my-skill");
     expect(insertedRows[1]!.type).toBe("skill");
     expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("acme--my-flow");
+    expect(insertedRows[2]!.id).toBe("@acme/my-flow");
     expect(insertedRows[2]!.type).toBe("flow");
     expect(insertedRows[2]!.autoInstalled).toBe(false);
 
     // autoInstalledDeps: skill (+ its transitive ext)
     expect(result.autoInstalledDeps).toHaveLength(2);
-    expect(result.autoInstalledDeps![0]!.packageId).toBe("acme--my-skill");
+    expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/my-skill");
     expect(result.autoInstalledDeps![0]!.type).toBe("skill");
-    expect(result.autoInstalledDeps![1]!.packageId).toBe("acme--my-ext");
+    expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/my-ext");
     expect(result.autoInstalledDeps![1]!.type).toBe("extension");
   });
 });

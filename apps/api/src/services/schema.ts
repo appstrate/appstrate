@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
-import { SLUG_REGEX } from "@appstrate/validation";
+import { PACKAGE_REF_REGEX } from "@appstrate/validation";
 
 // --- AJV runtime validation ---
 
@@ -203,8 +203,8 @@ export function validateFlowContent(
   }
   const seenIds = new Set<string>();
   for (const skill of skills) {
-    if (!SLUG_REGEX.test(skill.id)) {
-      errors.push(`skill.id '${skill.id}' is not a valid slug`);
+    if (!PACKAGE_REF_REGEX.test(skill.id)) {
+      errors.push(`skill.id '${skill.id}' is not a valid package reference`);
     }
     if (seenIds.has(skill.id)) {
       errors.push(`skill.id '${skill.id}' is duplicated`);

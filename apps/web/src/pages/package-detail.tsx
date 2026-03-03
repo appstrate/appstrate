@@ -2,21 +2,21 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
-import { usePackageDetail, useDeletePackage } from "../hooks/use-packages";
+import { useLibraryDetail, useDeleteLibrary } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { TypeBadge } from "../components/type-badge";
 import { PublishModal } from "../components/publish-modal";
 import { LoadingState } from "../components/page-states";
 import { marketplacePath } from "../lib/strings";
 
-export function PackageDetailPage() {
+export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
   const { t } = useTranslation(["settings", "flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
-  const packageId = `${scope}/${name}`;
+  const packageId = scope && name ? `${scope}/${name}` : undefined;
   const { isOrgAdmin } = useOrg();
 
-  const { isLoading, data: detail, type } = usePackageDetail(packageId);
-  const deleteMutation = useDeletePackage(type);
+  const { isLoading, data: detail } = useLibraryDetail(type, packageId);
+  const deleteMutation = useDeleteLibrary(type);
 
   const [publishOpen, setPublishOpen] = useState(false);
 

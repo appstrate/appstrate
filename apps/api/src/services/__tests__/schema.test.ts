@@ -17,8 +17,8 @@ const VALID_MANIFEST = {
   tags: ["test"],
   requires: {
     services: [{ id: "gmail", provider: "google-mail" }],
-    skills: ["greeting-style"],
-    extensions: ["web-search"],
+    skills: ["@appstrate/greeting-style"],
+    extensions: ["@appstrate/web-search"],
   },
   config: {
     schema: {
@@ -424,9 +424,17 @@ describe("validateOutput", () => {
 // =====================================================
 
 describe("validateFlowContent", () => {
-  test("valid prompt and skills pass", () => {
+  test("valid prompt and skills pass (bare slug)", () => {
     const result = validateFlowContent("Do something", [
       { id: "web-search", description: "Search", content: "..." },
+    ]);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  test("valid prompt and skills pass (scoped name)", () => {
+    const result = validateFlowContent("Do something", [
+      { id: "@appstrate/web-search", description: "Search", content: "..." },
     ]);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
@@ -444,6 +452,14 @@ describe("validateFlowContent", () => {
     ]);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("Invalid Skill!"))).toBe(true);
+  });
+
+  test("invalid scoped skill ID fails", () => {
+    const result = validateFlowContent("Do something", [
+      { id: "@UPPER/case", description: "Bad", content: "..." },
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("@UPPER/case"))).toBe(true);
   });
 
   test("duplicate skill IDs fail", () => {

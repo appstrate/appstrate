@@ -112,6 +112,9 @@ mock.module("../builtin-library.ts", () => ({
   getBuiltInExtensions: () => new Map(),
   isBuiltInSkill: () => false,
   isBuiltInExtension: () => false,
+  resolveBuiltInSkill: () => undefined,
+  resolveBuiltInExtension: () => undefined,
+  BUILTIN_SCOPE: "appstrate",
 }));
 
 // --- Import after mocks ---
@@ -169,7 +172,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // 2. findRegistryDependents: registry packages with manifests
       [
         {
-          id: "acme--parent",
+          id: "@acme/parent",
           manifest: {
             displayName: "Parent Pkg",
             registryDependencies: { skills: { "@acme/target": "*" } },
@@ -178,12 +181,12 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       ],
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--target", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/target", SKILL_CONFIG);
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe("DEPENDED_ON");
     expect(result.dependents).toHaveLength(1);
-    expect(result.dependents![0]!.id).toBe("acme--parent");
+    expect(result.dependents![0]!.id).toBe("@acme/parent");
     expect(deletedCount).toBe(0);
   });
 
@@ -193,7 +196,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [], // no registry dependents
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--orphan", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/orphan", SKILL_CONFIG);
 
     expect(result.ok).toBe(true);
     expect(deletedCount).toBeGreaterThanOrEqual(1);
@@ -206,7 +209,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // registry packages: the target itself appears (self-dep in manifest)
       [
         {
-          id: "acme--target",
+          id: "@acme/target",
           manifest: {
             displayName: "Self",
             registryDependencies: { skills: { "@acme/target": "*" } },
@@ -215,7 +218,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       ],
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--target", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/target", SKILL_CONFIG);
 
     // Self-reference should be excluded → delete allowed
     expect(result.ok).toBe(true);
@@ -227,13 +230,13 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // registry package with null manifest
       [
         {
-          id: "acme--other",
+          id: "@acme/other",
           manifest: null,
         },
       ],
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--target", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/target", SKILL_CONFIG);
 
     // null manifest should be skipped → delete allowed
     expect(result.ok).toBe(true);
@@ -248,7 +251,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // findRegistryDependents would find dependents but is never reached
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--target", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/target", SKILL_CONFIG);
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe("IN_USE");
@@ -262,7 +265,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // registry package with no displayName in manifest → fallback to id
       [
         {
-          id: "acme--dep",
+          id: "@acme/dep",
           manifest: {
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
@@ -270,11 +273,11 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       ],
     ];
 
-    const result = await deleteOrgItem("org-1", "acme--target", SKILL_CONFIG);
+    const result = await deleteOrgItem("org-1", "@acme/target", SKILL_CONFIG);
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe("DEPENDED_ON");
     // displayName should fallback to id
-    expect(result.dependents![0]!.displayName).toBe("acme--dep");
+    expect(result.dependents![0]!.displayName).toBe("@acme/dep");
   });
 });
