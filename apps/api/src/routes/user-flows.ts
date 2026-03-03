@@ -6,28 +6,11 @@ import { deletePackage, updatePackage, insertPackage } from "../services/user-fl
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
-import {
-  setFlowItems,
-  buildRegistryDepsFromIds,
-  SKILL_CONFIG,
-  EXTENSION_CONFIG,
-} from "../services/library.ts";
+import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/library.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
-
-/** Enrich manifest with registryDependencies before save (single write). */
-async function enrichManifestWithRegistryDeps(
-  orgId: string,
-  manifest: Record<string, unknown>,
-): Promise<{ skillIds: string[]; extensionIds: string[] }> {
-  const { skillIds, extensionIds } = extractDepsFromManifest(manifest);
-  const registryDeps = await buildRegistryDepsFromIds(orgId, skillIds, extensionIds);
-  if (registryDeps) manifest.registryDependencies = registryDeps;
-  else delete manifest.registryDependencies;
-  return { skillIds, extensionIds };
-}
 
 /** Synchronise the junction table after save. */
 async function syncFlowDepsJunctionTable(
@@ -82,13 +65,10 @@ export function createUserFlowsRouter() {
       );
     }
 
-    // Enrich manifest with registryDependencies before save
-    const { skillIds, extensionIds } = await enrichManifestWithRegistryDeps(
-      orgId,
-      validatedManifest,
-    );
+    // Extract dependency IDs from manifest
+    const { skillIds, extensionIds } = extractDepsFromManifest(validatedManifest);
 
-    // Store in DB (single write with registryDependencies already included)
+    // Store in DB
     await insertPackage(packageId, orgId, "flow", validatedManifest, prompt);
 
     // Sync junction table for dependency tracking
@@ -155,10 +135,10 @@ export function createUserFlowsRouter() {
         return c.json({ error: "VALIDATION_ERROR", message: "Prompt cannot be empty" }, 400);
       }
 
-      // Enrich manifest with registryDependencies before save
-      const { skillIds, extensionIds } = await enrichManifestWithRegistryDeps(orgId, manifest);
+      // Extract dependency IDs from manifest
+      const { skillIds, extensionIds } = extractDepsFromManifest(manifest);
 
-      // Update DB: manifest + prompt (single write with registryDependencies already included)
+      // Update DB: manifest + prompt
       const updated = await updatePackage(packageId, { manifest, content: prompt }, updatedAt);
       if (!updated) {
         return c.json(
