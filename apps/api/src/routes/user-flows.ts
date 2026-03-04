@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
@@ -183,93 +182,6 @@ export function createUserFlowsRouter() {
       await createVersionSafe({ packageId, orgId, userId: user.id, zipBuffer, manifest });
 
       return c.json({ packageId, message: "Flow updated", lockVersion: updated.version });
-    },
-  );
-
-  // PUT /api/flows/:scope/:name/package — upload a new ZIP for an existing user flow
-  router.put(
-    "/:scope{@[^/]+}/:name/package",
-    requireFlow(),
-    requireAdmin(),
-    requireMutableFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-      const user = c.get("user");
-      const packageId = flow.id;
-
-      const formData = await c.req.formData();
-      const file = formData.get("file");
-      const lockVersionRaw = formData.get("lockVersion") as string | null;
-
-      if (!file || !(file instanceof File)) {
-        return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
-      }
-
-      if (!file.name.endsWith(".zip")) {
-        return c.json({ error: "VALIDATION_ERROR", message: "Only .zip files are accepted" }, 400);
-      }
-
-      const lockVersion = lockVersionRaw != null ? parseInt(lockVersionRaw, 10) : NaN;
-      if (isNaN(lockVersion)) {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: "lockVersion (integer) is required for updates" },
-          400,
-        );
-      }
-
-      const buffer = Buffer.from(await file.arrayBuffer());
-
-      let parsed;
-      try {
-        parsed = parsePackageZip(new Uint8Array(buffer));
-      } catch (err) {
-        if (err instanceof PackageZipError) {
-          return c.json({ error: err.code, message: err.message, details: err.details }, 400);
-        }
-        throw err;
-      }
-
-      if (parsed.type !== "flow") {
-        return c.json({ error: "INVALID_TYPE", message: "Expected type: flow" }, 400);
-      }
-
-      const { manifest, content } = parsed;
-
-      // Ensure name matches the flow ID (immutable)
-      const zipScopedName = (manifest as { name: string }).name;
-      if (zipScopedName !== packageId) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `name in ZIP ('${zipScopedName}') does not match flow`,
-          },
-          400,
-        );
-      }
-
-      // Update DB with new metadata from ZIP
-      const updated = await updatePackage(packageId, { manifest, content }, lockVersion);
-      if (!updated) {
-        return c.json(
-          {
-            error: "CONFLICT",
-            message: "Flow has been modified since your last read. Reload and try again.",
-          },
-          409,
-        );
-      }
-
-      // Create version + upload ZIP to Storage
-      const orgId = c.get("orgId");
-      await createVersionSafe({
-        packageId,
-        orgId,
-        userId: user.id,
-        zipBuffer: buffer,
-        manifest: manifest as Record<string, unknown>,
-      });
-
-      return c.json({ packageId, message: "Package updated", lockVersion: updated.version });
     },
   );
 

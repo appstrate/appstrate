@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import i18n from "../i18n";
-import { api, apiFetch, uploadFormData, apiBlob } from "../api";
+import { api, apiFetch, uploadFormData } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -258,36 +258,6 @@ export function useUpdateFlow(packageId: string) {
     },
     onError: onMutationError,
   });
-}
-
-export function useUploadPackage(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ file, lockVersion }: { file: File; lockVersion: number }) => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("lockVersion", String(lockVersion));
-      return uploadFormData<{ packageId: string; lockVersion: number }>(
-        `/flows/${packageId}/package`,
-        fd,
-        "PUT",
-      );
-    },
-    onSuccess: () => invalidateFlowQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export async function downloadPackage(packageId: string): Promise<void> {
-  const blob = await apiBlob(`/flows/${packageId}/package`);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${packageId}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 export function useCancelExecution() {

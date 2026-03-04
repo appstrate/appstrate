@@ -37,8 +37,6 @@ const expectedEndpoints = [
   "PUT /api/flows/{packageId}/config",
   "GET /api/flows/{packageId}/versions",
   "GET /api/flows/{packageId}/versions/{version}",
-  "GET /api/flows/{packageId}/package",
-  "PUT /api/flows/{packageId}/package",
   "POST /api/flows/{packageId}/services/{serviceId}/bind",
   "DELETE /api/flows/{packageId}/services/{serviceId}/bind",
   "POST /api/flows/{packageId}/share-token",

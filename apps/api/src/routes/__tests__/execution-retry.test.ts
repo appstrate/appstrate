@@ -72,6 +72,7 @@ mock.module("../../services/env-builder.ts", () => ({
 
 mock.module("../../services/package-versions.ts", () => ({
   getLatestVersionId: mock(async () => null),
+  getVersionDetail: mock(async () => null),
 }));
 
 mock.module("../../services/execution-tracker.ts", () => ({

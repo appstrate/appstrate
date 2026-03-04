@@ -23,9 +23,6 @@ import {
   getVersionCount,
   getMatchingDistTags,
 } from "../services/package-versions.ts";
-import { getPackageZip } from "../services/package-storage.ts";
-import { computeIntegrity } from "@appstrate/core/integrity";
-import { buildDownloadHeaders } from "@appstrate/core/download";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
 import {
@@ -194,28 +191,6 @@ export function createFlowsRouter() {
       config,
       validation: { valid: true },
     });
-  });
-
-  // GET /api/flows/:scope/:name/package — download the flow ZIP
-  router.get("/:scope{@[^/]+}/:name/package", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-
-    const zipBuffer = await getPackageZip(flow, orgId);
-    if (!zipBuffer) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: "Package not found" }, 404);
-    }
-
-    const integrity = computeIntegrity(new Uint8Array(zipBuffer));
-    const version = (flow.manifest.version as string) ?? "0.0.0";
-    const downloadHeaders = buildDownloadHeaders({
-      integrity,
-      yanked: false,
-      scope: c.req.param("scope"),
-      name: c.req.param("name"),
-      version,
-    });
-    return new Response(new Uint8Array(zipBuffer), { status: 200, headers: downloadHeaders });
   });
 
   // GET /api/flows/:scope/:name/versions — list flow version history (user flows only)
