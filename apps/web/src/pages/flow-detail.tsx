@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useFlowDetail, useVersionDetail } from "../hooks/use-packages";
+import { useFlowDetail, useVersionDetail, usePackageDownload } from "../hooks/use-packages";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import { VersionSelector } from "../components/version-selector";
 import { VersionBanners } from "../components/version-banners";
@@ -43,6 +43,7 @@ import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { formatDateField } from "../lib/markdown";
 
+import { Download } from "lucide-react";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { Spinner } from "../components/spinner";
@@ -142,6 +143,8 @@ export function FlowDetailPage() {
     bindAfter?: boolean;
   } | null>(null);
 
+  const downloadPackage = usePackageDownload(scope, name);
+
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
 
   if (error || !detail) return <Navigate to="/" replace />;
@@ -195,6 +198,8 @@ export function FlowDetailPage() {
       });
     }
   };
+
+  const downloadVersion = isHistoricalVersion ? versionDetail?.version : detail.version;
 
   /** Resolve provider authMode for a service */
   const getServiceAuthMode = (svc: { provider: string; authMode?: string }): string | undefined => {
@@ -484,6 +489,14 @@ export function FlowDetailPage() {
           <div className="actions-admin">
             {hasConfigSchema && (
               <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>
+            )}
+            {downloadVersion && (
+              <button
+                onClick={() => downloadPackage(downloadVersion)}
+                title={t("btn.download", { ns: "common" })}
+              >
+                <Download size={14} /> {t("btn.download", { ns: "common" })}
+              </button>
             )}
             {detail.source !== "built-in" && !isHistoricalVersion && (
               <Link to={`/flows/${packageId}/edit`}>
