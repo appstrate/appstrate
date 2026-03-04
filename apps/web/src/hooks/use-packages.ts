@@ -95,6 +95,7 @@ function useUpdatePackageMetadata(type: PackageType) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: ["version-info"] });
     },
   });
 }
@@ -218,6 +219,59 @@ export function usePackageVersions(
       );
       return data.versions;
     },
+    enabled: !!packageId,
+  });
+}
+
+// --- Version management mutations ---
+
+export function useCreateVersion(type: "flow" | "skill" | "extension", packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      return api<{ id: number; version: string; message: string }>(
+        `${packageBasePath(type, packageId)}/versions`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["package-versions"] });
+      qc.invalidateQueries({ queryKey: ["version-detail"] });
+      qc.invalidateQueries({ queryKey: ["version-info"] });
+      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+    },
+  });
+}
+
+export function useRestoreVersion(type: "flow" | "skill" | "extension", packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (version: string) =>
+      api<{ message: string; restoredVersion: string; lockVersion: number }>(
+        `${packageBasePath(type, packageId)}/versions/${version}/restore`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+    },
+  });
+}
+
+export function useVersionInfo(
+  type: "flow" | "skill" | "extension",
+  packageId: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["version-info", orgId, type, packageId],
+    queryFn: () =>
+      api<{ latestVersion: string | null; draftVersion: string | null }>(
+        `${packageBasePath(type, packageId!)}/versions/info`,
+      ),
     enabled: !!packageId,
   });
 }

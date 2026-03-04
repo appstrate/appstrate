@@ -22,8 +22,12 @@ import {
   getVersionDetail,
   getVersionCount,
   getMatchingDistTags,
+  getVersionInfo,
+  getLatestVersionCreatedAt,
+  createVersionFromDraft,
 } from "../services/package-versions.ts";
-import { requireAdmin, requireFlow } from "../middleware/guards.ts";
+import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
+import { updatePackage } from "../services/user-flows.ts";
 import { createShareToken } from "../services/share-tokens.ts";
 import {
   getEffectiveProfileId,
@@ -31,6 +35,9 @@ import {
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { eq } from "drizzle-orm";
+import { packages } from "@appstrate/db/schema";
+import { db } from "../lib/db.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -91,13 +98,15 @@ export function createFlowsRouter() {
 
     // Get config (global), last execution (per-user), running count (per-user), version count
     // For user flows, also fetch the raw DB row for editable content
-    const [currentConfig, lastExec, runningCount, userFlowRow, versionCount] = await Promise.all([
-      getPackageConfig(orgId, flow.id),
-      getLastExecution(flow.id, user.id, orgId),
-      getRunningExecutionsForPackage(flow.id, user.id),
-      flow.source !== "built-in" ? getPackageById(flow.id) : Promise.resolve(null),
-      flow.source !== "built-in" ? getVersionCount(flow.id) : Promise.resolve(0),
-    ]);
+    const [currentConfig, lastExec, runningCount, userFlowRow, versionCount, latestVersionDate] =
+      await Promise.all([
+        getPackageConfig(orgId, flow.id),
+        getLastExecution(flow.id, user.id, orgId),
+        getRunningExecutionsForPackage(flow.id, user.id),
+        flow.source !== "built-in" ? getPackageById(flow.id) : Promise.resolve(null),
+        flow.source !== "built-in" ? getVersionCount(flow.id) : Promise.resolve(0),
+        flow.source !== "built-in" ? getLatestVersionCreatedAt(flow.id) : Promise.resolve(null),
+      ]);
 
     // Merge defaults with current config
     const configWithDefaults: Record<string, unknown> = {};
@@ -153,6 +162,10 @@ export function createFlowsRouter() {
             prompt: flow.prompt,
             lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,
             lastPublishedAt: userFlowRow.lastPublishedAt ?? null,
+            hasUnpublishedChanges:
+              versionCount > 0 && latestVersionDate
+                ? (userFlowRow.updatedAt ?? new Date()) > latestVersionDate
+                : false,
           }
         : {}),
     });
@@ -207,6 +220,124 @@ export function createFlowsRouter() {
     const versions = await listPackageVersions(flow.id);
     return c.json({ versions });
   });
+
+  // GET /api/flows/:scope/:name/versions/info — get latest published + draft version
+  router.get("/:scope{@[^/]+}/:name/versions/info", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    if (flow.source === "built-in") {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
+        400,
+      );
+    }
+    const info = await getVersionInfo(flow.id);
+    return c.json(info);
+  });
+
+  // POST /api/flows/:scope/:name/versions — create a version from current draft
+  router.post(
+    "/:scope{@[^/]+}/:name/versions",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const user = c.get("user");
+      const orgId = c.get("orgId");
+
+      if (flow.source === "built-in") {
+        return c.json(
+          { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
+          400,
+        );
+      }
+
+      const result = await createVersionFromDraft({
+        packageId: flow.id,
+        orgId,
+        userId: user.id,
+      });
+
+      if (!result) {
+        return c.json(
+          { error: "VERSION_FAILED", message: "Failed to create version (invalid or duplicate)" },
+          400,
+        );
+      }
+
+      return c.json(
+        { id: result.id, version: result.version, message: `Version ${result.version} created` },
+        201,
+      );
+    },
+  );
+
+  // POST /api/flows/:scope/:name/versions/:version/restore — restore a version into the draft
+  router.post(
+    "/:scope{@[^/]+}/:name/versions/:version/restore",
+    requireFlow(),
+    requireAdmin(),
+    requireMutableFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+
+      if (flow.source === "built-in") {
+        return c.json(
+          { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
+          400,
+        );
+      }
+
+      const versionQuery = c.req.param("version");
+      const detail = await getVersionDetail(flow.id, versionQuery);
+      if (!detail) {
+        return c.json(
+          { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+          404,
+        );
+      }
+
+      // Get current package for lockVersion
+      const pkg = await getPackageById(flow.id);
+      if (!pkg) {
+        return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
+      }
+
+      const updated = await updatePackage(
+        flow.id,
+        {
+          manifest: detail.manifest,
+          content: detail.prompt ?? "",
+        },
+        pkg.version,
+      );
+
+      if (!updated) {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "Package was modified concurrently. Reload and try again.",
+          },
+          409,
+        );
+      }
+
+      // Align updatedAt with the restored version's timestamp — the draft is now
+      // a known version state, not new unpublished work.
+      if (detail.createdAt) {
+        await db
+          .update(packages)
+          .set({ updatedAt: new Date(detail.createdAt) })
+          .where(eq(packages.id, flow.id));
+      }
+
+      return c.json({
+        message: `Version ${detail.version} restored`,
+        restoredVersion: detail.version,
+        lockVersion: updated.version,
+      });
+    },
+  );
 
   // GET /api/flows/:scope/:name/versions/:version — get version detail with prompt from ZIP
   router.get("/:scope{@[^/]+}/:name/versions/:version", requireFlow(), async (c) => {

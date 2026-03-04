@@ -4003,3 +4003,70 @@ button:disabled {
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+
+/* --- Version management --- */
+.version-badge.unpublished {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  letter-spacing: 0.03em;
+}
+
+.create-version-modal .version-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.create-version-modal .version-input-group label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.create-version-modal .version-warning {
+  font-size: 0.75rem;
+  color: var(--warning);
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+}
+.create-version-modal .version-error {
+  font-size: 0.75rem;
+  color: var(--danger);
+}
+
+.version-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.version-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}
+.version-history-row .version-label {
+  font-family: monospace;
+  font-weight: 600;
+  min-width: 4rem;
+}
+.version-history-row .version-date {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  flex: 1;
+}
+.version-history-row .version-yanked-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}

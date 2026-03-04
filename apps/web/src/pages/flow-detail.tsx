@@ -3,6 +3,9 @@ import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useFlowDetail, useVersionDetail, usePackageDownload } from "../hooks/use-packages";
+import { CreateVersionModal } from "../components/create-version-modal";
+import { VersionHistory } from "../components/version-history";
+import { DraftDiffView } from "../components/draft-diff-view";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import { VersionSelector } from "../components/version-selector";
 import { VersionBanners } from "../components/version-banners";
@@ -76,7 +79,7 @@ function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
   );
 }
 
-type Tab = "executions" | "schedules" | "memories";
+type Tab = "executions" | "schedules" | "memories" | "versions" | "changes";
 
 export function FlowDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
@@ -101,6 +104,12 @@ export function FlowDetailPage() {
     versionParam,
   );
   const isVersionView = !!versionParam;
+  const hasDraftChanges = detail?.source !== "built-in" && !!detail?.hasUnpublishedChanges;
+  const { data: latestVersionForDiff } = useVersionDetail(
+    "flow",
+    packageId,
+    hasDraftChanges ? "latest" : undefined,
+  );
   const { data: executions } = useExecutions(packageId);
   const { data: schedules } = useSchedules(packageId);
   const { data: providers } = useProviders();
@@ -127,6 +136,8 @@ export function FlowDetailPage() {
   const deleteAllMemories = useDeleteAllMemories(packageId!);
 
   const [tab, setTab] = useState<Tab>("executions");
+  const [diffTab, setDiffTab] = useState<"prompt" | "manifest">("prompt");
+  const [createVersionOpen, setCreateVersionOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -153,7 +164,6 @@ export function FlowDetailPage() {
     type: "flow",
     packageId,
     versionParam,
-    versionCount: detail.versionCount,
     versionDetail,
     liveVersion: detail.version,
   });
@@ -233,12 +243,17 @@ export function FlowDetailPage() {
       <div className="flow-detail-header">
         <div className="header-row">
           <h2>{detail.displayName}</h2>
+          {hasDraftChanges && !isVersionView && (
+            <span className="version-badge unpublished">{t("version.unpublished")}</span>
+          )}
           <div className="header-selectors">
             {detail.versionCount && detail.versionCount > 0 && (
               <VersionSelector
                 packageId={packageId}
                 currentVersion={versionDetail?.version ?? versionParam}
                 type="flow"
+                hasDraftChanges={hasDraftChanges}
+                currentIsDraft={!versionParam}
               />
             )}
             {isOrgAdmin && orgProxies && orgProxies.length > 0 && (
@@ -499,9 +514,14 @@ export function FlowDetailPage() {
               </button>
             )}
             {detail.source !== "built-in" && !isHistoricalVersion && (
-              <Link to={`/flows/${packageId}/edit`}>
-                <button>{t("btn.edit")}</button>
-              </Link>
+              <>
+                <button onClick={() => setCreateVersionOpen(true)} disabled={!hasDraftChanges}>
+                  {t("version.createVersion")}
+                </button>
+                <Link to={`/flows/${packageId}/edit`}>
+                  <button>{t("btn.edit")}</button>
+                </Link>
+              </>
             )}
             {isHistoricalVersion && (
               <span className="version-readonly-badge">{t("version.readOnly")}</span>
@@ -555,6 +575,27 @@ export function FlowDetailPage() {
           {t("detail.tabMemories")}
           {memories && memories.length > 0 ? ` (${memories.length})` : ""}
         </button>
+        {detail.source !== "built-in" && (
+          <button
+            role="tab"
+            aria-selected={tab === "versions"}
+            className={`tab ${tab === "versions" ? "active" : ""}`}
+            onClick={() => setTab("versions")}
+          >
+            {t("version.history")}
+            {detail.versionCount ? ` (${detail.versionCount})` : ""}
+          </button>
+        )}
+        {hasDraftChanges && !isVersionView && (
+          <button
+            role="tab"
+            aria-selected={tab === "changes"}
+            className={`tab ${tab === "changes" ? "active" : ""}`}
+            onClick={() => setTab("changes")}
+          >
+            {t("version.diff")}
+          </button>
+        )}
       </div>
 
       {tab === "executions" && (
@@ -704,6 +745,53 @@ export function FlowDetailPage() {
         </>
       )}
 
+      {tab === "versions" && (
+        <VersionHistory packageId={packageId} type="flow" isAdmin={isOrgAdmin} />
+      )}
+
+      {tab === "changes" && hasDraftChanges && !isVersionView && latestVersionForDiff && (
+        <>
+          <div className="exec-tabs" role="tablist">
+            <button
+              role="tab"
+              aria-selected={diffTab === "prompt"}
+              className={`tab ${diffTab === "prompt" ? "active" : ""}`}
+              onClick={() => setDiffTab("prompt")}
+            >
+              {t("version.diffPrompt")}
+            </button>
+            <button
+              role="tab"
+              aria-selected={diffTab === "manifest"}
+              className={`tab ${diffTab === "manifest" ? "active" : ""}`}
+              onClick={() => setDiffTab("manifest")}
+            >
+              {t("version.diffManifest")}
+            </button>
+          </div>
+          {diffTab === "prompt" && detail.prompt != null && latestVersionForDiff.prompt != null && (
+            <DraftDiffView
+              original={latestVersionForDiff.prompt}
+              modified={detail.prompt}
+              language="markdown"
+            />
+          )}
+          {diffTab === "manifest" && (
+            <DraftDiffView
+              original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
+              modified={JSON.stringify(detail.manifest ?? {}, null, 2)}
+              language="json"
+            />
+          )}
+        </>
+      )}
+
+      <CreateVersionModal
+        open={createVersionOpen}
+        onClose={() => setCreateVersionOpen(false)}
+        type="flow"
+        packageId={packageId}
+      />
       <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} flow={detail} />
       <InputModal
         open={inputOpen}

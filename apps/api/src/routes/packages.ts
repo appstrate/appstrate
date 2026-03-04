@@ -6,7 +6,7 @@ import { buildDownloadHeaders } from "@appstrate/core/download";
 import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
-import { getPackageById, insertPackage } from "../services/user-flows.ts";
+import { getPackageById, insertPackage, updatePackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { isBuiltInFlow } from "../services/flow-service.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-packages.ts";
@@ -33,6 +33,9 @@ import {
   getVersionCount,
   getMatchingDistTags,
   listPackageVersions,
+  getVersionInfo,
+  getLatestVersionCreatedAt,
+  createVersionFromDraft,
 } from "../services/package-versions.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
@@ -332,9 +335,10 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const [item, versionCount] = await Promise.all([
+    const [item, versionCount, latestVersionDate] = await Promise.all([
       getOrgItem(orgId, itemId, rcfg.cfg),
       getVersionCount(itemId),
+      getLatestVersionCreatedAt(itemId),
     ]);
 
     if (!item) {
@@ -347,7 +351,12 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    return c.json({ [rcfg.responseKey]: { ...item, versionCount } });
+    const hasUnpublishedChanges =
+      item.source !== "built-in" && versionCount > 0 && latestVersionDate
+        ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
+        : false;
+
+    return c.json({ [rcfg.responseKey]: { ...item, versionCount, hasUnpublishedChanges } });
   };
 }
 
@@ -559,6 +568,133 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
   };
 }
 
+function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const itemId = getItemId(c);
+    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!item) {
+      return c.json(
+        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
+        404,
+      );
+    }
+    const info = await getVersionInfo(itemId);
+    return c.json(info);
+  };
+}
+
+function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+    const itemId = getItemId(c);
+    const label = rcfg.cfg.label.slice(0, -1);
+
+    if (rcfg.cfg.isBuiltIn(itemId)) {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        403,
+      );
+    }
+
+    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!item) {
+      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+    }
+
+    const result = await createVersionFromDraft({
+      packageId: itemId,
+      orgId,
+      userId: user.id,
+    });
+
+    if (!result) {
+      return c.json(
+        { error: "VERSION_FAILED", message: "Failed to create version (invalid or duplicate)" },
+        400,
+      );
+    }
+
+    return c.json(
+      { id: result.id, version: result.version, message: `Version ${result.version} created` },
+      201,
+    );
+  };
+}
+
+function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
+    const itemId = getItemId(c);
+    const label = rcfg.cfg.label.slice(0, -1);
+
+    if (rcfg.cfg.isBuiltIn(itemId)) {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        403,
+      );
+    }
+
+    const versionQuery = c.req.param("version");
+    const detail = await getVersionDetail(itemId, versionQuery);
+    if (!detail) {
+      return c.json(
+        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+        404,
+      );
+    }
+
+    const pkg = await getPackageById(itemId);
+    if (!pkg) {
+      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+    }
+
+    // Extract content from version ZIP
+    let content = detail.prompt ?? "";
+    if (detail.content) {
+      const fileName = rcfg.storageFileName(itemId);
+      const fileData = detail.content[fileName];
+      if (fileData) {
+        content = new TextDecoder().decode(fileData);
+      }
+    }
+
+    const updated = await updatePackage(
+      itemId,
+      { manifest: detail.manifest, content },
+      pkg.version,
+    );
+
+    if (!updated) {
+      return c.json(
+        { error: "CONFLICT", message: "Package was modified concurrently. Reload and try again." },
+        409,
+      );
+    }
+
+    // Align updatedAt with the restored version's timestamp — the draft is now
+    // a known version state, not new unpublished work.
+    if (detail.createdAt) {
+      await db
+        .update(packages)
+        .set({ updatedAt: new Date(detail.createdAt) })
+        .where(eq(packages.id, itemId));
+    }
+
+    // Re-upload storage files from the version ZIP
+    if (detail.content) {
+      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, detail.content);
+    }
+
+    return c.json({
+      message: `Version ${detail.version} restored`,
+      restoredVersion: detail.version,
+      lockVersion: updated.version,
+    });
+  };
+}
+
 // ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
@@ -572,6 +708,18 @@ export function createPackagesRouter() {
     router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(`/${path}/:scope{@[^/]+}/:name/versions`, makeListVersionsHandler(rcfg));
+    // Version info + create version + restore — BEFORE :version param to avoid matching
+    router.get(`/${path}/:scope{@[^/]+}/:name/versions/info`, makeVersionInfoHandler(rcfg));
+    router.post(
+      `/${path}/:scope{@[^/]+}/:name/versions`,
+      requireAdmin(),
+      makeCreateVersionHandler(rcfg),
+    );
+    router.post(
+      `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
+      requireAdmin(),
+      makeRestoreVersionHandler(rcfg),
+    );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(`/${path}/:scope{@[^/]+}/:name`, makeGetHandler(rcfg));

@@ -246,5 +246,20 @@
   "version.selector": "Version",
   "version.yanked": "This version has been yanked",
   "version.readOnly": "Read-only",
-  "version.notFound": "Version not found"
+  "version.notFound": "Version not found",
+  "version.unpublished": "Unpublished changes",
+  "version.createVersion": "Create version",
+  "version.latestPublished": "Latest published version",
+  "version.draftVersionLabel": "Draft version (manifest)",
+  "version.noVersion": "Not set",
+  "version.mustBeHigher": "The manifest version must be higher than the latest published version. Update the version field in the editor.",
+  "version.noVersionInManifest": "No version set in the manifest. Add a version field in the editor.",
+  "version.restore": "Restore",
+  "version.restoreConfirm": "Restore version {{version}}? The current draft will be overwritten.",
+  "version.diff": "Diff",
+  "version.noVersions": "No versions created",
+  "version.draftLabel": "Draft",
+  "version.diffPrompt": "Prompt",
+  "version.diffManifest": "Manifest",
+  "version.history": "History"
 }

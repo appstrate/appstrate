@@ -117,7 +117,6 @@ export function createUserFlowsRouter() {
     requireMutableFlow(),
     async (c) => {
       const flow = c.get("flow");
-      const user = c.get("user");
       const orgId = c.get("orgId");
       const packageId = flow.id;
 
@@ -176,10 +175,6 @@ export function createUserFlowsRouter() {
 
       // Sync junction table for dependency tracking
       await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
-
-      // Create version + upload minimal ZIP
-      const zipBuffer = buildMinimalZip(manifest, prompt);
-      await createVersionSafe({ packageId, orgId, userId: user.id, zipBuffer, manifest });
 
       return c.json({ packageId, message: "Flow updated", lockVersion: updated.version });
     },

@@ -187,6 +187,37 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/skills/{skillId}/versions/info": {
+    get: {
+      operationId: "getSkillVersionInfo",
+      tags: ["Packages"],
+      summary: "Get version info for a skill (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latestVersion: { type: ["string", "null"] },
+                  draftVersion: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/packages/skills/{skillId}/versions": {
     get: {
       operationId: "listSkillVersions",
@@ -215,6 +246,76 @@ export const packagesPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createSkillVersion",
+      tags: ["Packages"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "201": {
+          description: "Version created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/skills/{skillId}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreSkillVersion",
+      tags: ["Packages"],
+      summary: "Restore a skill version into the draft",
+      description:
+        "Restore a previously published version into the skill draft. Does not create a new version. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restoredVersion: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification" },
       },
     },
   },
@@ -472,6 +573,37 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/extensions/{extensionId}/versions/info": {
+    get: {
+      operationId: "getExtensionVersionInfo",
+      tags: ["Packages"],
+      summary: "Get version info for an extension (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latestVersion: { type: ["string", "null"] },
+                  draftVersion: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/packages/extensions/{extensionId}/versions": {
     get: {
       operationId: "listExtensionVersions",
@@ -500,6 +632,76 @@ export const packagesPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createExtensionVersion",
+      tags: ["Packages"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current extension draft. Version is determined by the manifest version field. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "201": {
+          description: "Version created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/extensions/{extensionId}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreExtensionVersion",
+      tags: ["Packages"],
+      summary: "Restore an extension version into the draft",
+      description:
+        "Restore a previously published version into the extension draft. Does not create a new version. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restoredVersion: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification" },
       },
     },
   },
