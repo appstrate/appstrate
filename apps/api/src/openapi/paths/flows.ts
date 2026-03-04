@@ -754,7 +754,7 @@ export const flowsPaths = {
               type: "object",
               required: ["skillIds"],
               properties: {
-                skillIds: { type: "array", items: { type: "string" } },
+                skillIds: { type: "array", items: { type: "string", pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$" } },
               },
             },
           },
@@ -800,7 +800,7 @@ export const flowsPaths = {
               type: "object",
               required: ["extensionIds"],
               properties: {
-                extensionIds: { type: "array", items: { type: "string" } },
+                extensionIds: { type: "array", items: { type: "string", pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$" } },
               },
             },
           },

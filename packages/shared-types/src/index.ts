@@ -134,8 +134,8 @@ export interface FlowListItem {
   tags: string[];
   requires: {
     services: string[];
-    skills: string[];
-    extensions: string[];
+    skills: Record<string, string>;
+    extensions: Record<string, string>;
   };
   runningExecutions: number;
   source: "built-in" | "local";
@@ -151,8 +151,8 @@ export interface FlowDetail {
   source: "built-in" | "local";
   requires: {
     services: ServiceStatus[];
-    skills: { id: string; name?: string; description?: string }[];
-    extensions: { id: string; name?: string; description?: string }[];
+    skills: { id: string; version: string; name?: string; description?: string }[];
+    extensions: { id: string; version: string; name?: string; description?: string }[];
   };
   input?: {
     schema: JSONSchemaObject;
@@ -194,6 +194,7 @@ export interface OrgPackageItem {
   createdAt: string;
   updatedAt: string;
   usedByFlows?: number;
+  lastPublishedVersion?: string | null;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {

@@ -18,7 +18,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "@appstrate/core": "^2.0.0",
+    "@appstrate/core": "^2.1.2",
     "@appstrate/env": "workspace:*",
     "better-auth": "^1.2.8",
     "drizzle-orm": "^0.39.3",

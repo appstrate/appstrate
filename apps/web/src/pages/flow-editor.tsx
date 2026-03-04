@@ -169,8 +169,8 @@ function FlowEditorForm({
           type="skill"
           title={t("editor.tabSkills")}
           emptyLabel={t("editor.skillsEmpty")}
-          selectedIds={form.skills.map((s) => s.id)}
-          onChange={(ids) => setForm((s) => ({ ...s, skills: ids.map((id) => ({ id })) }))}
+          selectedEntries={form.skills}
+          onChange={(entries) => setForm((s) => ({ ...s, skills: entries }))}
         />
       )}
 
@@ -179,8 +179,8 @@ function FlowEditorForm({
           type="extension"
           title={t("editor.tabExtensions")}
           emptyLabel={t("editor.extensionsEmpty")}
-          selectedIds={form.extensions.map((e) => e.id)}
-          onChange={(ids) => setForm((s) => ({ ...s, extensions: ids.map((id) => ({ id })) }))}
+          selectedEntries={form.extensions}
+          onChange={(entries) => setForm((s) => ({ ...s, extensions: entries }))}
         />
       )}
 

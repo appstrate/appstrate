@@ -235,7 +235,7 @@ La réponse contient un champ `flows` listant les flows qui référencent cette 
 1. Pour chaque flow référencé, dissocier la ressource :
    ```
    PUT /api/flows/{packageId}/skills
-   { "skillIds": [... IDs restants sans celui à supprimer ...] }
+   { "skillIds": ["@scope/remaining-skill-1", "@scope/remaining-skill-2"] }
    ```
 2. Puis réessayer la suppression
 

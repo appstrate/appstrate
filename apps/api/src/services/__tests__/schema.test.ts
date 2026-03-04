@@ -17,8 +17,8 @@ const VALID_MANIFEST = {
   tags: ["test"],
   requires: {
     services: [{ id: "gmail", provider: "google-mail" }],
-    skills: ["@appstrate/greeting-style"],
-    extensions: ["@appstrate/web-search"],
+    skills: { "@appstrate/greeting-style": "*" },
+    extensions: { "@appstrate/web-search": "*" },
   },
   config: {
     schema: {
@@ -424,12 +424,12 @@ describe("validateOutput", () => {
 // =====================================================
 
 describe("validateFlowContent", () => {
-  test("valid prompt and skills pass (bare slug)", () => {
+  test("bare slug without scope is rejected", () => {
     const result = validateFlowContent("Do something", [
       { id: "web-search", description: "Search", content: "..." },
     ]);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain("web-search");
   });
 
   test("valid prompt and skills pass (scoped name)", () => {
@@ -464,8 +464,8 @@ describe("validateFlowContent", () => {
 
   test("duplicate skill IDs fail", () => {
     const result = validateFlowContent("Do something", [
-      { id: "search", description: "A", content: "..." },
-      { id: "search", description: "B", content: "..." },
+      { id: "@appstrate/search", description: "A", content: "..." },
+      { id: "@appstrate/search", description: "B", content: "..." },
     ]);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("duplicated"))).toBe(true);

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { validateManifest } from "@appstrate/core/validation";
+import { validateManifest, scopedNameRegex } from "@appstrate/core/validation";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload, getNextVersion } from "../services/package-versions.ts";
@@ -198,6 +198,17 @@ export function createUserFlowsRouter() {
         return c.json({ error: "VALIDATION_ERROR", message: "skillIds must be an array" }, 400);
       }
 
+      const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
+      if (invalidIds.length > 0) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+          },
+          400,
+        );
+      }
+
       try {
         await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
       } catch (err) {
@@ -227,6 +238,17 @@ export function createUserFlowsRouter() {
 
       if (!Array.isArray(extensionIds)) {
         return c.json({ error: "VALIDATION_ERROR", message: "extensionIds must be an array" }, 400);
+      }
+
+      const invalidIds = extensionIds.filter((id) => !scopedNameRegex.test(id));
+      if (invalidIds.length > 0) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: `Invalid extension IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+          },
+          400,
+        );
       }
 
       try {

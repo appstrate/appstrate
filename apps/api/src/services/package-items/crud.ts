@@ -24,11 +24,11 @@ async function countBuiltInUsageFromManifests(
   const countMap = new Map<string, number>();
 
   for (const flow of flowRows) {
-    const manifest = flow.manifest as { requires?: { [k: string]: { id: string }[] } };
-    const items = manifest?.requires?.[cfg.storageFolder] ?? [];
-    for (const item of items) {
-      if (cfg.isBuiltIn(item.id)) {
-        countMap.set(item.id, (countMap.get(item.id) ?? 0) + 1);
+    const manifest = flow.manifest as { requires?: Record<string, Record<string, string>> };
+    const itemsMap = manifest?.requires?.[cfg.storageFolder] ?? {};
+    for (const id of Object.keys(itemsMap)) {
+      if (cfg.isBuiltIn(id)) {
+        countMap.set(id, (countMap.get(id) ?? 0) + 1);
       }
     }
   }
@@ -145,6 +145,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       createdAt: row.createdAt?.toISOString() ?? "",
       updatedAt: row.updatedAt?.toISOString() ?? "",
       usedByFlows: countMap.get(row.id) ?? 0,
+      lastPublishedVersion: row.lastPublishedVersion ?? null,
     };
   });
 

@@ -21,12 +21,14 @@ export interface FlowServiceRequirement {
 
 export interface SkillMeta {
   id: string;
+  version?: string;
   name?: string;
   description?: string;
 }
 
 export interface ExtensionMeta {
   id: string;
+  version?: string;
   name?: string;
   description?: string;
 }

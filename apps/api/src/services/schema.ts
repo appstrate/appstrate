@@ -1,7 +1,7 @@
 import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
-import { PACKAGE_REF_REGEX } from "@appstrate/core/validation";
+import { scopedNameRegex } from "@appstrate/core/validation";
 
 // --- AJV runtime validation ---
 
@@ -203,7 +203,7 @@ export function validateFlowContent(
   }
   const seenIds = new Set<string>();
   for (const skill of skills) {
-    if (!PACKAGE_REF_REGEX.test(skill.id)) {
+    if (!scopedNameRegex.test(skill.id)) {
       errors.push(`skill.id '${skill.id}' is not a valid package reference`);
     }
     if (seenIds.has(skill.id)) {
