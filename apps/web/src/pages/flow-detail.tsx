@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -136,7 +136,7 @@ export function FlowDetailPage() {
   const deleteAllMemories = useDeleteAllMemories(packageId!);
 
   const [tab, setTab] = useState<Tab>("executions");
-  const [diffTab, setDiffTab] = useState<"prompt" | "manifest">("prompt");
+  const [diffTab, setDiffTab] = useState<"prompt" | "manifest">("manifest");
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
@@ -155,6 +155,15 @@ export function FlowDetailPage() {
   } | null>(null);
 
   const downloadPackage = usePackageDownload(scope, name);
+
+  const hasPromptChanges = detail?.prompt !== latestVersionForDiff?.prompt;
+  const hasManifestChanges =
+    JSON.stringify(detail?.manifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
+
+  useEffect(() => {
+    if (diffTab === "prompt" && !hasPromptChanges && hasManifestChanges) setDiffTab("manifest");
+    if (diffTab === "manifest" && !hasManifestChanges && hasPromptChanges) setDiffTab("prompt");
+  }, [hasPromptChanges, hasManifestChanges, diffTab]);
 
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
 
@@ -752,35 +761,39 @@ export function FlowDetailPage() {
       {tab === "changes" && hasDraftChanges && !isVersionView && latestVersionForDiff && (
         <>
           <div className="exec-tabs" role="tablist">
-            <button
-              role="tab"
-              aria-selected={diffTab === "prompt"}
-              className={`tab ${diffTab === "prompt" ? "active" : ""}`}
-              onClick={() => setDiffTab("prompt")}
-            >
-              {t("version.diffPrompt")}
-            </button>
-            <button
-              role="tab"
-              aria-selected={diffTab === "manifest"}
-              className={`tab ${diffTab === "manifest" ? "active" : ""}`}
-              onClick={() => setDiffTab("manifest")}
-            >
-              {t("version.diffManifest")}
-            </button>
+            {hasManifestChanges && (
+              <button
+                role="tab"
+                aria-selected={diffTab === "manifest"}
+                className={`tab ${diffTab === "manifest" ? "active" : ""}`}
+                onClick={() => setDiffTab("manifest")}
+              >
+                {t("version.diffManifest")}
+              </button>
+            )}
+            {hasPromptChanges && (
+              <button
+                role="tab"
+                aria-selected={diffTab === "prompt"}
+                className={`tab ${diffTab === "prompt" ? "active" : ""}`}
+                onClick={() => setDiffTab("prompt")}
+              >
+                {t("version.diffPrompt")}
+              </button>
+            )}
           </div>
-          {diffTab === "prompt" && detail.prompt != null && latestVersionForDiff.prompt != null && (
-            <DraftDiffView
-              original={latestVersionForDiff.prompt}
-              modified={detail.prompt}
-              language="markdown"
-            />
-          )}
-          {diffTab === "manifest" && (
+          {diffTab === "manifest" && hasManifestChanges && (
             <DraftDiffView
               original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
               modified={JSON.stringify(detail.manifest ?? {}, null, 2)}
               language="json"
+            />
+          )}
+          {diffTab === "prompt" && hasPromptChanges && detail.prompt != null && latestVersionForDiff.prompt != null && (
+            <DraftDiffView
+              original={latestVersionForDiff.prompt}
+              modified={detail.prompt}
+              language="markdown"
             />
           )}
         </>
