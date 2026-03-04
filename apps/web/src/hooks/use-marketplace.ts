@@ -50,6 +50,8 @@ interface MarketplacePackageDetail {
   createdAt: string;
   updatedAt: string;
   installedVersion: string | null;
+  integrityConflict: boolean;
+  localVersionAhead: string | null;
   distTags?: Array<{ tag: string; versionId: number }>;
 }
 

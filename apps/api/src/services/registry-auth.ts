@@ -58,7 +58,7 @@ export async function initiateRegistryOAuth(
     response_type: "code",
     client_id: env.REGISTRY_CLIENT_ID,
     redirect_uri: callbackUrl,
-    scope: "read write publish",
+    scope: "read publish",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",

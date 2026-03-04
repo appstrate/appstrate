@@ -23,7 +23,7 @@ export function createShareRouter() {
 
   // GET /share/:token/flow — public flow metadata (no JWT)
   router.get("/:token/flow", rateLimitByIp(60), async (c) => {
-    const token = c.req.param("token");
+    const token = c.req.param("token")!;
     const shareToken = await getShareToken(token);
 
     if (!shareToken || shareToken.expiresAt < new Date()) {
@@ -81,7 +81,7 @@ export function createShareRouter() {
 
   // POST /share/:token/run — consume token and execute (no JWT)
   router.post("/:token/run", rateLimitByIp(5), async (c) => {
-    const token = c.req.param("token");
+    const token = c.req.param("token")!;
 
     // Atomically consume the token
     const consumed = await consumeShareToken(token);
@@ -184,7 +184,7 @@ export function createShareRouter() {
 
   // GET /share/:token/status — polling endpoint for execution status (no JWT)
   router.get("/:token/status", rateLimitByIp(60), async (c) => {
-    const token = c.req.param("token");
+    const token = c.req.param("token")!;
     const shareToken = await getShareToken(token);
 
     if (!shareToken) {

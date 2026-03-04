@@ -1,8 +1,8 @@
 import { eq, and } from "drizzle-orm";
 import { RegistryClientError, type PublishResult } from "@appstrate/registry-client";
-import { zipArtifact, type Zippable } from "@appstrate/core/zip";
+import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
 import { db } from "../lib/db.ts";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageVersions } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import { getAuthenticatedRegistryClient } from "./registry-auth.ts";
@@ -24,6 +24,7 @@ import { validateForwardVersion } from "@appstrate/core/version-policy";
 import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
 import { getPackage } from "./flow-service.ts";
 import { buildRegistryDependencies } from "./package-items/dependencies.ts";
+import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -43,6 +44,7 @@ export async function publishPackage(
   packageId: string,
   orgId: string,
   userId: string,
+  targetVersion?: string,
 ): Promise<PublishResult> {
   // 1. Verify registry connection
   const client = await getAuthenticatedRegistryClient(userId);
@@ -65,17 +67,57 @@ export async function publishPackage(
     throw new Error("Cannot publish built-in packages");
   }
 
-  // 3. Derive scope/name from manifest (single source of truth)
-  const currentManifest = (pkg.manifest ?? {}) as Partial<Manifest>;
-  const parsed = parseScopedName(currentManifest.name!);
+  // 3. Resolve manifest: from a specific version or from the draft
+  let sourceManifest: Partial<Manifest>;
+  let versionZipBuffer: Buffer | null = null;
+
+  if (targetVersion) {
+    // Load from packageVersions table
+    const [versionRow] = await db
+      .select()
+      .from(packageVersions)
+      .where(
+        and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, targetVersion)),
+      )
+      .limit(1);
+
+    if (!versionRow) {
+      throw new PublishValidationError(
+        "VERSION_NOT_FOUND",
+        `Version "${targetVersion}" not found for package "${packageId}"`,
+      );
+    }
+
+    if (versionRow.yanked) {
+      throw new PublishValidationError(
+        "VERSION_YANKED",
+        `Version "${targetVersion}" has been yanked and cannot be published`,
+      );
+    }
+
+    sourceManifest = (versionRow.manifest ?? {}) as Partial<Manifest>;
+    versionZipBuffer = await downloadVersionZip(packageId, targetVersion, versionRow.integrity);
+
+    if (!versionZipBuffer) {
+      throw new PublishValidationError(
+        "VERSION_ZIP_MISSING",
+        `ZIP artifact not found for version "${targetVersion}"`,
+      );
+    }
+  } else {
+    sourceManifest = (pkg.manifest ?? {}) as Partial<Manifest>;
+  }
+
+  // 4. Derive scope/name from manifest (single source of truth)
+  const parsed = parseScopedName(sourceManifest.name!);
   if (!parsed) {
     throw new Error("manifest.name must be in @scope/name format");
   }
 
   const { scope, name } = parsed;
 
-  // 4. Version comes from manifest (user-controlled, npm model)
-  const version = currentManifest.version as string | undefined;
+  // 5. Version comes from manifest (user-controlled, npm model)
+  const version = sourceManifest.version as string | undefined;
 
   if (!version) {
     throw new PublishValidationError("VERSION_MISSING", "manifest.version is required");
@@ -94,20 +136,22 @@ export async function publishPackage(
     );
   }
 
-  // 5. Build publish manifest with registry deps — local manifest stays untouched
+  // 6. Build publish manifest with registry deps — local manifest stays untouched
   const registryDeps = await buildRegistryDependencies(packageId, orgId);
   const publishManifest = prepareManifestForPublish(
-    currentManifest as Record<string, unknown>,
+    sourceManifest as Record<string, unknown>,
     scope,
     name,
     version,
     registryDeps,
   ) as Partial<Manifest>;
 
-  // 6. Build artifact
-  const artifact = await buildPublishableArtifact(pkg, orgId, publishManifest);
+  // 7. Build artifact
+  const artifact = versionZipBuffer
+    ? await buildArtifactFromVersionZip(versionZipBuffer, publishManifest)
+    : await buildPublishableArtifact(pkg, orgId, publishManifest);
 
-  // 7. Publish to registry
+  // 8. Publish to registry
   let result: PublishResult;
   try {
     result = await client.publish(artifact);
@@ -122,7 +166,7 @@ export async function publishPackage(
     throw err;
   }
 
-  // 8. Update local package with registry tracking — local manifest stays intact
+  // 9. Update local package with registry tracking — local manifest stays intact
   await db
     .update(packages)
     .set({
@@ -221,6 +265,26 @@ async function buildPublishableArtifact(
       entries[`${pkg.id}.ts`] = new TextEncoder().encode(pkg.content);
     }
   }
+
+  return zipArtifact(entries, ZIP_COMPRESSION_LEVEL);
+}
+
+/** Build a publishable artifact from a stored version ZIP, replacing manifest.json with the publish manifest. */
+async function buildArtifactFromVersionZip(
+  zipBuffer: Buffer,
+  publishManifest: Partial<Manifest>,
+): Promise<Uint8Array> {
+  const unzipped = unzipArtifact(new Uint8Array(zipBuffer));
+  const entries: Zippable = {};
+
+  // Copy all files from the version ZIP except manifest.json
+  for (const [filePath, content] of Object.entries(unzipped.files)) {
+    if (filePath === "manifest.json") continue;
+    entries[filePath] = content;
+  }
+
+  // Replace manifest with the publish manifest
+  entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(publishManifest, null, 2));
 
   return zipArtifact(entries, ZIP_COMPRESSION_LEVEL);
 }

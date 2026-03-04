@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
-import { api, ApiError } from "../api";
+import { api } from "../api";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -86,29 +86,28 @@ export function useClaimScope() {
   });
 }
 
-export function usePublishPackage() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ packageId }: { packageId: string }) =>
-      api<{ scope: string; name: string; version: string }>(`/packages/${packageId}/publish`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow"] });
-      qc.invalidateQueries({ queryKey: ["flows"] });
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      qc.invalidateQueries({ queryKey: ["registry"] });
-    },
-    onError: (err: Error) => {
-      if (err instanceof ApiError) {
-        const key = `publish.error.${err.code}`;
-        const translated = i18n.t(key, { ns: "flows", defaultValue: "" });
-        const message =
-          translated || i18n.t("publish.error.generic", { ns: "flows", message: err.message });
-        alert(message);
-        return;
-      }
-      onMutationError(err);
-    },
+// --- Publish Plan Types ---
+
+export type PublishStatus = "unpublished" | "outdated" | "published" | "no_version";
+
+export interface PublishPlanItem {
+  packageId: string;
+  type: "flow" | "skill" | "extension";
+  displayName: string;
+  version: string | null;
+  lastPublishedVersion: string | null;
+  status: PublishStatus;
+}
+
+export interface PublishPlan {
+  items: PublishPlanItem[];
+  circular: string[] | null;
+}
+
+export function usePublishPlan(packageId: string | undefined) {
+  return useQuery({
+    queryKey: ["publish-plan", packageId],
+    queryFn: () => api<PublishPlan>(`/packages/${packageId}/publish-plan`),
+    enabled: false,
   });
 }

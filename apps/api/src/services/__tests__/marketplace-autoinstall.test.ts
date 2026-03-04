@@ -162,6 +162,16 @@ mock.module("@appstrate/db/schema", () => ({
     orgId: "org_id",
     createdAt: "created_at",
   },
+  packageVersions: {
+    id: "id",
+    integrity: "integrity",
+    version: "version",
+  },
+  packageDistTags: {
+    packageId: "package_id",
+    tag: "tag",
+    versionId: "version_id",
+  },
 }));
 
 // --- Service mocks ---
@@ -239,6 +249,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // No registryDependencies → extractDependencies returns [] → no SELECT for deps
     // Only 1 SELECT: existing check → not installed
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // existing check → not installed → INSERT
     ];
 
@@ -275,6 +286,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Helper: no deps → no SELECT; existing check → not installed → INSERT
     // Parent: existing check → not installed → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent: helper not in DB → missing
       [], // existing check for helper → INSERT
       [], // existing check for parent → INSERT
@@ -324,6 +336,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   B: existing check → INSERT
     // A: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → C missing
       [], // existing check for C → INSERT
@@ -376,6 +389,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   B: existing check → INSERT
     // A: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → A "missing" from DB (but visited blocks it)
       [], // existing check for B → INSERT
@@ -407,6 +421,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   dep: no deps (no SELECT); existing check → ALREADY installed → UPDATE
     // Parent: existing check → not installed → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → dep missing
       [{ id: "@acme/dep" }], // existing check for dep → UPDATE
       [], // existing check for parent → INSERT
@@ -425,6 +440,8 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // No deps → no SELECT for deps; existing check → already installed
     selectQueue = [
+      [{ id: "@acme/existing" }], // integrity conflict guard → found
+      [], // getLocalVersionIntegrities → no versions → skip integrity check
       [{ id: "@acme/existing" }], // existing check → UPDATE
     ];
 
@@ -448,6 +465,8 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // No deps; existing check → already installed
     selectQueue = [
+      [{ id: "@acme/promoted" }], // integrity conflict guard → found
+      [], // getLocalVersionIntegrities → no versions → skip integrity check
       [{ id: "@acme/promoted" }], // existing check → UPDATE
     ];
 
@@ -479,6 +498,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // dep: no deps; existing check → ALREADY installed → UPDATE (with ctx.autoInstalled=true)
     // Parent: existing check → not installed → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → dep missing
       [{ id: "@acme/dep" }], // existing check for dep → UPDATE
       [], // existing check for parent → INSERT
@@ -512,6 +532,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(makeZipResult("skill", { displayName: "Leaf" }));
 
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for root → mid missing
       [], // findMissingDeps for mid → leaf missing
       [], // existing check for leaf → INSERT
@@ -558,6 +579,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // ext: no deps; existing check → INSERT
     // flow: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → ext missing
       [], // existing check for ext → INSERT
       [], // existing check for flow → INSERT
@@ -602,6 +624,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // ext-b: no deps; existing check → INSERT
     // flow: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → both missing
       [], // existing check for skill-a → INSERT
       [], // existing check for ext-b → INSERT
@@ -652,6 +675,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // c: no deps; existing check → INSERT
     // parent: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → both missing
       [], // existing check for b → INSERT
       [], // existing check for c → INSERT
@@ -715,6 +739,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   C: existing check → INSERT
     //   A: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B and C missing
       [], // findMissingDeps for B → D missing
       [], // findMissingDeps for C → D "missing" (not in DB yet, diamond dedup handles it)
@@ -779,6 +804,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   B: existing check → INSERT
     // A: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → C missing
       [], // findMissingDeps for C → A "missing" (visited blocks)
@@ -814,6 +840,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // parent: findMissingDeps → ghost missing
     // ghost: client.getPackage returns null → throws before any DB query
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → ghost missing
     ];
 
@@ -850,6 +877,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   skill: existing check → INSERT
     // flow: existing check → INSERT
     selectQueue = [
+      [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → skill missing
       [], // findMissingDeps for skill → ext missing
       [], // existing check for ext → INSERT
