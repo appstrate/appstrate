@@ -77,9 +77,9 @@ The manifest defines everything about the flow. Follow this structure exactly:
 - `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
 - `connectionMode` (optional): `"user"` (default) or `"admin"`. Admin mode means an admin binds their connection for all users.
 
-**requires.skills[]** (optional): Array of skill IDs (strings). Example: `["greeting-style", "web-research"]`. Skills must exist in the org packages or as built-in skills.
+**requires.skills** (optional): Record of scoped skill IDs to static versions. Example: `{"@org/greeting-style": "1.0.0", "@org/web-research": "2.0.0"}`. Skills must exist in the org packages or as built-in skills. Scope prefix (`@scope/`) is mandatory.
 
-**requires.extensions[]** (optional): Array of extension IDs (strings). Example: `["web-search", "web-fetch"]`. Extensions must exist in the org packages or as built-in extensions.
+**requires.extensions** (optional): Record of scoped extension IDs to static versions. Example: `{"@org/web-search": "1.0.0", "@org/web-fetch": "1.0.0"}`. Extensions must exist in the org packages or as built-in extensions. Scope prefix (`@scope/`) is mandatory.
 
 **input.schema** (optional): Per-execution user input. The user fills a form before each run. Uses JSON Schema Object format (`type: "object"`, `properties`, `required`):
 ```json
@@ -301,7 +301,7 @@ Concrete examples of input → output.
 1. The flow directory (including `skills/`) is mounted read-only at `/workspace/flow/`
 2. The entrypoint creates symlinks: `/workspace/flow/skills/{id}/` → `/workspace/.pi/skills/{id}/`
 3. The Pi agent can discover and read skills from `/workspace/.pi/skills/`
-4. Skills are also listed in the flow detail API response (`requires.skills[]`)
+4. Skills are also listed in the flow detail API response (`requires.skills`)
 
 ## Step 5: Write Files and Package
 
@@ -427,8 +427,8 @@ If the flow needs a service not in this list, tell the user they need to:
         "scopes": ["task:write"]
       }
     ],
-    "skills": [],
-    "extensions": ["web-search"]
+    "skills": {},
+    "extensions": { "@appstrate/web-search": "1.0.0" }
   },
 
   "input": {

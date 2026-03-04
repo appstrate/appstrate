@@ -94,6 +94,7 @@ export const schemas = {
     type: "object",
     properties: {
       id: { type: "string" },
+      version: { type: "string" },
       name: { type: "string" },
       description: { type: "string" },
     },
@@ -102,6 +103,7 @@ export const schemas = {
     type: "object",
     properties: {
       id: { type: "string" },
+      version: { type: "string" },
       name: { type: "string" },
       description: { type: "string" },
     },
@@ -131,8 +133,8 @@ export const schemas = {
         type: "object",
         properties: {
           services: { type: "array", items: { type: "string" } },
-          skills: { type: "array", items: { type: "string" } },
-          extensions: { type: "array", items: { type: "string" } },
+          skills: { type: "object", additionalProperties: { type: "string" } },
+          extensions: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -421,6 +423,7 @@ export const schemas = {
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
+      lastPublishedVersion: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

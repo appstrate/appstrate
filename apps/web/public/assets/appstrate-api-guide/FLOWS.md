@@ -48,8 +48,8 @@ Content-Type: application/json
 {
   "manifest": { ... },
   "prompt": "# My Agent\n\nYour task is to...",
-  "skillIds": ["web-research"],
-  "extensionIds": ["web-fetch"]
+  "skillIds": ["@appstrate/web-research"],
+  "extensionIds": ["@appstrate/web-fetch"]
 }
 ```
 
@@ -70,8 +70,8 @@ Content-Type: application/json
   "manifest": { ... },
   "prompt": "# Updated prompt...",
   "updatedAt": "2026-01-15T10:00:00.000Z",
-  "skillIds": ["web-research"],
-  "extensionIds": ["web-fetch"]
+  "skillIds": ["@appstrate/web-research"],
+  "extensionIds": ["@appstrate/web-fetch"]
 }
 ```
 
@@ -119,7 +119,7 @@ PUT /api/flows/{packageId}/skills
 Authorization: Bearer ask_...
 Content-Type: application/json
 
-{ "skillIds": ["web-research", "appstrate-api-guide"] }
+{ "skillIds": ["@appstrate/web-research", "@appstrate/appstrate-api-guide"] }
 ```
 
 ## Update Linked Extensions
@@ -131,7 +131,7 @@ PUT /api/flows/{packageId}/extensions
 Authorization: Bearer ask_...
 Content-Type: application/json
 
-{ "extensionIds": ["web-fetch", "web-search"] }
+{ "extensionIds": ["@appstrate/web-fetch", "@appstrate/web-search"] }
 ```
 
 ## Flow Versions
@@ -173,8 +173,8 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
         "connectionMode": "user"
       }
     ],
-    "skills": ["web-research"],
-    "extensions": ["web-fetch"]
+    "skills": { "@appstrate/web-research": "*" },
+    "extensions": { "@appstrate/web-fetch": "*" }
   },
   "input": {
     "schema": {
@@ -241,7 +241,7 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
 - **`requires.services[].id`**: Also kebab-case. This is the service identifier used for connection binding.
 - **`requires.services[].provider`**: Must match a configured provider ID in the organization. **Verify it exists** via `GET /api/providers` before referencing it in a manifest.
 - **`requires.services[].connectionMode`**: `"user"` (default) = each user connects individually. `"admin"` = admin binds once for all users.
-- **`requires.skills`** and **`requires.extensions`**: Arrays of skill/extension IDs from the library. **Verify they exist** via `GET /api/packages/skills` and `GET /api/packages/extensions`.
+- **`requires.skills`** and **`requires.extensions`**: Records mapping scoped package IDs (`@scope/name`) to version ranges (e.g. `"*"`, `"^1.0.0"`). **Verify they exist** via `GET /api/packages/skills` and `GET /api/packages/extensions`.
 - **`input.schema.required`**: Array at the object level. Do NOT use `required: true` on individual properties.
 - **Field types**: `string`, `number`, `boolean`, `array`, `object`, `file`.
 - **`execution.timeout`**: In seconds. Default varies by adapter.

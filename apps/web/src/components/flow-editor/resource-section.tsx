@@ -4,24 +4,63 @@ import { Link } from "react-router-dom";
 import {
   usePackageList,
   useUploadPackage,
+  usePackageVersions,
   PACKAGE_CONFIG,
   type PackageType,
 } from "../../hooks/use-packages";
 import { Spinner } from "../spinner";
+import type { ResourceEntry } from "./types";
 
 interface ResourceSectionProps {
   type: PackageType;
   title: string;
   emptyLabel: string;
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
+  selectedEntries: ResourceEntry[];
+  onChange: (entries: ResourceEntry[]) => void;
+}
+
+function VersionSelect({
+  type,
+  packageId,
+  value,
+  onChange,
+}: {
+  type: PackageType;
+  packageId: string;
+  value: string;
+  onChange: (version: string) => void;
+}) {
+  const { data: versions, isLoading } = usePackageVersions(type, packageId);
+
+  if (isLoading) return <Spinner />;
+  if (!versions || versions.length === 0) {
+    return <span className="version-badge">*</span>;
+  }
+
+  return (
+    <select
+      className="version-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {value === "*" && <option value="*">*</option>}
+      {versions
+        .filter((v) => !v.yanked)
+        .map((v) => (
+          <option key={v.id} value={v.version}>
+            {v.version}
+          </option>
+        ))}
+    </select>
+  );
 }
 
 export function ResourceSection({
   type,
   title,
   emptyLabel,
-  selectedIds,
+  selectedEntries,
   onChange,
 }: ResourceSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
@@ -30,12 +69,20 @@ export function ResourceSection({
   const upload = useUploadPackage(type);
   const cfg = PACKAGE_CONFIG[type];
 
+  const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
+
   const toggle = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter((x) => x !== id));
+    if (selectedMap.has(id)) {
+      onChange(selectedEntries.filter((e) => e.id !== id));
     } else {
-      onChange([...selectedIds, id]);
+      const item = items?.find((i) => i.id === id);
+      const version = item?.lastPublishedVersion ?? "*";
+      onChange([...selectedEntries, { id, version }]);
     }
+  };
+
+  const updateVersion = (id: string, version: string) => {
+    onChange(selectedEntries.map((e) => (e.id === id ? { ...e, version } : e)));
   };
 
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -46,8 +93,8 @@ export function ResourceSection({
       const result = await upload.mutateAsync(file);
       const newId = (result as Record<string, { id: string }>)[cfg.detailKey].id;
 
-      if (!selectedIds.includes(newId)) {
-        onChange([...selectedIds, newId]);
+      if (!selectedMap.has(newId)) {
+        onChange([...selectedEntries, { id: newId, version: "*" }]);
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : t("error.unknown"));
@@ -86,24 +133,37 @@ export function ResourceSection({
           </>
         ) : (
           <div className="pkg-checkbox-list">
-            {items.map((item) => (
-              <label
-                key={item.id}
-                className={`pkg-checkbox-item${selectedIds.includes(item.id) ? " checked" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(item.id)}
-                  onChange={() => toggle(item.id)}
-                />
-                <div className="pkg-checkbox-info">
-                  <span className="pkg-checkbox-name">{item.name || item.id}</span>
-                  {item.description && (
-                    <span className="pkg-checkbox-desc">{item.description}</span>
+            {items.map((item) => {
+              const isSelected = selectedMap.has(item.id);
+              const isBuiltIn = item.source === "built-in";
+              const entry = selectedMap.get(item.id);
+
+              return (
+                <label key={item.id} className={`pkg-checkbox-item${isSelected ? " checked" : ""}`}>
+                  <input type="checkbox" checked={isSelected} onChange={() => toggle(item.id)} />
+                  <div className="pkg-checkbox-info">
+                    <span className="pkg-checkbox-name">{item.name || item.id}</span>
+                    {item.description && (
+                      <span className="pkg-checkbox-desc">{item.description}</span>
+                    )}
+                  </div>
+                  {isSelected && (
+                    <div className="pkg-checkbox-version">
+                      {isBuiltIn ? (
+                        <span className="version-badge">{t("editor.builtIn", "Integree")}</span>
+                      ) : (
+                        <VersionSelect
+                          type={type}
+                          packageId={item.id}
+                          value={entry?.version ?? "*"}
+                          onChange={(v) => updateVersion(item.id, v)}
+                        />
+                      )}
+                    </div>
                   )}
-                </div>
-              </label>
-            ))}
+                </label>
+              );
+            })}
           </div>
         )}
       </div>

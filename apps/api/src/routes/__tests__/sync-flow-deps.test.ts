@@ -5,8 +5,8 @@ describe("extractDepsFromManifest", () => {
   test("extracts skills and extensions from manifest.requires", () => {
     const result = extractDepsFromManifest({
       requires: {
-        skills: ["skill-a", "skill-b"],
-        extensions: ["ext-1"],
+        skills: { "skill-a": "1.0.0", "skill-b": "2.0.0" },
+        extensions: { "ext-1": "0.1.0" },
       },
     });
 
@@ -30,11 +30,11 @@ describe("extractDepsFromManifest", () => {
     expect(result.extensionIds).toEqual([]);
   });
 
-  test("filters out falsy values from skill/extension arrays", () => {
+  test("filters out empty keys from skill/extension records", () => {
     const result = extractDepsFromManifest({
       requires: {
-        skills: ["skill-a", "", null, undefined, "skill-b"],
-        extensions: [null, "ext-1", ""],
+        skills: { "skill-a": "1.0.0", "": "*", "skill-b": "2.0.0" },
+        extensions: { "": "*", "ext-1": "0.1.0" },
       },
     });
 
@@ -44,7 +44,7 @@ describe("extractDepsFromManifest", () => {
 
   test("handles skills-only manifest (no extensions key)", () => {
     const result = extractDepsFromManifest({
-      requires: { skills: ["skill-a"] },
+      requires: { skills: { "skill-a": "1.0.0" } },
     });
 
     expect(result.skillIds).toEqual(["skill-a"]);
@@ -53,7 +53,7 @@ describe("extractDepsFromManifest", () => {
 
   test("handles extensions-only manifest (no skills key)", () => {
     const result = extractDepsFromManifest({
-      requires: { extensions: ["ext-1"] },
+      requires: { extensions: { "ext-1": "0.1.0" } },
     });
 
     expect(result.skillIds).toEqual([]);

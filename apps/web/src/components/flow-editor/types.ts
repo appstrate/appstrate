@@ -19,6 +19,7 @@ export interface ServiceEntry {
 
 export interface ResourceEntry {
   id: string;
+  version: string;
   name?: string;
   description?: string;
 }

@@ -126,28 +126,30 @@ export function getBuiltInExtensions(): ReadonlyMap<string, BuiltInPackageItem> 
 }
 
 export function isBuiltInSkill(id: string): boolean {
-  return builtInSkills.has(id) || builtInSkills.has(`@${BUILTIN_SCOPE}/${id}`);
+  return builtInSkills.has(id);
 }
 
 export function isBuiltInExtension(id: string): boolean {
-  return builtInExtensions.has(id) || builtInExtensions.has(`@${BUILTIN_SCOPE}/${id}`);
+  return builtInExtensions.has(id);
 }
 
-/** Resolve a built-in skill by ID (supports both bare slug and scoped name). */
+/** Resolve a built-in skill by scoped ID (@scope/name). */
 export function resolveBuiltInSkill(id: string): BuiltInPackageItem | undefined {
-  return builtInSkills.get(id) ?? builtInSkills.get(`@${BUILTIN_SCOPE}/${id}`);
+  return builtInSkills.get(id);
 }
 
-/** Resolve a built-in extension by ID (supports both bare slug and scoped name). */
+/** Resolve a built-in extension by scoped ID (@scope/name). */
 export function resolveBuiltInExtension(id: string): BuiltInPackageItem | undefined {
-  return builtInExtensions.get(id) ?? builtInExtensions.get(`@${BUILTIN_SCOPE}/${id}`);
+  return builtInExtensions.get(id);
 }
 
 /** Get all files for a built-in skill (for ZIP packaging). */
 export async function getBuiltInSkillFiles(id: string): Promise<Record<string, Uint8Array> | null> {
   if (!resolveBuiltInSkill(id) || !skillsDir) return null;
 
-  const slug = parseScopedName(id)?.name ?? id;
+  const parsed = parseScopedName(id);
+  if (!parsed) return null;
+  const slug = parsed.name;
   const skillDir = join(skillsDir, slug);
   const files: Record<string, Uint8Array> = {};
 
@@ -180,7 +182,9 @@ export async function getBuiltInSkillFiles(id: string): Promise<Record<string, U
 export async function getBuiltInExtensionFile(id: string): Promise<Uint8Array | null> {
   if (!resolveBuiltInExtension(id) || !extensionsDir) return null;
 
-  const slug = parseScopedName(id)?.name ?? id;
+  const parsed = parseScopedName(id);
+  if (!parsed) return null;
+  const slug = parsed.name;
   const extPath = join(extensionsDir, slug, "extension.ts");
   try {
     const content = await readFile(extPath);

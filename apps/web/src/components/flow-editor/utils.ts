@@ -5,10 +5,11 @@ import { getOrderedKeys } from "@appstrate/shared-types";
 
 export function toResourceEntry(r: {
   id: string;
+  version?: string;
   name?: string;
   description?: string;
 }): ResourceEntry {
-  return { id: r.id, name: r.name, description: r.description };
+  return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
 }
 
 export function defaultFormState(orgSlug?: string, userEmail?: string): FlowFormState {
@@ -205,8 +206,14 @@ export function assemblePayload(state: FlowFormState) {
   const baseRequires = (state._manifestBase.requires ?? {}) as Record<string, unknown>;
   const baseServices = (baseRequires.services ?? []) as Array<Record<string, unknown>>;
 
-  const filteredSkills = state.skills.map((s) => s.id).filter(Boolean);
-  const filteredExtensions = state.extensions.map((e) => e.id).filter(Boolean);
+  const filteredSkills: Record<string, string> = {};
+  for (const s of state.skills) {
+    if (s.id) filteredSkills[s.id] = s.version;
+  }
+  const filteredExtensions: Record<string, string> = {};
+  for (const e of state.extensions) {
+    if (e.id) filteredExtensions[e.id] = e.version;
+  }
 
   const requires: Record<string, unknown> = {
     ...baseRequires, // Preserve unknown fields in requires
@@ -236,12 +243,12 @@ export function assemblePayload(state: FlowFormState) {
         return svc;
       }),
   };
-  if ("skills" in baseRequires || filteredSkills.length > 0) {
+  if ("skills" in baseRequires || Object.keys(filteredSkills).length > 0) {
     requires.skills = filteredSkills;
   } else {
     delete requires.skills;
   }
-  if ("extensions" in baseRequires || filteredExtensions.length > 0) {
+  if ("extensions" in baseRequires || Object.keys(filteredExtensions).length > 0) {
     requires.extensions = filteredExtensions;
   } else {
     delete requires.extensions;
@@ -335,11 +342,13 @@ export function payloadToFormState(payload: {
     connectionMode: (s.connectionMode as "user" | "admin") || "user",
   }));
 
-  const rawSkills = (requires.skills as string[]) || [];
-  const skills = rawSkills.map((id) => toResourceEntry({ id }));
+  const rawSkills = (requires.skills ?? {}) as Record<string, string>;
+  const skills = Object.entries(rawSkills).map(([id, version]) => toResourceEntry({ id, version }));
 
-  const rawExtensions = (requires.extensions as string[]) || [];
-  const extensions = rawExtensions.map((id) => toResourceEntry({ id }));
+  const rawExtensions = (requires.extensions ?? {}) as Record<string, string>;
+  const extensions = Object.entries(rawExtensions).map(([id, version]) =>
+    toResourceEntry({ id, version }),
+  );
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;

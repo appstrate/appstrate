@@ -61,8 +61,8 @@ export function createFlowsRouter() {
         tags: f.manifest.tags ?? [],
         requires: {
           services: f.manifest.requires.services.map((s) => s.id),
-          skills: f.skills.map((s) => s.id),
-          extensions: f.extensions.map((e) => e.id),
+          skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),
+          extensions: Object.fromEntries(f.extensions.map((e) => [e.id, e.version ?? "*"])),
         },
         runningExecutions: runningCounts[f.id] ?? 0,
         source: f.source,
@@ -129,11 +129,13 @@ export function createFlowsRouter() {
         services: serviceStatuses,
         skills: flow.skills.map((s) => ({
           id: s.id,
+          version: s.version ?? "*",
           ...(s.name ? { name: s.name } : {}),
           ...(s.description ? { description: s.description } : {}),
         })),
         extensions: flow.extensions.map((e) => ({
           id: e.id,
+          version: e.version ?? "*",
           ...(e.name ? { name: e.name } : {}),
           ...(e.description ? { description: e.description } : {}),
         })),

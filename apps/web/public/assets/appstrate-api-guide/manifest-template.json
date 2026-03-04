@@ -16,8 +16,8 @@
         "connectionMode": "user"
       }
     ],
-    "skills": [],
-    "extensions": []
+    "skills": {},
+    "extensions": {}
   },
   "input": {
     "schema": {

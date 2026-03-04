@@ -14,7 +14,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@appstrate/core": "^2.0.0",
+    "@appstrate/core": "^2.1.2",
     "@appstrate/connect": "workspace:*",
     "@appstrate/registry-client": "workspace:*",
     "@appstrate/db": "workspace:*",
