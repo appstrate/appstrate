@@ -177,6 +177,85 @@ export const registryPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/publish-plan": {
+    get: {
+      operationId: "getPublishPlan",
+      tags: ["Packages"],
+      summary: "Get publish dependency plan",
+      description:
+        "Analyze the dependency graph of a package and return a topologically sorted publish plan. Shows which dependencies need to be published first.",
+      parameters: [
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Target version to compute publish status for. If omitted, uses the current draft version.",
+        },
+        { $ref: "#/components/parameters/XOrgId" },
+      ],
+      responses: {
+        "200": {
+          description: "Publish plan with dependency order",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["items", "circular"],
+                properties: {
+                  items: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "packageId",
+                        "type",
+                        "displayName",
+                        "version",
+                        "lastPublishedVersion",
+                        "status",
+                      ],
+                      properties: {
+                        packageId: { type: "string" },
+                        type: { type: "string", enum: ["flow", "skill", "extension"] },
+                        displayName: { type: "string" },
+                        version: { type: ["string", "null"] },
+                        lastPublishedVersion: { type: ["string", "null"] },
+                        status: {
+                          type: "string",
+                          enum: ["unpublished", "outdated", "published", "no_version"],
+                        },
+                      },
+                    },
+                  },
+                  circular: {
+                    type: ["array", "null"],
+                    items: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/publish": {
     post: {
       operationId: "publishPackage",
@@ -201,6 +280,23 @@ export const registryPaths = {
         },
         { $ref: "#/components/parameters/XOrgId" },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description:
+                    "Optional target version to publish (from local package versions). If omitted, the current draft version is used.",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "200": {
           description: "Package published",

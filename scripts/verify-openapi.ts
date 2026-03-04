@@ -195,6 +195,7 @@ const expectedEndpoints = [
   // Packages
   "POST /api/packages/import",
   "GET /api/packages/{packageId}/{version}/download",
+  "GET /api/packages/{scope}/{name}/publish-plan",
   "POST /api/packages/{scope}/{name}/publish",
 
   // Registry

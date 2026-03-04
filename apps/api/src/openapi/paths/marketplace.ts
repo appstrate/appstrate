@@ -316,6 +316,16 @@ export const marketplacePaths = {
                     type: ["string", "null"],
                     description: "Currently installed version in the org (null if not installed)",
                   },
+                  integrityConflict: {
+                    type: "boolean",
+                    description:
+                      "True when a local package with the same ID exists but has different integrity than all registry versions",
+                  },
+                  localVersionAhead: {
+                    type: ["string", "null"],
+                    description:
+                      "When the highest local version is greater than the registry latest, contains that version string. Null otherwise.",
+                  },
                 },
               },
             },

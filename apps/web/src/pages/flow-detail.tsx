@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -136,7 +136,7 @@ export function FlowDetailPage() {
   const deleteAllMemories = useDeleteAllMemories(packageId!);
 
   const [tab, setTab] = useState<Tab>("executions");
-  const [diffTab, setDiffTab] = useState<"prompt" | "manifest">("manifest");
+  const [diffTabOverride, setDiffTab] = useState<"prompt" | "manifest" | null>(null);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
@@ -160,10 +160,12 @@ export function FlowDetailPage() {
   const hasManifestChanges =
     JSON.stringify(detail?.manifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
 
-  useEffect(() => {
-    if (diffTab === "prompt" && !hasPromptChanges && hasManifestChanges) setDiffTab("manifest");
-    if (diffTab === "manifest" && !hasManifestChanges && hasPromptChanges) setDiffTab("prompt");
-  }, [hasPromptChanges, hasManifestChanges, diffTab]);
+  const diffTab = useMemo(() => {
+    const preferred = diffTabOverride ?? "manifest";
+    if (preferred === "prompt" && !hasPromptChanges && hasManifestChanges) return "manifest";
+    if (preferred === "manifest" && !hasManifestChanges && hasPromptChanges) return "prompt";
+    return preferred;
+  }, [diffTabOverride, hasPromptChanges, hasManifestChanges]);
 
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
 
@@ -789,13 +791,16 @@ export function FlowDetailPage() {
               language="json"
             />
           )}
-          {diffTab === "prompt" && hasPromptChanges && detail.prompt != null && latestVersionForDiff.prompt != null && (
-            <DraftDiffView
-              original={latestVersionForDiff.prompt}
-              modified={detail.prompt}
-              language="markdown"
-            />
-          )}
+          {diffTab === "prompt" &&
+            hasPromptChanges &&
+            detail.prompt != null &&
+            latestVersionForDiff.prompt != null && (
+              <DraftDiffView
+                original={latestVersionForDiff.prompt}
+                modified={detail.prompt}
+                language="markdown"
+              />
+            )}
         </>
       )}
 

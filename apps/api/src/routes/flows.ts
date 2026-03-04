@@ -290,7 +290,7 @@ export function createFlowsRouter() {
         );
       }
 
-      const versionQuery = c.req.param("version");
+      const versionQuery = c.req.param("version")!;
       const detail = await getVersionDetail(flow.id, versionQuery);
       if (!detail) {
         return c.json(
@@ -352,7 +352,7 @@ export function createFlowsRouter() {
       );
     }
 
-    const versionQuery = c.req.param("version");
+    const versionQuery = c.req.param("version")!;
     const detail = await getVersionDetail(flow.id, versionQuery);
     if (!detail) {
       return c.json(
@@ -385,7 +385,7 @@ export function createFlowsRouter() {
     async (c) => {
       const flow = c.get("flow");
       const user = c.get("user");
-      const serviceId = c.req.param("serviceId");
+      const serviceId = c.req.param("serviceId")!;
 
       // Verify the service exists and is in admin mode
       const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
@@ -440,7 +440,7 @@ export function createFlowsRouter() {
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
-      const serviceId = c.req.param("serviceId");
+      const serviceId = c.req.param("serviceId")!;
 
       const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
       if (!svc) {
@@ -535,7 +535,7 @@ export function createFlowsRouter() {
     async (c) => {
       const flow = c.get("flow");
       const orgId = c.get("orgId");
-      const memoryId = parseInt(c.req.param("memoryId"), 10);
+      const memoryId = parseInt(c.req.param("memoryId")!, 10);
       if (isNaN(memoryId)) {
         return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
       }

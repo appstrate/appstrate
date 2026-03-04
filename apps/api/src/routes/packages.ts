@@ -11,6 +11,7 @@ import { postInstallPackage } from "../services/post-install-package.ts";
 import { isBuiltInFlow } from "../services/flow-service.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-packages.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
+import { getPublishPlan } from "../services/dependency-graph.ts";
 import { getVersionForDownload } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import {
@@ -328,7 +329,7 @@ function getItemId(c: Context<AppEnv>): string {
   const scope = c.req.param("scope");
   const name = c.req.param("name");
   if (scope && name) return `${scope}/${name}`;
-  return c.req.param("id");
+  return c.req.param("id")!;
 }
 
 function makeGetHandler(rcfg: PackageRouteConfig) {
@@ -522,7 +523,7 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const versionQuery = c.req.param("version");
+    const versionQuery = c.req.param("version")!;
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!existing) {
@@ -636,7 +637,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    const versionQuery = c.req.param("version");
+    const versionQuery = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionQuery);
     if (!detail) {
       return c.json(
@@ -825,7 +826,7 @@ export function createPackagesRouter() {
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const versionQuery = c.req.param("version");
+    const versionQuery = c.req.param("version")!;
 
     const ver = await getVersionForDownload(packageId, versionQuery);
     if (!ver) {
@@ -845,11 +846,20 @@ export function createPackagesRouter() {
     const downloadHeaders = buildDownloadHeaders({
       integrity: ver.integrity,
       yanked: ver.yanked,
-      scope: c.req.param("scope"),
-      name: c.req.param("name"),
+      scope: c.req.param("scope")!,
+      name: c.req.param("name")!,
       version: ver.version,
     });
     return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
+  });
+
+  // GET /api/packages/:scope/:name/publish-plan — get publish dependency plan
+  router.get("/:scope{@[^/]+}/:name/publish-plan", requireAdmin(), async (c) => {
+    const orgId = c.get("orgId");
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const targetVersion = c.req.query("version") || undefined;
+    const plan = await getPublishPlan(packageId, orgId, targetVersion);
+    return c.json(plan);
   });
 
   // POST /api/packages/:scope/:name/publish — publish a package to registry
@@ -857,9 +867,11 @@ export function createPackagesRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const body = await c.req.json().catch(() => ({}));
+    const targetVersion = body.version as string | undefined;
 
     try {
-      const result = await publishPackage(packageId, orgId, user.id);
+      const result = await publishPackage(packageId, orgId, user.id, targetVersion);
       return c.json(result);
     } catch (err) {
       if (err instanceof PublishValidationError) {

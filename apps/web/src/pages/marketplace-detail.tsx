@@ -1,17 +1,27 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Download, ExternalLink, Scale, CheckCircle, ArrowUpCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  ExternalLink,
+  Scale,
+  CheckCircle,
+  ArrowUpCircle,
+  AlertTriangle,
+  Upload,
+} from "lucide-react";
 import { apiBlob } from "../api";
 import {
   useMarketplacePackage,
   useInstallPackage,
   useUpdatePackage,
 } from "../hooks/use-marketplace";
-import { useRegistryStatus, useRegistryScopes } from "../hooks/use-registry";
+import { useRegistryStatus, useRegistryScopes, usePublishPlan } from "../hooks/use-registry";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
+import { PublishPlanModal } from "../components/publish-plan-modal";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -33,6 +43,15 @@ export function MarketplaceDetailPage() {
   const { data: registryStatus } = useRegistryStatus();
   const { data: registryScopes } = useRegistryScopes();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
+  const publishPlan = usePublishPlan(scope && name ? `@${scope}/${name}` : undefined);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+
+  const handlePublish = async () => {
+    if (!scope || !name) return;
+    const result = await publishPlan.refetch();
+    if (!result.data) return;
+    setPlanModalOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -97,6 +116,18 @@ export function MarketplaceDetailPage() {
     );
   };
 
+  const publishAheadBadge = pkg.localVersionAhead && (
+    <>
+      <span className="marketplace-update-badge">
+        <Upload size={14} />
+        {t("marketplace.localVersionAhead", { version: pkg.localVersionAhead })}
+      </span>
+      <button className="btn-install" onClick={handlePublish} disabled={publishPlan.isFetching}>
+        {publishPlan.isFetching ? <Spinner /> : t("marketplace.publishAction")}
+      </button>
+    </>
+  );
+
   return (
     <div className="marketplace-page">
       <Link to="/marketplace" className="breadcrumb">
@@ -151,7 +182,9 @@ export function MarketplaceDetailPage() {
               <CheckCircle size={14} />
               {t("marketplace.installedVersion", { version: pkg.installedVersion })}
             </span>
-            {hasUpdate ? (
+            {pkg.localVersionAhead ? (
+              <>{publishAheadBadge}</>
+            ) : hasUpdate ? (
               <>
                 <span className="marketplace-update-badge">
                   <ArrowUpCircle size={14} />
@@ -163,6 +196,17 @@ export function MarketplaceDetailPage() {
               </>
             ) : (
               <span className="marketplace-uptodate">{t("marketplace.upToDate")}</span>
+            )}
+          </div>
+        ) : pkg.integrityConflict ? (
+          <div className="marketplace-detail-install-row">
+            {pkg.localVersionAhead ? (
+              <>{publishAheadBadge}</>
+            ) : (
+              <span className="marketplace-conflict-badge">
+                <AlertTriangle size={14} />
+                {t("marketplace.integrityConflict")}
+              </span>
             )}
           </div>
         ) : (
@@ -259,6 +303,16 @@ export function MarketplaceDetailPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {publishPlan.data && (
+        <PublishPlanModal
+          open={planModalOpen}
+          onClose={() => setPlanModalOpen(false)}
+          items={publishPlan.data.items}
+          circular={publishPlan.data.circular}
+          onComplete={() => setPlanModalOpen(false)}
+        />
       )}
     </div>
   );

@@ -12,7 +12,7 @@ import { getEnv } from "@appstrate/env";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
 import { normalizeScope, buildPackageId, parseScopedName } from "@appstrate/core/naming";
 import { extractDependencies } from "@appstrate/core/dependencies";
-import { resolveLatestVersion } from "@appstrate/core/semver";
+import { resolveLatestVersion, versionGt, compareVersionsDesc } from "@appstrate/core/semver";
 import { checkUpdateAvailable } from "@appstrate/core/update-check";
 import { postInstallPackage } from "./post-install-package.ts";
 import { getLatestVersionId } from "./package-versions.ts";
@@ -303,6 +303,37 @@ export async function installFromMarketplace(
   userId: string,
   accessToken: string | undefined,
 ): Promise<InstallResult> {
+  const scope = normalizeScope(rawScope);
+  const packageId = buildPackageId(scope, name);
+
+  // Check for local package with different integrity (conflict)
+  const [existingPkg] = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .limit(1);
+
+  if (existingPkg) {
+    const localVersions = await getLocalVersionIntegrities(packageId);
+    if (localVersions.length > 0) {
+      const client = getRegistryClient();
+      if (client) {
+        const authedClient = accessToken
+          ? new RegistryClient({ baseUrl: getEnv().REGISTRY_URL!, accessToken })
+          : client;
+        const remote = await authedClient.getPackage(scope, name);
+        if (remote) {
+          if (!hasMatchingVersionIntegrity(localVersions, remote.versions)) {
+            throw new Error(
+              `Cannot install: a local package "${packageId}" exists with different content. ` +
+                `Delete or rename the local package before installing from the registry.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
   // Phase A — collect (network + DB reads, no writes)
   const ctx: CollectContext = {
     autoInstalled: false,
@@ -378,6 +409,33 @@ async function resolveInstalledVersion(
   return (((row?.manifest ?? {}) as Partial<Manifest>).version as string) ?? null;
 }
 
+// --- Installed integrity ---
+
+interface VersionIntegrity {
+  version: string;
+  integrity: string;
+}
+
+/** Get all (version, integrity) pairs for a local package. */
+async function getLocalVersionIntegrities(packageId: string): Promise<VersionIntegrity[]> {
+  return db
+    .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+    .from(packageVersions)
+    .where(eq(packageVersions.packageId, packageId));
+}
+
+/**
+ * Check if any local version matches any registry version by (version, integrity) pair.
+ * Returns true if at least one pair matches — proving the package originates from the registry.
+ */
+function hasMatchingVersionIntegrity(
+  localVersions: VersionIntegrity[],
+  registryVersions: VersionIntegrity[],
+): boolean {
+  const registryPairs = new Set(registryVersions.map((v) => `${v.version}:${v.integrity}`));
+  return localVersions.some((v) => registryPairs.has(`${v.version}:${v.integrity}`));
+}
+
 // --- Package detail with install status ---
 
 export async function getMarketplacePackageWithInstallStatus(
@@ -398,11 +456,43 @@ export async function getMarketplacePackageWithInstallStatus(
     .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
     .limit(1);
 
-  const installedVersion = installed ? await resolveInstalledVersion(packageId, orgId) : null;
+  let installedVersion: string | null = null;
+  let integrityConflict = false;
+  let localVersionAhead: string | null = null;
+
+  if (installed) {
+    const localVersions = await getLocalVersionIntegrities(packageId);
+
+    if (localVersions.length > 0) {
+      if (hasMatchingVersionIntegrity(localVersions, pkg.versions)) {
+        installedVersion = await resolveInstalledVersion(packageId, orgId);
+      } else {
+        integrityConflict = true;
+      }
+
+      // Check if local version is ahead of registry latest
+      const sortedLocal = [...localVersions].sort((a, b) =>
+        compareVersionsDesc(a.version, b.version),
+      );
+      const maxLocalVersion = sortedLocal[0]!.version;
+      const latestTag = pkg.distTags?.find((t: { tag: string }) => t.tag === "latest");
+      const registryLatest = latestTag
+        ? pkg.versions.find((v: { id: number }) => v.id === latestTag.versionId)?.version
+        : pkg.versions[pkg.versions.length - 1]?.version;
+      if (registryLatest && versionGt(maxLocalVersion, registryLatest)) {
+        localVersionAhead = maxLocalVersion;
+      }
+    } else {
+      // No local versions (pre-migration package) — fall back to old behavior
+      installedVersion = await resolveInstalledVersion(packageId, orgId);
+    }
+  }
 
   return {
     ...pkg,
     installedVersion,
+    integrityConflict,
+    localVersionAhead,
   };
 }
 
@@ -468,6 +558,14 @@ export async function checkRegistryUpdates(
         return null;
       }
       if (!remote) return null;
+
+      // Skip packages whose local versions don't match any registry version by (version, integrity)
+      const localVersions = await getLocalVersionIntegrities(pkg.id);
+      if (localVersions.length > 0) {
+        if (!hasMatchingVersionIntegrity(localVersions, remote.versions)) {
+          return null;
+        }
+      }
 
       // Read installed version from packageVersions via dist-tag, fallback to manifest
       const installedVersion = await resolveInstalledVersion(
