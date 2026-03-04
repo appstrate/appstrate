@@ -1999,12 +1999,6 @@ button:disabled {
   color: var(--text-muted);
 }
 
-.package-actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
 .package-add-form {
   display: flex;
   gap: 0.5rem;
@@ -2033,12 +2027,6 @@ button:disabled {
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-bottom: 0.5rem;
-}
-
-.editor-success {
-  font-size: 0.75rem;
-  color: var(--success);
-  margin-top: 0.5rem;
 }
 
 .btn-upload {

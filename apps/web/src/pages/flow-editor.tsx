@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
@@ -9,7 +9,6 @@ import { useOrg } from "../hooks/use-org";
 import { MetadataSection } from "../components/flow-editor/metadata-section";
 import { SchemaSection } from "../components/flow-editor/schema-section";
 import { ExecutionSection } from "../components/flow-editor/execution-section";
-import { PackageSection } from "../components/flow-editor/package-section";
 import { ResourceSection } from "../components/flow-editor/resource-section";
 import { EditorTabs } from "../components/flow-editor/editor-tabs";
 import { PromptEditor } from "../components/flow-editor/prompt-editor";
@@ -47,22 +46,15 @@ function FlowEditorForm({
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("general");
-  const needsFullRefresh = useRef(false);
-
   // Sync from server after API mutations refetch detail
   /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from server data to local form state */
   useEffect(() => {
     if (!detail) return;
-    if (needsFullRefresh.current) {
-      needsFullRefresh.current = false;
-      setForm(detailToFormState(detail));
-    } else {
-      setForm((prev) => ({
-        ...prev,
-        skills: (detail.requires.skills ?? []).map(toResourceEntry),
-        extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
-      }));
-    }
+    setForm((prev) => ({
+      ...prev,
+      skills: (detail.requires.skills ?? []).map(toResourceEntry),
+      extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
+    }));
   }, [detail]);
 
   const handleSubmit = () => {
@@ -95,7 +87,6 @@ function FlowEditorForm({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
-  const canEdit = isEdit && detail?.source !== "built-in" && detail?.lockVersion != null;
 
   const handleJsonApply = (newState: FlowFormState) => {
     setForm(newState);
@@ -133,16 +124,6 @@ function FlowEditorForm({
             value={form.execution}
             onChange={(execution) => setForm((s) => ({ ...s, execution }))}
           />
-          {isEdit && (
-            <PackageSection
-              detail={detail}
-              packageId={packageId}
-              canEdit={canEdit}
-              onPackageUploaded={() => {
-                needsFullRefresh.current = true;
-              }}
-            />
-          )}
         </>
       )}
 
