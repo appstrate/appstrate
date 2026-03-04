@@ -4,80 +4,80 @@ import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
 import type {
-  OrgLibraryItem,
-  OrgLibraryItemDetail,
+  OrgPackageItem,
+  OrgPackageItemDetail,
   FlowListItem,
   FlowDetail,
 } from "@appstrate/shared-types";
 
-// --- Library (skills / extensions) — config-driven factory ---
+// --- Packages (skills / extensions) — config-driven factory ---
 
-type LibraryType = "skill" | "extension";
+type PackageType = "skill" | "extension";
 
-const LIBRARY_CONFIG = {
+const PACKAGE_CONFIG = {
   skill: { path: "skills", listKey: "skills", detailKey: "skill" },
   extension: { path: "extensions", listKey: "extensions", detailKey: "extension" },
 } as const;
 
-function useLibraryList(type: LibraryType) {
+function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
-  const cfg = LIBRARY_CONFIG[type];
+  const cfg = PACKAGE_CONFIG[type];
   return useQuery({
-    queryKey: ["library", cfg.path, orgId],
+    queryKey: ["packages", cfg.path, orgId],
     queryFn: async () => {
-      const data = await api<Record<string, OrgLibraryItem[]>>(`/library/${cfg.path}`);
-      return data[cfg.listKey] as OrgLibraryItem[];
+      const data = await api<Record<string, OrgPackageItem[]>>(`/packages/${cfg.path}`);
+      return data[cfg.listKey] as OrgPackageItem[];
     },
   });
 }
 
-function useLibraryDetail(type: LibraryType, id: string | undefined) {
+function usePackageDetail(type: PackageType, id: string | undefined) {
   const orgId = useCurrentOrgId();
-  const cfg = LIBRARY_CONFIG[type];
+  const cfg = PACKAGE_CONFIG[type];
   return useQuery({
-    queryKey: ["library", cfg.detailKey, orgId, id],
+    queryKey: ["packages", cfg.detailKey, orgId, id],
     queryFn: async () => {
-      const data = await api<Record<string, OrgLibraryItemDetail>>(`/library/${cfg.path}/${id}`);
-      return data[cfg.detailKey] as OrgLibraryItemDetail;
+      const data = await api<Record<string, OrgPackageItemDetail>>(`/packages/${cfg.path}/${id}`);
+      return data[cfg.detailKey] as OrgPackageItemDetail;
     },
     enabled: !!id,
   });
 }
 
-function useUploadLibrary(type: LibraryType) {
+function useUploadPackage(type: PackageType) {
   const qc = useQueryClient();
-  const cfg = LIBRARY_CONFIG[type];
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (file: File) => {
       const fd = new FormData();
       fd.append("file", file);
       return uploadFormData<Record<string, { id: string; name: string; description: string }>>(
-        `/library/${cfg.path}`,
+        `/packages/${cfg.path}`,
         fd,
       );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["library", cfg.path] });
+      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
     },
   });
 }
 
-function useDeleteLibrary(type: LibraryType) {
+function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
-  const cfg = LIBRARY_CONFIG[type];
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (id: string) => {
-      await api(`/library/${cfg.path}/${id}`, { method: "DELETE" });
+      await api(`/packages/${cfg.path}/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["library", cfg.path] });
+      qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
     },
   });
 }
 
-function useUpdateLibraryMetadata(type: LibraryType) {
+function useUpdatePackageMetadata(type: PackageType) {
   const qc = useQueryClient();
-  const cfg = LIBRARY_CONFIG[type];
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async ({
       id,
@@ -89,25 +89,25 @@ function useUpdateLibraryMetadata(type: LibraryType) {
       version?: string;
       scopedName?: string;
     }) =>
-      api(`/library/${cfg.path}/${id}`, {
+      api(`/packages/${cfg.path}/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
 }
 
 // Re-export factory hooks for direct use
 export {
-  useLibraryList,
-  useLibraryDetail,
-  useUploadLibrary,
-  useDeleteLibrary,
-  useUpdateLibraryMetadata,
-  type LibraryType,
-  LIBRARY_CONFIG,
+  usePackageList,
+  usePackageDetail,
+  useUploadPackage,
+  useDeletePackage,
+  useUpdatePackageMetadata,
+  type PackageType,
+  PACKAGE_CONFIG,
 };
 
 // --- Flows ---
@@ -187,8 +187,8 @@ export interface VersionListItem {
   createdAt: string | null;
 }
 
-function libraryBasePath(type: "flow" | "skill" | "extension", packageId: string | undefined) {
-  return type === "flow" ? `/flows/${packageId}` : `/library/${type}s/${packageId}`;
+function packageBasePath(type: "flow" | "skill" | "extension", packageId: string | undefined) {
+  return type === "flow" ? `/flows/${packageId}` : `/packages/${type}s/${packageId}`;
 }
 
 export function useVersionDetail(
@@ -200,7 +200,7 @@ export function useVersionDetail(
   return useQuery({
     queryKey: ["version-detail", orgId, type, packageId, version],
     queryFn: () =>
-      api<VersionDetailResponse>(`${libraryBasePath(type, packageId)}/versions/${version}`),
+      api<VersionDetailResponse>(`${packageBasePath(type, packageId)}/versions/${version}`),
     enabled: !!packageId && !!version,
   });
 }
@@ -214,7 +214,7 @@ export function usePackageVersions(
     queryKey: ["package-versions", orgId, type, packageId],
     queryFn: async () => {
       const data = await api<{ versions: VersionListItem[] }>(
-        `${libraryBasePath(type, packageId)}/versions`,
+        `${packageBasePath(type, packageId)}/versions`,
       );
       return data.versions;
     },

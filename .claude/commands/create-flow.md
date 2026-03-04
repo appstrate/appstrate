@@ -77,9 +77,9 @@ The manifest defines everything about the flow. Follow this structure exactly:
 - `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
 - `connectionMode` (optional): `"user"` (default) or `"admin"`. Admin mode means an admin binds their connection for all users.
 
-**requires.skills[]** (optional): Array of skill IDs (strings). Example: `["greeting-style", "web-research"]`. Skills must exist in the org library or as built-in skills.
+**requires.skills[]** (optional): Array of skill IDs (strings). Example: `["greeting-style", "web-research"]`. Skills must exist in the org packages or as built-in skills.
 
-**requires.extensions[]** (optional): Array of extension IDs (strings). Example: `["web-search", "web-fetch"]`. Extensions must exist in the org library or as built-in extensions.
+**requires.extensions[]** (optional): Array of extension IDs (strings). Example: `["web-search", "web-fetch"]`. Extensions must exist in the org packages or as built-in extensions.
 
 **input.schema** (optional): Per-execution user input. The user fills a form before each run. Uses JSON Schema Object format (`type: "object"`, `properties`, `required`):
 ```json

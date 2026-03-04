@@ -4,8 +4,8 @@ import { packages, packageDependencies } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId } from "@appstrate/core/naming";
 import type { Manifest } from "@appstrate/core/validation";
-import { type LibraryTypeConfig } from "./config.ts";
-import { deleteLibraryPackage } from "./storage.ts";
+import { type PackageTypeConfig } from "./config.ts";
+import { deletePackageFiles } from "./storage.ts";
 
 // ─────────────────────────────────────────────
 // Helpers (private)
@@ -14,7 +14,7 @@ import { deleteLibraryPackage } from "./storage.ts";
 /** Count built-in skill/extension usage from flow manifests (since built-in IDs can't be in junction tables). */
 async function countBuiltInUsageFromManifests(
   orgId: string,
-  cfg: LibraryTypeConfig,
+  cfg: PackageTypeConfig,
 ): Promise<Map<string, number>> {
   const flowRows = await db
     .select({ manifest: packages.manifest })
@@ -92,7 +92,7 @@ export interface UpsertItemInput {
 }
 
 /** List all items of a type in the org with usedByFlows count (built-in + org). */
-export async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
+export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   const data = await db
     .select()
     .from(packages)
@@ -152,7 +152,7 @@ export async function listOrgItems(orgId: string, cfg: LibraryTypeConfig) {
 }
 
 /** Get a single item with content and list of flows referencing it. */
-export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryTypeConfig) {
+export async function getOrgItem(orgId: string, itemId: string, cfg: PackageTypeConfig) {
   const builtIn = cfg.resolveBuiltIn(itemId);
   if (builtIn) {
     return {
@@ -205,7 +205,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: LibraryType
   };
 }
 
-/** Insert or update an item in the org library.
+/** Insert or update an item in the org packages.
  *  When orgSlug is provided, packageId = @orgSlug/item.id (local creation).
  *  When orgSlug is null, item.id IS the full packageId (marketplace installs).
  *
@@ -217,7 +217,7 @@ export async function upsertOrgItem(
   orgId: string,
   orgSlug: string | null,
   item: UpsertItemInput,
-  cfg: LibraryTypeConfig,
+  cfg: PackageTypeConfig,
   manifest?: Record<string, unknown>,
 ) {
   const now = new Date();
@@ -269,7 +269,7 @@ export async function upsertOrgItem(
 export async function deleteOrgItem(
   orgId: string,
   itemId: string,
-  cfg: LibraryTypeConfig,
+  cfg: PackageTypeConfig,
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -295,7 +295,7 @@ export async function deleteOrgItem(
     .delete(packages)
     .where(and(eq(packages.orgId, orgId), eq(packages.id, itemId), eq(packages.type, cfg.type)));
 
-  await deleteLibraryPackage(cfg.storageFolder, orgId, itemId);
+  await deletePackageFiles(cfg.storageFolder, orgId, itemId);
 
   return { ok: true };
 }

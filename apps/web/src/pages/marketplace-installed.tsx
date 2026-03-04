@@ -69,7 +69,7 @@ export function MarketplaceInstalledPage() {
                   {version && <span className="marketplace-card-stat">v{version}</span>}
                   {path && (
                     <Link to={path} className="marketplace-card-stat marketplace-detail-link">
-                      {t("library.viewOnMarketplace")}
+                      {t("packages.viewOnMarketplace")}
                     </Link>
                   )}
                 </div>

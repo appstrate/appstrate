@@ -120,7 +120,7 @@ export function useInstallPackage() {
       api<InstallResult>("/marketplace/install", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
-      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
     },
   });
@@ -142,7 +142,7 @@ export function useUpdatePackage() {
       api<InstallResult>("/marketplace/update", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
-      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
     },
   });

@@ -11,7 +11,7 @@ import {
   isBuiltInExtension,
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
-} from "./builtin-library.ts";
+} from "./builtin-packages.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 
 const BUCKET = "flow-packages";
@@ -92,9 +92,9 @@ export async function getPackageZip(flow: LoadedFlow, orgId: string): Promise<Bu
   return buildUserFlowZip(flow, orgId);
 }
 
-/** Build a user flow package ZIP on-the-fly from org library + built-in content. */
+/** Build a user flow package ZIP on-the-fly from org packages + built-in content. */
 async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer> {
-  const { getFlowItemFiles, SKILL_CONFIG, EXTENSION_CONFIG } = await import("./library.ts");
+  const { getFlowItemFiles, SKILL_CONFIG, EXTENSION_CONFIG } = await import("./package-items.ts");
 
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),

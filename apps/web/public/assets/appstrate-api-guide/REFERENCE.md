@@ -42,7 +42,7 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 | `CONFIG_INCOMPLETE` | Call `GET /api/flows/{packageId}` → read `manifest.config.schema` to find required fields → check which are missing in `config` → if fields have `default` values, set them via `PUT /api/flows/{packageId}/config`. If no defaults, ask the user for values. |
 | `NAME_COLLISION` | The resource already exists. Call `GET /api/flows` (or skills/extensions) to find it, then decide: update instead of create, or choose a different ID. |
 | `EXECUTION_IN_PROGRESS` | Call `GET /api/flows/{packageId}/executions?limit=5` → find the running execution → either poll it until completion, or cancel via `POST /api/executions/{execId}/cancel`. |
-| `FLOW_IN_USE` | Call `GET /api/library/skills/{id}` or `GET /api/library/extensions/{id}` → read the `flows` field → unlink from those flows first. |
+| `FLOW_IN_USE` | Call `GET /api/packages/skills/{id}` or `GET /api/packages/extensions/{id}` → read the `flows` field → unlink from those flows first. |
 | `UNAUTHORIZED` | Validate the API key with `GET /api/flows`. If it fails, tell the user their key is invalid/expired and ask for a new one. |
 
 ---
@@ -68,8 +68,8 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 ```
 1. GET /api/flows                             → Check if the flow ID already exists
 2. GET /api/providers                         → Check which providers are available for services
-3. GET /api/library/skills                    → Check available skills
-4. GET /api/library/extensions                → Check available extensions
+3. GET /api/packages/skills                    → Check available skills
+4. GET /api/packages/extensions                → Check available extensions
 5. POST /api/flows                            → Create the flow (manifest + prompt + skillIds + extensionIds)
 6. GET /api/flows/{packageId}                    → Verify creation, check service status
 7. IF services disconnected:

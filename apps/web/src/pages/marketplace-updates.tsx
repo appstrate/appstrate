@@ -39,8 +39,8 @@ export function MarketplaceUpdatesPage() {
       {updates.length === 0 ? (
         <EmptyState message={t("marketplace.upToDate")} />
       ) : (
-        <div className="library-table-wrap">
-          <table className="library-table">
+        <div className="pkg-table-wrap">
+          <table className="pkg-table">
             <thead>
               <tr>
                 <th>{t("marketplace.colPackage")}</th>

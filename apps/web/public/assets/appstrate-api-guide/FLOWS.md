@@ -112,7 +112,7 @@ The body is validated against the flow's `config.schema` from the manifest.
 
 ## Update Linked Skills
 
-**First check available skills** via `GET /api/library/skills`:
+**First check available skills** via `GET /api/packages/skills`:
 
 ```
 PUT /api/flows/{packageId}/skills
@@ -124,7 +124,7 @@ Content-Type: application/json
 
 ## Update Linked Extensions
 
-**First check available extensions** via `GET /api/library/extensions`:
+**First check available extensions** via `GET /api/packages/extensions`:
 
 ```
 PUT /api/flows/{packageId}/extensions
@@ -241,7 +241,7 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
 - **`requires.services[].id`**: Also kebab-case. This is the service identifier used for connection binding.
 - **`requires.services[].provider`**: Must match a configured provider ID in the organization. **Verify it exists** via `GET /api/providers` before referencing it in a manifest.
 - **`requires.services[].connectionMode`**: `"user"` (default) = each user connects individually. `"admin"` = admin binds once for all users.
-- **`requires.skills`** and **`requires.extensions`**: Arrays of skill/extension IDs from the library. **Verify they exist** via `GET /api/library/skills` and `GET /api/library/extensions`.
+- **`requires.skills`** and **`requires.extensions`**: Arrays of skill/extension IDs from the library. **Verify they exist** via `GET /api/packages/skills` and `GET /api/packages/extensions`.
 - **`input.schema.required`**: Array at the object level. Do NOT use `required: true` on individual properties.
 - **Field types**: `string`, `number`, `boolean`, `array`, `object`, `file`.
 - **`execution.timeout`**: In seconds. Default varies by adapter.

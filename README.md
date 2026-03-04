@@ -100,9 +100,8 @@ The API is organized into 23 route domains with 110 documented endpoints:
 | **Provider Templates**  | Built-in provider templates                               |
 | **Proxies**             | Org-level and flow-level HTTP proxy config                |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                      |
-| **Library**             | Organization skills and extensions CRUD                   |
+| **Packages**            | Organization skills/extensions CRUD, import, publish      |
 | **Marketplace**         | Browse/install packages from Appstrate [registry]         |
-| **Packages**            | Import packages from ZIP files                            |
 | **Notifications**       | Execution notification management                         |
 | **Organizations**       | Org CRUD, members, invitations                            |
 | **Profile**             | User profile management                                   |

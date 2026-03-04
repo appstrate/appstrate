@@ -12,7 +12,7 @@ import {
   resolveBuiltInExtension,
   getBuiltInSkills,
   getBuiltInExtensions,
-} from "./builtin-library.ts";
+} from "./builtin-packages.ts";
 import type { Manifest } from "@appstrate/core/validation";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
@@ -68,7 +68,7 @@ export async function initPackageService(dataDir?: string): Promise<void> {
       const manifest = raw as FlowManifest;
       const packageId = manifest.name;
 
-      // Resolve skill/extension IDs to SkillMeta using built-in library
+      // Resolve skill/extension IDs to SkillMeta using built-in packages
       const skills = (manifest.requires.skills ?? []).map((id) => {
         const builtIn = resolveBuiltInSkill(id);
         return { id, name: builtIn?.name, description: builtIn?.description };

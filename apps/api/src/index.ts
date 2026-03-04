@@ -14,7 +14,6 @@ import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
-import { createLibraryRouter } from "./routes/library.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createProviderTemplatesRouter } from "./routes/provider-templates.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
@@ -176,9 +175,8 @@ app.route("/api/flows", flowsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before executionsRouter (GET /api/executions vs /api/executions/:id)
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
-app.route("/api/library", createLibraryRouter());
-app.route("/api/marketplace", createMarketplaceRouter());
 app.route("/api/packages", createPackagesRouter());
+app.route("/api/marketplace", createMarketplaceRouter());
 app.route("/api/registry", createRegistryAuthRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/provider-templates", createProviderTemplatesRouter());
