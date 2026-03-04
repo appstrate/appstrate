@@ -11,6 +11,7 @@ function onMutationError(err: Error) {
 
 function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["flows"] });
+  qc.invalidateQueries({ queryKey: ["version-info"] });
   return qc.invalidateQueries({ queryKey: ["flow"] });
 }
 

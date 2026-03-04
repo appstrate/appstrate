@@ -246,5 +246,20 @@
   "version.selector": "Version",
   "version.yanked": "Cette version a été retirée",
   "version.readOnly": "Lecture seule",
-  "version.notFound": "Version introuvable"
+  "version.notFound": "Version introuvable",
+  "version.unpublished": "Modifications non versionnées",
+  "version.createVersion": "Créer une version",
+  "version.latestPublished": "Dernière version publiée",
+  "version.draftVersionLabel": "Version du brouillon (manifest)",
+  "version.noVersion": "Non définie",
+  "version.mustBeHigher": "La version du manifest doit être supérieure à la dernière version publiée. Modifiez le champ version dans l'éditeur.",
+  "version.noVersionInManifest": "Aucune version définie dans le manifest. Ajoutez un champ version dans l'éditeur.",
+  "version.restore": "Restaurer",
+  "version.restoreConfirm": "Restaurer la version {{version}} ? Le brouillon actuel sera écrasé.",
+  "version.diff": "Diff",
+  "version.noVersions": "Aucune version créée",
+  "version.draftLabel": "Brouillon",
+  "version.diffPrompt": "Prompt",
+  "version.diffManifest": "Manifest",
+  "version.history": "Historique"
 }

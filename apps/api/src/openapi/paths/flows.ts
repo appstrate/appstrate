@@ -254,6 +254,37 @@ export const flowsPaths = {
       },
     },
   },
+  "/api/flows/{packageId}/versions/info": {
+    get: {
+      operationId: "getFlowVersionInfo",
+      tags: ["Flows"],
+      summary: "Get version info (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latestVersion: { type: ["string", "null"] },
+                  draftVersion: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/flows/{packageId}/versions": {
     get: {
       operationId: "listFlowVersions",
@@ -281,6 +312,77 @@ export const flowsPaths = {
             },
           },
         },
+      },
+    },
+    post: {
+      operationId: "createFlowVersion",
+      tags: ["Flows"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current draft. Version is determined by the manifest version field. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "201": {
+          description: "Version created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { description: "Flow in use (running executions)" },
+      },
+    },
+  },
+  "/api/flows/{packageId}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreFlowVersion",
+      tags: ["Flows"],
+      summary: "Restore a version into the draft",
+      description:
+        "Restore a previously published version into the draft (packages table). Does not create a new version. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restoredVersion: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification" },
       },
     },
   },

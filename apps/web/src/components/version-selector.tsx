@@ -6,9 +6,17 @@ interface VersionSelectorProps {
   packageId: string;
   currentVersion: string | undefined;
   type: "flow" | "skill" | "extension";
+  hasDraftChanges?: boolean;
+  currentIsDraft?: boolean;
 }
 
-export function VersionSelector({ packageId, currentVersion, type }: VersionSelectorProps) {
+export function VersionSelector({
+  packageId,
+  currentVersion,
+  type,
+  hasDraftChanges,
+  currentIsDraft,
+}: VersionSelectorProps) {
   const { t } = useTranslation("flows");
   const navigate = useNavigate();
   const { data: versions } = usePackageVersions(type, packageId);
@@ -18,14 +26,21 @@ export function VersionSelector({ packageId, currentVersion, type }: VersionSele
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value;
-    navigate(`${detailPath}/${selected}`);
+    if (selected === "draft") {
+      navigate(detailPath);
+    } else {
+      navigate(`${detailPath}/${selected}`);
+    }
   };
+
+  const selectValue = currentIsDraft ? "draft" : (currentVersion ?? "");
 
   return (
     <div className="version-selector">
       <label>{t("version.selector")}</label>
-      <select className="profile-select" value={currentVersion ?? ""} onChange={handleChange}>
-        {!currentVersion && (
+      <select className="profile-select" value={selectValue} onChange={handleChange}>
+        {hasDraftChanges && <option value="draft">{t("version.draftLabel")}</option>}
+        {!currentVersion && !currentIsDraft && (
           <option value="" disabled>
             {t("version.selector")}
           </option>

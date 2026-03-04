@@ -12,6 +12,9 @@ import {
   type PackageType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
+import { CreateVersionModal } from "../components/create-version-modal";
+import { VersionHistory } from "../components/version-history";
+import { DraftDiffView } from "../components/draft-diff-view";
 
 import { TypeBadge } from "../components/type-badge";
 import { VersionSelector } from "../components/version-selector";
@@ -176,6 +179,13 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
   );
   const deleteMutation = useDeletePackage(type);
   const downloadPackage = usePackageDownload(scope, name);
+  const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const hasDraftChanges = !!detail?.hasUnpublishedChanges && detail?.source !== "built-in";
+  const { data: latestVersionForDiff } = useVersionDetail(
+    type,
+    packageId,
+    hasDraftChanges ? "latest" : undefined,
+  );
 
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (!detail) return <Navigate to="/" replace />;
@@ -184,7 +194,6 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
     type,
     packageId: packageId!,
     versionParam,
-    versionCount: detail.versionCount,
     versionDetail,
     liveVersion: detail.version,
   });
@@ -224,6 +233,11 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
           <div className="flow-card-badges">
             <TypeBadge type={type} />
             {isBuiltIn && <span className="source-badge">{t("packages.sourceBuiltIn")}</span>}
+            {hasDraftChanges && !isVersionView && (
+              <span className="version-badge unpublished">
+                {t("version.unpublished", { ns: "flows" })}
+              </span>
+            )}
             {isHistoricalVersion && (
               <span className="version-readonly-badge">
                 {t("version.readOnly", { ns: "flows" })}
@@ -231,7 +245,13 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
             )}
           </div>
           {packageId && detail.versionCount && detail.versionCount > 0 && (
-            <VersionSelector packageId={packageId} currentVersion={versionParam} type={type} />
+            <VersionSelector
+              packageId={packageId}
+              currentVersion={versionParam}
+              type={type}
+              hasDraftChanges={hasDraftChanges}
+              currentIsDraft={!versionParam}
+            />
           )}
           {downloadVersion && packageId && (
             <button
@@ -282,12 +302,44 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
         </pre>
       </div>
 
-      {isOrgAdmin && !isBuiltIn && !hasFlows && !isHistoricalVersion && (
+      {isOrgAdmin && !isBuiltIn && !isHistoricalVersion && packageId && (
         <div className="actions">
-          <button className="btn-danger" onClick={handleDelete} disabled={deleteMutation.isPending}>
-            {t("btn.delete")}
+          <button onClick={() => setCreateVersionOpen(true)} disabled={!hasDraftChanges}>
+            {t("version.createVersion", { ns: "flows" })}
           </button>
+          {!hasFlows && (
+            <button
+              className="btn-danger"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {t("btn.delete")}
+            </button>
+          )}
         </div>
+      )}
+
+      {packageId && !isBuiltIn && (
+        <div className="detail-section">
+          <h3>{t("version.history", { ns: "flows" })}</h3>
+          <VersionHistory packageId={packageId} type={type} isAdmin={isOrgAdmin} />
+        </div>
+      )}
+
+      {hasDraftChanges &&
+        !isVersionView &&
+        latestVersionForDiff?.content != null &&
+        detail.content != null && (
+          <DraftDiffView original={latestVersionForDiff.content} modified={detail.content} />
+        )}
+
+      {packageId && (
+        <CreateVersionModal
+          open={createVersionOpen}
+          onClose={() => setCreateVersionOpen(false)}
+          type={type}
+          packageId={packageId}
+        />
       )}
     </>
   );

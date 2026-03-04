@@ -177,7 +177,7 @@ export const registryPaths = {
       },
     },
   },
-  "/api/packages/{packageId}/publish": {
+  "/api/packages/{scope}/{name}/publish": {
     post: {
       operationId: "publishPackage",
       tags: ["Packages"],
@@ -186,11 +186,18 @@ export const registryPaths = {
         "Publish a local package (flow, skill, or extension) to the Appstrate registry. Requires registry connection. Admin only.",
       parameters: [
         {
-          name: "packageId",
+          name: "scope",
           in: "path",
           required: true,
           schema: { type: "string" },
-          description: "Package ID",
+          description: "Package scope (e.g. @org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
         },
         { $ref: "#/components/parameters/XOrgId" },
       ],

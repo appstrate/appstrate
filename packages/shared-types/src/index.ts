@@ -179,6 +179,7 @@ export interface FlowDetail {
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
+  hasUnpublishedChanges?: boolean;
 }
 
 // --- Organization Package Types ---
@@ -207,6 +208,7 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
+  hasUnpublishedChanges?: boolean;
 }
 
 // --- Package Version Types ---

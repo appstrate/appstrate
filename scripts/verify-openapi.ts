@@ -36,6 +36,9 @@ const expectedEndpoints = [
   "DELETE /api/flows/{packageId}",
   "PUT /api/flows/{packageId}/config",
   "GET /api/flows/{packageId}/versions",
+  "GET /api/flows/{packageId}/versions/info",
+  "POST /api/flows/{packageId}/versions",
+  "POST /api/flows/{packageId}/versions/{version}/restore",
   "GET /api/flows/{packageId}/versions/{version}",
   "POST /api/flows/{packageId}/services/{serviceId}/bind",
   "DELETE /api/flows/{packageId}/services/{serviceId}/bind",
@@ -120,6 +123,9 @@ const expectedEndpoints = [
   "PUT /api/packages/skills/{skillId}",
   "DELETE /api/packages/skills/{skillId}",
   "GET /api/packages/skills/{skillId}/versions",
+  "GET /api/packages/skills/{skillId}/versions/info",
+  "POST /api/packages/skills/{skillId}/versions",
+  "POST /api/packages/skills/{skillId}/versions/{version}/restore",
   "GET /api/packages/skills/{skillId}/versions/{version}",
 
   // Packages — Extensions
@@ -129,6 +135,9 @@ const expectedEndpoints = [
   "PUT /api/packages/extensions/{extensionId}",
   "DELETE /api/packages/extensions/{extensionId}",
   "GET /api/packages/extensions/{extensionId}/versions",
+  "GET /api/packages/extensions/{extensionId}/versions/info",
+  "POST /api/packages/extensions/{extensionId}/versions",
+  "POST /api/packages/extensions/{extensionId}/versions/{version}/restore",
   "GET /api/packages/extensions/{extensionId}/versions/{version}",
 
   // Organizations
@@ -186,7 +195,7 @@ const expectedEndpoints = [
   // Packages
   "POST /api/packages/import",
   "GET /api/packages/{packageId}/{version}/download",
-  "POST /api/packages/{packageId}/publish",
+  "POST /api/packages/{scope}/{name}/publish",
 
   // Registry
   "POST /api/registry/connect",

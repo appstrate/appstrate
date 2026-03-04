@@ -430,6 +430,116 @@ export async function getNextVersion(packageId: string): Promise<string> {
   return "1.0.0";
 }
 
+/** Return the latest published version and the current draft version from the manifest. */
+export async function getVersionInfo(
+  packageId: string,
+): Promise<{ latestVersion: string | null; draftVersion: string | null }> {
+  const [[pkg], [latestTag]] = await Promise.all([
+    db
+      .select({ manifest: packages.manifest })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .limit(1),
+    db
+      .select({ versionId: packageDistTags.versionId })
+      .from(packageDistTags)
+      .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+      .limit(1),
+  ]);
+
+  const draftVersion =
+    ((pkg?.manifest as Record<string, unknown> | null)?.version as string | undefined) ?? null;
+
+  let latestVersion: string | null = null;
+  if (latestTag) {
+    const [row] = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.id, latestTag.versionId))
+      .limit(1);
+    latestVersion = row?.version ?? null;
+  }
+
+  return { latestVersion, draftVersion };
+}
+
+// ─────────────────────────────────────────────
+// Draft → version helpers
+// ─────────────────────────────────────────────
+
+/** Get the createdAt of the latest version for a package. Returns null if no versions exist. */
+export async function getLatestVersionCreatedAt(packageId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ createdAt: packageVersions.createdAt })
+    .from(packageVersions)
+    .where(eq(packageVersions.packageId, packageId))
+    .orderBy(desc(packageVersions.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
+/** Create an immutable version snapshot from the current draft (packages table).
+ *  Uses manifest.version as-is — no auto-bump. Returns null if version is missing,
+ *  invalid, or fails forward-only validation (handled by createPackageVersion). */
+export async function createVersionFromDraft(params: {
+  packageId: string;
+  orgId: string;
+  userId: string;
+}): Promise<{ id: number; version: string } | null> {
+  const { packageId, orgId, userId } = params;
+
+  const [pkg] = await db
+    .select({ manifest: packages.manifest, content: packages.content, type: packages.type })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+
+  if (!pkg) return null;
+
+  const baseManifest = pkg.manifest as Record<string, unknown>;
+  const content = pkg.content as string;
+  const version = baseManifest.version as string | undefined;
+
+  if (!version || !isValidVersion(version)) return null;
+
+  const manifest = { ...baseManifest, version };
+
+  // Build ZIP depending on package type
+  let zipBuffer: Buffer;
+  if (pkg.type === "flow") {
+    const { buildMinimalZip } = await import("./package-storage.ts");
+    zipBuffer = buildMinimalZip(manifest, content);
+  } else {
+    // For skills/extensions, build ZIP from storage files or content
+    const { downloadPackageFiles } = await import("./package-items/storage.ts");
+    const files = await downloadPackageFiles(
+      pkg.type === "skill" ? "skills" : "extensions",
+      orgId,
+      packageId,
+    );
+    if (files) {
+      const { zipArtifact } = await import("@appstrate/core/zip");
+      // Include manifest.json if available
+      const entries: Record<string, Uint8Array> = { ...files };
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    } else {
+      // Fallback: create minimal ZIP with manifest + content
+      const { buildMinimalZip } = await import("./package-storage.ts");
+      zipBuffer = buildMinimalZip(manifest, content);
+    }
+  }
+
+  return createVersionAndUpload({
+    packageId,
+    version,
+    orgId,
+    createdBy: userId,
+    zipBuffer,
+    manifest,
+  });
+}
+
 // ─────────────────────────────────────────────
 // Convenience: create version + upload ZIP
 // ─────────────────────────────────────────────
