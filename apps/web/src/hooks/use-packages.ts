@@ -1,5 +1,6 @@
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, uploadFormData } from "../api";
+import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
 import type {
@@ -134,6 +135,30 @@ export function useFlowDetail(packageId: string | undefined) {
     },
     enabled: !!packageId,
   });
+}
+
+// --- Package download ---
+
+export function usePackageDownload(scope: string | undefined, name: string | undefined) {
+  return useCallback(
+    async (version: string) => {
+      if (!scope || !name) return;
+      try {
+        const blob = await apiBlob(`/packages/${scope}/${name}/${version}/download`);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${scope.replace(/^@/, "")}-${name}-${version}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {
+        // silent fail, same as marketplace
+      }
+    },
+    [scope, name],
+  );
 }
 
 // --- Version queries ---

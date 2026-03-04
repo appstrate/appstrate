@@ -49,5 +49,6 @@
   "validation.emailFormat": "Invalid email address",
   "orgSwitcher.marketplace": "Marketplace",
   "btn.install": "Install",
-  "btn.installing": "Installing..."
+  "btn.installing": "Installing...",
+  "btn.download": "Download"
 }

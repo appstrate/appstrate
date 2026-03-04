@@ -1,13 +1,14 @@
 import { useState, useMemo } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Check } from "lucide-react";
+import { Check, Download } from "lucide-react";
 import type { OrgLibraryItemDetail } from "@appstrate/shared-types";
 import {
   useLibraryDetail,
   useDeleteLibrary,
   useUpdateLibraryMetadata,
   useVersionDetail,
+  usePackageDownload,
   type LibraryType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
@@ -174,6 +175,7 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
     versionParam,
   );
   const deleteMutation = useDeleteLibrary(type);
+  const downloadPackage = usePackageDownload(scope, name);
 
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (!detail) return <Navigate to="/" replace />;
@@ -195,6 +197,8 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
 
   const isBuiltIn = detail.source === "built-in";
   const hasFlows = detail.flows.length > 0;
+
+  const downloadVersion = isHistoricalVersion ? versionDetail?.version : detail.version;
 
   const handleDelete = () => {
     if (!packageId) return;
@@ -228,6 +232,15 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
           </div>
           {packageId && detail.versionCount && detail.versionCount > 0 && (
             <VersionSelector packageId={packageId} currentVersion={versionParam} type={type} />
+          )}
+          {downloadVersion && packageId && (
+            <button
+              className="btn-icon"
+              title={t("btn.download", { ns: "common" })}
+              onClick={() => downloadPackage(downloadVersion)}
+            >
+              <Download size={14} />
+            </button>
           )}
         </div>
         {detail.description && <p className="description">{detail.description}</p>}
