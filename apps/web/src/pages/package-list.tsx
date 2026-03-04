@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
-import { useFlows, useLibraryList } from "../hooks/use-packages";
+import { useFlows, usePackageList } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
 import { PackageCard } from "../components/package-card";
@@ -121,7 +121,7 @@ function FlowsTab() {
   );
 }
 
-interface LibraryTabConfig {
+interface ItemTabConfig {
   type: "skill" | "extension";
   useData: () => {
     data:
@@ -139,26 +139,26 @@ interface LibraryTabConfig {
   emptyHintKey: string;
 }
 
-const LIBRARY_TAB_CONFIGS: LibraryTabConfig[] = [
+const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
   {
     type: "skill",
-    useData: () => useLibraryList("skill"),
-    emptyMessageKey: "library.emptyItems",
-    emptyHintKey: "library.emptyItemsHint",
+    useData: () => usePackageList("skill"),
+    emptyMessageKey: "packages.emptyItems",
+    emptyHintKey: "packages.emptyItemsHint",
   },
   {
     type: "extension",
-    useData: () => useLibraryList("extension"),
-    emptyMessageKey: "library.emptyItems",
-    emptyHintKey: "library.emptyItemsHint",
+    useData: () => usePackageList("extension"),
+    emptyMessageKey: "packages.emptyItems",
+    emptyHintKey: "packages.emptyItemsHint",
   },
 ];
 
-function LibraryTab({ config }: { config: LibraryTabConfig }) {
+function ItemTab({ config }: { config: ItemTabConfig }) {
   const { t } = useTranslation(["settings", "common"]);
   const { data: rawItems, isLoading } = config.useData();
 
-  const typeLabel = t(`library.type.${config.type}`);
+  const typeLabel = t(`packages.type.${config.type}`);
   const items: CardItem[] | undefined = rawItems?.map((item) => ({
     id: item.id,
     displayName: item.name || item.id,
@@ -178,8 +178,8 @@ function LibraryTab({ config }: { config: LibraryTabConfig }) {
   );
 }
 
-const skillTabConfig = LIBRARY_TAB_CONFIGS[0];
-const extensionTabConfig = LIBRARY_TAB_CONFIGS[1];
+const skillTabConfig = ITEM_TAB_CONFIGS[0];
+const extensionTabConfig = ITEM_TAB_CONFIGS[1];
 
 export function PackageList() {
   const { t } = useTranslation(["flows", "settings", "common"]);
@@ -225,8 +225,8 @@ export function PackageList() {
       </div>
 
       {tab === "flows" && <FlowsTab />}
-      {tab === "skills" && <LibraryTab config={skillTabConfig} />}
-      {tab === "extensions" && <LibraryTab config={extensionTabConfig} />}
+      {tab === "skills" && <ItemTab config={skillTabConfig} />}
+      {tab === "extensions" && <ItemTab config={extensionTabConfig} />}
     </>
   );
 }

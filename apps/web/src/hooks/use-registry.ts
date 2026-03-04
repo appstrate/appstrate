@@ -96,7 +96,7 @@ export function usePublishPackage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
-      qc.invalidateQueries({ queryKey: ["library"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
       qc.invalidateQueries({ queryKey: ["registry"] });
     },
     onError: (err: Error) => {

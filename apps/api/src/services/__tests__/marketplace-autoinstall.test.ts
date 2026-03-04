@@ -125,7 +125,7 @@ mock.module("@appstrate/db/storage", () => ({
   deleteFile: async () => {},
 }));
 
-mock.module("../builtin-library.ts", () => ({
+mock.module("../builtin-packages.ts", () => ({
   getBuiltInSkills: () => new Map(),
   getBuiltInExtensions: () => new Map(),
   isBuiltInSkill: () => false,
@@ -174,8 +174,8 @@ mock.module("../registry-provider.ts", () => ({
   getRegistryDiscovery: () => null,
 }));
 
-// Mock post-install-package.ts (extracted from library.ts to avoid poisoning
-// the library.ts mock scope — see oven-sh/bun#12823).
+// Mock post-install-package.ts (extracted from package-items.ts to avoid poisoning
+// the package-items.ts mock scope — see oven-sh/bun#12823).
 mock.module("../post-install-package.ts", () => ({
   postInstallPackage: async (params: unknown) => {
     postInstallCalls.push(params);

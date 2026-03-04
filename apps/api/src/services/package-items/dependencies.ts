@@ -6,11 +6,11 @@ import {
   buildRegistryDepsFromRows,
   type RegistryDependencies,
 } from "@appstrate/core/registry-deps";
-import { type LibraryTypeConfig } from "./config.ts";
-import { downloadLibraryPackage } from "./storage.ts";
+import { type PackageTypeConfig } from "./config.ts";
+import { downloadPackageFiles } from "./storage.ts";
 
 // ─────────────────────────────────────────────
-// Flow ↔ library item dependency management
+// Flow ↔ package item dependency management
 // ─────────────────────────────────────────────
 
 /** Replace all references of a type for a flow. Only org IDs are stored (built-in tracked via manifest). */
@@ -18,7 +18,7 @@ export async function setFlowItems(
   packageId: string,
   orgId: string,
   itemIds: string[],
-  cfg: LibraryTypeConfig,
+  cfg: PackageTypeConfig,
 ): Promise<void> {
   const orgItemIds = itemIds.filter((id) => !cfg.isBuiltIn(id));
 
@@ -38,7 +38,7 @@ export async function setFlowItems(
     const existingIds = new Set(existing.map((e) => e.id));
     const missing = orgItemIds.filter((id) => !existingIds.has(id));
     if (missing.length > 0) {
-      throw new Error(`${cfg.label} not found in library: ${missing.join(", ")}`);
+      throw new Error(`${cfg.label} not found in packages: ${missing.join(", ")}`);
     }
   }
 
@@ -113,7 +113,7 @@ export async function buildRegistryDependencies(
 export async function getFlowItemFiles(
   packageId: string,
   orgId: string,
-  cfg: LibraryTypeConfig,
+  cfg: PackageTypeConfig,
 ): Promise<Map<string, Record<string, Uint8Array>>> {
   const data = await db
     .select({ dependencyId: packageDependencies.dependencyId })
@@ -129,7 +129,7 @@ export async function getFlowItemFiles(
 
   const entries = await Promise.all(
     data.map(async (row) => {
-      const files = await downloadLibraryPackage(cfg.storageFolder, orgId, row.dependencyId);
+      const files = await downloadPackageFiles(cfg.storageFolder, orgId, row.dependencyId);
       return [row.dependencyId, files] as const;
     }),
   );

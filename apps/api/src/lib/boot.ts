@@ -12,13 +12,13 @@ import { initRealtime } from "../services/realtime.ts";
 import { initBuiltInProviders } from "@appstrate/connect";
 import { initBuiltInProxies } from "../services/proxy-registry.ts";
 import { initPackageService, getBuiltInPackageCount } from "../services/flow-service.ts";
-import { initBuiltInLibrary } from "../services/builtin-library.ts";
+import { initBuiltInPackages } from "../services/builtin-packages.ts";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
 import { cleanupOrphanedContainers } from "../services/docker.ts";
 import { initScheduler } from "../services/scheduler.ts";
 import { initSidecarPool } from "../services/sidecar-pool.ts";
 import { ensureStorageBucket } from "../services/package-storage.ts";
-import { ensureLibraryBucket } from "../services/library.ts";
+import { ensurePackageItemsBucket } from "../services/package-items.ts";
 import { initRegistryProvider } from "../services/registry-provider.ts";
 
 export async function boot(): Promise<void> {
@@ -51,7 +51,7 @@ export async function boot(): Promise<void> {
     await initPackageService(dataDir);
     logger.info("Built-in flows loaded", { count: getBuiltInPackageCount() });
 
-    await initBuiltInLibrary(dataDir);
+    await initBuiltInPackages(dataDir);
   } else {
     initBuiltInProviders(); // SYSTEM_PROVIDERS env var still loaded
     initBuiltInProxies(); // SYSTEM_PROXIES env var still loaded
@@ -65,15 +65,15 @@ export async function boot(): Promise<void> {
     });
   });
 
-  // Parallel init: storage, library, NOTIFY triggers, and realtime are all independent
+  // Parallel init: storage, package items, NOTIFY triggers, and realtime are all independent
   await Promise.all([
     ensureStorageBucket().catch((err) => {
       logger.warn("Could not ensure storage bucket", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),
-    ensureLibraryBucket().catch((err) => {
-      logger.warn("Could not ensure library bucket", {
+    ensurePackageItemsBucket().catch((err) => {
+      logger.warn("Could not ensure package items bucket", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),

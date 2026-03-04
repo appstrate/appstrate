@@ -5,7 +5,7 @@ import { deletePackage, updatePackage, insertPackage } from "../services/user-fl
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { createVersionAndUpload, getNextVersion } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
-import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/library.ts";
+import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/package-items.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";

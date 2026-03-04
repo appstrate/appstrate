@@ -2,14 +2,14 @@ import { useState, useMemo } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Check, Download } from "lucide-react";
-import type { OrgLibraryItemDetail } from "@appstrate/shared-types";
+import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import {
-  useLibraryDetail,
-  useDeleteLibrary,
-  useUpdateLibraryMetadata,
+  usePackageDetail,
+  useDeletePackage,
+  useUpdatePackageMetadata,
   useVersionDetail,
   usePackageDownload,
-  type LibraryType,
+  type PackageType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 
@@ -28,12 +28,12 @@ function PackageMetadataEditor({
   packageId,
   type,
 }: {
-  detail: OrgLibraryItemDetail;
+  detail: OrgPackageItemDetail;
   packageId: string;
-  type: LibraryType;
+  type: PackageType;
 }) {
   const { t } = useTranslation("flows");
-  const updateMutation = useUpdateLibraryMetadata(type);
+  const updateMutation = useUpdatePackageMetadata(type);
 
   const initVersion = detail.version ?? "0.0.0";
   const initDisplayName = detail.name ?? "";
@@ -168,13 +168,13 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
   const { isOrgAdmin } = useOrg();
   const isVersionView = !!versionParam;
 
-  const { isLoading, data: detail } = useLibraryDetail(type, packageId);
+  const { isLoading, data: detail } = usePackageDetail(type, packageId);
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
     packageId,
     versionParam,
   );
-  const deleteMutation = useDeleteLibrary(type);
+  const deleteMutation = useDeletePackage(type);
   const downloadPackage = usePackageDownload(scope, name);
 
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
@@ -203,17 +203,17 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
   const handleDelete = () => {
     if (!packageId) return;
     const name = detail.name || detail.id;
-    const typeLabel = t(`library.type.${type}`);
-    if (!confirm(t("library.deleteConfirm", { type: typeLabel, name }))) return;
+    const typeLabel = t(`packages.type.${type}`);
+    if (!confirm(t("packages.deleteConfirm", { type: typeLabel, name }))) return;
     deleteMutation.mutate(packageId, {
-      onError: (err) => alert(err instanceof Error ? err.message : t("library.deleteDependedOn")),
+      onError: (err) => alert(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
     });
   };
 
   return (
     <>
       <nav className="breadcrumb">
-        <Link to={`/?tab=${type}s`}>{t(`library.type.${type}s`)}</Link>
+        <Link to={`/?tab=${type}s`}>{t(`packages.type.${type}s`)}</Link>
         <span className="separator">/</span>
         <span className="current">{detail.name || detail.id}</span>
       </nav>
@@ -223,7 +223,7 @@ export function PackageDetailPage({ type }: { type: "skill" | "extension" }) {
           <h2>{detail.name || detail.id}</h2>
           <div className="flow-card-badges">
             <TypeBadge type={type} />
-            {isBuiltIn && <span className="source-badge">{t("library.sourceBuiltIn")}</span>}
+            {isBuiltIn && <span className="source-badge">{t("packages.sourceBuiltIn")}</span>}
             {isHistoricalVersion && (
               <span className="version-readonly-badge">
                 {t("version.readOnly", { ns: "flows" })}

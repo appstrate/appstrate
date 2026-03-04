@@ -124,7 +124,7 @@ mock.module("@appstrate/db/storage", () => ({
   deleteFile: async () => {},
 }));
 
-mock.module("../builtin-library.ts", () => ({
+mock.module("../builtin-packages.ts", () => ({
   getBuiltInSkills: () => new Map(),
   getBuiltInExtensions: () => new Map(),
   isBuiltInSkill: () => false,
@@ -136,7 +136,7 @@ mock.module("../builtin-library.ts", () => ({
 
 // --- Import after mocks ---
 
-const { deleteOrgItem, listOrgItems, SKILL_CONFIG } = await import("../library.ts");
+const { deleteOrgItem, listOrgItems, SKILL_CONFIG } = await import("../package-items.ts");
 
 // --- Tests ---
 

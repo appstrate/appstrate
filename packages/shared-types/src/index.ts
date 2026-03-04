@@ -181,9 +181,9 @@ export interface FlowDetail {
   versionCount?: number;
 }
 
-// --- Organization Library Types ---
+// --- Organization Package Types ---
 
-export interface OrgLibraryItem {
+export interface OrgPackageItem {
   id: string;
   name?: string | null;
   description?: string | null;
@@ -195,7 +195,7 @@ export interface OrgLibraryItem {
   usedByFlows?: number;
 }
 
-export interface OrgLibraryItemDetail extends OrgLibraryItem {
+export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   flows: { id: string; displayName: string }[];
   autoInstalled?: boolean;

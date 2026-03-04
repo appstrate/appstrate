@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Upload } from "lucide-react";
 import { useRegistryStatus, usePublishPackage } from "../hooks/use-registry";
-import { useFlows, useLibraryList } from "../hooks/use-packages";
+import { useFlows, usePackageList } from "../hooks/use-packages";
 import { RegistrySettings } from "../components/registry-settings";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
@@ -21,8 +21,8 @@ export function MarketplacePublishPage() {
   const publishMutation = usePublishPackage();
 
   const { data: flows, isLoading: flowsLoading } = useFlows();
-  const { data: skills, isLoading: skillsLoading } = useLibraryList("skill");
-  const { data: extensions, isLoading: extensionsLoading } = useLibraryList("extension");
+  const { data: skills, isLoading: skillsLoading } = usePackageList("skill");
+  const { data: extensions, isLoading: extensionsLoading } = usePackageList("extension");
 
   const isLoading = statusLoading || flowsLoading || skillsLoading || extensionsLoading;
 

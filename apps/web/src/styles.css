@@ -2587,27 +2587,27 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* ─── Library ─── */
+/* ─── Packages ─── */
 
-.library-page {
+.pkg-page {
   max-width: 900px;
 }
 
-.library-upload {
+.pkg-upload {
   margin-bottom: 1rem;
 }
 
-.library-table-wrap {
+.pkg-table-wrap {
   overflow-x: auto;
 }
 
-.library-table {
+.pkg-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
 }
 
-.library-table th {
+.pkg-table th {
   text-align: left;
   font-size: 0.7rem;
   font-weight: 600;
@@ -2618,21 +2618,21 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
-.library-table td {
+.pkg-table td {
   padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 
-.library-table tbody tr {
+.pkg-table tbody tr {
   transition: background 0.12s;
 }
 
-.library-table tbody tr:hover {
+.pkg-table tbody tr:hover {
   background: var(--surface-hover);
 }
 
-.library-table .cell-id code {
+.pkg-table .cell-id code {
   font-family: "SF Mono", "Fira Code", monospace;
   font-size: 0.72rem;
   background: var(--surface);
@@ -2642,26 +2642,26 @@ button:disabled {
   white-space: nowrap;
 }
 
-.library-table .cell-meta {
+.pkg-table .cell-meta {
   min-width: 160px;
 }
 
-.library-table .cell-name {
+.pkg-table .cell-name {
   font-weight: 500;
 }
 
-.library-table .cell-desc {
+.pkg-table .cell-desc {
   font-size: 0.72rem;
   color: var(--text-muted);
   margin-top: 0.15rem;
 }
 
-.library-table .cell-count {
+.pkg-table .cell-count {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-.library-table .cell-actions {
+.pkg-table .cell-actions {
   text-align: right;
   white-space: nowrap;
 }
@@ -2697,9 +2697,9 @@ button:disabled {
   margin-left: 0.35rem;
 }
 
-/* Library item detail modal */
+/* Package item detail */
 
-.library-item-detail {
+.pkg-item-detail {
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -2817,13 +2817,13 @@ button:disabled {
 
 /* Resource section checkboxes (flow editor) */
 
-.library-checkbox-list {
+.pkg-checkbox-list {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-.library-checkbox-item {
+.pkg-checkbox-item {
   display: flex;
   align-items: flex-start;
   gap: 0.6rem;
@@ -2837,34 +2837,34 @@ button:disabled {
     background 0.15s;
 }
 
-.library-checkbox-item:hover {
+.pkg-checkbox-item:hover {
   border-color: var(--text-muted);
   background: var(--surface-hover);
 }
 
-.library-checkbox-item.checked {
+.pkg-checkbox-item.checked {
   border-color: var(--primary);
 }
 
-.library-checkbox-item input[type="checkbox"] {
+.pkg-checkbox-item input[type="checkbox"] {
   margin-top: 0.15rem;
   accent-color: var(--primary);
   flex-shrink: 0;
 }
 
-.library-checkbox-info {
+.pkg-checkbox-info {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   min-width: 0;
 }
 
-.library-checkbox-name {
+.pkg-checkbox-name {
   font-size: 0.8rem;
   font-weight: 500;
 }
 
-.library-checkbox-desc {
+.pkg-checkbox-desc {
   font-size: 0.72rem;
   color: var(--text-muted);
   line-height: 1.3;

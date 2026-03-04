@@ -21,7 +21,6 @@ import { providerTemplatesPaths } from "./paths/provider-templates.ts";
 import { proxiesPaths } from "./paths/proxies.ts";
 import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
-import { libraryPaths } from "./paths/library.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
 import { invitationsPaths } from "./paths/invitations.ts";
@@ -49,7 +48,6 @@ export const openApiSpec = {
     ...proxiesPaths,
     ...connectionProfilesPaths,
     ...apiKeysPaths,
-    ...libraryPaths,
     ...organizationsPaths,
     ...profilePaths,
     ...invitationsPaths,

@@ -18,7 +18,7 @@ Before performing any action or asking any question, call the relevant GET endpo
 1. **Need to know what flows exist?** → Call `GET /api/flows` — don't ask the user
 2. **Need to know what providers are configured?** → Call `GET /api/providers` — don't ask the user
 3. **Need to know what services are connected?** → Call `GET /auth/integrations` — don't ask the user
-4. **Need to know what skills/extensions are available?** → Call `GET /api/library/skills` and `GET /api/library/extensions` — don't ask the user
+4. **Need to know what skills/extensions are available?** → Call `GET /api/packages/skills` and `GET /api/packages/extensions` — don't ask the user
 5. **Need to know the flow's requirements?** → Call `GET /api/flows/{packageId}` — don't ask the user
 6. **Need to know if config is set?** → The flow detail response includes current `config` values — don't ask the user
 
@@ -39,8 +39,8 @@ When starting any task involving Appstrate, run this sequence to build your unde
 1. GET /api/flows                    → What flows exist? What's their status?
 2. GET /api/providers                → What providers are configured?
 3. GET /auth/integrations            → What services are connected/disconnected?
-4. GET /api/library/skills           → What skills are available?
-5. GET /api/library/extensions       → What extensions are available?
+4. GET /api/packages/skills           → What skills are available?
+5. GET /api/packages/extensions       → What extensions are available?
 ```
 
 You do NOT need to run all 5 every time — pick the ones relevant to your task. But **always gather context before acting**.
@@ -73,7 +73,7 @@ This skill is organized into focused reference files. **Read the file relevant t
 | **`AUTH.md`** | You need to authenticate, validate an API key, connect a service, or manage OAuth/API-key connections |
 | **`PROVIDERS.md`** | You need to create, configure, or research an external service provider (OAuth2, API key, custom auth) |
 | **`FLOWS.md`** | You need to create, update, delete, import, or configure a flow. Also covers the manifest format and JSON schema rules |
-| **`LIBRARY.md`** | You need to create, list, or manage skills and extensions in the library |
+| **`PACKAGES.md`** | You need to create, list, or manage skills and extensions in the packages section |
 | **`EXECUTION.md`** | You need to run a flow, monitor execution, stream logs, cancel, or set up automation (webhooks, triggers) |
 | **`SCHEDULING.md`** | You need to create, update, or manage cron schedules for recurring flow runs |
 | **`ADMIN.md`** | You need to manage organizations, members, API keys, or share tokens |

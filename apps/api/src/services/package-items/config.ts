@@ -6,10 +6,10 @@ import {
   isBuiltInExtension,
   resolveBuiltInSkill,
   resolveBuiltInExtension,
-} from "../builtin-library.ts";
+} from "../builtin-packages.ts";
 
 // ─────────────────────────────────────────────
-// Library type configuration
+// Package type configuration
 // ─────────────────────────────────────────────
 
 interface BuiltInItem {
@@ -19,7 +19,7 @@ interface BuiltInItem {
   content: string;
 }
 
-export interface LibraryTypeConfig {
+export interface PackageTypeConfig {
   type: "skill" | "extension";
   storageFolder: "skills" | "extensions";
   getBuiltIns: () => ReadonlyMap<string, BuiltInItem>;
@@ -28,7 +28,7 @@ export interface LibraryTypeConfig {
   label: string;
 }
 
-export const SKILL_CONFIG: LibraryTypeConfig = {
+export const SKILL_CONFIG: PackageTypeConfig = {
   type: "skill",
   storageFolder: "skills",
   getBuiltIns: getBuiltInSkills,
@@ -37,7 +37,7 @@ export const SKILL_CONFIG: LibraryTypeConfig = {
   label: "Skills",
 };
 
-export const EXTENSION_CONFIG: LibraryTypeConfig = {
+export const EXTENSION_CONFIG: PackageTypeConfig = {
   type: "extension",
   storageFolder: "extensions",
   getBuiltIns: getBuiltInExtensions,
@@ -47,10 +47,10 @@ export const EXTENSION_CONFIG: LibraryTypeConfig = {
 };
 
 // ─────────────────────────────────────────────
-// Library storage bucket
+// Package items storage bucket
 // ─────────────────────────────────────────────
 
-export const LIBRARY_BUCKET = "library-packages";
+export const PACKAGE_ITEMS_BUCKET = "library-packages";
 
-/** Ensure the library-packages Storage bucket exists. Call once at boot. */
-export const ensureLibraryBucket = () => storage.ensureBucket(LIBRARY_BUCKET);
+/** Ensure the package-items Storage bucket exists. Call once at boot. */
+export const ensurePackageItemsBucket = () => storage.ensureBucket(PACKAGE_ITEMS_BUCKET);

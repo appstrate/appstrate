@@ -8,22 +8,22 @@ import type { Manifest } from "@appstrate/core/validation";
 import { getAuthenticatedRegistryClient } from "./registry-auth.ts";
 import {
   getFlowItemFiles,
-  downloadLibraryPackage,
+  downloadPackageFiles,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
-} from "./library/index.ts";
+} from "./package-items/index.ts";
 import {
   isBuiltInSkill,
   isBuiltInExtension,
   getBuiltInSkillFiles,
   getBuiltInExtensionFile,
-} from "./builtin-library.ts";
+} from "./builtin-packages.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { isValidVersion } from "@appstrate/core/semver";
 import { validateForwardVersion } from "@appstrate/core/version-policy";
 import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
 import { getPackage } from "./flow-service.ts";
-import { buildRegistryDependencies } from "./library/dependencies.ts";
+import { buildRegistryDependencies } from "./package-items/dependencies.ts";
 import { logger } from "../lib/logger.ts";
 
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -202,7 +202,7 @@ async function buildPublishableArtifact(
     }
   } else if (pkg.type === "skill") {
     // Skill: manifest + files from storage (or content as SKILL.md)
-    const files = await downloadLibraryPackage("skills", orgId, pkg.id);
+    const files = await downloadPackageFiles("skills", orgId, pkg.id);
     if (files) {
       for (const [filePath, content] of Object.entries(files)) {
         entries[filePath] = content;
@@ -212,7 +212,7 @@ async function buildPublishableArtifact(
     }
   } else if (pkg.type === "extension") {
     // Extension: manifest + .ts file from storage (or content)
-    const files = await downloadLibraryPackage("extensions", orgId, pkg.id);
+    const files = await downloadPackageFiles("extensions", orgId, pkg.id);
     if (files) {
       for (const [filePath, content] of Object.entries(files)) {
         entries[filePath] = content;

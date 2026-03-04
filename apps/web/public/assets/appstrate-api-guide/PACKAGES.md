@@ -1,6 +1,6 @@
-# Library: Skills & Extensions
+# Packages: Skills & Extensions
 
-The library contains reusable components that flows can reference.
+The packages section contains reusable components that flows can reference.
 
 ## Skills
 
@@ -36,7 +36,7 @@ description: What this skill does and when to use it.
 ### List Skills
 
 ```
-GET /api/library/skills
+GET /api/packages/skills
 Authorization: Bearer ask_...
 ```
 
@@ -44,10 +44,10 @@ Returns built-in + org skills with `id`, `name`, `description`, `source`, `usedB
 
 ### Create a Skill
 
-**First check if the skill ID already exists** via `GET /api/library/skills`:
+**First check if the skill ID already exists** via `GET /api/packages/skills`:
 
 ```
-POST /api/library/skills
+POST /api/packages/skills
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -64,7 +64,7 @@ The `name` and `description` are auto-extracted from YAML frontmatter if omitted
 ### Get Skill Detail
 
 ```
-GET /api/library/skills/{skillId}
+GET /api/packages/skills/{skillId}
 Authorization: Bearer ask_...
 ```
 
@@ -73,7 +73,7 @@ Returns full content, metadata, and list of flows referencing this skill.
 ### Update a Skill
 
 ```
-PUT /api/library/skills/{skillId}
+PUT /api/packages/skills/{skillId}
 Authorization: Bearer ask_...
 Content-Type: application/json
 
@@ -85,11 +85,11 @@ Built-in skills cannot be modified (403).
 ### Delete a Skill
 
 ```
-DELETE /api/library/skills/{skillId}
+DELETE /api/packages/skills/{skillId}
 Authorization: Bearer ask_...
 ```
 
-Returns 409 if still referenced by flows. **Check which flows reference it first** via `GET /api/library/skills/{skillId}` (includes `flows` field).
+Returns 409 if still referenced by flows. **Check which flows reference it first** via `GET /api/packages/skills/{skillId}` (includes `flows` field).
 
 ## Extensions
 
@@ -132,9 +132,9 @@ export default function (pi: ExtensionAPI) {
 Same pattern as skills:
 
 ```
-GET    /api/library/extensions              # List all
-POST   /api/library/extensions              # Create (id + content required)
-GET    /api/library/extensions/{extensionId} # Get detail with source code
-PUT    /api/library/extensions/{extensionId} # Update
-DELETE /api/library/extensions/{extensionId} # Delete (409 if in use)
+GET    /api/packages/extensions              # List all
+POST   /api/packages/extensions              # Create (id + content required)
+GET    /api/packages/extensions/{extensionId} # Get detail with source code
+PUT    /api/packages/extensions/{extensionId} # Update
+DELETE /api/packages/extensions/{extensionId} # Delete (409 if in use)
 ```

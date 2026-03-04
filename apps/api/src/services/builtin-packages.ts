@@ -6,19 +6,19 @@ import { parseScopedName } from "@appstrate/core/naming";
 
 export const BUILTIN_SCOPE = "appstrate";
 
-// Module-level directories, initialized by initBuiltInLibrary()
+// Module-level directories, initialized by initBuiltInPackages()
 let skillsDir: string | null = null;
 let extensionsDir: string | null = null;
 
-interface BuiltInLibraryItem {
+interface BuiltInPackageItem {
   id: string;
   name: string;
   description: string;
   content: string;
 }
 
-let builtInSkills: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
-let builtInExtensions: ReadonlyMap<string, BuiltInLibraryItem> = new Map();
+let builtInSkills: ReadonlyMap<string, BuiltInPackageItem> = new Map();
+let builtInExtensions: ReadonlyMap<string, BuiltInPackageItem> = new Map();
 
 // --- Generic loader ---
 
@@ -32,8 +32,8 @@ interface BuiltInLoadConfig {
   typeLabel: string;
 }
 
-async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, BuiltInLibraryItem>> {
-  const result = new Map<string, BuiltInLibraryItem>();
+async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, BuiltInPackageItem>> {
+  const result = new Map<string, BuiltInPackageItem>();
 
   try {
     const entries = await readdir(cfg.dir);
@@ -78,9 +78,9 @@ async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, Buil
 }
 
 /** Load built-in skills and extensions from dataDir. Call once at boot. */
-export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
+export async function initBuiltInPackages(dataDir?: string): Promise<void> {
   if (!dataDir) {
-    logger.info("Built-in library disabled (no dataDir)");
+    logger.info("Built-in packages disabled (no dataDir)");
     return;
   }
 
@@ -111,17 +111,17 @@ export async function initBuiltInLibrary(dataDir?: string): Promise<void> {
   builtInSkills = skills;
   builtInExtensions = extensions;
 
-  logger.info("Built-in library loaded", {
+  logger.info("Built-in packages loaded", {
     skills: skills.size,
     extensions: extensions.size,
   });
 }
 
-export function getBuiltInSkills(): ReadonlyMap<string, BuiltInLibraryItem> {
+export function getBuiltInSkills(): ReadonlyMap<string, BuiltInPackageItem> {
   return builtInSkills;
 }
 
-export function getBuiltInExtensions(): ReadonlyMap<string, BuiltInLibraryItem> {
+export function getBuiltInExtensions(): ReadonlyMap<string, BuiltInPackageItem> {
   return builtInExtensions;
 }
 
@@ -134,12 +134,12 @@ export function isBuiltInExtension(id: string): boolean {
 }
 
 /** Resolve a built-in skill by ID (supports both bare slug and scoped name). */
-export function resolveBuiltInSkill(id: string): BuiltInLibraryItem | undefined {
+export function resolveBuiltInSkill(id: string): BuiltInPackageItem | undefined {
   return builtInSkills.get(id) ?? builtInSkills.get(`@${BUILTIN_SCOPE}/${id}`);
 }
 
 /** Resolve a built-in extension by ID (supports both bare slug and scoped name). */
-export function resolveBuiltInExtension(id: string): BuiltInLibraryItem | undefined {
+export function resolveBuiltInExtension(id: string): BuiltInPackageItem | undefined {
   return builtInExtensions.get(id) ?? builtInExtensions.get(`@${BUILTIN_SCOPE}/${id}`);
 }
 

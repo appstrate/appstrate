@@ -38,7 +38,7 @@ Authorization: Bearer ask_...
 La clé API est valide mais l'utilisateur n'a pas les droits admin. Les opérations en lecture fonctionneront toujours.
 
 **Actions de l'agent :**
-1. Déterminer si l'opération nécessite vraiment le rôle admin (création de flow, modification de provider, gestion de library)
+1. Déterminer si l'opération nécessite vraiment le rôle admin (création de flow, modification de provider, gestion de packages)
 2. Si oui, informer l'utilisateur : « Cette opération nécessite le rôle admin. Vérifiez votre rôle dans Organization Settings. »
 3. Si non, vérifier que l'appel est bien fait sur la bonne ressource
 
@@ -220,14 +220,14 @@ Vérifier la configuration du provider (authorizationUrl, tokenUrl, scopes).
 
 ---
 
-## Erreurs de library (skills/extensions)
+## Erreurs de packages (skills/extensions)
 
 ### 409 FLOW_IN_USE lors de la suppression
 
 **Diagnostic autonome :**
 ```
-GET {BASE_URL}/api/library/skills/{skillId}
-GET {BASE_URL}/api/library/extensions/{extensionId}
+GET {BASE_URL}/api/packages/skills/{skillId}
+GET {BASE_URL}/api/packages/extensions/{extensionId}
 ```
 La réponse contient un champ `flows` listant les flows qui référencent cette ressource.
 

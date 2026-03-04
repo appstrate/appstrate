@@ -113,23 +113,23 @@ const expectedEndpoints = [
   "POST /api/api-keys",
   "DELETE /api/api-keys/{keyId}",
 
-  // Library — Skills
-  "GET /api/library/skills",
-  "POST /api/library/skills",
-  "GET /api/library/skills/{skillId}",
-  "PUT /api/library/skills/{skillId}",
-  "DELETE /api/library/skills/{skillId}",
-  "GET /api/library/skills/{skillId}/versions",
-  "GET /api/library/skills/{skillId}/versions/{version}",
+  // Packages — Skills
+  "GET /api/packages/skills",
+  "POST /api/packages/skills",
+  "GET /api/packages/skills/{skillId}",
+  "PUT /api/packages/skills/{skillId}",
+  "DELETE /api/packages/skills/{skillId}",
+  "GET /api/packages/skills/{skillId}/versions",
+  "GET /api/packages/skills/{skillId}/versions/{version}",
 
-  // Library — Extensions
-  "GET /api/library/extensions",
-  "POST /api/library/extensions",
-  "GET /api/library/extensions/{extensionId}",
-  "PUT /api/library/extensions/{extensionId}",
-  "DELETE /api/library/extensions/{extensionId}",
-  "GET /api/library/extensions/{extensionId}/versions",
-  "GET /api/library/extensions/{extensionId}/versions/{version}",
+  // Packages — Extensions
+  "GET /api/packages/extensions",
+  "POST /api/packages/extensions",
+  "GET /api/packages/extensions/{extensionId}",
+  "PUT /api/packages/extensions/{extensionId}",
+  "DELETE /api/packages/extensions/{extensionId}",
+  "GET /api/packages/extensions/{extensionId}/versions",
+  "GET /api/packages/extensions/{extensionId}/versions/{version}",
 
   // Organizations
   "GET /api/orgs",

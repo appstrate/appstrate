@@ -7,7 +7,7 @@
   "orgSwitcher.ariaLabel": "Switch organization",
   "orgSwitcher.ariaLabelList": "Organizations",
   "orgSwitcher.schedules": "Schedules",
-  "orgSwitcher.library": "Library",
+  "orgSwitcher.packages": "Packages",
   "orgSwitcher.connectors": "Connectors",
   "orgSwitcher.settings": "Organization settings",
   "orgSwitcher.create": "+ New organization",

@@ -411,7 +411,7 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
     },
   },
-  OrgLibraryItem: {
+  OrgPackageItem: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -425,13 +425,13 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  OrgLibraryItemDetail: {
+  OrgPackageItemDetail: {
     type: "object",
     properties: {
       id: { type: "string" },
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
-      content: { type: "string", description: "Library item content" },
+      content: { type: "string", description: "Package item content" },
       source: { type: "string", enum: ["built-in", "local"] },
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },

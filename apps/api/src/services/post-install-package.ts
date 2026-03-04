@@ -1,7 +1,12 @@
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 import { createVersionAndUpload, getNextVersion } from "./package-versions.ts";
-import { upsertOrgItem, uploadLibraryPackage, SKILL_CONFIG, EXTENSION_CONFIG } from "./library.ts";
+import {
+  upsertOrgItem,
+  uploadPackageFiles,
+  SKILL_CONFIG,
+  EXTENSION_CONFIG,
+} from "./package-items.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 
 /** Parse manifest.json from normalized ZIP files if present. */
@@ -88,7 +93,7 @@ export async function postInstallPackage(params: {
         SKILL_CONFIG,
         manifest,
       );
-      await uploadLibraryPackage("skills", orgId, packageId, files);
+      await uploadPackageFiles("skills", orgId, packageId, files);
 
       // Create version for skill too
       await createVersion(manifest ?? manifestOrEmpty);
@@ -102,7 +107,7 @@ export async function postInstallPackage(params: {
         EXTENSION_CONFIG,
         manifest,
       );
-      await uploadLibraryPackage("extensions", orgId, packageId, files);
+      await uploadPackageFiles("extensions", orgId, packageId, files);
 
       // Create version for extension too
       await createVersion(manifest ?? manifestOrEmpty);

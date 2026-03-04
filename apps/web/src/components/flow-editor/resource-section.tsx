@@ -2,15 +2,15 @@ import { type ChangeEvent, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
-  useLibraryList,
-  useUploadLibrary,
-  LIBRARY_CONFIG,
-  type LibraryType,
+  usePackageList,
+  useUploadPackage,
+  PACKAGE_CONFIG,
+  type PackageType,
 } from "../../hooks/use-packages";
 import { Spinner } from "../spinner";
 
 interface ResourceSectionProps {
-  type: LibraryType;
+  type: PackageType;
   title: string;
   emptyLabel: string;
   selectedIds: string[];
@@ -26,9 +26,9 @@ export function ResourceSection({
 }: ResourceSectionProps) {
   const { t } = useTranslation(["flows", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: items, isLoading } = useLibraryList(type);
-  const upload = useUploadLibrary(type);
-  const cfg = LIBRARY_CONFIG[type];
+  const { data: items, isLoading } = usePackageList(type);
+  const upload = useUploadPackage(type);
+  const cfg = PACKAGE_CONFIG[type];
 
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -81,25 +81,25 @@ export function ResourceSection({
           <>
             <p className="editor-hint">{emptyLabel}</p>
             <p className="editor-hint">
-              <Link to="/?tab=skills">{t("editor.goToLibrary")}</Link>
+              <Link to="/?tab=skills">{t("editor.goToPackages")}</Link>
             </p>
           </>
         ) : (
-          <div className="library-checkbox-list">
+          <div className="pkg-checkbox-list">
             {items.map((item) => (
               <label
                 key={item.id}
-                className={`library-checkbox-item${selectedIds.includes(item.id) ? " checked" : ""}`}
+                className={`pkg-checkbox-item${selectedIds.includes(item.id) ? " checked" : ""}`}
               >
                 <input
                   type="checkbox"
                   checked={selectedIds.includes(item.id)}
                   onChange={() => toggle(item.id)}
                 />
-                <div className="library-checkbox-info">
-                  <span className="library-checkbox-name">{item.name || item.id}</span>
+                <div className="pkg-checkbox-info">
+                  <span className="pkg-checkbox-name">{item.name || item.id}</span>
                   {item.description && (
-                    <span className="library-checkbox-desc">{item.description}</span>
+                    <span className="pkg-checkbox-desc">{item.description}</span>
                   )}
                 </div>
               </label>
