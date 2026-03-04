@@ -6,6 +6,7 @@
   "userMenu.apiDocs": "API Documentation",
   "orgSwitcher.ariaLabel": "Switch organization",
   "orgSwitcher.ariaLabelList": "Organizations",
+  "orgSwitcher.executions": "Executions",
   "orgSwitcher.schedules": "Schedules",
   "orgSwitcher.packages": "Packages",
   "orgSwitcher.connectors": "Connectors",

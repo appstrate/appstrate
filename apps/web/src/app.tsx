@@ -32,7 +32,7 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useClickOutside } from "./hooks/use-click-outside";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download, FileText, LogOut } from "lucide-react";
+import { User, Settings, Download, FileText, LogOut, Store } from "lucide-react";
 
 function UserMenu({
   displayName,
@@ -112,6 +112,9 @@ function MainLayout() {
       <header>
         <Link to="/" className="logo-link">
           <img src="/logo.svg" alt="Appstrate" className="app-logo" />
+        </Link>
+        <Link to="/marketplace" className="nav-icon-link" title="Marketplace">
+          <Store size={18} />
         </Link>
         <NotificationBell />
         <OrgSwitcher />

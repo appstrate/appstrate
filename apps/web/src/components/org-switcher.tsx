@@ -5,6 +5,7 @@ import {
   Users,
   ChevronDown,
   Check,
+  Activity,
   Calendar,
   ShoppingBag,
   Plug,
@@ -71,6 +72,10 @@ export function OrgSwitcher() {
           })}
 
           <div className="org-switcher-divider">
+            <Link to="/executions" className="org-switcher-link" onClick={() => setOpen(false)}>
+              <Activity size={14} />
+              {t("orgSwitcher.executions")}
+            </Link>
             <Link to="/schedules" className="org-switcher-link" onClick={() => setOpen(false)}>
               <Calendar size={14} />
               {t("orgSwitcher.schedules")}

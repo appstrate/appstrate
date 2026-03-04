@@ -42,7 +42,7 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
-header .notification-bell {
+header .nav-icon-link {
   margin-left: auto;
 }
 
@@ -1099,6 +1099,24 @@ button:disabled {
 .nav-tab.active {
   color: var(--text);
   background: var(--surface);
+}
+
+/* Nav icon links */
+.nav-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: all 0.15s;
+  margin-right: 0.5rem;
+}
+.nav-icon-link:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 /* Notification bell */
