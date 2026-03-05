@@ -242,7 +242,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     parseOpts: { requiredFile: null, contentFileExt: ".ts", extractMeta: false },
     responseKey: "extension",
     validateContent: validateExtensionSource,
-    storageFileName: (id) => `${id}.ts`,
+    storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
   },
 };
 
@@ -308,7 +308,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     );
 
     if (parsed.normalizedFiles) {
-      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, parsed.id, parsed.normalizedFiles);
+      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, item.id, parsed.normalizedFiles);
     }
 
     return c.json(
