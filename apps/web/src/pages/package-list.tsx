@@ -155,7 +155,8 @@ const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
 ];
 
 function ItemTab({ config }: { config: ItemTabConfig }) {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "flows", "common"]);
+  const { isOrgAdmin } = useOrg();
   const { data: rawItems, isLoading } = config.useData();
 
   const typeLabel = t(`packages.type.${config.type}`);
@@ -174,6 +175,13 @@ function ItemTab({ config }: { config: ItemTabConfig }) {
       isLoading={isLoading}
       emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
       emptyHint={t(config.emptyHintKey, { type: typeLabel })}
+      extraActions={
+        isOrgAdmin ? (
+          <Link to={`/${config.type}s/new`}>
+            <button>{t("list.createItem", { ns: "flows" })}</button>
+          </Link>
+        ) : undefined
+      }
     />
   );
 }

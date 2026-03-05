@@ -1,5 +1,6 @@
 {
   "list.create": "Créer un flow",
+  "list.createItem": "Créer",
   "list.import": "Importer un package (.zip)",
   "list.empty": "Aucun flow disponible.",
   "list.emptyHint": "Ajoutez un flow dans le répertoire <1>flows/</1> ou importez un ZIP",
@@ -221,16 +222,6 @@
   "packages.content": "Contenu",
   "packages.usedBy": "Utilisé par",
   "packages.noFlows": "Aucun flow n'utilise ce package",
-  "packages.metadata": "Metadata",
-  "packages.version": "Version",
-  "packages.displayName": "Nom d'affichage",
-  "packages.description": "Description",
-  "packages.scopedName": "Nom registry",
-  "packages.scopedNameDesc": "Nom utilisé pour la publication (@scope/nom)",
-  "packages.save": "Enregistrer",
-  "packages.saved": "Enregistré",
-  "packages.versionInvalid": "Format semver invalide (X.Y.Z)",
-  "packages.scopedNameInvalid": "Format invalide (@scope/nom)",
   "publish.title": "Publier sur le registre",
   "publish.scope": "Scope",
   "publish.name": "Nom",
@@ -266,5 +257,8 @@
   "version.draftLabel": "Brouillon",
   "version.diffPrompt": "Prompt",
   "version.diffManifest": "Manifest",
-  "version.history": "Historique"
+  "version.history": "Historique",
+  "editor.errorContent": "Le contenu est requis.",
+  "editor.breadcrumbNewSkill": "Nouveau skill",
+  "editor.breadcrumbNewExtension": "Nouvelle extension"
 }
