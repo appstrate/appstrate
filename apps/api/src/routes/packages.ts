@@ -6,9 +6,8 @@ import { buildDownloadHeaders } from "@appstrate/core/download";
 import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
-import { getPackageById, insertPackage, updatePackage } from "../services/user-flows.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { isBuiltInFlow } from "../services/flow-service.ts";
+import { isBuiltInFlow, getAllPackageIds } from "../services/flow-service.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-packages.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
 import { getPublishPlan } from "../services/dependency-graph.ts";
@@ -16,16 +15,24 @@ import { getVersionForDownload, replaceVersionContent } from "../services/packag
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
+  getPackageById,
   listOrgItems,
   getOrgItem,
-  upsertOrgItem,
+  createOrgItem,
+  updateOrgItem,
   deleteOrgItem,
   uploadPackageFiles,
+  setFlowItems,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
+  FLOW_CONFIG,
   type PackageTypeConfig,
 } from "../services/package-items.ts";
-import { extractSkillMeta, validateExtensionSource } from "@appstrate/core/validation";
+import {
+  extractSkillMeta,
+  validateExtensionSource,
+  validateManifest,
+} from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
 import { parseScopedName } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
@@ -38,13 +45,16 @@ import {
   getVersionInfo,
   getLatestVersionCreatedAt,
   createVersionFromDraft,
+  createVersionAndUpload,
 } from "../services/package-versions.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { getRunningExecutionsForPackage } from "../services/state.ts";
 import { logger } from "../lib/logger.ts";
+import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 
 // ═══════════════════════════════════════════════
-// Shared helpers for skill/extension CRUD routes
+// Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -79,6 +89,8 @@ interface ParsedUpload {
   normalizedFiles?: Record<string, Uint8Array>;
   /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
   manifest?: Record<string, unknown>;
+  /** User-specified version from JSON body (propagated to manifest default). */
+  version?: string;
 }
 
 /**
@@ -189,8 +201,10 @@ async function parsePackageUpload(
   const body = await c.req.json<{
     id: string;
     content: string;
+    manifest?: Record<string, unknown>;
     name?: string;
     description?: string;
+    version?: string;
   }>();
 
   if (!body.id || !body.content) {
@@ -217,17 +231,91 @@ async function parsePackageUpload(
     opts.requiredFile ?? (opts.contentFileExt ? `${body.id}${opts.contentFileExt}` : "content");
   const normalizedFiles: Record<string, Uint8Array> = { [fileName]: encoded };
 
-  return { id: body.id, name, description, content: body.content, normalizedFiles };
+  return {
+    id: body.id,
+    name,
+    description,
+    content: body.content,
+    normalizedFiles,
+    manifest: body.manifest,
+    version: body.version,
+  };
+}
+
+// --- Synchronise the junction table after save (flows only). ---
+async function syncFlowDepsJunctionTable(
+  packageId: string,
+  orgId: string,
+  skillIds: string[],
+  extensionIds: string[],
+) {
+  await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
+  await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+}
+
+/** Create a version snapshot from files + manifest (non-fatal on error).
+ *  Builds the ZIP from normalizedFiles + manifest.json, then uploads. */
+async function createVersionSafe(params: {
+  packageId: string;
+  orgId: string;
+  userId: string;
+  manifest: Record<string, unknown>;
+  normalizedFiles: Record<string, Uint8Array>;
+}): Promise<void> {
+  const version = params.manifest.version as string | undefined;
+  if (!version || !isValidVersion(version)) {
+    logger.warn("Skipping version creation: missing or invalid version in manifest", {
+      packageId: params.packageId,
+    });
+    return;
+  }
+  try {
+    const { zipArtifact } = await import("@appstrate/core/zip");
+    const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
+    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
+    const zipBuffer = Buffer.from(zipArtifact(entries, 6));
+
+    await createVersionAndUpload({
+      packageId: params.packageId,
+      version,
+      orgId: params.orgId,
+      createdBy: params.userId,
+      zipBuffer,
+      manifest: params.manifest,
+    });
+  } catch (error) {
+    logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
+  }
 }
 
 // --- Route configuration per package type ---
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
-  parseOpts: { requiredFile: string | null; contentFileExt: string | null; extractMeta: boolean };
+  parseOpts: {
+    requiredFile: string | null;
+    contentFileExt: string | null;
+    extractMeta: boolean;
+  };
   responseKey: string;
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
   storageFileName: (id: string) => string;
+  /** Hook called after a new package is created. */
+  afterCreate?: (params: {
+    packageId: string;
+    orgId: string;
+    manifest: Record<string, unknown>;
+  }) => Promise<void>;
+  /** Hook called after a package is updated. */
+  afterUpdate?: (params: {
+    packageId: string;
+    orgId: string;
+    manifest: Record<string, unknown>;
+  }) => Promise<void>;
+  /** If true, version create/restore require no running executions (flows). */
+  requireMutableForVersionOps?: boolean;
+  /** If true, this type uses JSON body for create (not ZIP upload parsing). */
+  jsonBodyCreate?: boolean;
 }
 
 const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
@@ -243,6 +331,22 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     responseKey: "extension",
     validateContent: validateExtensionSource,
     storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+  },
+  flows: {
+    cfg: FLOW_CONFIG,
+    parseOpts: { requiredFile: null, contentFileExt: null, extractMeta: false },
+    responseKey: "flow",
+    storageFileName: () => "prompt.md",
+    jsonBodyCreate: true,
+    requireMutableForVersionOps: true,
+    afterCreate: async ({ packageId, orgId, manifest }) => {
+      const { skillIds, extensionIds } = extractDepsFromManifest(manifest as Partial<Manifest>);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
+    },
+    afterUpdate: async ({ packageId, orgId, manifest }) => {
+      const { skillIds, extensionIds } = extractDepsFromManifest(manifest as Partial<Manifest>);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
+    },
   },
 };
 
@@ -263,6 +367,88 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
+    // Flow create uses JSON body with { manifest, content }
+    if (rcfg.jsonBodyCreate) {
+      const body = await c.req.json<{
+        manifest: Record<string, unknown>;
+        prompt?: string;
+        content?: string;
+      }>();
+
+      const manifest = body.manifest;
+      const content = body.content ?? body.prompt ?? "";
+
+      // Validate manifest
+      const manifestResult = validateManifest(manifest);
+      if (!manifestResult.valid) {
+        return c.json(
+          {
+            error: "INVALID_MANIFEST",
+            message: "Invalid manifest",
+            details: manifestResult.errors,
+          },
+          400,
+        );
+      }
+      const validatedManifest = manifestResult.manifest;
+
+      if (!content.trim()) {
+        return c.json({ error: "VALIDATION_ERROR", message: "Content cannot be empty" }, 400);
+      }
+
+      const packageId = validatedManifest.name;
+
+      // Check for name collision
+      const existingIds = await getAllPackageIds(orgId);
+      if (existingIds.includes(packageId)) {
+        return c.json(
+          {
+            error: "NAME_COLLISION",
+            message: `A ${rcfg.cfg.type} with identifier '${packageId}' already exists`,
+          },
+          400,
+        );
+      }
+
+      // Insert into DB
+      const item = await createOrgItem(
+        orgId,
+        null, // packageId is already fully scoped from manifest.name
+        {
+          id: packageId,
+          content,
+          createdBy: user.id,
+        },
+        rcfg.cfg,
+        validatedManifest as Record<string, unknown>,
+      );
+
+      // After-create hook (e.g. flow junction table sync)
+      if (rcfg.afterCreate) {
+        await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
+      }
+
+      // Create initial version (non-fatal)
+      const contentFileName = rcfg.storageFileName(packageId);
+      await createVersionSafe({
+        packageId,
+        orgId,
+        userId: user.id,
+        manifest: validatedManifest,
+        normalizedFiles: { [contentFileName]: new TextEncoder().encode(content) },
+      });
+
+      return c.json(
+        {
+          packageId,
+          lockVersion: item.version,
+          message: `${rcfg.cfg.label.slice(0, -1)} created`,
+        },
+        201,
+      );
+    }
+
+    // Skill/Extension create — uses parsePackageUpload (ZIP or JSON body)
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
     if (parsed instanceof Response) return parsed;
 
@@ -274,6 +460,21 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         },
         403,
       );
+    }
+
+    // Validate manifest if present
+    if (parsed.manifest) {
+      const manifestResult = validateManifest(parsed.manifest);
+      if (!manifestResult.valid) {
+        return c.json(
+          {
+            error: "INVALID_MANIFEST",
+            message: "Invalid manifest",
+            details: manifestResult.errors,
+          },
+          400,
+        );
+      }
     }
 
     let warnings: string[] = [];
@@ -293,7 +494,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       warnings = validation.warnings;
     }
 
-    const item = await upsertOrgItem(
+    // Merge user-specified version into manifest for createOrgItem
+    const effectiveManifest = parsed.manifest
+      ? parsed.manifest
+      : parsed.version
+        ? { version: parsed.version }
+        : undefined;
+
+    const item = await createOrgItem(
       orgId,
       orgSlug,
       {
@@ -304,12 +512,28 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         createdBy: user.id,
       },
       rcfg.cfg,
-      parsed.manifest,
+      effectiveManifest,
     );
 
     if (parsed.normalizedFiles) {
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, item.id, parsed.normalizedFiles);
     }
+
+    // After-create hook
+    if (rcfg.afterCreate) {
+      const finalManifest = (item.manifest ?? {}) as Record<string, unknown>;
+      await rcfg.afterCreate({ packageId: item.id, orgId, manifest: finalManifest });
+    }
+
+    // Create initial version (non-fatal)
+    const finalManifest = (item.manifest ?? {}) as Record<string, unknown>;
+    await createVersionSafe({
+      packageId: item.id,
+      orgId,
+      userId: user.id,
+      manifest: finalManifest,
+      normalizedFiles: parsed.normalizedFiles ?? {},
+    });
 
     return c.json(
       {
@@ -318,6 +542,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           name: item.name,
           description: ((item.manifest ?? {}) as Partial<Manifest>).description ?? null,
         },
+        lockVersion: item.version,
         ...(warnings.length > 0 ? { warnings } : {}),
       },
       201,
@@ -358,14 +583,19 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
         ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
         : false;
 
-    return c.json({ [rcfg.responseKey]: { ...item, versionCount, hasUnpublishedChanges } });
+    return c.json({
+      [rcfg.responseKey]: {
+        ...item,
+        versionCount,
+        hasUnpublishedChanges,
+      },
+    });
   };
 }
 
 function makeUpdateHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const user = c.get("user");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -385,26 +615,54 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     const body = await c.req.json<{
-      name?: string;
-      description?: string;
+      manifest?: Record<string, unknown>;
       content?: string;
-      version?: string;
-      scopedName?: string;
+      prompt?: string; // alias for content (flow backward compat)
+      lockVersion?: number;
     }>();
 
-    if (body.version && !isValidVersion(body.version)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Invalid semver version (X.Y.Z)" }, 400);
-    }
-    if (body.scopedName && !parseScopedName(body.scopedName)) {
+    if (body.lockVersion == null || typeof body.lockVersion !== "number") {
       return c.json(
-        { error: "VALIDATION_ERROR", message: "Invalid scoped name (@scope/name)" },
+        {
+          error: "VALIDATION_ERROR",
+          message: "lockVersion (integer) is required for updates",
+        },
         400,
       );
     }
 
+    const manifest =
+      body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
+    const content = body.content ?? body.prompt ?? existing.content ?? "";
+
+    // Validate manifest
+    const manifestResult = validateManifest(manifest);
+    if (!manifestResult.valid) {
+      return c.json(
+        {
+          error: "INVALID_MANIFEST",
+          message: "Invalid manifest",
+          details: manifestResult.errors,
+        },
+        400,
+      );
+    }
+
+    // Ensure ID immutability (all types)
+    const newScopedName = (manifest as { name?: string }).name;
+    if (newScopedName && newScopedName !== itemId) {
+      return c.json({ error: "VALIDATION_ERROR", message: "name cannot change" }, 400);
+    }
+
+    // Content cannot be empty (all types)
+    if (!content.trim()) {
+      return c.json({ error: "VALIDATION_ERROR", message: "Content cannot be empty" }, 400);
+    }
+
+    // Content validation (extensions)
     let warnings: string[] = [];
-    if (rcfg.validateContent && body.content) {
-      const validation = rcfg.validateContent(body.content);
+    if (rcfg.validateContent && content) {
+      const validation = rcfg.validateContent(content);
       if (!validation.valid) {
         return c.json(
           {
@@ -419,44 +677,43 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       warnings = validation.warnings;
     }
 
-    const finalContent = body.content ?? existing.content;
-    const existingManifest = ((existing as { manifest?: Record<string, unknown> }).manifest ??
-      {}) as Record<string, unknown>;
-
-    // Merge body overrides into manifest (version, scopedName are manifest fields now)
-    const mergedManifest = {
-      ...existingManifest,
-      ...(body.version && { version: body.version }),
-      ...(body.scopedName && { name: body.scopedName }),
-    };
-
-    // Pass null for orgSlug — itemId is already the full package ID from the DB,
-    // so upsertOrgItem should use it directly instead of reconstructing it.
-    const item = await upsertOrgItem(
-      orgId,
-      null,
-      {
-        id: itemId,
-        name: body.name ?? existing.name ?? undefined,
-        description: body.description ?? existing.description ?? undefined,
-        content: finalContent!,
-        createdBy: existing.createdBy ?? user.id,
-      },
-      rcfg.cfg,
-      mergedManifest,
+    const updated = await updateOrgItem(
+      itemId,
+      { manifest: manifest as Record<string, unknown>, content },
+      body.lockVersion,
     );
 
-    // Update storage ZIP so container packaging stays in sync
+    if (!updated) {
+      return c.json(
+        {
+          error: "CONFLICT",
+          message: `${label} was modified concurrently. Reload and try again.`,
+        },
+        409,
+      );
+    }
+
+    // Update storage files
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, {
-      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(finalContent!),
+      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
     });
+
+    // After-update hook (e.g. flow junction table sync)
+    if (rcfg.afterUpdate) {
+      await rcfg.afterUpdate({
+        packageId: itemId,
+        orgId,
+        manifest: manifest as Record<string, unknown>,
+      });
+    }
 
     return c.json({
       [rcfg.responseKey]: {
-        id: item.id,
-        name: item.name,
-        description: ((item.manifest ?? {}) as Partial<Manifest>).description ?? null,
+        id: updated.id,
+        name: updated.name,
+        description: ((updated.manifest ?? {}) as Partial<Manifest>).description ?? null,
       },
+      lockVersion: updated.version,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
   };
@@ -476,6 +733,20 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
         },
         403,
       );
+    }
+
+    // For flows, check running executions
+    if (rcfg.requireMutableForVersionOps) {
+      const running = await getRunningExecutionsForPackage(itemId);
+      if (running > 0) {
+        return c.json(
+          {
+            error: "FLOW_IN_USE",
+            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
+          },
+          409,
+        );
+      }
     }
 
     const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
@@ -547,7 +818,6 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     // Extract primary content file from the ZIP
     let content: string | null = null;
     if (detail.content) {
-      // For skills, look for SKILL.md; for extensions, look for .ts file
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];
       if (fileData) {
@@ -560,6 +830,8 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
+      // For flows, also return as `prompt` for backward compat
+      ...(rcfg.cfg.type === "flow" ? { prompt: content ?? detail.prompt } : {}),
       yanked: detail.yanked,
       yankedReason: detail.yankedReason,
       integrity: detail.integrity,
@@ -600,6 +872,20 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       );
     }
 
+    // Mutable check: no running executions for flows
+    if (rcfg.requireMutableForVersionOps) {
+      const running = await getRunningExecutionsForPackage(itemId);
+      if (running > 0) {
+        return c.json(
+          {
+            error: "FLOW_IN_USE",
+            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
+          },
+          409,
+        );
+      }
+    }
+
     const item = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!item) {
       return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
@@ -638,6 +924,20 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       );
     }
 
+    // Mutable check: no running executions for flows
+    if (rcfg.requireMutableForVersionOps) {
+      const running = await getRunningExecutionsForPackage(itemId);
+      if (running > 0) {
+        return c.json(
+          {
+            error: "FLOW_IN_USE",
+            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
+          },
+          409,
+        );
+      }
+    }
+
     const versionQuery = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionQuery);
     if (!detail) {
@@ -647,8 +947,8 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    const pkg = await getPackageById(itemId);
-    if (!pkg) {
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing || !existing.lockVersion) {
       return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
     }
 
@@ -662,10 +962,10 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    const updated = await updatePackage(
+    const updated = await updateOrgItem(
       itemId,
       { manifest: detail.manifest, content },
-      pkg.version,
+      existing.lockVersion,
     );
 
     if (!updated) {
@@ -691,6 +991,15 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, detail.content);
     }
 
+    // After-update hook (e.g. flow junction table sync on restore)
+    if (rcfg.afterUpdate) {
+      await rcfg.afterUpdate({
+        packageId: itemId,
+        orgId,
+        manifest: detail.manifest,
+      });
+    }
+
     return c.json({
       message: `Version ${detail.version} restored`,
       restoredVersion: detail.version,
@@ -706,7 +1015,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Skill/Extension CRUD routes ---
+  // --- Package CRUD routes (skills, extensions, flows) ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
     router.get(`/${path}`, makeListHandler(rcfg));
     router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
@@ -852,8 +1161,21 @@ export function createPackagesRouter() {
         .set({ manifest, content, updatedAt: new Date() })
         .where(eq(packages.id, packageId));
     } else {
-      // New package — insert
-      await insertPackage(packageId, orgId, packageType, manifest, content);
+      // New package — insert (orgSlug=null since packageId is already fully scoped from manifest.name)
+      const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
+      if (!cfg) {
+        return c.json(
+          { error: "INVALID_TYPE", message: `Unknown package type '${packageType}'` },
+          400,
+        );
+      }
+      await createOrgItem(
+        orgId,
+        null,
+        { id: packageId, content, createdBy: user.id },
+        cfg,
+        manifest as Record<string, unknown>,
+      );
     }
 
     // Per-type post-install (version, package upsert, storage upload)

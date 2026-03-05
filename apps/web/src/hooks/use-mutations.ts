@@ -226,9 +226,9 @@ export function useCreateFlow() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (body: { manifest: Record<string, unknown>; prompt: string }) => {
-      return api<{ packageId: string }>("/flows", {
+      return api<{ packageId: string; lockVersion: number }>("/packages/flows", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({ manifest: body.manifest, content: body.prompt }),
       });
     },
     onSuccess: async (data) => {
@@ -248,9 +248,13 @@ export function useUpdateFlow(packageId: string) {
       prompt: string;
       lockVersion: number;
     }) => {
-      return api<{ packageId: string; lockVersion: number }>(`/flows/${packageId}`, {
+      return api<{ flow: { id: string }; lockVersion: number }>(`/packages/flows/${packageId}`, {
         method: "PUT",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          manifest: body.manifest,
+          content: body.prompt,
+          lockVersion: body.lockVersion,
+        }),
       });
     },
     onSuccess: async () => {
@@ -317,7 +321,7 @@ export function useDeleteFlow() {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (packageId: string) => {
-      await api(`/flows/${packageId}`, { method: "DELETE" });
+      await api(`/packages/flows/${packageId}`, { method: "DELETE" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flows"] });
@@ -364,9 +368,8 @@ export function useCreatePackage(type: "skill" | "extension") {
   return useMutation({
     mutationFn: async (body: {
       id: string;
+      manifest: Record<string, unknown>;
       content: string;
-      name?: string;
-      description?: string;
     }) => {
       return api<{ [key: string]: { id: string; name: string; description: string } }>(
         `/packages/${path}`,
@@ -391,21 +394,21 @@ export function useUpdatePackage(type: "skill" | "extension", packageId: string)
   const qc = useQueryClient();
   const navigate = useNavigate();
   const path = type === "skill" ? "skills" : "extensions";
+  const detailKey = type === "skill" ? "skill" : "extension";
   return useMutation({
     mutationFn: async (body: {
-      name?: string;
-      description?: string;
-      content?: string;
-      version?: string;
-      scopedName?: string;
+      manifest: Record<string, unknown>;
+      content: string;
+      lockVersion: number;
     }) => {
-      return api(`/packages/${path}/${packageId}`, {
+      return api<{ lockVersion: number }>(`/packages/${path}/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: ["packages", path] });
+      qc.invalidateQueries({ queryKey: ["packages", detailKey] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(`/${type}s/${packageId}`);
     },

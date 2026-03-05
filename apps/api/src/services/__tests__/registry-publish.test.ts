@@ -37,10 +37,13 @@ mock.module("../package-items/index.ts", () => ({
   downloadPackageFiles: async () => null,
   SKILL_CONFIG: {},
   EXTENSION_CONFIG: {},
+  FLOW_CONFIG: {},
 }));
 
 mock.module("../flow-service.ts", () => ({
   getPackage: async () => ({ prompt: "test", skills: [], extensions: [] }),
+  isBuiltInFlow: () => false,
+  getAllPackageIds: async () => [],
 }));
 
 mock.module("../package-items/dependencies.ts", () => ({

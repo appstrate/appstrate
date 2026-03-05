@@ -253,6 +253,7 @@
   "version.restore": "Restore",
   "version.restoreConfirm": "Restore version {{version}}? The current draft will be overwritten.",
   "version.diff": "Diff",
+  "version.noDiff": "Unable to compare changes. Create a new version to fix.",
   "version.noVersions": "No versions created",
   "version.draftLabel": "Draft",
   "version.diffPrompt": "Prompt",

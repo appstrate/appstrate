@@ -206,6 +206,7 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
   lastPublishedAt?: string | null;
   version?: string | null;
   manifestName?: string | null;
+  lockVersion?: number;
 
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];

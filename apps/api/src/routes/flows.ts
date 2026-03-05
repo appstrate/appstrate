@@ -15,19 +15,10 @@ import {
 } from "../services/state.ts";
 import { getConnectionStatus, resolveServiceStatuses } from "../services/connection-manager.ts";
 import { validateConfig } from "../services/schema.ts";
-import { getPackageById } from "../services/user-flows.ts";
+import { getPackageById } from "../services/package-items.ts";
 import { listPackages } from "../services/flow-service.ts";
-import {
-  listPackageVersions,
-  getVersionDetail,
-  getVersionCount,
-  getMatchingDistTags,
-  getVersionInfo,
-  getLatestVersionCreatedAt,
-  createVersionFromDraft,
-} from "../services/package-versions.ts";
-import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
-import { updatePackage } from "../services/user-flows.ts";
+import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
+import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
 import {
   getEffectiveProfileId,
@@ -35,9 +26,6 @@ import {
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { eq } from "drizzle-orm";
-import { packages } from "@appstrate/db/schema";
-import { db } from "../lib/db.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -205,177 +193,6 @@ export function createFlowsRouter() {
     return c.json({
       config,
       validation: { valid: true },
-    });
-  });
-
-  // GET /api/flows/:scope/:name/versions — list flow version history (user flows only)
-  router.get("/:scope{@[^/]+}/:name/versions", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-
-    if (flow.source === "built-in") {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not have version history" },
-        400,
-      );
-    }
-
-    const versions = await listPackageVersions(flow.id);
-    return c.json({ versions });
-  });
-
-  // GET /api/flows/:scope/:name/versions/info — get latest published + draft version
-  router.get("/:scope{@[^/]+}/:name/versions/info", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    if (flow.source === "built-in") {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
-        400,
-      );
-    }
-    const info = await getVersionInfo(flow.id);
-    return c.json(info);
-  });
-
-  // POST /api/flows/:scope/:name/versions — create a version from current draft
-  router.post(
-    "/:scope{@[^/]+}/:name/versions",
-    requireFlow(),
-    requireAdmin(),
-    requireMutableFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-      const user = c.get("user");
-      const orgId = c.get("orgId");
-
-      if (flow.source === "built-in") {
-        return c.json(
-          { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
-          400,
-        );
-      }
-
-      const result = await createVersionFromDraft({
-        packageId: flow.id,
-        orgId,
-        userId: user.id,
-      });
-
-      if (!result) {
-        return c.json(
-          { error: "VERSION_FAILED", message: "Failed to create version (invalid or duplicate)" },
-          400,
-        );
-      }
-
-      return c.json(
-        { id: result.id, version: result.version, message: `Version ${result.version} created` },
-        201,
-      );
-    },
-  );
-
-  // POST /api/flows/:scope/:name/versions/:version/restore — restore a version into the draft
-  router.post(
-    "/:scope{@[^/]+}/:name/versions/:version/restore",
-    requireFlow(),
-    requireAdmin(),
-    requireMutableFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-
-      if (flow.source === "built-in") {
-        return c.json(
-          { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not support versioning" },
-          400,
-        );
-      }
-
-      const versionQuery = c.req.param("version")!;
-      const detail = await getVersionDetail(flow.id, versionQuery);
-      if (!detail) {
-        return c.json(
-          { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-          404,
-        );
-      }
-
-      // Get current package for lockVersion
-      const pkg = await getPackageById(flow.id);
-      if (!pkg) {
-        return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
-      }
-
-      const updated = await updatePackage(
-        flow.id,
-        {
-          manifest: detail.manifest,
-          content: detail.prompt ?? "",
-        },
-        pkg.version,
-      );
-
-      if (!updated) {
-        return c.json(
-          {
-            error: "CONFLICT",
-            message: "Package was modified concurrently. Reload and try again.",
-          },
-          409,
-        );
-      }
-
-      // If restoring the latest version, align updatedAt so the draft
-      // doesn't appear as having unpublished changes.
-      const latestDate = await getLatestVersionCreatedAt(flow.id);
-      if (
-        latestDate &&
-        detail.createdAt &&
-        new Date(detail.createdAt).getTime() === latestDate.getTime()
-      ) {
-        await db.update(packages).set({ updatedAt: latestDate }).where(eq(packages.id, flow.id));
-      }
-
-      return c.json({
-        message: `Version ${detail.version} restored`,
-        restoredVersion: detail.version,
-        lockVersion: updated.version,
-      });
-    },
-  );
-
-  // GET /api/flows/:scope/:name/versions/:version — get version detail with prompt from ZIP
-  router.get("/:scope{@[^/]+}/:name/versions/:version", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-
-    if (flow.source === "built-in") {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Built-in flows do not have version history" },
-        400,
-      );
-    }
-
-    const versionQuery = c.req.param("version")!;
-    const detail = await getVersionDetail(flow.id, versionQuery);
-    if (!detail) {
-      return c.json(
-        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-        404,
-      );
-    }
-
-    const matchingTags = await getMatchingDistTags(flow.id, detail.version);
-
-    return c.json({
-      id: detail.id,
-      version: detail.version,
-      manifest: detail.manifest,
-      prompt: detail.prompt,
-      yanked: detail.yanked,
-      yankedReason: detail.yankedReason,
-      integrity: detail.integrity,
-      artifactSize: detail.artifactSize,
-      createdAt: detail.createdAt,
-      distTags: matchingTags,
     });
   });
 

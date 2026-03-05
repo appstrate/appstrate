@@ -7,6 +7,7 @@ import {
   resolveBuiltInSkill,
   resolveBuiltInExtension,
 } from "../builtin-packages.ts";
+import { isBuiltInFlow } from "../flow-service.ts";
 
 // ─────────────────────────────────────────────
 // Package type configuration
@@ -20,8 +21,8 @@ interface BuiltInItem {
 }
 
 export interface PackageTypeConfig {
-  type: "skill" | "extension";
-  storageFolder: "skills" | "extensions";
+  type: "flow" | "skill" | "extension";
+  storageFolder: "flows" | "skills" | "extensions";
   getBuiltIns: () => ReadonlyMap<string, BuiltInItem>;
   isBuiltIn: (id: string) => boolean;
   resolveBuiltIn: (id: string) => BuiltInItem | undefined;
@@ -44,6 +45,20 @@ export const EXTENSION_CONFIG: PackageTypeConfig = {
   isBuiltIn: isBuiltInExtension,
   resolveBuiltIn: resolveBuiltInExtension,
   label: "Extensions",
+};
+
+/** Flows don't have the same built-in resolution (LoadedFlow ≠ BuiltInItem),
+ *  but we need a PackageTypeConfig for CRUD uniformity. Built-in flows are
+ *  handled at the route level (requireFlow middleware), so these are no-ops. */
+const EMPTY_MAP = new Map<string, BuiltInItem>();
+
+export const FLOW_CONFIG: PackageTypeConfig = {
+  type: "flow",
+  storageFolder: "flows",
+  getBuiltIns: () => EMPTY_MAP,
+  isBuiltIn: isBuiltInFlow,
+  resolveBuiltIn: () => undefined,
+  label: "Flows",
 };
 
 // ─────────────────────────────────────────────

@@ -933,4 +933,304 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/flows": {
+    post: {
+      operationId: "createFlow",
+      tags: ["Packages"],
+      summary: "Create a user flow",
+      description:
+        "Create a new user flow from manifest and content. Creates an initial version automatically. Admin only.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content"],
+              properties: {
+                manifest: { type: "object", description: "Flow manifest JSON" },
+                content: { type: "string", description: "Agent prompt (markdown)" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Flow created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/flows/{flowId}": {
+    get: {
+      operationId: "getFlowPackage",
+      tags: ["Packages"],
+      summary: "Get flow package detail",
+      description: "Get a flow's package details including content, manifest, and lockVersion.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Flow package detail",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateFlow",
+      tags: ["Packages"],
+      summary: "Update a user flow",
+      description:
+        "Update manifest and content of a user flow with optimistic locking. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lockVersion"],
+              properties: {
+                manifest: { type: "object" },
+                content: { type: "string" },
+                lockVersion: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Flow updated",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  flow: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: "string" },
+                      description: { type: "string" },
+                    },
+                  },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification or flow in use" },
+      },
+    },
+    delete: {
+      operationId: "deleteFlow",
+      tags: ["Packages"],
+      summary: "Delete a user flow",
+      description: "Delete a user flow. Built-in flows cannot be deleted. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Flow deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { description: "Flow in use" },
+      },
+    },
+  },
+  "/api/packages/flows/{flowId}/versions/info": {
+    get: {
+      operationId: "getFlowVersionInfo",
+      tags: ["Packages"],
+      summary: "Get flow version info (latest published + draft)",
+      description: "Returns the latest published version and current draft version for a flow.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latestVersion: { type: ["string", "null"] },
+                  draftVersion: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/flows/{flowId}/versions": {
+    get: {
+      operationId: "listFlowVersions",
+      tags: ["Packages"],
+      summary: "List flow versions",
+      description: "Returns all published versions for a flow.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FlowVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createFlowVersion",
+      tags: ["Packages"],
+      summary: "Create a flow version from draft",
+      description:
+        "Create an immutable version snapshot. Requires no running executions. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "201": {
+          description: "Version created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { description: "Flow in use (running executions)" },
+      },
+    },
+  },
+  "/api/packages/flows/{flowId}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreFlowVersion",
+      tags: ["Packages"],
+      summary: "Restore a flow version into the draft",
+      description:
+        "Restore a published version into the draft. Requires no running executions. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restoredVersion: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification or flow in use" },
+      },
+    },
+  },
+  "/api/packages/flows/{flowId}/versions/{version}": {
+    get: {
+      operationId: "getFlowVersionDetail",
+      tags: ["Packages"],
+      summary: "Get flow version detail",
+      description: "Returns the detail of a specific flow version including manifest and content.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version detail",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: { type: "object" },
+                  content: { type: ["string", "null"] },
+                  prompt: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yankedReason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifactSize: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  distTags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
 } as const;

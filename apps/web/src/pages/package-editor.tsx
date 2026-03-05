@@ -279,20 +279,16 @@ function PackageEditorInner({
       return;
     }
 
+    const module = getPackageTypeModule(type);
+    const payload = module.assemblePayload(form);
     if (isEdit) {
-      const module = getPackageTypeModule(type);
-      const payload = module.assemblePayload(form);
-      updatePkg.mutate(payload as never, { onError: (err) => setError(err.message) });
+      updatePkg.mutate({ ...payload, lockVersion: form._lockVersion! } as never, {
+        onError: (err) => setError(err.message),
+      });
     } else {
-      createPkg.mutate(
-        {
-          id: meta.id,
-          content: form.content,
-          name: meta.displayName,
-          description: meta.description,
-        },
-        { onError: (err) => setError(err.message) },
-      );
+      createPkg.mutate({ id: meta.id, ...payload } as never, {
+        onError: (err) => setError(err.message),
+      });
     }
   };
 
@@ -459,6 +455,7 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
           content: pkgDetail.content,
           updatedAt: pkgDetail.updatedAt,
           manifestName: pkgDetail.manifestName,
+          lockVersion: pkgDetail.lockVersion,
         })
       : module.defaultFormState(currentOrg?.slug, user?.email);
 

@@ -27,19 +27,10 @@ const expectedEndpoints = [
   "POST /api/auth/sign-out",
   "GET /api/auth/get-session",
 
-  // Flows (flows.ts + user-flows.ts)
+  // Flows (runtime — flows.ts + user-flows.ts junction endpoints)
   "GET /api/flows",
-  "POST /api/flows",
-  "POST /api/flows/import",
   "GET /api/flows/{packageId}",
-  "PUT /api/flows/{packageId}",
-  "DELETE /api/flows/{packageId}",
   "PUT /api/flows/{packageId}/config",
-  "GET /api/flows/{packageId}/versions",
-  "GET /api/flows/{packageId}/versions/info",
-  "POST /api/flows/{packageId}/versions",
-  "POST /api/flows/{packageId}/versions/{version}/restore",
-  "GET /api/flows/{packageId}/versions/{version}",
   "POST /api/flows/{packageId}/services/{serviceId}/bind",
   "DELETE /api/flows/{packageId}/services/{serviceId}/bind",
   "POST /api/flows/{packageId}/share-token",
@@ -139,6 +130,17 @@ const expectedEndpoints = [
   "POST /api/packages/extensions/{extensionId}/versions",
   "POST /api/packages/extensions/{extensionId}/versions/{version}/restore",
   "GET /api/packages/extensions/{extensionId}/versions/{version}",
+
+  // Packages — Flows
+  "POST /api/packages/flows",
+  "GET /api/packages/flows/{flowId}",
+  "PUT /api/packages/flows/{flowId}",
+  "DELETE /api/packages/flows/{flowId}",
+  "GET /api/packages/flows/{flowId}/versions",
+  "GET /api/packages/flows/{flowId}/versions/info",
+  "POST /api/packages/flows/{flowId}/versions",
+  "POST /api/packages/flows/{flowId}/versions/{version}/restore",
+  "GET /api/packages/flows/{flowId}/versions/{version}",
 
   // Organizations
   "GET /api/orgs",

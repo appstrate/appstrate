@@ -253,6 +253,7 @@
   "version.restore": "Restaurer",
   "version.restoreConfirm": "Restaurer la version {{version}} ? Le brouillon actuel sera écrasé.",
   "version.diff": "Diff",
+  "version.noDiff": "Impossible de comparer les modifications. Créez une nouvelle version pour corriger.",
   "version.noVersions": "Aucune version créée",
   "version.draftLabel": "Brouillon",
   "version.diffPrompt": "Prompt",
