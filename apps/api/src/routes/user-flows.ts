@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { validateManifest, scopedNameRegex } from "@appstrate/core/validation";
+import { isValidVersion } from "@appstrate/core/semver";
 import { deletePackage, updatePackage, insertPackage } from "../services/user-flows.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
-import { createVersionAndUpload, getNextVersion } from "../services/package-versions.ts";
+import { createVersionAndUpload } from "../services/package-versions.ts";
 import { buildMinimalZip } from "../services/package-storage.ts";
 import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/package-items.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -30,8 +31,14 @@ async function createVersionSafe(params: {
   zipBuffer: Buffer;
   manifest: Record<string, unknown>;
 }): Promise<void> {
+  const version = params.manifest.version as string | undefined;
+  if (!version || !isValidVersion(version)) {
+    logger.warn("Skipping version creation: missing or invalid version in manifest", {
+      packageId: params.packageId,
+    });
+    return;
+  }
   try {
-    const version = await getNextVersion(params.packageId);
     await createVersionAndUpload({
       packageId: params.packageId,
       version,

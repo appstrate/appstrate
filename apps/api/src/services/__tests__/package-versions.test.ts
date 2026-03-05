@@ -37,7 +37,7 @@ const {
   getVersionCount,
   yankVersion,
   getMatchingDistTags,
-  getNextVersion,
+
   getVersionInfo,
   getLatestVersionCreatedAt,
   createVersionAndUpload,
@@ -259,50 +259,6 @@ describe("yankVersion", () => {
 
     const result = await yankVersion("pkg-1", "1.0.0");
     expect(result).toBe(true);
-  });
-});
-
-describe("getNextVersion", () => {
-  beforeEach(() => {
-    resetQueues();
-  });
-
-  test("returns 1.0.0 when no versions and no manifest version", async () => {
-    queues.select = [
-      [{ manifest: {} }], // pkg
-      [], // latestTag
-    ];
-    const result = await getNextVersion("pkg-1");
-    expect(result).toBe("1.0.0");
-  });
-
-  test("returns manifest version when no existing versions", async () => {
-    queues.select = [
-      [{ manifest: { version: "2.0.0" } }], // pkg
-      [], // latestTag
-    ];
-    const result = await getNextVersion("pkg-1");
-    expect(result).toBe("2.0.0");
-  });
-
-  test("returns manifest version when higher than latest", async () => {
-    queues.select = [
-      [{ manifest: { version: "3.0.0" } }], // pkg
-      [{ versionId: 1 }], // latestTag
-      [{ version: "2.0.0" }], // latestVer
-    ];
-    const result = await getNextVersion("pkg-1");
-    expect(result).toBe("3.0.0");
-  });
-
-  test("returns bumped patch when manifest version is not higher", async () => {
-    queues.select = [
-      [{ manifest: { version: "1.0.0" } }], // pkg
-      [{ versionId: 1 }], // latestTag
-      [{ version: "1.0.0" }], // latestVer (same as manifest)
-    ];
-    const result = await getNextVersion("pkg-1");
-    expect(result).toBe("1.0.1");
   });
 });
 

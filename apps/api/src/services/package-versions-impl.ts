@@ -8,7 +8,6 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { storeVersionDependencies } from "./package-version-deps.ts";
 import {
   isValidVersion,
-  versionGt,
   resolveVersionFromCatalog,
   type CatalogVersion,
   type DistTagEntry,
@@ -16,7 +15,6 @@ import {
 import {
   validateForwardVersion,
   findBestStableVersion,
-  bumpPatch,
   shouldUpdateLatestTag,
 } from "@appstrate/core/version-policy";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
@@ -383,51 +381,6 @@ async function listDistTags(packageId: string): Promise<{ tag: string; version: 
 export async function getMatchingDistTags(packageId: string, version: string): Promise<string[]> {
   const distTags = await listDistTags(packageId);
   return distTags.filter((dt) => dt.version === version).map((dt) => dt.tag);
-}
-
-// ─────────────────────────────────────────────
-// Auto-version helpers
-// ─────────────────────────────────────────────
-
-/** Get the next version for a package. Auto-bumps patch from "latest" or manifest.version. */
-export async function getNextVersion(packageId: string): Promise<string> {
-  const [pkg] = await db
-    .select({ manifest: packages.manifest })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-
-  const manifestVersion = (pkg?.manifest as Record<string, unknown> | null)?.version as
-    | string
-    | undefined;
-
-  const [latestTag] = await db
-    .select({ versionId: packageDistTags.versionId })
-    .from(packageDistTags)
-    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-    .limit(1);
-
-  if (latestTag) {
-    const [latestVer] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, latestTag.versionId))
-      .limit(1);
-
-    if (latestVer) {
-      if (
-        manifestVersion &&
-        isValidVersion(manifestVersion) &&
-        versionGt(manifestVersion, latestVer.version)
-      ) {
-        return manifestVersion;
-      }
-      return bumpPatch(latestVer.version) ?? "1.0.0";
-    }
-  }
-
-  if (manifestVersion && isValidVersion(manifestVersion)) return manifestVersion;
-  return "1.0.0";
 }
 
 /** Return the latest published version and the current draft version from the manifest. */
