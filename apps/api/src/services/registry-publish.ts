@@ -172,7 +172,6 @@ export async function publishPackage(
     .set({
       lastPublishedVersion: version,
       lastPublishedAt: new Date(),
-      updatedAt: new Date(),
     })
     .where(eq(packages.id, packageId));
 

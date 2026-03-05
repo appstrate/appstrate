@@ -675,13 +675,15 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Align updatedAt with the restored version's timestamp — the draft is now
-    // a known version state, not new unpublished work.
-    if (detail.createdAt) {
-      await db
-        .update(packages)
-        .set({ updatedAt: new Date(detail.createdAt) })
-        .where(eq(packages.id, itemId));
+    // If restoring the latest version, align updatedAt so the draft
+    // doesn't appear as having unpublished changes.
+    const latestDate = await getLatestVersionCreatedAt(itemId);
+    if (
+      latestDate &&
+      detail.createdAt &&
+      new Date(detail.createdAt).getTime() === latestDate.getTime()
+    ) {
+      await db.update(packages).set({ updatedAt: latestDate }).where(eq(packages.id, itemId));
     }
 
     // Re-upload storage files from the version ZIP
