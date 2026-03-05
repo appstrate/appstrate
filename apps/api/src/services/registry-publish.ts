@@ -274,11 +274,11 @@ async function buildArtifactFromVersionZip(
   zipBuffer: Buffer,
   publishManifest: Partial<Manifest>,
 ): Promise<Uint8Array> {
-  const unzipped = unzipArtifact(new Uint8Array(zipBuffer));
+  const files = unzipArtifact(new Uint8Array(zipBuffer));
   const entries: Zippable = {};
 
   // Copy all files from the version ZIP except manifest.json
-  for (const [filePath, content] of Object.entries(unzipped.files)) {
+  for (const [filePath, content] of Object.entries(files)) {
     if (filePath === "manifest.json") continue;
     entries[filePath] = content;
   }

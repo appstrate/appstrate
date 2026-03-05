@@ -57,6 +57,8 @@
   "import.submit": "Import",
   "import.errZip": "Only .zip files are accepted",
   "import.errSize": "File exceeds 10 MB",
+  "import.confirmOverwrite": "This package has unpublished draft changes (draft v{{draftVersion}}). The import will overwrite them.",
+  "import.forceSubmit": "Overwrite and import",
   "input.title": "{{name}} — Parameters",
   "input.run": "Run",
   "input.fieldRequired": "Field \"{{field}}\" is required",

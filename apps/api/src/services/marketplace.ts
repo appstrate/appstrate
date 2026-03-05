@@ -302,32 +302,35 @@ export async function installFromMarketplace(
   orgId: string,
   userId: string,
   accessToken: string | undefined,
+  force?: boolean,
 ): Promise<InstallResult> {
   const scope = normalizeScope(rawScope);
   const packageId = buildPackageId(scope, name);
 
   // Check for local package with different integrity (conflict)
-  const [existingPkg] = await db
-    .select({ id: packages.id })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
-    .limit(1);
+  if (!force) {
+    const [existingPkg] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+      .limit(1);
 
-  if (existingPkg) {
-    const localVersions = await getLocalVersionIntegrities(packageId);
-    if (localVersions.length > 0) {
-      const client = getRegistryClient();
-      if (client) {
-        const authedClient = accessToken
-          ? new RegistryClient({ baseUrl: getEnv().REGISTRY_URL!, accessToken })
-          : client;
-        const remote = await authedClient.getPackage(scope, name);
-        if (remote) {
-          if (!hasMatchingVersionIntegrity(localVersions, remote.versions)) {
-            throw new Error(
-              `Cannot install: a local package "${packageId}" exists with different content. ` +
-                `Delete or rename the local package before installing from the registry.`,
-            );
+    if (existingPkg) {
+      const localVersions = await getLocalVersionIntegrities(packageId);
+      if (localVersions.length > 0) {
+        const client = getRegistryClient();
+        if (client) {
+          const authedClient = accessToken
+            ? new RegistryClient({ baseUrl: getEnv().REGISTRY_URL!, accessToken })
+            : client;
+          const remote = await authedClient.getPackage(scope, name);
+          if (remote) {
+            if (hasIntegrityConflict(localVersions, remote.versions)) {
+              throw new Error(
+                `Cannot install: a local package "${packageId}" exists with different content. ` +
+                  `Delete or rename the local package before installing from the registry.`,
+              );
+            }
           }
         }
       }
@@ -425,15 +428,19 @@ async function getLocalVersionIntegrities(packageId: string): Promise<VersionInt
 }
 
 /**
- * Check if any local version matches any registry version by (version, integrity) pair.
- * Returns true if at least one pair matches — proving the package originates from the registry.
+ * Check if any local version has the same version number as a registry version but different integrity.
+ * This is a true content conflict — the same version was modified locally.
+ * Disjoint version sets (e.g. local 1.0.0, registry 1.1.0) are NOT conflicts.
  */
-function hasMatchingVersionIntegrity(
+function hasIntegrityConflict(
   localVersions: VersionIntegrity[],
   registryVersions: VersionIntegrity[],
 ): boolean {
-  const registryPairs = new Set(registryVersions.map((v) => `${v.version}:${v.integrity}`));
-  return localVersions.some((v) => registryPairs.has(`${v.version}:${v.integrity}`));
+  const registryByVersion = new Map(registryVersions.map((v) => [v.version, v.integrity]));
+  return localVersions.some((local) => {
+    const registryIntegrity = registryByVersion.get(local.version);
+    return registryIntegrity !== undefined && registryIntegrity !== local.integrity;
+  });
 }
 
 // --- Package detail with install status ---
@@ -464,10 +471,10 @@ export async function getMarketplacePackageWithInstallStatus(
     const localVersions = await getLocalVersionIntegrities(packageId);
 
     if (localVersions.length > 0) {
-      if (hasMatchingVersionIntegrity(localVersions, pkg.versions)) {
-        installedVersion = await resolveInstalledVersion(packageId, orgId);
-      } else {
+      if (hasIntegrityConflict(localVersions, pkg.versions)) {
         integrityConflict = true;
+      } else {
+        installedVersion = await resolveInstalledVersion(packageId, orgId);
       }
 
       // Check if local version is ahead of registry latest
@@ -559,10 +566,10 @@ export async function checkRegistryUpdates(
       }
       if (!remote) return null;
 
-      // Skip packages whose local versions don't match any registry version by (version, integrity)
+      // Skip packages whose local versions conflict with registry (same version, different content)
       const localVersions = await getLocalVersionIntegrities(pkg.id);
       if (localVersions.length > 0) {
-        if (!hasMatchingVersionIntegrity(localVersions, remote.versions)) {
+        if (hasIntegrityConflict(localVersions, remote.versions)) {
           return null;
         }
       }

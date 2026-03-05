@@ -341,6 +341,7 @@
   "marketplace.navUpdates": "Updates",
   "marketplace.navPublish": "Publish",
   "marketplace.integrityConflict": "A local package with the same name exists with different content. Delete or rename the local package to install from the registry.",
+  "marketplace.integrityConflictConfirm": "The registry package will overwrite the locally installed version. Continue?",
   "marketplace.localVersionAhead": "Version {{version}} is ready to publish",
   "marketplace.publishAction": "Publish",
   "marketplace.publishSuccess": "Version {{version}} published successfully",

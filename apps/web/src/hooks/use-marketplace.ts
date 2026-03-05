@@ -118,7 +118,7 @@ export function useMarketplacePackage(scope: string | undefined, name: string | 
 export function useInstallPackage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (opts: { scope: string; name: string; version?: string }) =>
+    mutationFn: (opts: { scope: string; name: string; version?: string; force?: boolean }) =>
       api<InstallResult>("/marketplace/install", { method: "POST", body: JSON.stringify(opts) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["marketplace"] });

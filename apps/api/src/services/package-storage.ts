@@ -157,20 +157,11 @@ export function buildMinimalZip(manifest: Record<string, unknown>, prompt: strin
 }
 
 /**
- * Unzip a buffer and normalize (strip __MACOSX, directory entries, and folder wrappers).
+ * Unzip a buffer and normalize (strip __MACOSX, directory entries).
  * Returns a map of path → content as Uint8Array.
  */
 export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
-  const { files, prefix } = unzipArtifact(new Uint8Array(zipBuffer));
-
-  const result: Record<string, Uint8Array> = {};
-  for (const [path, data] of Object.entries(files)) {
-    // Filter out directory entries and __MACOSX resource forks
-    if (path.endsWith("/") || path.startsWith("__MACOSX/")) continue;
-    const stripped = prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
-    if (stripped) result[stripped] = data;
-  }
-  return result;
+  return unzipArtifact(new Uint8Array(zipBuffer));
 }
 
 /** Recursively read a directory into an fflate Zippable structure. */

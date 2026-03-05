@@ -341,6 +341,7 @@
   "marketplace.navUpdates": "Mises à jour",
   "marketplace.navPublish": "Publier",
   "marketplace.integrityConflict": "Un package local portant le même nom existe avec un contenu différent. Supprimez ou renommez le package local pour installer depuis le registre.",
+  "marketplace.integrityConflictConfirm": "Le package du registre écrasera la version installée localement. Continuer ?",
   "marketplace.localVersionAhead": "La version {{version}} est prête à être publiée",
   "marketplace.publishAction": "Publier",
   "marketplace.publishSuccess": "Version {{version}} publiée avec succès",

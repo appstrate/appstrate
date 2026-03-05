@@ -365,6 +365,11 @@ export const marketplacePaths = {
                   description: "Specific version to install (defaults to latest)",
                 },
                 accessToken: { type: "string", description: "Optional registry access token" },
+                force: {
+                  type: "boolean",
+                  description:
+                    "Skip integrity conflict check and force install over a local package with different content",
+                },
               },
             },
           },

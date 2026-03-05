@@ -37,7 +37,7 @@ export async function downloadPackageFiles(
     logger.warn("Failed to download package files", { type, orgId, itemId });
     return null;
   }
-  return unzipArtifact(new Uint8Array(data)).files;
+  return unzipArtifact(new Uint8Array(data));
 }
 
 /** Delete a package item's files from Storage. */

@@ -6,6 +6,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@appstrate/core": "^2.1.2"
+    "@appstrate/core": "2.1.3"
   }
 }

@@ -203,10 +203,29 @@ export function MarketplaceDetailPage() {
             {pkg.localVersionAhead ? (
               <>{publishAheadBadge}</>
             ) : (
-              <span className="marketplace-conflict-badge">
-                <AlertTriangle size={14} />
-                {t("marketplace.integrityConflict")}
-              </span>
+              <>
+                <span className="marketplace-conflict-badge">
+                  <AlertTriangle size={14} />
+                  {t("marketplace.integrityConflict")}
+                </span>
+                <button
+                  className="btn-install"
+                  disabled={install.isPending}
+                  onClick={() => {
+                    if (!scope || !name) return;
+                    if (!window.confirm(t("marketplace.integrityConflictConfirm"))) return;
+                    const version = selectedVersion ?? pkg.versions[0]?.version;
+                    install.mutate(
+                      { scope, name, version, force: true },
+                      {
+                        onError: (err) => alert(t("error.prefix", { message: err.message })),
+                      },
+                    );
+                  }}
+                >
+                  {install.isPending ? <Spinner /> : t("marketplace.install")}
+                </button>
+              </>
             )}
           </div>
         ) : (

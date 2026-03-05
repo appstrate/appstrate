@@ -133,6 +133,7 @@ export function createMarketplaceRouter() {
       name: string;
       version?: string;
       accessToken?: string;
+      force?: boolean;
     }>();
 
     if (!body.scope || !body.name) {
@@ -147,6 +148,7 @@ export function createMarketplaceRouter() {
         orgId,
         user.id,
         body.accessToken || undefined,
+        body.force,
       );
       return c.json(result, 201);
     } catch (err) {
