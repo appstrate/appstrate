@@ -49,7 +49,7 @@ mock.module("../package-items/dependencies.ts", () => ({
 
 mock.module("@appstrate/core/zip", () => ({
   zipArtifact: () => new Uint8Array(10),
-  unzipArtifact: () => ({ files: {} }),
+  unzipArtifact: () => ({}),
 }));
 
 // --- Import after mocks ---
@@ -166,18 +166,14 @@ describe("publishPackage", () => {
 
   test("throws VERSION_MISSING when manifest has no version", async () => {
     queues.select = [[makePackageRow({ manifest: { name: "@acme/my-flow" } })]];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch(
-      (e: unknown) => e,
-    );
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_MISSING");
   });
 
   test("throws VERSION_INVALID for invalid semver", async () => {
     queues.select = [[makePackageRow({ manifest: { name: "@acme/my-flow", version: "abc" } })]];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch(
-      (e: unknown) => e,
-    );
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_INVALID");
   });
@@ -191,9 +187,7 @@ describe("publishPackage", () => {
         }),
       ],
     ];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch(
-      (e: unknown) => e,
-    );
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_NOT_HIGHER");
   });
@@ -207,9 +201,7 @@ describe("publishPackage", () => {
         }),
       ],
     ];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch(
-      (e: unknown) => e,
-    );
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_EXISTS");
   });
@@ -250,9 +242,7 @@ describe("publishPackage", () => {
         throw new registryClientStub.RegistryClientError(409, "CONFLICT", "Already exists");
       }),
     };
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch(
-      (e: unknown) => e,
-    );
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("REGISTRY_CONFLICT");
   });

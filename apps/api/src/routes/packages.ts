@@ -798,6 +798,31 @@ export function createPackagesRouter() {
           400,
         );
       }
+      // Draft overwrite protection
+      const force = c.req.query("force") === "true";
+      if (!force) {
+        const [vCount, latestDate] = await Promise.all([
+          getVersionCount(packageId),
+          getLatestVersionCreatedAt(packageId),
+        ]);
+        const hasUnpublishedChanges =
+          vCount > 0 && latestDate ? (existing.updatedAt ?? new Date()) > latestDate : false;
+        if (hasUnpublishedChanges) {
+          return c.json(
+            {
+              error: "DRAFT_OVERWRITE",
+              message:
+                "Ce package a des modifications non publiées qui seront écrasées par l'import.",
+              details: {
+                packageId,
+                draftVersion: (existing.manifest as Record<string, unknown>)?.version ?? null,
+              },
+            },
+            409,
+          );
+        }
+      }
+
       // Update existing package manifest and content
       await db
         .update(packages)
@@ -809,15 +834,21 @@ export function createPackagesRouter() {
     }
 
     // Per-type post-install (version, package upsert, storage upload)
-    await postInstallPackage({
-      packageType,
-      packageId,
-      orgId,
-      userId: user.id,
-      content,
-      files,
-      zipBuffer: buffer,
-    });
+    try {
+      await postInstallPackage({
+        packageType,
+        packageId,
+        orgId,
+        userId: user.id,
+        content,
+        files,
+        zipBuffer: buffer,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("Post-install failed", { packageId, packageType, error: message });
+      return c.json({ error: "POST_INSTALL_FAILED", message }, 400);
+    }
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);

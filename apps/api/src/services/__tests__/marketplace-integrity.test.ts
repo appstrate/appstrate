@@ -72,7 +72,7 @@ mock.module("@appstrate/core/zip", () => ({
     }
   },
   zipArtifact: () => new Uint8Array(),
-  unzipArtifact: () => ({ files: {} }),
+  unzipArtifact: () => ({}),
 }));
 
 mock.module("@appstrate/core/integrity", () => ({
@@ -239,23 +239,26 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
     expect(result!.integrityConflict).toBe(false);
   });
 
-  test("same integrity but different version → conflict (no false positive)", async () => {
+  test("disjoint versions (no overlapping version number) → no conflict, installable", async () => {
     registryPackages.set(
       "@acme/foo",
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.1", integrity: "sha256-same" }]),
     );
 
+    latestVersionIdResult = 42;
+
     queues.select = [
       [{ id: "@acme/foo" }], // installed check
-      // Only local v1.0.0 with same integrity but different version
+      // Only local v1.0.0 — registry only has v1.0.1, no overlapping version number
       [{ version: "1.0.0", integrity: "sha256-same" }],
+      [{ version: "1.0.0" }], // resolveInstalledVersion SELECT
     ];
 
     const result = await getMarketplacePackageWithInstallStatus("@acme", "foo", "org-1");
 
     expect(result).not.toBeNull();
-    expect(result!.installedVersion).toBeNull();
-    expect(result!.integrityConflict).toBe(true);
+    expect(result!.installedVersion).toBe("1.0.0");
+    expect(result!.integrityConflict).toBe(false);
   });
 });
 
@@ -266,7 +269,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
 //   4. (if no conflict) Phase A collect → Phase B commit ...
 
 describe("installFromMarketplace — integrity conflict guard", () => {
-  test("install blocked when no local (version, integrity) matches registry", async () => {
+  test("install blocked when same version exists locally with different integrity", async () => {
     registryPackages.set(
       "@acme/foo",
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
@@ -280,6 +283,38 @@ describe("installFromMarketplace — integrity conflict guard", () => {
     await expect(
       installFromMarketplace("@acme", "foo", undefined, "org-1", "user-1", undefined),
     ).rejects.toThrow("Cannot install");
+  });
+
+  test("install allowed when local and registry have disjoint versions", async () => {
+    registryPackages.set(
+      "@acme/foo",
+      makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.1.0", integrity: "sha256-registry" }]),
+    );
+
+    latestVersionIdResult = 42;
+    zipQueue.push({
+      manifest: { displayName: "Foo" },
+      content: "content",
+      files: {},
+      type: "skill",
+    });
+
+    queues.select = [
+      [{ id: "@acme/foo" }], // existing check
+      [{ version: "1.0.0", integrity: "sha256-local" }], // getLocalVersionIntegrities — no overlapping version
+      [{ id: "@acme/foo" }], // commit phase existing check → UPDATE
+    ];
+
+    const result = await installFromMarketplace(
+      "@acme",
+      "foo",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    expect(result.packageId).toBe("@acme/foo");
   });
 
   test("install allowed when a local (version, integrity) matches registry", async () => {
@@ -309,6 +344,38 @@ describe("installFromMarketplace — integrity conflict guard", () => {
       "org-1",
       "user-1",
       undefined,
+    );
+
+    expect(result.packageId).toBe("@acme/foo");
+  });
+
+  test("install allowed with force when integrity conflict exists", async () => {
+    registryPackages.set(
+      "@acme/foo",
+      makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
+    );
+
+    latestVersionIdResult = 42;
+    zipQueue.push({
+      manifest: { displayName: "Foo" },
+      content: "content",
+      files: {},
+      type: "skill",
+    });
+
+    queues.select = [
+      // No conflict guard queries — force skips them
+      [{ id: "@acme/foo" }], // commit phase existing check → UPDATE
+    ];
+
+    const result = await installFromMarketplace(
+      "@acme",
+      "foo",
+      undefined,
+      "org-1",
+      "user-1",
+      undefined,
+      true, // force
     );
 
     expect(result.packageId).toBe("@acme/foo");
@@ -361,7 +428,7 @@ describe("installFromMarketplace — integrity conflict guard", () => {
 //   4. (if match) resolveInstalledVersion + checkUpdateAvailable
 
 describe("checkRegistryUpdates — integrity filter", () => {
-  test("update skipped when no local (version, integrity) matches registry", async () => {
+  test("update skipped when same version exists locally with different integrity", async () => {
     latestVersionIdResult = 42;
 
     queues.select = [
@@ -511,7 +578,51 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
     expect(result!.localVersionAhead).toBeNull();
   });
 
-  test("conflict + local version > registry → integrityConflict: true + localVersionAhead set", async () => {
+  test("disjoint versions + local version > registry → no conflict, localVersionAhead set", async () => {
+    registryPackages.set(
+      "@acme/foo",
+      makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
+    );
+
+    latestVersionIdResult = 99;
+
+    queues.select = [
+      [{ id: "@acme/foo" }], // installed check
+      [{ version: "2.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — disjoint
+      [{ version: "2.0.0" }], // resolveInstalledVersion SELECT
+    ];
+
+    const result = await getMarketplacePackageWithInstallStatus("@acme", "foo", "org-1");
+
+    expect(result).not.toBeNull();
+    expect(result!.installedVersion).toBe("2.0.0");
+    expect(result!.integrityConflict).toBe(false);
+    expect(result!.localVersionAhead).toBe("2.0.0");
+  });
+
+  test("disjoint versions + local version ≤ registry → no conflict, localVersionAhead null", async () => {
+    registryPackages.set(
+      "@acme/foo",
+      makeRegistryPkg("@acme", "foo", [{ id: 1, version: "2.0.0", integrity: "sha256-registry" }]),
+    );
+
+    latestVersionIdResult = 42;
+
+    queues.select = [
+      [{ id: "@acme/foo" }], // installed check
+      [{ version: "1.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — disjoint
+      [{ version: "1.0.0" }], // resolveInstalledVersion SELECT
+    ];
+
+    const result = await getMarketplacePackageWithInstallStatus("@acme", "foo", "org-1");
+
+    expect(result).not.toBeNull();
+    expect(result!.installedVersion).toBe("1.0.0");
+    expect(result!.integrityConflict).toBe(false);
+    expect(result!.localVersionAhead).toBeNull();
+  });
+
+  test("real conflict (same version, different integrity) + local ahead → integrityConflict true + localVersionAhead set", async () => {
     registryPackages.set(
       "@acme/foo",
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
@@ -519,7 +630,10 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
 
     queues.select = [
       [{ id: "@acme/foo" }], // installed check
-      [{ version: "2.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — no match
+      [
+        { version: "1.0.0", integrity: "sha256-local-different" }, // same version, different integrity → conflict
+        { version: "2.0.0", integrity: "sha256-local-v2" },
+      ],
     ];
 
     const result = await getMarketplacePackageWithInstallStatus("@acme", "foo", "org-1");
@@ -528,24 +642,5 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
     expect(result!.installedVersion).toBeNull();
     expect(result!.integrityConflict).toBe(true);
     expect(result!.localVersionAhead).toBe("2.0.0");
-  });
-
-  test("conflict + local version ≤ registry → localVersionAhead: null", async () => {
-    registryPackages.set(
-      "@acme/foo",
-      makeRegistryPkg("@acme", "foo", [{ id: 1, version: "2.0.0", integrity: "sha256-registry" }]),
-    );
-
-    queues.select = [
-      [{ id: "@acme/foo" }], // installed check
-      [{ version: "1.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — no match
-    ];
-
-    const result = await getMarketplacePackageWithInstallStatus("@acme", "foo", "org-1");
-
-    expect(result).not.toBeNull();
-    expect(result!.installedVersion).toBeNull();
-    expect(result!.integrityConflict).toBe(true);
-    expect(result!.localVersionAhead).toBeNull();
   });
 });

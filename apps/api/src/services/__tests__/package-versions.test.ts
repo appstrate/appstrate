@@ -145,9 +145,7 @@ describe("createPackageVersion", () => {
     expect(result).not.toBeNull();
     // Should have 2 inserts: version row + dist-tag upsert
     expect(tracking.insertCalls).toHaveLength(2);
-    const distTagInsert = tracking.insertCalls.find(
-      (c) => "tag" in c && c.tag === "latest",
-    );
+    const distTagInsert = tracking.insertCalls.find((c) => "tag" in c && c.tag === "latest");
     expect(distTagInsert).toMatchObject({ tag: "latest", versionId: 1 });
   });
 

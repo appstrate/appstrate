@@ -57,6 +57,8 @@
   "import.submit": "Importer",
   "import.errZip": "Seuls les fichiers .zip sont acceptés",
   "import.errSize": "Le fichier dépasse 10 MB",
+  "import.confirmOverwrite": "Ce package a des modifications non publiées (brouillon v{{draftVersion}}). L'import les écrasera.",
+  "import.forceSubmit": "Écraser et importer",
   "input.title": "{{name}} — Paramètres",
   "input.run": "Lancer",
   "input.fieldRequired": "Le champ \"{{field}}\" est requis",

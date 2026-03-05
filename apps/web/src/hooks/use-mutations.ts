@@ -205,10 +205,11 @@ export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, force }: { file: File; force?: boolean }) => {
       const fd = new FormData();
       fd.append("file", file);
-      return uploadFormData<{ packageId: string; type: string }>("/packages/import", fd);
+      const qs = force ? "?force=true" : "";
+      return uploadFormData<{ packageId: string; type: string }>(`/packages/import${qs}`, fd);
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["flows"] });
@@ -217,7 +218,6 @@ export function useImportPackage() {
         navigate(`/flows/${data.packageId}`);
       }
     },
-    onError: onMutationError,
   });
 }
 

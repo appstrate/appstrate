@@ -5,8 +5,18 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (flow, skill, or extension) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+        "Import a package (flow, skill, or extension) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "force",
+          in: "query",
+          required: false,
+          description:
+            "Skip draft overwrite protection. Set to true to overwrite a package with unpublished changes.",
+          schema: { type: "boolean" },
+        },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -43,6 +53,28 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description: "Package has unpublished draft changes that would be overwritten",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["error", "message", "details"],
+                properties: {
+                  error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
+                  message: { type: "string" },
+                  details: {
+                    type: "object",
+                    properties: {
+                      packageId: { type: "string" },
+                      draftVersion: { type: ["string", "null"] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

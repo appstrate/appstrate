@@ -7,6 +7,7 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public status: number,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -17,7 +18,12 @@ async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
     if (body.error) {
-      throw new ApiError(body.error, body.message || `API Error: ${res.status}`, res.status);
+      throw new ApiError(
+        body.error,
+        body.message || `API Error: ${res.status}`,
+        res.status,
+        body.details,
+      );
     }
     throw new Error(body.message || `API Error: ${res.status}`);
   }

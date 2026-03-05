@@ -9,19 +9,25 @@ import {
 } from "./package-items.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 
-/** Parse manifest.json from normalized ZIP files if present. */
-function parseManifestFromFiles(
-  files: Record<string, Uint8Array>,
-): Record<string, unknown> | undefined {
+/** Parse manifest.json from normalized ZIP files. Throws if not found. */
+function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<string, unknown> {
   const data = files["manifest.json"];
-  if (!data) return undefined;
+  if (!data) {
+    throw new Error(
+      `manifest.json not found in files dict. Available keys: ${Object.keys(files).join(", ")}`,
+    );
+  }
   try {
     const parsed = JSON.parse(new TextDecoder().decode(data));
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error("manifest.json is not a valid JSON object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("manifest.json is not valid JSON", { cause: err });
+    }
+    throw err;
   }
 }
 
@@ -44,8 +50,7 @@ export async function postInstallPackage(params: {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
   const manifest = parseManifestFromFiles(files);
-  const manifestOrEmpty = manifest ?? {};
-  const manifestVersion = manifestOrEmpty.version as string | undefined;
+  const manifestVersion = manifest.version as string | undefined;
 
   // Determine version: explicit override > manifest version > auto-bump
   const version =
@@ -75,7 +80,7 @@ export async function postInstallPackage(params: {
 
   switch (packageType) {
     case "flow": {
-      await createVersion(manifestOrEmpty);
+      await createVersion(manifest);
       break;
     }
     case "skill": {
@@ -96,7 +101,7 @@ export async function postInstallPackage(params: {
       await uploadPackageFiles("skills", orgId, packageId, files);
 
       // Create version for skill too
-      await createVersion(manifest ?? manifestOrEmpty);
+      await createVersion(manifest);
       break;
     }
     case "extension": {
@@ -110,7 +115,7 @@ export async function postInstallPackage(params: {
       await uploadPackageFiles("extensions", orgId, packageId, files);
 
       // Create version for extension too
-      await createVersion(manifest ?? manifestOrEmpty);
+      await createVersion(manifest);
       break;
     }
   }

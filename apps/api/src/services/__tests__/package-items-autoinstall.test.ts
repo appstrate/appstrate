@@ -40,9 +40,8 @@ mock.module("../builtin-packages.ts", () => builtinPackagesStub);
 
 // --- Import after mocks ---
 
-const { deleteOrgItem, listOrgItems, upsertOrgItem, getOrgItem, SKILL_CONFIG } = await import(
-  "../package-items.ts"
-);
+const { deleteOrgItem, listOrgItems, upsertOrgItem, getOrgItem, SKILL_CONFIG } =
+  await import("../package-items.ts");
 
 // --- Tests ---
 

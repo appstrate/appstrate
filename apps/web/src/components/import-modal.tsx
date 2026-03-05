@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { useImportPackage } from "../hooks/use-mutations";
+import { ApiError } from "../api";
+import i18n from "../i18n";
 
 interface ImportModalProps {
   open: boolean;
@@ -15,6 +17,10 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
+  const [confirmOverwrite, setConfirmOverwrite] = useState<{
+    packageId: string;
+    draftVersion: string | null;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const importPackage = useImportPackage();
 
@@ -30,6 +36,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   const handleFile = useCallback(
     (f: File) => {
       const err = validateFile(f);
+      setConfirmOverwrite(null);
       if (err) {
         setError(err);
         setFile(null);
@@ -53,19 +60,35 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
 
   const handleSubmit = () => {
     if (!file) return;
-    importPackage.mutate(file, {
-      onSuccess: () => {
-        setFile(null);
-        setError("");
-        onClose();
+    const force = !!confirmOverwrite;
+    importPackage.mutate(
+      { file, force },
+      {
+        onSuccess: () => {
+          setFile(null);
+          setError("");
+          setConfirmOverwrite(null);
+          onClose();
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.code === "DRAFT_OVERWRITE" && err.details) {
+            setConfirmOverwrite({
+              packageId: err.details.packageId as string,
+              draftVersion: (err.details.draftVersion as string) ?? null,
+            });
+            return;
+          }
+          alert(i18n.t("error.prefix", { message: err.message }));
+        },
       },
-    });
+    );
   };
 
   const handleClose = () => {
     if (importPackage.isPending) return;
     setFile(null);
     setError("");
+    setConfirmOverwrite(null);
     onClose();
   };
 
@@ -84,7 +107,11 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             onClick={handleSubmit}
             disabled={!file || importPackage.isPending}
           >
-            {importPackage.isPending ? t("import.importing") : t("import.submit")}
+            {importPackage.isPending
+              ? t("import.importing")
+              : confirmOverwrite
+                ? t("import.forceSubmit")
+                : t("import.submit")}
           </button>
         </>
       }
@@ -119,7 +146,14 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         )}
       </div>
       {error && <p className="drop-zone-error">{error}</p>}
-      {importPackage.isError && <p className="drop-zone-error">{importPackage.error.message}</p>}
+      {confirmOverwrite && (
+        <p className="drop-zone-error">
+          {t("import.confirmOverwrite", { draftVersion: confirmOverwrite.draftVersion ?? "?" })}
+        </p>
+      )}
+      {importPackage.isError && !confirmOverwrite && (
+        <p className="drop-zone-error">{importPackage.error.message}</p>
+      )}
     </Modal>
   );
 }
