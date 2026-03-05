@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { isValidVersion } from "@appstrate/core/semver";
+import { isValidVersion, versionGt } from "@appstrate/core/semver";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 
@@ -19,7 +19,12 @@ export interface DependencyGraph {
   edges: Map<string, Set<string>>; // packageId → dependencyIds
 }
 
-export type PublishStatus = "unpublished" | "outdated" | "published" | "no_version";
+export type PublishStatus =
+  | "unpublished"
+  | "outdated"
+  | "published"
+  | "no_version"
+  | "version_behind";
 
 export interface PublishPlanItem {
   packageId: string;
@@ -41,8 +46,9 @@ export function computePublishStatus(node: GraphNode): PublishStatus {
   const { version, lastPublishedVersion } = node;
   if (!version || !isValidVersion(version)) return "no_version";
   if (!lastPublishedVersion) return "unpublished";
-  if (version !== lastPublishedVersion) return "outdated";
-  return "published";
+  if (version === lastPublishedVersion) return "published";
+  if (versionGt(version, lastPublishedVersion)) return "outdated";
+  return "version_behind";
 }
 
 export function topoSort(graph: DependencyGraph): { order: string[]; circular: string[] | null } {

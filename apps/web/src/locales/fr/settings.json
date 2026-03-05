@@ -353,6 +353,8 @@
   "publishPlan.publishOne": "Publier",
   "publishPlan.publishing": "Publication en cours...",
   "publishPlan.noVersionWarning": "Certaines dépendances n'ont pas de version définie et ne peuvent pas être publiées.",
+  "publishPlan.lastPublished": "(dernière publiée : v{{version}})",
+  "publishPlan.versionBehindWarning": "Certaines dépendances ont une version inférieure à la dernière publiée. Mettez à jour leur version avant de publier.",
   "publishPlan.circularWarning": "Dépendance circulaire détectée. Résolvez le cycle avant de publier.",
   "publishPlan.failedAt": "Échec de la publication de {{name}} : {{message}}",
   "publishPlan.status.pending": "En attente",
@@ -362,5 +364,6 @@
   "publishPlan.status.unpublished": "Non publié",
   "publishPlan.status.outdated": "À publier",
   "publishPlan.status.published": "Déjà publié",
-  "publishPlan.status.no_version": "Version manquante"
+  "publishPlan.status.no_version": "Version manquante",
+  "publishPlan.status.version_behind": "Version obsolète"
 }

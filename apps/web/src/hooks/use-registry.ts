@@ -88,7 +88,12 @@ export function useClaimScope() {
 
 // --- Publish Plan Types ---
 
-export type PublishStatus = "unpublished" | "outdated" | "published" | "no_version";
+export type PublishStatus =
+  | "unpublished"
+  | "outdated"
+  | "published"
+  | "no_version"
+  | "version_behind";
 
 export interface PublishPlanItem {
   packageId: string;

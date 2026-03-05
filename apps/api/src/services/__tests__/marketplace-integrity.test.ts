@@ -1,4 +1,12 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import {
+  queues,
+  resetQueues,
+  db,
+  schemaStubs,
+  builtinPackagesStub,
+  packageVersionsStub,
+} from "./_db-mock.ts";
 
 // --- Mocks ---
 
@@ -8,43 +16,9 @@ mock.module("../../lib/logger.ts", () => ({
   logger: { debug: noop, info: noop, warn: noop, error: noop },
 }));
 
-// --- Drizzle mock (queue-based) ---
-
-let selectQueue: unknown[][] = [];
-
-function chainable(result: unknown[]) {
-  const obj = {
-    from: () => obj,
-    where: () => obj,
-    limit: () => obj,
-    orderBy: () => obj,
-    then: (resolve: (v: unknown) => void) => resolve(result),
-  };
-  return obj;
-}
-
-const dbOps = {
-  select: () => {
-    const result = selectQueue.shift() ?? [];
-    return chainable(result);
-  },
-  insert: () => ({
-    values: () => Promise.resolve(),
-  }),
-  update: () => ({
-    set: () => ({
-      where: () => Promise.resolve(),
-    }),
-  }),
-  execute: () => Promise.resolve(),
-};
-
-mock.module("../../lib/db.ts", () => ({
-  db: {
-    ...dbOps,
-    transaction: async (fn: (tx: typeof dbOps) => Promise<void>) => fn(dbOps),
-  },
-}));
+mock.module("../../lib/db.ts", () => ({ db }));
+mock.module("@appstrate/db/schema", () => schemaStubs);
+mock.module("../builtin-packages.ts", () => builtinPackagesStub);
 
 mock.module("@appstrate/env", () => ({
   getEnv: () => ({ REGISTRY_URL: "http://test-registry" }),
@@ -66,6 +40,16 @@ mock.module("@appstrate/registry-client", () => ({
         integrity: "sha256-abc123",
         verified: true,
       };
+    }
+  },
+  RegistryClientError: class extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.name = "RegistryClientError";
+      this.status = status;
+      this.code = code;
     }
   },
 }));
@@ -106,56 +90,13 @@ mock.module("@appstrate/db/storage", () => ({
   deleteFile: async () => {},
 }));
 
-mock.module("../builtin-packages.ts", () => ({
-  getBuiltInSkills: () => new Map(),
-  getBuiltInExtensions: () => new Map(),
-  isBuiltInSkill: () => false,
-  isBuiltInExtension: () => false,
-  resolveBuiltInSkill: () => undefined,
-  resolveBuiltInExtension: () => undefined,
-  BUILTIN_SCOPE: "appstrate",
-}));
-
+// latestVersionIdResult is captured by reference in the mock closure below.
+// Tests mutate this variable before each call, and the mock reads the latest value.
 let latestVersionIdResult: number | null = null;
 
 mock.module("../package-versions.ts", () => ({
-  createVersionAndUpload: async () => {},
+  ...packageVersionsStub,
   getLatestVersionId: async () => latestVersionIdResult,
-}));
-
-// --- DB schema stubs ---
-
-mock.module("@appstrate/db/schema", () => ({
-  packages: {
-    id: "id",
-    orgId: "org_id",
-    type: "type",
-    source: "source",
-    name: "name",
-    manifest: "manifest",
-    content: "content",
-    autoInstalled: "auto_installed",
-    createdBy: "created_by",
-    createdAt: "created_at",
-    updatedAt: "updated_at",
-  },
-  packageDependencies: {
-    packageId: "package_id",
-    dependencyId: "dependency_id",
-    orgId: "org_id",
-    createdAt: "created_at",
-  },
-  packageVersions: {
-    id: "id",
-    packageId: "package_id",
-    integrity: "integrity",
-    version: "version",
-  },
-  packageDistTags: {
-    packageId: "package_id",
-    tag: "tag",
-    versionId: "version_id",
-  },
 }));
 
 // --- Service mocks ---
@@ -204,7 +145,7 @@ function makeRegistryPkg(
 // --- Tests ---
 
 beforeEach(() => {
-  selectQueue = [];
+  resetQueues();
   registryPackages.clear();
   zipQueue = [];
   latestVersionIdResult = null;
@@ -225,7 +166,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
 
     latestVersionIdResult = 42;
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [{ version: "1.0.0", integrity: "sha256-match" }], // getLocalVersionIntegrities
       [{ version: "1.0.0" }], // resolveInstalledVersion SELECT
@@ -244,7 +185,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [{ version: "1.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities
     ];
@@ -262,7 +203,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-abc" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [], // installed check → not found
     ];
 
@@ -281,7 +222,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
 
     latestVersionIdResult = 99;
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       // getLocalVersionIntegrities → returns ALL local versions
       [
@@ -304,7 +245,7 @@ describe("getMarketplacePackageWithInstallStatus — integrity check", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.1", integrity: "sha256-same" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       // Only local v1.0.0 with same integrity but different version
       [{ version: "1.0.0", integrity: "sha256-same" }],
@@ -331,7 +272,7 @@ describe("installFromMarketplace — integrity conflict guard", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // existing check
       [{ version: "1.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities
     ];
@@ -355,7 +296,7 @@ describe("installFromMarketplace — integrity conflict guard", () => {
       type: "skill",
     });
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // conflict guard existing check
       [{ version: "1.0.0", integrity: "sha256-abc123" }], // getLocalVersionIntegrities → matches
       [{ id: "@acme/foo" }], // commit phase existing check → UPDATE
@@ -390,7 +331,7 @@ describe("installFromMarketplace — integrity conflict guard", () => {
       type: "skill",
     });
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // conflict guard existing check
       // Local has v1.0.0 (matches registry) + v1.2.0 (local only)
       [
@@ -423,7 +364,7 @@ describe("checkRegistryUpdates — integrity filter", () => {
   test("update skipped when no local (version, integrity) matches registry", async () => {
     latestVersionIdResult = 42;
 
-    selectQueue = [
+    queues.select = [
       [
         {
           id: "@acme/foo",
@@ -452,7 +393,7 @@ describe("checkRegistryUpdates — integrity filter", () => {
   test("update proposed when local (version, integrity) matches a registry version", async () => {
     latestVersionIdResult = 42;
 
-    selectQueue = [
+    queues.select = [
       // getInstalledRegistryPackages
       [
         {
@@ -485,7 +426,7 @@ describe("checkRegistryUpdates — integrity filter", () => {
   test("update proposed when local has extra unpublished version but v1.0.0 matches", async () => {
     latestVersionIdResult = 99;
 
-    selectQueue = [
+    queues.select = [
       [
         {
           id: "@acme/foo",
@@ -531,7 +472,7 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
 
     latestVersionIdResult = 99;
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [
         { version: "1.0.0", integrity: "sha256-v1" },
@@ -556,7 +497,7 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
 
     latestVersionIdResult = 42;
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [{ version: "1.0.0", integrity: "sha256-v1" }], // getLocalVersionIntegrities
       [{ version: "1.0.0" }], // resolveInstalledVersion SELECT
@@ -576,7 +517,7 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "1.0.0", integrity: "sha256-registry" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [{ version: "2.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — no match
     ];
@@ -595,7 +536,7 @@ describe("getMarketplacePackageWithInstallStatus — localVersionAhead", () => {
       makeRegistryPkg("@acme", "foo", [{ id: 1, version: "2.0.0", integrity: "sha256-registry" }]),
     );
 
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/foo" }], // installed check
       [{ version: "1.0.0", integrity: "sha256-local-different" }], // getLocalVersionIntegrities — no match
     ];
