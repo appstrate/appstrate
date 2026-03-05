@@ -11,6 +11,7 @@ export {
   createPackageVersion,
   listPackageVersions,
   getLatestVersionId,
+  getLatestVersionWithManifest,
   resolveVersion,
   getVersionForDownload,
   getVersionDetail,

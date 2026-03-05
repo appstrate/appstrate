@@ -137,6 +137,11 @@ button.danger:hover {
   border: 1px solid var(--border);
 }
 
+.tag.draft {
+  opacity: 0.5;
+  font-style: italic;
+}
+
 /* Flow List Grid */
 .flow-grid {
   display: flex;

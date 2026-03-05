@@ -43,6 +43,7 @@ const {
   createPackageVersion,
   listPackageVersions,
   getLatestVersionId,
+  getLatestVersionWithManifest,
   resolveVersion,
   getVersionForDownload,
   getVersionDetail,
@@ -336,6 +337,40 @@ describe("getLatestVersionId", () => {
       [], // no versions
     ];
     const result = await getLatestVersionId("pkg-1");
+    expect(result).toBeNull();
+  });
+});
+
+describe("getLatestVersionWithManifest", () => {
+  beforeEach(() => {
+    resetQueues();
+  });
+
+  test("returns id + manifest via dist-tag", async () => {
+    queues.select = [
+      [{ versionId: 42 }], // dist-tag lookup
+      [{ id: 42, manifest: { name: "test" } }], // version row
+    ];
+    const result = await getLatestVersionWithManifest("pkg-1");
+    expect(result).toEqual({ id: 42, manifest: { name: "test" } });
+  });
+
+  test("falls back when no dist-tag", async () => {
+    queues.select = [
+      [], // no dist-tag
+      [{ id: 99 }], // highest by id
+      [{ id: 99, manifest: { name: "fallback" } }], // version row
+    ];
+    const result = await getLatestVersionWithManifest("pkg-1");
+    expect(result).toEqual({ id: 99, manifest: { name: "fallback" } });
+  });
+
+  test("returns null when no versions exist", async () => {
+    queues.select = [
+      [], // no dist-tag
+      [], // no versions
+    ];
+    const result = await getLatestVersionWithManifest("pkg-1");
     expect(result).toBeNull();
   });
 });
