@@ -355,6 +355,64 @@ export function useDeleteAllMemories(packageId: string) {
   });
 }
 
+// --- Package (skill/extension) create/update mutations ---
+
+export function useCreatePackage(type: "skill" | "extension") {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const path = type === "skill" ? "skills" : "extensions";
+  return useMutation({
+    mutationFn: async (body: {
+      id: string;
+      content: string;
+      name?: string;
+      description?: string;
+    }) => {
+      return api<{ [key: string]: { id: string; name: string; description: string } }>(
+        `/packages/${path}`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      );
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["packages", path] });
+      const result = data[type];
+      if (result?.id) {
+        navigate(`/${type}s/${result.id}`);
+      }
+    },
+    onError: onMutationError,
+  });
+}
+
+export function useUpdatePackage(type: "skill" | "extension", packageId: string) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const path = type === "skill" ? "skills" : "extensions";
+  return useMutation({
+    mutationFn: async (body: {
+      name?: string;
+      description?: string;
+      content?: string;
+      version?: string;
+      scopedName?: string;
+    }) => {
+      return api(`/packages/${path}/${packageId}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["packages"] });
+      qc.invalidateQueries({ queryKey: ["version-info"] });
+      navigate(`/${type}s/${packageId}`);
+    },
+    onError: onMutationError,
+  });
+}
+
 // --- Provider mutations ---
 
 function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {

@@ -75,38 +75,12 @@ function useDeletePackage(type: PackageType) {
   });
 }
 
-function useUpdatePackageMetadata(type: PackageType) {
-  const qc = useQueryClient();
-  const cfg = PACKAGE_CONFIG[type];
-  return useMutation({
-    mutationFn: async ({
-      id,
-      ...data
-    }: {
-      id: string;
-      name?: string;
-      description?: string;
-      version?: string;
-      scopedName?: string;
-    }) =>
-      api(`/packages/${cfg.path}/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages"] });
-      qc.invalidateQueries({ queryKey: ["version-info"] });
-    },
-  });
-}
-
 // Re-export factory hooks for direct use
 export {
   usePackageList,
   usePackageDetail,
   useUploadPackage,
   useDeletePackage,
-  useUpdatePackageMetadata,
   type PackageType,
   PACKAGE_CONFIG,
 };

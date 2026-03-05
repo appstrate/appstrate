@@ -2,9 +2,8 @@ import { useState, useRef, useCallback } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PackageList } from "./pages/package-list";
-import { PackageDetailPage } from "./pages/package-detail";
-import { FlowDetailPage } from "./pages/flow-detail";
-import { FlowEditorPage } from "./pages/flow-editor";
+import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
+import { PackageEditorPage } from "./pages/package-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
 import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
@@ -223,28 +222,47 @@ export function App() {
             <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<PackageList />} />
-              <Route path="/flows/new" element={<FlowEditorPage />} />
-              <Route path="/flows/:scope/:name/edit" element={<FlowEditorPage />} />
-              <Route path="/flows/:scope/:name" element={<FlowDetailPage />} />
-              <Route path="/flows/:scope/:name/:version" element={<FlowDetailPage />} />
+              <Route path="/flows/new" element={<PackageEditorPage type="flow" />} />
+              <Route path="/flows/:scope/:name/edit" element={<PackageEditorPage type="flow" />} />
+              <Route
+                path="/flows/:scope/:name"
+                element={<UnifiedPackageDetailPage type="flow" />}
+              />
+              <Route
+                path="/flows/:scope/:name/:version"
+                element={<UnifiedPackageDetailPage type="flow" />}
+              />
               <Route
                 path="/flows/:scope/:name/executions/:execId"
                 element={<ExecutionDetailPage />}
               />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
-              <Route path="/skills/:scope/:name" element={<PackageDetailPage type="skill" />} />
+              <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
+              <Route
+                path="/skills/:scope/:name/edit"
+                element={<PackageEditorPage type="skill" />}
+              />
+              <Route
+                path="/skills/:scope/:name"
+                element={<UnifiedPackageDetailPage type="skill" />}
+              />
               <Route
                 path="/skills/:scope/:name/:version"
-                element={<PackageDetailPage type="skill" />}
+                element={<UnifiedPackageDetailPage type="skill" />}
+              />
+              <Route path="/extensions/new" element={<PackageEditorPage type="extension" />} />
+              <Route
+                path="/extensions/:scope/:name/edit"
+                element={<PackageEditorPage type="extension" />}
               />
               <Route
                 path="/extensions/:scope/:name"
-                element={<PackageDetailPage type="extension" />}
+                element={<UnifiedPackageDetailPage type="extension" />}
               />
               <Route
                 path="/extensions/:scope/:name/:version"
-                element={<PackageDetailPage type="extension" />}
+                element={<UnifiedPackageDetailPage type="extension" />}
               />
               <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
