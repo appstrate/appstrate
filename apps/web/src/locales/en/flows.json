@@ -1,5 +1,6 @@
 {
   "list.create": "Create flow",
+  "list.createItem": "Create",
   "list.import": "Import package (.zip)",
   "list.empty": "No flows available.",
   "list.emptyHint": "Add a flow in the <1>flows/</1> directory or import a ZIP",
@@ -221,16 +222,6 @@
   "packages.content": "Content",
   "packages.usedBy": "Used by",
   "packages.noFlows": "No flows use this package",
-  "packages.metadata": "Metadata",
-  "packages.version": "Version",
-  "packages.displayName": "Display name",
-  "packages.description": "Description",
-  "packages.scopedName": "Registry name",
-  "packages.scopedNameDesc": "Name used for publishing (@scope/name)",
-  "packages.save": "Save",
-  "packages.saved": "Saved",
-  "packages.versionInvalid": "Invalid semver format (X.Y.Z)",
-  "packages.scopedNameInvalid": "Invalid format (@scope/name)",
   "publish.title": "Publish to registry",
   "publish.scope": "Scope",
   "publish.name": "Name",
@@ -266,5 +257,8 @@
   "version.draftLabel": "Draft",
   "version.diffPrompt": "Prompt",
   "version.diffManifest": "Manifest",
-  "version.history": "History"
+  "version.history": "History",
+  "editor.errorContent": "Content is required.",
+  "editor.breadcrumbNewSkill": "New skill",
+  "editor.breadcrumbNewExtension": "New extension"
 }
