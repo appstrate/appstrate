@@ -17,7 +17,7 @@ export function makeContentPackageModule(
         metadata: {
           id: scopeMatch ? scopeMatch[2] : detail.id,
           scope: scopeMatch ? scopeMatch[1] : "",
-          version: detail.version ?? "0.0.0",
+          version: detail.version ?? "1.0.0",
           displayName: detail.displayName,
           description: detail.description,
           author: "",
@@ -25,6 +25,7 @@ export function makeContentPackageModule(
         },
         content: detail.content ?? "",
         _manifestBase: detail.manifest ?? {},
+        _lockVersion: detail.lockVersion,
       };
     },
 
@@ -47,14 +48,18 @@ export function makeContentPackageModule(
 
     assemblePayload(state: PackageFormState): Record<string, unknown> {
       if (state._type !== type) throw new Error(`Expected ${type} form state`);
+      const scopedName = state.metadata.scope
+        ? `@${state.metadata.scope}/${state.metadata.id}`
+        : undefined;
       return {
-        name: state.metadata.displayName,
-        description: state.metadata.description,
+        manifest: {
+          ...state._manifestBase,
+          version: state.metadata.version,
+          displayName: state.metadata.displayName,
+          description: state.metadata.description,
+          ...(scopedName ? { name: scopedName } : {}),
+        },
         content: state.content,
-        version: state.metadata.version,
-        scopedName: state.metadata.scope
-          ? `@${state.metadata.scope}/${state.metadata.id}`
-          : undefined,
       };
     },
   };

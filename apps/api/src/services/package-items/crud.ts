@@ -1,11 +1,22 @@
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
+import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId } from "@appstrate/core/naming";
 import type { Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
+
+// ─────────────────────────────────────────────
+// Generic package lookup
+// ─────────────────────────────────────────────
+
+/** Get a raw package row by ID (no org filter — used for import collision checks). */
+export async function getPackageById(id: string): Promise<Package | null> {
+  const rows = await db.select().from(packages).where(eq(packages.id, id)).limit(1);
+  return rows[0] ?? null;
+}
 
 // ─────────────────────────────────────────────
 // Helpers (private)
@@ -80,15 +91,78 @@ async function findRegistryDependents(
 }
 
 // ─────────────────────────────────────────────
-// Unified CRUD functions
+// Create / Update with optimistic locking
 // ─────────────────────────────────────────────
 
-export interface UpsertItemInput {
+export interface CreateItemInput {
   id: string;
   name?: string;
   description?: string;
   content: string;
   createdBy?: string;
+}
+
+/** Insert a new package item. Returns the row with version=1 (lock counter). */
+export async function createOrgItem(
+  orgId: string,
+  orgSlug: string | null,
+  item: CreateItemInput,
+  cfg: PackageTypeConfig,
+  manifest?: Record<string, unknown>,
+): Promise<Package> {
+  const now = new Date();
+  const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
+
+  const finalManifest: Record<string, unknown> = manifest
+    ? { ...manifest }
+    : { version: "1.0.0", name: packageId };
+
+  finalManifest.type = cfg.type;
+  if (!finalManifest.name) finalManifest.name = packageId;
+  if (item.name) finalManifest.displayName = item.name;
+  if (item.description) finalManifest.description = item.description;
+
+  const [row] = await db
+    .insert(packages)
+    .values({
+      id: packageId,
+      orgId,
+      type: cfg.type,
+      source: "local",
+      name: item.id,
+      manifest: finalManifest,
+      content: item.content,
+      createdBy: item.createdBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (!row) throw new Error("Failed to insert package: no row returned");
+  return row;
+}
+
+/** Update a package item with optimistic locking. Returns null on version mismatch (409). */
+export async function updateOrgItem(
+  id: string,
+  payload: {
+    manifest: Record<string, unknown>;
+    content: string;
+  },
+  expectedVersion: number,
+): Promise<Package | null> {
+  const rows = await db
+    .update(packages)
+    .set({
+      manifest: payload.manifest,
+      content: payload.content,
+      updatedAt: new Date(),
+      version: sql`${packages.version} + 1`,
+    })
+    .where(and(eq(packages.id, id), eq(packages.version, expectedVersion)))
+    .returning();
+
+  return rows[0] ?? null;
 }
 
 /** List all items of a type in the org with usedByFlows count (built-in + org). */
@@ -203,68 +277,9 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     version: (m.version as string) ?? null,
     manifestName: (m.name as string) ?? null,
     manifest: (data.manifest ?? {}) as Record<string, unknown>,
+    lockVersion: data.version,
     flows: await getPackageDisplayNames(packageIds),
   };
-}
-
-/** Insert or update an item in the org packages.
- *  When orgSlug is provided, packageId = @orgSlug/item.id (local creation).
- *  When orgSlug is null, item.id IS the full packageId (marketplace installs).
- *
- *  The `manifest` parameter is the source of truth (like the registry approach).
- *  When provided (ZIP upload or DB existing), it is used as-is as the base.
- *  When undefined (JSON body without manifest), a minimal default is created.
- */
-export async function upsertOrgItem(
-  orgId: string,
-  orgSlug: string | null,
-  item: UpsertItemInput,
-  cfg: PackageTypeConfig,
-  manifest?: Record<string, unknown>,
-) {
-  const now = new Date();
-
-  const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
-
-  // Build manifest: use provided manifest as base, or create minimal default
-  const finalManifest: Record<string, unknown> = manifest
-    ? { ...manifest }
-    : { version: "0.0.0", name: packageId };
-
-  // Always ensure type and name
-  finalManifest.type = cfg.type;
-  if (!finalManifest.name) finalManifest.name = packageId;
-
-  // Overlay displayName/description if provided
-  if (item.name) finalManifest.displayName = item.name;
-  if (item.description) finalManifest.description = item.description;
-
-  const [data] = await db
-    .insert(packages)
-    .values({
-      id: packageId,
-      orgId,
-      type: cfg.type,
-      source: "local",
-      name: item.id,
-      manifest: finalManifest,
-      content: item.content,
-      createdBy: item.createdBy ?? null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [packages.id],
-      set: {
-        manifest: finalManifest,
-        content: item.content,
-        createdBy: item.createdBy ?? null,
-        updatedAt: now,
-      },
-      setWhere: eq(packages.orgId, sql`excluded.org_id`),
-    })
-    .returning();
-
-  return data!;
 }
 
 /** Delete an item. Returns error info if still referenced by flows. */

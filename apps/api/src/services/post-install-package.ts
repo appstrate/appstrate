@@ -2,10 +2,14 @@ import { extractSkillMeta } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
-  upsertOrgItem,
+  createOrgItem,
+  updateOrgItem,
+  getOrgItem,
   uploadPackageFiles,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
+  type PackageTypeConfig,
+  type CreateItemInput,
 } from "./package-items.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 
@@ -28,6 +32,24 @@ function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<strin
       throw new Error("manifest.json is not valid JSON", { cause: err });
     }
     throw err;
+  }
+}
+
+/** Insert or update a skill/extension during post-install (marketplace install). */
+async function upsertItem(
+  orgId: string,
+  packageId: string,
+  item: CreateItemInput,
+  cfg: PackageTypeConfig,
+  manifest: Record<string, unknown>,
+): Promise<void> {
+  const existing = await getOrgItem(orgId, packageId, cfg);
+  if (existing && existing.lockVersion != null) {
+    // Re-install: update existing package
+    await updateOrgItem(packageId, { manifest, content: item.content }, existing.lockVersion);
+  } else {
+    // Fresh install: create new package (orgSlug=null → item.id is already the full packageId)
+    await createOrgItem(orgId, null, item, cfg, manifest);
   }
 }
 
@@ -78,45 +100,19 @@ export async function postInstallPackage(params: {
     }
   }
 
-  switch (packageType) {
-    case "flow": {
-      await createVersion(manifest);
-      break;
-    }
-    case "skill": {
+  if (packageType === "skill" || packageType === "extension") {
+    const cfg = packageType === "skill" ? SKILL_CONFIG : EXTENSION_CONFIG;
+    const item: CreateItemInput = { id: packageId, content, createdBy: userId };
+
+    if (packageType === "skill") {
       const skillMeta = extractSkillMeta(content);
-      await upsertOrgItem(
-        orgId,
-        null,
-        {
-          id: packageId,
-          name: skillMeta.name || undefined,
-          description: skillMeta.description || undefined,
-          content,
-          createdBy: userId,
-        },
-        SKILL_CONFIG,
-        manifest,
-      );
-      await uploadPackageFiles("skills", orgId, packageId, files);
-
-      // Create version for skill too
-      await createVersion(manifest);
-      break;
+      item.name = skillMeta.name || undefined;
+      item.description = skillMeta.description || undefined;
     }
-    case "extension": {
-      await upsertOrgItem(
-        orgId,
-        null,
-        { id: packageId, content, createdBy: userId },
-        EXTENSION_CONFIG,
-        manifest,
-      );
-      await uploadPackageFiles("extensions", orgId, packageId, files);
 
-      // Create version for extension too
-      await createVersion(manifest);
-      break;
-    }
+    await upsertItem(orgId, packageId, item, cfg, manifest);
+    await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
   }
+
+  await createVersion(manifest);
 }

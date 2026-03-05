@@ -147,11 +147,15 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
   return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
 }
 
-/** Build a minimal ZIP with just manifest.json + prompt.md. */
-export function buildMinimalZip(manifest: Record<string, unknown>, prompt: string): Buffer {
+/** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */
+export function buildMinimalZip(
+  manifest: Record<string, unknown>,
+  content: string,
+  contentFileName = "prompt.md",
+): Buffer {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
-    "prompt.md": new TextEncoder().encode(prompt),
+    [contentFileName]: new TextEncoder().encode(content),
   };
   return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
 }

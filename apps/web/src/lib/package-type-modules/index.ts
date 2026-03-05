@@ -17,6 +17,7 @@ export interface ContentPackageInput {
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
   updatedAt?: string | null;
+  lockVersion?: number;
 }
 
 // --- Generic form state ---
@@ -36,6 +37,7 @@ export interface PackageFormState {
   metadata: PackageMetadata;
   content: string;
   _manifestBase: Record<string, unknown>;
+  _lockVersion?: number;
 }
 
 // --- Module registry ---

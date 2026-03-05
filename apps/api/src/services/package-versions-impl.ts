@@ -493,9 +493,12 @@ export async function createVersionFromDraft(params: {
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
       zipBuffer = Buffer.from(zipArtifact(entries, 6));
     } else {
-      // Fallback: create minimal ZIP with manifest + content
+      // Fallback: create minimal ZIP with manifest + content using correct filename
       const { buildMinimalZip } = await import("./package-storage.ts");
-      zipBuffer = buildMinimalZip(manifest, content);
+      const { parseScopedName } = await import("@appstrate/core/naming");
+      const contentFileName =
+        pkg.type === "skill" ? "SKILL.md" : `${parseScopedName(packageId)?.name ?? packageId}.ts`;
+      zipBuffer = buildMinimalZip(manifest, content, contentFileName);
     }
   }
 

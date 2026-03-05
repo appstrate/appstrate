@@ -163,7 +163,7 @@ export interface VersionListItem {
 }
 
 function packageBasePath(type: "flow" | "skill" | "extension", packageId: string | undefined) {
-  return type === "flow" ? `/flows/${packageId}` : `/packages/${type}s/${packageId}`;
+  return `/packages/${type}s/${packageId}`;
 }
 
 export function useVersionDetail(

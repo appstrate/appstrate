@@ -27,6 +27,9 @@ mock.module("../package-storage.ts", () => packageStorageStub);
 
 mock.module("../flow-service.ts", () => ({
   getPackagesDir: () => "/tmp",
+  isBuiltInFlow: () => false,
+  getAllPackageIds: async () => [],
+  getPackage: async () => null,
 }));
 
 mock.module("@appstrate/db/storage", () => ({
@@ -40,7 +43,7 @@ mock.module("../builtin-packages.ts", () => builtinPackagesStub);
 
 // --- Import after mocks ---
 
-const { deleteOrgItem, listOrgItems, upsertOrgItem, getOrgItem, SKILL_CONFIG } =
+const { deleteOrgItem, listOrgItems, createOrgItem, getOrgItem, SKILL_CONFIG } =
   await import("../package-items.ts");
 
 // --- Tests ---
@@ -204,14 +207,14 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
   });
 });
 
-describe("upsertOrgItem", () => {
+describe("createOrgItem", () => {
   beforeEach(() => {
     resetQueues();
   });
 
   test("inserts with minimal manifest when none provided", async () => {
     queues.insert = [[{ id: "@acme/my-skill", orgId: "org-1" }]];
-    const result = await upsertOrgItem(
+    const result = await createOrgItem(
       "org-1",
       "acme",
       { id: "my-skill", content: "test content", createdBy: "user-1" },
@@ -225,7 +228,7 @@ describe("upsertOrgItem", () => {
 
   test("uses provided manifest when given", async () => {
     queues.insert = [[{ id: "@acme/custom", orgId: "org-1" }]];
-    await upsertOrgItem(
+    await createOrgItem(
       "org-1",
       "acme",
       { id: "custom", content: "code", name: "Custom Skill", createdBy: "user-1" },
@@ -241,7 +244,7 @@ describe("upsertOrgItem", () => {
 
   test("uses full item.id as packageId when orgSlug is null", async () => {
     queues.insert = [[{ id: "bare-id", orgId: "org-1" }]];
-    await upsertOrgItem(
+    await createOrgItem(
       "org-1",
       null,
       { id: "bare-id", content: "test", createdBy: "user-1" },

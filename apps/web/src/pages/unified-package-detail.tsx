@@ -416,9 +416,17 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
                 )}
             </>
           )}
-          {type !== "flow" && hasContentChanges && latestVersionForDiff && pkgDetail && (
-            <DraftDiffView original={latestVersionForDiff.content!} modified={pkgDetail.content} />
-          )}
+          {type !== "flow" &&
+            latestVersionForDiff &&
+            pkgDetail &&
+            (hasContentChanges ? (
+              <DraftDiffView
+                original={latestVersionForDiff.content!}
+                modified={pkgDetail.content}
+              />
+            ) : (
+              <p className="detail-empty">{t("version.noDiff")}</p>
+            ))}
         </>
       )}
 
