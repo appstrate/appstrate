@@ -353,6 +353,8 @@
   "publishPlan.publishOne": "Publish",
   "publishPlan.publishing": "Publishing...",
   "publishPlan.noVersionWarning": "Some dependencies don't have a version defined and cannot be published.",
+  "publishPlan.lastPublished": "(last published: v{{version}})",
+  "publishPlan.versionBehindWarning": "Some dependencies have a version lower than the last published. Update their version before publishing.",
   "publishPlan.circularWarning": "Circular dependency detected. Resolve the cycle before publishing.",
   "publishPlan.failedAt": "Failed to publish {{name}}: {{message}}",
   "publishPlan.status.pending": "Pending",
@@ -362,5 +364,6 @@
   "publishPlan.status.unpublished": "Unpublished",
   "publishPlan.status.outdated": "To publish",
   "publishPlan.status.published": "Already published",
-  "publishPlan.status.no_version": "Missing version"
+  "publishPlan.status.no_version": "Missing version",
+  "publishPlan.status.version_behind": "Version behind"
 }

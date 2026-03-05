@@ -1,4 +1,13 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import {
+  queues,
+  resetQueues,
+  db,
+  schemaStubs,
+  builtinPackagesStub,
+  packageStorageStub,
+  registryClientStub,
+} from "./_db-mock.ts";
 
 // --- Mocks ---
 
@@ -8,43 +17,11 @@ mock.module("../../lib/logger.ts", () => ({
   logger: { debug: noop, info: noop, warn: noop, error: noop },
 }));
 
-// --- Drizzle mock (queue-based) ---
-
-let selectQueue: unknown[][] = [];
-
-function chainable(result: unknown[]) {
-  const obj = {
-    from: () => obj,
-    where: () => obj,
-    limit: () => obj,
-    orderBy: () => obj,
-    then: (resolve: (v: unknown) => void) => resolve(result),
-  };
-  return obj;
-}
-
-mock.module("../../lib/db.ts", () => ({
-  db: {
-    select: (..._args: unknown[]) => {
-      // Support select() and select({ ... }) for column selection
-      const result = selectQueue.shift() ?? [];
-      return chainable(result);
-    },
-  },
-}));
-
-mock.module("@appstrate/db/schema", () => ({
-  packages: {
-    id: "id",
-    orgId: "org_id",
-    type: "type",
-    name: "name",
-    manifest: "manifest",
-    lastPublishedVersion: "last_published_version",
-    source: "source",
-  },
-  packageDependencies: { packageId: "package_id", dependencyId: "dependency_id", orgId: "org_id" },
-}));
+mock.module("../../lib/db.ts", () => ({ db }));
+mock.module("@appstrate/db/schema", () => schemaStubs);
+mock.module("../builtin-packages.ts", () => builtinPackagesStub);
+mock.module("../package-storage.ts", () => packageStorageStub);
+mock.module("@appstrate/registry-client", () => registryClientStub);
 
 // --- Import after mocks ---
 
@@ -98,10 +75,16 @@ describe("computePublishStatus", () => {
     );
   });
 
-  test("returns outdated when version differs from lastPublishedVersion", () => {
+  test("returns outdated when version is ahead of lastPublishedVersion", () => {
     expect(
       computePublishStatus(makeNode({ version: "2.0.0", lastPublishedVersion: "1.0.0" })),
     ).toBe("outdated");
+  });
+
+  test("returns version_behind when version is behind lastPublishedVersion", () => {
+    expect(
+      computePublishStatus(makeNode({ version: "1.0.0", lastPublishedVersion: "1.0.1" })),
+    ).toBe("version_behind");
   });
 
   test("returns published when versions match", () => {
@@ -194,18 +177,18 @@ describe("topoSort", () => {
 
 describe("buildGraph", () => {
   beforeEach(() => {
-    selectQueue = [];
+    resetQueues();
   });
 
   test("returns empty graph when root package not found", async () => {
-    selectQueue = [[]]; // package lookup returns nothing
+    queues.select = [[]]; // package lookup returns nothing
     const graph = await buildGraph("@test/missing", "org-1");
     expect(graph.nodes.size).toBe(0);
     expect(graph.edges.size).toBe(0);
   });
 
   test("returns single node for package without dependencies", async () => {
-    selectQueue = [
+    queues.select = [
       // Package lookup
       [
         {
@@ -228,7 +211,7 @@ describe("buildGraph", () => {
   });
 
   test("excludes built-in packages", async () => {
-    selectQueue = [
+    queues.select = [
       // Root package
       [
         {
@@ -260,8 +243,62 @@ describe("buildGraph", () => {
     expect(graph.nodes.has("@test/builtin-skill")).toBe(false);
   });
 
+  test("displayName falls back to manifest.name when displayName absent", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "db-name",
+          manifest: { name: "Manifest Name", version: "1.0.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [], // no deps
+    ];
+    const graph = await buildGraph("@test/flow", "org-1");
+    expect(graph.nodes.get("@test/flow")!.displayName).toBe("Manifest Name");
+  });
+
+  test("displayName falls back to pkg.name when manifest has neither", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "DB Column Name",
+          manifest: { version: "1.0.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [],
+    ];
+    const graph = await buildGraph("@test/flow", "org-1");
+    expect(graph.nodes.get("@test/flow")!.displayName).toBe("DB Column Name");
+  });
+
+  test("displayName falls back to packageId when all sources are falsy", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "",
+          manifest: { version: "1.0.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [],
+    ];
+    const graph = await buildGraph("@test/flow", "org-1");
+    expect(graph.nodes.get("@test/flow")!.displayName).toBe("@test/flow");
+  });
+
   test("builds graph with one level of dependencies", async () => {
-    selectQueue = [
+    queues.select = [
       // Root flow
       [
         {
@@ -298,18 +335,18 @@ describe("buildGraph", () => {
 
 describe("getPublishPlan", () => {
   beforeEach(() => {
-    selectQueue = [];
+    resetQueues();
   });
 
   test("returns empty plan for missing package", async () => {
-    selectQueue = [[]];
+    queues.select = [[]];
     const plan = await getPublishPlan("@test/missing", "org-1");
     expect(plan.items).toEqual([]);
     expect(plan.circular).toBeNull();
   });
 
   test("returns plan with correct statuses", async () => {
-    selectQueue = [
+    queues.select = [
       // Root flow
       [
         {
@@ -349,8 +386,84 @@ describe("getPublishPlan", () => {
     expect(plan.items[1]!.status).toBe("outdated");
   });
 
+  test("targetVersion overrides root version", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "Flow",
+          manifest: { version: "1.0.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [],
+    ];
+
+    const plan = await getPublishPlan("@test/flow", "org-1", "2.0.0");
+    expect(plan.items).toHaveLength(1);
+    expect(plan.items[0]!.version).toBe("2.0.0");
+  });
+
+  test("targetVersion does not affect dependencies", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "Flow",
+          manifest: { version: "1.0.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [{ dependencyId: "@test/skill" }],
+      [
+        {
+          id: "@test/skill",
+          type: "skill",
+          name: "Skill",
+          manifest: { version: "0.5.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [],
+    ];
+
+    const plan = await getPublishPlan("@test/flow", "org-1", "3.0.0");
+    const skill = plan.items.find((i) => i.packageId === "@test/skill");
+    expect(skill!.version).toBe("0.5.0");
+  });
+
+  test("targetVersion on unpublished root keeps unpublished status", async () => {
+    queues.select = [
+      [
+        {
+          id: "@test/flow",
+          type: "flow",
+          name: "Flow",
+          manifest: { version: "0.1.0" },
+          lastPublishedVersion: null,
+          source: "local",
+        },
+      ],
+      [],
+    ];
+
+    const plan = await getPublishPlan("@test/flow", "org-1", "1.0.0");
+    expect(plan.items[0]!.status).toBe("unpublished");
+  });
+
+  test("targetVersion on missing root returns empty plan", async () => {
+    queues.select = [[]];
+    const plan = await getPublishPlan("@test/missing", "org-1", "1.0.0");
+    expect(plan.items).toEqual([]);
+  });
+
   test("detects circular dependencies", async () => {
-    selectQueue = [
+    queues.select = [
       // Package A
       [
         {

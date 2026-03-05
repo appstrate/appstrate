@@ -33,7 +33,8 @@ export function PublishPlanModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const hasNoVersion = items.some((i) => i.status === "no_version");
-  const isBlocked = !!circular || hasNoVersion;
+  const hasVersionBehind = items.some((i) => i.status === "version_behind");
+  const isBlocked = !!circular || hasNoVersion || hasVersionBehind;
   const isSingleItem = items.length === 1;
 
   const handleClose = useCallback(() => {
@@ -128,6 +129,8 @@ export function PublishPlanModal({
         return t("publishPlan.status.outdated");
       case "no_version":
         return t("publishPlan.status.no_version");
+      case "version_behind":
+        return t("publishPlan.status.version_behind");
       default:
         return t("publishPlan.status.pending");
     }
@@ -137,7 +140,8 @@ export function PublishPlanModal({
     const s = statuses.get(item.packageId);
     if (s === "done" || s === "skipped" || item.status === "published")
       return "publish-plan-status published";
-    if (s === "failed" || item.status === "no_version") return "publish-plan-status error";
+    if (s === "failed" || item.status === "no_version" || item.status === "version_behind")
+      return "publish-plan-status error";
     if (s === "publishing") return "publish-plan-status publishing";
     if (item.status === "unpublished") return "publish-plan-status unpublished";
     if (item.status === "outdated") return "publish-plan-status outdated";
@@ -184,6 +188,12 @@ export function PublishPlanModal({
         </div>
       )}
 
+      {hasVersionBehind && !circular && (
+        <div className="publish-plan-warning publish-plan-warning-warn">
+          {t("publishPlan.versionBehindWarning")}
+        </div>
+      )}
+
       <div className="publish-plan-list">
         {items.map((item) => (
           <div key={item.packageId} className="publish-plan-item">
@@ -198,6 +208,11 @@ export function PublishPlanModal({
               <TypeBadge type={item.type} />
               <span className="publish-plan-item-name">{item.displayName}</span>
               {item.version && <span className="publish-plan-item-version">v{item.version}</span>}
+              {item.status === "version_behind" && item.lastPublishedVersion && (
+                <span className="publish-plan-item-behind">
+                  {t("publishPlan.lastPublished", { version: item.lastPublishedVersion })}
+                </span>
+              )}
             </div>
             <span className={statusClassName(item)}>{statusLabel(item)}</span>
           </div>

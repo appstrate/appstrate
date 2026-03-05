@@ -1,4 +1,13 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import {
+  queues,
+  resetQueues,
+  db,
+  schemaStubs,
+  builtinPackagesStub,
+  packageVersionsStub,
+  tracking,
+} from "./_db-mock.ts";
 
 // --- Mocks ---
 
@@ -16,51 +25,9 @@ mock.module("../../lib/logger.ts", () => ({
   },
 }));
 
-// --- Drizzle mock (queue-based) ---
-
-let selectQueue: unknown[][] = [];
-let insertedRows: Record<string, unknown>[] = [];
-let updatedSets: Record<string, unknown>[] = [];
-
-function chainable(result: unknown[]) {
-  const obj = {
-    from: () => obj,
-    where: () => obj,
-    limit: () => obj,
-    orderBy: () => obj,
-    then: (resolve: (v: unknown) => void) => resolve(result),
-  };
-  return obj;
-}
-
-const dbOps = {
-  select: () => {
-    const result = selectQueue.shift() ?? [];
-    return chainable(result);
-  },
-  insert: () => ({
-    values: (vals: Record<string, unknown>) => {
-      insertedRows.push(vals);
-      return Promise.resolve();
-    },
-  }),
-  update: () => ({
-    set: (vals: Record<string, unknown>) => ({
-      where: () => {
-        updatedSets.push(vals);
-        return Promise.resolve();
-      },
-    }),
-  }),
-  execute: () => Promise.resolve(),
-};
-
-mock.module("../../lib/db.ts", () => ({
-  db: {
-    ...dbOps,
-    transaction: async (fn: (tx: typeof dbOps) => Promise<void>) => fn(dbOps),
-  },
-}));
+mock.module("../../lib/db.ts", () => ({ db }));
+mock.module("@appstrate/db/schema", () => schemaStubs);
+mock.module("../builtin-packages.ts", () => builtinPackagesStub);
 
 mock.module("@appstrate/env", () => ({
   getEnv: () => ({ REGISTRY_URL: "http://test-registry" }),
@@ -82,6 +49,16 @@ mock.module("@appstrate/registry-client", () => ({
         integrity: "sha256-fixed",
         verified: true,
       };
+    }
+  },
+  RegistryClientError: class extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.name = "RegistryClientError";
+      this.status = status;
+      this.code = code;
     }
   },
 }));
@@ -125,54 +102,7 @@ mock.module("@appstrate/db/storage", () => ({
   deleteFile: async () => {},
 }));
 
-mock.module("../builtin-packages.ts", () => ({
-  getBuiltInSkills: () => new Map(),
-  getBuiltInExtensions: () => new Map(),
-  isBuiltInSkill: () => false,
-  isBuiltInExtension: () => false,
-  resolveBuiltInSkill: () => undefined,
-  resolveBuiltInExtension: () => undefined,
-  BUILTIN_SCOPE: "appstrate",
-}));
-
-mock.module("../package-versions.ts", () => ({
-  createVersionAndUpload: async () => {},
-  getLatestVersionId: async () => null,
-}));
-
-// --- DB schema stubs ---
-
-mock.module("@appstrate/db/schema", () => ({
-  packages: {
-    id: "id",
-    orgId: "org_id",
-    type: "type",
-    source: "source",
-    name: "name",
-    manifest: "manifest",
-    content: "content",
-    autoInstalled: "auto_installed",
-    createdBy: "created_by",
-    createdAt: "created_at",
-    updatedAt: "updated_at",
-  },
-  packageDependencies: {
-    packageId: "package_id",
-    dependencyId: "dependency_id",
-    orgId: "org_id",
-    createdAt: "created_at",
-  },
-  packageVersions: {
-    id: "id",
-    integrity: "integrity",
-    version: "version",
-  },
-  packageDistTags: {
-    packageId: "package_id",
-    tag: "tag",
-    versionId: "version_id",
-  },
-}));
+mock.module("../package-versions.ts", () => packageVersionsStub);
 
 // --- Service mocks ---
 
@@ -232,9 +162,7 @@ function makeZipResult(type: "skill" | "extension" | "flow", manifest: Record<st
 // --- Tests ---
 
 beforeEach(() => {
-  selectQueue = [];
-  insertedRows = [];
-  updatedSets = [];
+  resetQueues();
   warnCalls.length = 0;
   postInstallCalls.length = 0;
   registryPackages.clear();
@@ -242,13 +170,13 @@ beforeEach(() => {
 });
 
 describe("installFromMarketplace — auto-install deps", () => {
-  test("package sans deps → insert simple, autoInstalled=false, pas d'autoInstalledDeps", async () => {
+  test("package with no deps — simple insert, autoInstalled=false, no autoInstalledDeps", async () => {
     registryPackages.set("@acme/solo", makeRegistryPkg("@acme", "solo"));
     zipQueue.push(makeZipResult("skill", { displayName: "Solo Skill" }));
 
     // No registryDependencies → extractDependencies returns [] → no SELECT for deps
     // Only 1 SELECT: existing check → not installed
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // existing check → not installed → INSERT
     ];
@@ -266,11 +194,14 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(result.type).toBe("skill");
     expect(result.version).toBe("1.0.0");
     expect(result.autoInstalledDeps).toBeUndefined();
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]!.autoInstalled).toBe(false);
+    expect(tracking.insertCalls).toHaveLength(1);
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(false);
+    expect(postInstallCalls).toHaveLength(1);
+    expect((postInstallCalls[0] as Record<string, unknown>).packageId).toBe("@acme/solo");
+    expect((postInstallCalls[0] as Record<string, unknown>).packageType).toBe("skill");
   });
 
-  test("package avec 1 dep manquante → auto-install de la dep", async () => {
+  test("package with 1 missing dep — auto-installs the dep", async () => {
     registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
     registryPackages.set("@acme/helper", makeRegistryPkg("@acme", "helper"));
 
@@ -285,7 +216,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Parent: findMissingDeps SELECT → helper missing
     // Helper: no deps → no SELECT; existing check → not installed → INSERT
     // Parent: existing check → not installed → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent: helper not in DB → missing
       [], // existing check for helper → INSERT
@@ -301,17 +232,21 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(2);
-    expect(insertedRows[0]!.id).toBe("@acme/helper");
-    expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("@acme/parent");
-    expect(insertedRows[1]!.autoInstalled).toBe(false);
+    expect(tracking.insertCalls).toHaveLength(2);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/helper");
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/parent");
+    expect(tracking.insertCalls[1]!.autoInstalled).toBe(false);
 
     expect(result.autoInstalledDeps).toHaveLength(1);
     expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/helper");
+    // postInstall called for dep first, then parent
+    expect(postInstallCalls).toHaveLength(2);
+    expect((postInstallCalls[0] as Record<string, unknown>).packageId).toBe("@acme/helper");
+    expect((postInstallCalls[1] as Record<string, unknown>).packageId).toBe("@acme/parent");
   });
 
-  test("deps transitives A→B→C → installe C puis B puis A", async () => {
+  test("transitive deps A→B→C — installs C then B then A", async () => {
     registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
     registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
     registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
@@ -335,7 +270,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //     C: no deps (no SELECT); existing check → INSERT
     //   B: existing check → INSERT
     // A: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → C missing
@@ -353,13 +288,13 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("@acme/c");
-    expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("@acme/b");
-    expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("@acme/a");
-    expect(insertedRows[2]!.autoInstalled).toBe(false);
+    expect(tracking.insertCalls).toHaveLength(3);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/c");
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/b");
+    expect(tracking.insertCalls[1]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/a");
+    expect(tracking.insertCalls[2]!.autoInstalled).toBe(false);
 
     // autoInstalledDeps order: collect phase pushes deepest deps first (C, then B)
     expect(result.autoInstalledDeps).toHaveLength(2);
@@ -367,7 +302,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/b");
   });
 
-  test("dep circulaire A→B→A → skip avec warning", async () => {
+  test("circular dep A→B→A — skips with warning", async () => {
     registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
     registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
 
@@ -388,7 +323,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     //   B: findMissingDeps → A returned as "missing" by DB, but visited set blocks install
     //   B: existing check → INSERT
     // A: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → A "missing" from DB (but visited blocks it)
@@ -402,10 +337,10 @@ describe("installFromMarketplace — auto-install deps", () => {
       (args) => typeof args[0] === "string" && args[0].includes("Circular dependency"),
     );
     expect(circularWarns.length).toBeGreaterThanOrEqual(1);
-    expect(insertedRows).toHaveLength(2);
+    expect(tracking.insertCalls).toHaveLength(2);
   });
 
-  test("dep déjà installée → update au lieu d'insert", async () => {
+  test("already installed dep — updates instead of insert", async () => {
     registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
     registryPackages.set("@acme/dep", makeRegistryPkg("@acme", "dep"));
 
@@ -420,7 +355,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Parent: findMissingDeps → dep missing
     //   dep: no deps (no SELECT); existing check → ALREADY installed → UPDATE
     // Parent: existing check → not installed → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → dep missing
       [{ id: "@acme/dep" }], // existing check for dep → UPDATE
@@ -429,17 +364,17 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     await installFromMarketplace("acme", "parent", undefined, "org-1", "user-1", undefined);
 
-    expect(updatedSets).toHaveLength(1);
-    expect(insertedRows).toHaveLength(1);
-    expect(insertedRows[0]!.id).toBe("@acme/parent");
+    expect(tracking.updateCalls).toHaveLength(1);
+    expect(tracking.insertCalls).toHaveLength(1);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/parent");
   });
 
-  test("update d'un package existant — le met à jour", async () => {
+  test("existing package — updates it", async () => {
     registryPackages.set("@acme/existing", makeRegistryPkg("@acme", "existing"));
     zipQueue.push(makeZipResult("skill", { displayName: "Existing" }));
 
     // No deps → no SELECT for deps; existing check → already installed
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/existing" }], // integrity conflict guard → found
       [], // getLocalVersionIntegrities → no versions → skip integrity check
       [{ id: "@acme/existing" }], // existing check → UPDATE
@@ -454,17 +389,17 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(updatedSets).toHaveLength(1);
-    expect(insertedRows).toHaveLength(0);
+    expect(tracking.updateCalls).toHaveLength(1);
+    expect(tracking.insertCalls).toHaveLength(0);
     expect(result.packageId).toBe("@acme/existing");
   });
 
-  test("promotion auto→explicit — autoInstalled passe à false", async () => {
+  test("promotion auto→explicit — autoInstalled set to false", async () => {
     registryPackages.set("@acme/promoted", makeRegistryPkg("@acme", "promoted"));
     zipQueue.push(makeZipResult("skill", { displayName: "Promoted" }));
 
     // No deps; existing check → already installed
-    selectQueue = [
+    queues.select = [
       [{ id: "@acme/promoted" }], // integrity conflict guard → found
       [], // getLocalVersionIntegrities → no versions → skip integrity check
       [{ id: "@acme/promoted" }], // existing check → UPDATE
@@ -473,12 +408,12 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Direct install (ctx.autoInstalled=false) on existing package → promote to explicit
     await installFromMarketplace("acme", "promoted", undefined, "org-1", "user-1", undefined);
 
-    expect(updatedSets).toHaveLength(1);
+    expect(tracking.updateCalls).toHaveLength(1);
     // !ctx.autoInstalled is true → spread { autoInstalled: false } into the set
-    expect(updatedSets[0]).toHaveProperty("autoInstalled", false);
+    expect(tracking.updateCalls[0]).toHaveProperty("autoInstalled", false);
   });
 
-  test("jamais demotion explicit→auto — autoInstalled n'est PAS dans l'updateSet", async () => {
+  test("never demotes explicit→auto — autoInstalled NOT in updateSet", async () => {
     // Install parent that depends on dep. Dep is already installed.
     // The recursive call for dep runs with ctx.autoInstalled=true.
     // The update of an existing dep should NOT set autoInstalled (no demotion).
@@ -497,7 +432,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // Parent: findMissingDeps → dep missing
     // dep: no deps; existing check → ALREADY installed → UPDATE (with ctx.autoInstalled=true)
     // Parent: existing check → not installed → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → dep missing
       [{ id: "@acme/dep" }], // existing check for dep → UPDATE
@@ -508,11 +443,11 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // dep was updated with ctx.autoInstalled=true
     // !ctx.autoInstalled is false → spread false is a no-op → autoInstalled NOT in set
-    expect(updatedSets).toHaveLength(1);
-    expect(updatedSets[0]).not.toHaveProperty("autoInstalled");
+    expect(tracking.updateCalls).toHaveLength(1);
+    expect(tracking.updateCalls[0]).not.toHaveProperty("autoInstalled");
   });
 
-  test("autoInstalledDeps inclut les deps transitives à plat", async () => {
+  test("autoInstalledDeps includes transitive deps flattened", async () => {
     registryPackages.set("@acme/root", makeRegistryPkg("@acme", "root"));
     registryPackages.set("@acme/mid", makeRegistryPkg("@acme", "mid"));
     registryPackages.set("@acme/leaf", makeRegistryPkg("@acme", "leaf"));
@@ -531,7 +466,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Leaf" }));
 
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for root → mid missing
       [], // findMissingDeps for mid → leaf missing
@@ -578,7 +513,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // flow: findMissingDeps → ext missing
     // ext: no deps; existing check → INSERT
     // flow: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → ext missing
       [], // existing check for ext → INSERT
@@ -594,15 +529,15 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(2);
-    expect(insertedRows[0]!.id).toBe("@acme/ext");
-    expect(insertedRows[0]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls).toHaveLength(2);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/ext");
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
     expect(result.autoInstalledDeps).toHaveLength(1);
     expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/ext");
     expect(result.autoInstalledDeps![0]!.type).toBe("extension");
   });
 
-  test("flow avec deps mixtes skill + extension au même niveau", async () => {
+  test("flow with mixed skill + extension deps at same level", async () => {
     registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
     registryPackages.set("@acme/skill-a", makeRegistryPkg("@acme", "skill-a"));
     registryPackages.set("@acme/ext-b", makeRegistryPkg("@acme", "ext-b"));
@@ -623,7 +558,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // skill-a: no deps; existing check → INSERT
     // ext-b: no deps; existing check → INSERT
     // flow: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → both missing
       [], // existing check for skill-a → INSERT
@@ -640,13 +575,13 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("@acme/skill-a");
-    expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("@acme/ext-b");
-    expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("@acme/my-flow");
-    expect(insertedRows[2]!.autoInstalled).toBe(false);
+    expect(tracking.insertCalls).toHaveLength(3);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/skill-a");
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/ext-b");
+    expect(tracking.insertCalls[1]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/my-flow");
+    expect(tracking.insertCalls[2]!.autoInstalled).toBe(false);
 
     expect(result.autoInstalledDeps).toHaveLength(2);
     const types = result.autoInstalledDeps!.map((d) => d.type);
@@ -654,7 +589,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(types).toContain("extension");
   });
 
-  test("deps parallèles — A dépend de B et C sans imbrication", async () => {
+  test("parallel deps — A depends on B and C without nesting", async () => {
     registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
     registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
     registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
@@ -674,7 +609,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // b: no deps; existing check → INSERT
     // c: no deps; existing check → INSERT
     // parent: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → both missing
       [], // existing check for b → INSERT
@@ -691,14 +626,14 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("@acme/b");
-    expect(insertedRows[1]!.id).toBe("@acme/c");
-    expect(insertedRows[2]!.id).toBe("@acme/parent");
+    expect(tracking.insertCalls).toHaveLength(3);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/b");
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/c");
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/parent");
     expect(result.autoInstalledDeps).toHaveLength(2);
   });
 
-  test("diamond dependency A→B,C et B→D, C→D — D installé une seule fois", async () => {
+  test("diamond dependency A→B,C and B→D, C→D — D installed only once", async () => {
     registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
     registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
     registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
@@ -725,20 +660,7 @@ describe("installFromMarketplace — auto-install deps", () => {
       }),
     );
 
-    // Phase A (collect): findMissingDeps queries only (no writes yet)
-    //   A: findMissingDeps → B and C missing
-    //   B: findMissingDeps → D missing
-    //   D: no deps (no SELECT); pushed to collected
-    //   B: pushed to collected
-    //   C: findMissingDeps → D NOT in DB (no writes yet), but diamond dedup skips collect
-    //   C: pushed to collected
-    //   A: pushed to collected
-    // Phase B (commit): collected = [D, B, C, A]
-    //   D: existing check → INSERT
-    //   B: existing check → INSERT
-    //   C: existing check → INSERT
-    //   A: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B and C missing
       [], // findMissingDeps for B → D missing
@@ -759,11 +681,11 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
 
     // D inserted once (by B's subtree), C sees it already installed
-    expect(insertedRows).toHaveLength(4);
-    expect(insertedRows[0]!.id).toBe("@acme/d");
-    expect(insertedRows[1]!.id).toBe("@acme/b");
-    expect(insertedRows[2]!.id).toBe("@acme/c");
-    expect(insertedRows[3]!.id).toBe("@acme/a");
+    expect(tracking.insertCalls).toHaveLength(4);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/d");
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/b");
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/c");
+    expect(tracking.insertCalls[3]!.id).toBe("@acme/a");
 
     // autoInstalledDeps: B (+ its transitive D), then C (D already handled)
     expect(result.autoInstalledDeps).toHaveLength(3);
@@ -773,7 +695,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(depIds).toContain("@acme/d");
   });
 
-  test("dep circulaire à 3 niveaux A→B→C→A → skip avec warning", async () => {
+  test("3-level circular dep A→B→C→A — skips with warning", async () => {
     registryPackages.set("@acme/a", makeRegistryPkg("@acme", "a"));
     registryPackages.set("@acme/b", makeRegistryPkg("@acme", "b"));
     registryPackages.set("@acme/c", makeRegistryPkg("@acme", "c"));
@@ -797,13 +719,7 @@ describe("installFromMarketplace — auto-install deps", () => {
       }),
     );
 
-    // A: findMissingDeps → B missing
-    //   B: findMissingDeps → C missing
-    //     C: findMissingDeps → A "missing" from DB, but visited={acme--a, acme--b} blocks it
-    //     C: existing check → INSERT
-    //   B: existing check → INSERT
-    // A: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for A → B missing
       [], // findMissingDeps for B → C missing
@@ -820,13 +736,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
     expect(circularWarns.length).toBeGreaterThanOrEqual(1);
     // All 3 installed despite the cycle (A already being installed, just skipped as dep of C)
-    expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("@acme/c");
-    expect(insertedRows[1]!.id).toBe("@acme/b");
-    expect(insertedRows[2]!.id).toBe("@acme/a");
+    expect(tracking.insertCalls).toHaveLength(3);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/c");
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/b");
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/a");
   });
 
-  test("dep introuvable dans le registry → throw", async () => {
+  test("dep not found in registry — throws", async () => {
     registryPackages.set("@acme/parent", makeRegistryPkg("@acme", "parent"));
     // @acme/ghost is NOT in the registry
 
@@ -839,7 +755,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     // parent: findMissingDeps → ghost missing
     // ghost: client.getPackage returns null → throws before any DB query
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for parent → ghost missing
     ];
@@ -849,10 +765,11 @@ describe("installFromMarketplace — auto-install deps", () => {
     ).rejects.toThrow("not found in registry");
 
     // Nothing should have been inserted (error during dep resolution)
-    expect(insertedRows).toHaveLength(0);
+    expect(tracking.insertCalls).toHaveLength(0);
+    expect(postInstallCalls).toHaveLength(0);
   });
 
-  test("flow → skill → extension — deps cross-type imbriquées", async () => {
+  test("flow → skill → extension — nested cross-type deps", async () => {
     registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
     registryPackages.set("@acme/my-skill", makeRegistryPkg("@acme", "my-skill"));
     registryPackages.set("@acme/my-ext", makeRegistryPkg("@acme", "my-ext"));
@@ -871,12 +788,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     );
     zipQueue.push(makeZipResult("extension", { displayName: "My Ext" }));
 
-    // flow: findMissingDeps → skill missing
-    //   skill: findMissingDeps → ext missing
-    //     ext: no deps; existing check → INSERT
-    //   skill: existing check → INSERT
-    // flow: existing check → INSERT
-    selectQueue = [
+    queues.select = [
       [], // integrity conflict guard → not installed
       [], // findMissingDeps for flow → skill missing
       [], // findMissingDeps for skill → ext missing
@@ -894,16 +806,16 @@ describe("installFromMarketplace — auto-install deps", () => {
       undefined,
     );
 
-    expect(insertedRows).toHaveLength(3);
-    expect(insertedRows[0]!.id).toBe("@acme/my-ext");
-    expect(insertedRows[0]!.type).toBe("extension");
-    expect(insertedRows[0]!.autoInstalled).toBe(true);
-    expect(insertedRows[1]!.id).toBe("@acme/my-skill");
-    expect(insertedRows[1]!.type).toBe("skill");
-    expect(insertedRows[1]!.autoInstalled).toBe(true);
-    expect(insertedRows[2]!.id).toBe("@acme/my-flow");
-    expect(insertedRows[2]!.type).toBe("flow");
-    expect(insertedRows[2]!.autoInstalled).toBe(false);
+    expect(tracking.insertCalls).toHaveLength(3);
+    expect(tracking.insertCalls[0]!.id).toBe("@acme/my-ext");
+    expect(tracking.insertCalls[0]!.type).toBe("extension");
+    expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[1]!.id).toBe("@acme/my-skill");
+    expect(tracking.insertCalls[1]!.type).toBe("skill");
+    expect(tracking.insertCalls[1]!.autoInstalled).toBe(true);
+    expect(tracking.insertCalls[2]!.id).toBe("@acme/my-flow");
+    expect(tracking.insertCalls[2]!.type).toBe("flow");
+    expect(tracking.insertCalls[2]!.autoInstalled).toBe(false);
 
     // autoInstalledDeps: collect phase pushes deepest deps first (ext, then skill)
     expect(result.autoInstalledDeps).toHaveLength(2);
@@ -911,5 +823,76 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(result.autoInstalledDeps![0]!.type).toBe("extension");
     expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/my-skill");
     expect(result.autoInstalledDeps![1]!.type).toBe("skill");
+  });
+
+  test("MAX_INSTALL_PACKAGES limit — throws when dependency tree exceeds 10 packages", async () => {
+    // The limit check is `collected.length >= 10` at the START of _installInternal.
+    // Each dep pushes to collected AFTER its recursive processing completes.
+    // So we need 11 direct deps: dep0..dep9 each push (collected=[0..9]),
+    // then dep10 starts with collected.length=10 → triggers the error.
+    const depNames = Array.from({ length: 11 }, (_, i) => `dep${i}`);
+    registryPackages.set("@acme/root", makeRegistryPkg("@acme", "root"));
+    for (const name of depNames) {
+      registryPackages.set(`@acme/${name}`, makeRegistryPkg("@acme", name));
+    }
+
+    const depsMap: Record<string, string> = {};
+    for (const name of depNames) {
+      depsMap[`@acme/${name}`] = "*";
+    }
+    zipQueue.push(
+      makeZipResult("skill", {
+        displayName: "Root",
+        registryDependencies: { skills: depsMap },
+      }),
+    );
+    for (const name of depNames) {
+      zipQueue.push(makeZipResult("skill", { displayName: name }));
+    }
+
+    // integrity conflict guard + findMissingDeps for root + existing checks for deps
+    const selects: unknown[][] = [
+      [], // integrity conflict guard
+      [], // findMissingDeps for root → all 11 deps missing
+    ];
+    for (let i = 0; i < depNames.length; i++) {
+      selects.push([]); // existing check for each dep
+    }
+    selects.push([]); // existing check for root (never reached)
+    queues.select = selects;
+
+    await expect(
+      installFromMarketplace("acme", "root", undefined, "org-1", "user-1", undefined),
+    ).rejects.toThrow("exceeds");
+  });
+
+  test("explicit version parameter — installs with specified version", async () => {
+    registryPackages.set("@acme/versioned", {
+      name: "versioned",
+      description: "versioned package",
+      versions: [
+        { id: 1, version: "1.0.0" },
+        { id: 2, version: "2.0.0" },
+      ],
+      distTags: [{ tag: "latest", versionId: 2 }],
+    });
+    zipQueue.push(makeZipResult("skill", { displayName: "Versioned" }));
+
+    queues.select = [
+      [], // integrity conflict guard
+      [], // existing check → INSERT
+    ];
+
+    const result = await installFromMarketplace(
+      "acme",
+      "versioned",
+      "1.0.0",
+      "org-1",
+      "user-1",
+      undefined,
+    );
+
+    expect(result.packageId).toBe("@acme/versioned");
+    expect(result.version).toBe("1.0.0");
   });
 });
