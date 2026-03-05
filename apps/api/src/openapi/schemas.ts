@@ -424,6 +424,7 @@ export const schemas = {
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
       lastPublishedVersion: { type: ["string", "null"] },
+      version: { type: ["string", "null"], description: "Manifest version (semver)" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

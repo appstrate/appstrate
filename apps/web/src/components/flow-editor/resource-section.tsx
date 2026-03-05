@@ -37,11 +37,8 @@ function VersionSelect({
   // Sync state when current value doesn't match any available option
   useEffect(() => {
     if (!latestVersion) return;
-    if (value === "*") return;
-    const hasMatch = available!.some((v) => v.version === value);
-    if (!hasMatch) {
-      onChange(latestVersion);
-    }
+    if (value !== "*" && available!.some((v) => v.version === value)) return;
+    onChange(latestVersion);
   }, [latestVersion, available, value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
@@ -86,7 +83,7 @@ export function ResourceSection({
       onChange(selectedEntries.filter((e) => e.id !== id));
     } else {
       const item = items?.find((i) => i.id === id);
-      const version = item?.lastPublishedVersion ?? "*";
+      const version = item?.lastPublishedVersion ?? item?.version ?? "*";
       onChange([...selectedEntries, { id, version }]);
     }
   };
