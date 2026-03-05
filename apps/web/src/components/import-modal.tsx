@@ -21,6 +21,10 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     packageId: string;
     draftVersion: string | null;
   } | null>(null);
+  const [confirmIntegrity, setConfirmIntegrity] = useState<{
+    packageId: string;
+    version: string;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const importPackage = useImportPackage();
 
@@ -37,6 +41,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     (f: File) => {
       const err = validateFile(f);
       setConfirmOverwrite(null);
+      setConfirmIntegrity(null);
       if (err) {
         setError(err);
         setFile(null);
@@ -60,7 +65,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
 
   const handleSubmit = () => {
     if (!file) return;
-    const force = !!confirmOverwrite;
+    const force = !!confirmOverwrite || !!confirmIntegrity;
     importPackage.mutate(
       { file, force },
       {
@@ -68,6 +73,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           setFile(null);
           setError("");
           setConfirmOverwrite(null);
+          setConfirmIntegrity(null);
           onClose();
         },
         onError: (err) => {
@@ -75,6 +81,13 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             setConfirmOverwrite({
               packageId: err.details.packageId as string,
               draftVersion: (err.details.draftVersion as string) ?? null,
+            });
+            return;
+          }
+          if (err instanceof ApiError && err.code === "INTEGRITY_MISMATCH" && err.details) {
+            setConfirmIntegrity({
+              packageId: err.details.packageId as string,
+              version: err.details.version as string,
             });
             return;
           }
@@ -89,6 +102,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     setFile(null);
     setError("");
     setConfirmOverwrite(null);
+    setConfirmIntegrity(null);
     onClose();
   };
 
@@ -111,7 +125,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               ? t("import.importing")
               : confirmOverwrite
                 ? t("import.forceSubmit")
-                : t("import.submit")}
+                : confirmIntegrity
+                  ? t("import.forceIntegrity")
+                  : t("import.submit")}
           </button>
         </>
       }
@@ -151,7 +167,12 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           {t("import.confirmOverwrite", { draftVersion: confirmOverwrite.draftVersion ?? "?" })}
         </p>
       )}
-      {importPackage.isError && !confirmOverwrite && (
+      {confirmIntegrity && (
+        <p className="drop-zone-error">
+          {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
+        </p>
+      )}
+      {importPackage.isError && !confirmOverwrite && !confirmIntegrity && (
         <p className="drop-zone-error">{importPackage.error.message}</p>
       )}
     </Modal>

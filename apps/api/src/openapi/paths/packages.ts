@@ -54,23 +54,43 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
-          description: "Package has unpublished draft changes that would be overwritten",
+          description:
+            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
           content: {
             "application/json": {
               schema: {
-                type: "object",
-                required: ["error", "message", "details"],
-                properties: {
-                  error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
-                  message: { type: "string" },
-                  details: {
+                oneOf: [
+                  {
                     type: "object",
+                    required: ["error", "message", "details"],
                     properties: {
-                      packageId: { type: "string" },
-                      draftVersion: { type: ["string", "null"] },
+                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
+                      message: { type: "string" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          packageId: { type: "string" },
+                          draftVersion: { type: ["string", "null"] },
+                        },
+                      },
                     },
                   },
-                },
+                  {
+                    type: "object",
+                    required: ["error", "message", "details"],
+                    properties: {
+                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
+                      message: { type: "string" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          packageId: { type: "string" },
+                          version: { type: "string" },
+                        },
+                      },
+                    },
+                  },
+                ],
               },
             },
           },

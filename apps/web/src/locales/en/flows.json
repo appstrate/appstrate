@@ -59,6 +59,8 @@
   "import.errSize": "File exceeds 10 MB",
   "import.confirmOverwrite": "This package has unpublished draft changes (draft v{{draftVersion}}). The import will overwrite them.",
   "import.forceSubmit": "Overwrite and import",
+  "import.confirmIntegrity": "Version {{version}} already exists with different content. The import will replace this version's content.",
+  "import.forceIntegrity": "Replace and import",
   "input.title": "{{name}} — Parameters",
   "input.run": "Run",
   "input.fieldRequired": "Field \"{{field}}\" is required",
