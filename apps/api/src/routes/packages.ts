@@ -12,8 +12,9 @@ import { isBuiltInFlow } from "../services/flow-service.ts";
 import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-packages.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
 import { getPublishPlan } from "../services/dependency-graph.ts";
-import { getVersionForDownload } from "../services/package-versions.ts";
+import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import {
   listOrgItems,
   getOrgItem,
@@ -778,6 +779,7 @@ export function createPackagesRouter() {
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
+    const force = c.req.query("force") === "true";
 
     if (existing) {
       if (existing.orgId !== orgId) {
@@ -799,7 +801,6 @@ export function createPackagesRouter() {
         );
       }
       // Draft overwrite protection
-      const force = c.req.query("force") === "true";
       if (!force) {
         const [vCount, latestDate] = await Promise.all([
           getVersionCount(packageId),
@@ -820,6 +821,26 @@ export function createPackagesRouter() {
             },
             409,
           );
+        }
+      }
+
+      // Integrity mismatch detection — same version, different content
+      const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
+      if (!force && importedVersion) {
+        const existingVer = await getVersionForDownload(packageId, importedVersion);
+        if (existingVer) {
+          const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+          if (existingVer.integrity !== importedIntegrity) {
+            return c.json(
+              {
+                error: "INTEGRITY_MISMATCH",
+                message:
+                  "Cette version existe déjà avec un contenu différent. Utilisez l'option force pour remplacer.",
+                details: { packageId, version: importedVersion },
+              },
+              409,
+            );
+          }
         }
       }
 
@@ -848,6 +869,26 @@ export function createPackagesRouter() {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
       return c.json({ error: "POST_INSTALL_FAILED", message }, 400);
+    }
+
+    // Force import: replace existing version content if integrity differs
+    // Runs after postInstallPackage so we don't duplicate the ZIP upload
+    const importedVersionForReplace = (manifest as Record<string, unknown>).version as
+      | string
+      | undefined;
+    if (existing && force && importedVersionForReplace) {
+      const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
+      if (existingVer) {
+        const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+        if (existingVer.integrity !== importedIntegrity) {
+          await replaceVersionContent({
+            packageId,
+            version: importedVersionForReplace,
+            zipBuffer: buffer,
+            manifest: manifest as Record<string, unknown>,
+          });
+        }
+      }
     }
 
     logger.info("Package imported", { packageId, type: packageType, orgId });

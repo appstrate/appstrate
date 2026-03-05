@@ -17,14 +17,26 @@ mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-test",
 }));
 
+const depsTracking = {
+  storeCalls: [] as { versionId: number }[],
+  clearCalls: [] as { versionId: number }[],
+};
+
 mock.module("../package-version-deps.ts", () => ({
-  storeVersionDependencies: async () => {},
+  storeVersionDependencies: async (versionId: number) => {
+    depsTracking.storeCalls.push({ versionId });
+  },
+  clearVersionDependencies: async (versionId: number) => {
+    depsTracking.clearCalls.push({ versionId });
+  },
 }));
 
 // --- Import after mocks ---
 
 mock.module("../package-items/storage.ts", () => ({
   downloadPackageFiles: async () => null,
+  uploadPackageFiles: async () => {},
+  deletePackageFiles: async () => {},
 }));
 
 const {
@@ -44,6 +56,7 @@ const {
   createVersionFromDraft,
   addDistTag,
   removeDistTag,
+  replaceVersionContent,
 } = await import("../package-versions-impl.ts");
 
 // --- Tests ---
@@ -654,5 +667,72 @@ describe("createVersionFromDraft", () => {
       userId: "user-1",
     });
     expect(result).toEqual({ id: 1, version: "1.0.0" });
+  });
+});
+
+describe("replaceVersionContent", () => {
+  beforeEach(() => {
+    resetQueues();
+    depsTracking.storeCalls.length = 0;
+    depsTracking.clearCalls.length = 0;
+  });
+
+  test("updates version row, clears old deps, and stores new deps", async () => {
+    queues.update = [
+      [{ id: 7 }], // update returning
+    ];
+
+    await replaceVersionContent({
+      packageId: "@acme/flow-1",
+      version: "1.0.0",
+      zipBuffer: Buffer.from([1, 2, 3]),
+      manifest: {
+        registryDependencies: { skills: { "@acme/helper": "*" } },
+      },
+    });
+
+    // Should have updated integrity, artifactSize, manifest
+    expect(tracking.updateCalls).toHaveLength(1);
+    expect(tracking.updateCalls[0]).toMatchObject({
+      integrity: "sha256-test",
+      artifactSize: 3,
+    });
+
+    // Should clear old deps then store new ones
+    expect(depsTracking.clearCalls).toEqual([{ versionId: 7 }]);
+    expect(depsTracking.storeCalls).toEqual([{ versionId: 7 }]);
+  });
+
+  test("clears deps but does not store when new manifest has no deps", async () => {
+    queues.update = [
+      [{ id: 7 }], // update returning
+    ];
+
+    await replaceVersionContent({
+      packageId: "@acme/flow-1",
+      version: "1.0.0",
+      zipBuffer: Buffer.from([4, 5]),
+      manifest: { name: "test" }, // no registryDependencies
+    });
+
+    expect(depsTracking.clearCalls).toEqual([{ versionId: 7 }]);
+    expect(depsTracking.storeCalls).toEqual([]); // no new deps to store
+  });
+
+  test("returns early when version row not found", async () => {
+    queues.update = [
+      [], // update returning — empty (no row matched)
+    ];
+
+    await replaceVersionContent({
+      packageId: "@acme/flow-1",
+      version: "9.9.9",
+      zipBuffer: Buffer.from([1]),
+      manifest: {},
+    });
+
+    // Should not attempt dep operations
+    expect(depsTracking.clearCalls).toEqual([]);
+    expect(depsTracking.storeCalls).toEqual([]);
   });
 });

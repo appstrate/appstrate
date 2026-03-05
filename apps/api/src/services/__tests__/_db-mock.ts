@@ -216,4 +216,5 @@ export const packageVersionsStub = {
   getLatestVersionCreatedAt: async () => null,
   createVersionFromDraft: async () => null,
   createVersionAndUpload: async () => {},
+  replaceVersionContent: async () => {},
 };

@@ -5,7 +5,7 @@ import { logger } from "../lib/logger.ts";
 import { uploadPackageZip, downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies } from "@appstrate/core/dependencies";
-import { storeVersionDependencies } from "./package-version-deps.ts";
+import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
 import {
   isValidVersion,
   resolveVersionFromCatalog,
@@ -490,6 +490,44 @@ export async function createVersionFromDraft(params: {
     zipBuffer,
     manifest,
   });
+}
+
+// ─────────────────────────────────────────────
+// Replace existing version content
+// ─────────────────────────────────────────────
+
+/** Replace the content of an existing version (integrity, artifactSize, manifest) and re-upload ZIP. */
+export async function replaceVersionContent(params: {
+  packageId: string;
+  version: string;
+  zipBuffer: Buffer;
+  manifest: Record<string, unknown>;
+}): Promise<void> {
+  const { packageId, version, zipBuffer, manifest } = params;
+  const integrity = computeIntegrity(new Uint8Array(zipBuffer));
+  const artifactSize = zipBuffer.byteLength;
+
+  const [row] = await db
+    .update(packageVersions)
+    .set({ integrity, artifactSize, manifest })
+    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+    .returning({ id: packageVersions.id });
+
+  if (!row) {
+    logger.warn("replaceVersionContent: version row not found", { packageId, version });
+    return;
+  }
+
+  await uploadPackageZip(packageId, version, zipBuffer);
+
+  // Clear old deps and re-store from new manifest
+  await clearVersionDependencies(row.id);
+  const deps = extractDependencies(manifest);
+  if (deps.length > 0) {
+    await storeVersionDependencies(row.id, deps);
+  }
+
+  logger.info("Replaced version content", { packageId, version, integrity });
 }
 
 // ─────────────────────────────────────────────

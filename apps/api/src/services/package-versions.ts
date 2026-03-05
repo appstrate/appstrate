@@ -23,6 +23,7 @@ export {
   getLatestVersionCreatedAt,
   createVersionFromDraft,
   createVersionAndUpload,
+  replaceVersionContent,
 } from "./package-versions-impl.ts";
 
 export type { VersionDetail } from "./package-versions-impl.ts";

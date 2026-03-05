@@ -18,6 +18,13 @@ export async function storeVersionDependencies(versionId: number, deps: DepEntry
   await db.insert(packageVersionDependencies).values(rows).onConflictDoNothing();
 }
 
+/** Delete all dependencies for a specific version. */
+export async function clearVersionDependencies(versionId: number): Promise<void> {
+  await db
+    .delete(packageVersionDependencies)
+    .where(eq(packageVersionDependencies.versionId, versionId));
+}
+
 /** Get all dependencies for a specific version. */
 export async function getVersionDependencies(versionId: number): Promise<DepEntry[]> {
   const rows = await db
