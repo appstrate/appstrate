@@ -2,19 +2,19 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Upload } from "lucide-react";
-import { useRegistryStatus, type PublishPlan } from "../hooks/use-registry";
+import { useRegistryStatus } from "../hooks/use-registry";
 import {
   useFlows,
   usePackageList,
   usePackageVersions,
   type VersionListItem,
 } from "../hooks/use-packages";
+import { usePublishPlanModal } from "../hooks/use-publish-plan-modal";
 import { RegistrySettings } from "../components/registry-settings";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
 import { PublishPlanModal } from "../components/publish-plan-modal";
-import { api } from "../api";
 
 interface PublishableItem {
   id: string;
@@ -83,25 +83,10 @@ function PublishItemCard({
 export function MarketplacePublishPage() {
   const { t } = useTranslation(["settings", "flows", "common"]);
   const { data: registryStatus, isLoading: statusLoading } = useRegistryStatus();
-  const [planModalOpen, setPlanModalOpen] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<PublishPlan | null>(null);
-  const [currentPublishVersion, setCurrentPublishVersion] = useState<string | undefined>();
-  const [fetchingPlan, setFetchingPlan] = useState(false);
+  const publishPlan = usePublishPlanModal();
 
-  const handlePublish = async (packageId: string, selectedVersion?: string) => {
-    setFetchingPlan(true);
-    try {
-      const query = selectedVersion ? `?version=${encodeURIComponent(selectedVersion)}` : "";
-      const plan = await api<PublishPlan>(`/packages/${packageId}/publish-plan${query}`);
-      setCurrentPlan(plan);
-      setCurrentPublishVersion(selectedVersion);
-      setPlanModalOpen(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      alert(t("error.prefix", { ns: "common", message }));
-    } finally {
-      setFetchingPlan(false);
-    }
+  const handlePublish = (packageId: string, selectedVersion?: string) => {
+    publishPlan.open(packageId, selectedVersion);
   };
 
   const { data: flows, isLoading: flowsLoading } = useFlows();
@@ -186,7 +171,7 @@ export function MarketplacePublishPage() {
                 <PublishItemCard
                   key={item.id}
                   item={item}
-                  fetchingPlan={fetchingPlan}
+                  fetchingPlan={publishPlan.isFetching}
                   onPublish={handlePublish}
                 />
               ))}
@@ -197,16 +182,7 @@ export function MarketplacePublishPage() {
         </>
       )}
 
-      {currentPlan && (
-        <PublishPlanModal
-          open={planModalOpen}
-          onClose={() => setPlanModalOpen(false)}
-          items={currentPlan.items}
-          circular={currentPlan.circular}
-          rootVersion={currentPublishVersion}
-          onComplete={() => setPlanModalOpen(false)}
-        />
-      )}
+      {publishPlan.hasPlan && <PublishPlanModal {...publishPlan.modalProps} />}
     </div>
   );
 }

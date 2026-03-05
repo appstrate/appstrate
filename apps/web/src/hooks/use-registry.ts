@@ -109,10 +109,3 @@ export interface PublishPlan {
   circular: string[] | null;
 }
 
-export function usePublishPlan(packageId: string | undefined) {
-  return useQuery({
-    queryKey: ["publish-plan", packageId],
-    queryFn: () => api<PublishPlan>(`/packages/${packageId}/publish-plan`),
-    enabled: false,
-  });
-}

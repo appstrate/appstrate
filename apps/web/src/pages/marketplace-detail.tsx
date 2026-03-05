@@ -17,7 +17,8 @@ import {
   useInstallPackage,
   useUpdatePackage,
 } from "../hooks/use-marketplace";
-import { useRegistryStatus, useRegistryScopes, usePublishPlan } from "../hooks/use-registry";
+import { useRegistryStatus, useRegistryScopes } from "../hooks/use-registry";
+import { usePublishPlanModal } from "../hooks/use-publish-plan-modal";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
@@ -43,14 +44,11 @@ export function MarketplaceDetailPage() {
   const { data: registryStatus } = useRegistryStatus();
   const { data: registryScopes } = useRegistryScopes();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
-  const publishPlan = usePublishPlan(scope && name ? `@${scope}/${name}` : undefined);
-  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const publishPlan = usePublishPlanModal();
 
-  const handlePublish = async () => {
+  const handlePublish = () => {
     if (!scope || !name) return;
-    const result = await publishPlan.refetch();
-    if (!result.data) return;
-    setPlanModalOpen(true);
+    publishPlan.open(`@${scope}/${name}`);
   };
 
   if (isLoading) {
@@ -324,15 +322,7 @@ export function MarketplaceDetailPage() {
         </div>
       )}
 
-      {publishPlan.data && (
-        <PublishPlanModal
-          open={planModalOpen}
-          onClose={() => setPlanModalOpen(false)}
-          items={publishPlan.data.items}
-          circular={publishPlan.data.circular}
-          onComplete={() => setPlanModalOpen(false)}
-        />
-      )}
+      {publishPlan.hasPlan && <PublishPlanModal {...publishPlan.modalProps} />}
     </div>
   );
 }
