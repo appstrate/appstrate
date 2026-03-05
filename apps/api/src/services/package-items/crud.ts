@@ -146,6 +146,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       updatedAt: row.updatedAt?.toISOString() ?? "",
       usedByFlows: countMap.get(row.id) ?? 0,
       lastPublishedVersion: row.lastPublishedVersion ?? null,
+      version: (m.version as string) ?? null,
     };
   });
 

@@ -195,6 +195,7 @@ export interface OrgPackageItem {
   updatedAt: string;
   usedByFlows?: number;
   lastPublishedVersion?: string | null;
+  version?: string | null;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
