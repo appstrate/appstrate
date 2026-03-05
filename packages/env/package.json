@@ -11,7 +11,7 @@
     "lint:fix": "prettier --write src/"
   },
   "dependencies": {
-    "@appstrate/core": "2.1.3",
+    "@appstrate/core": "2.2.0",
     "zod": "^4.3.6"
   }
 }

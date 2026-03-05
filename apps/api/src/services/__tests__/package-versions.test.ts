@@ -70,6 +70,7 @@ describe("createPackageVersion", () => {
     // tx.select for allExisting versions
     queues.select = [
       [{ version: "1.0.0" }], // allExisting
+      [], // currentLatest dist-tag lookup
       [{ id: 42, version: "1.0.0" }], // existing row lookup
     ];
 
@@ -88,6 +89,7 @@ describe("createPackageVersion", () => {
   test("returns null for VERSION_NOT_HIGHER", async () => {
     queues.select = [
       [{ version: "2.0.0" }], // allExisting — 2.0.0 is higher than 1.0.0
+      [{ version: "2.0.0" }], // currentLatest dist-tag lookup
     ];
 
     const result = await createPackageVersion({

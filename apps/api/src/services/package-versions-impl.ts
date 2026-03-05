@@ -12,11 +12,7 @@ import {
   type CatalogVersion,
   type DistTagEntry,
 } from "@appstrate/core/semver";
-import {
-  validateForwardVersion,
-  findBestStableVersion,
-  shouldUpdateLatestTag,
-} from "@appstrate/core/version-policy";
+import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 
 // ─────────────────────────────────────────────
@@ -53,22 +49,32 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
         .from(packageVersions)
         .where(eq(packageVersions.packageId, packageId));
 
-      const existingVersions = allExisting.map((v) => v.version);
-      const forwardCheck = validateForwardVersion(version, existingVersions);
+      const [currentLatest] = await tx
+        .select({ version: packageVersions.version })
+        .from(packageDistTags)
+        .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
+        .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+        .limit(1);
 
-      if (!forwardCheck.ok) {
-        if (forwardCheck.error === "VERSION_EXISTS") {
-          logger.warn("Version already exists", { packageId, version });
-          const [existingRow] = await tx
-            .select({ id: packageVersions.id, version: packageVersions.version })
-            .from(packageVersions)
-            .where(
-              and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)),
-            )
-            .limit(1);
-          return existingRow ?? null;
-        }
-        logger.warn("Version not higher", { packageId, version, highest: forwardCheck.highest });
+      const outcome = planCreateVersionOutcome(
+        version,
+        allExisting.map((v) => v.version),
+        currentLatest?.version ?? null,
+      );
+
+      if (outcome.action === "exists") {
+        logger.warn("Version already exists", { packageId, version });
+        const [existingRow] = await tx
+          .select({ id: packageVersions.id, version: packageVersions.version })
+          .from(packageVersions)
+          .where(
+            and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)),
+          )
+          .limit(1);
+        return existingRow ?? null;
+      }
+      if (outcome.action === "rejected") {
+        logger.warn("Version not higher", { packageId, version, highest: outcome.highest });
         return null;
       }
 
@@ -83,14 +89,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
       }
 
       // Auto-manage "latest" dist-tag
-      const [currentLatest] = await tx
-        .select({ version: packageVersions.version })
-        .from(packageDistTags)
-        .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
-        .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-        .limit(1);
-
-      if (shouldUpdateLatestTag(version, currentLatest?.version ?? null)) {
+      if (outcome.shouldUpdateLatest) {
         await tx
           .insert(packageDistTags)
           .values({ packageId, tag: "latest", versionId: row.id })
@@ -326,18 +325,18 @@ export async function yankVersion(
       .from(packageVersions)
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
 
-    const best = findBestStableVersion(candidates);
+    const instructions = planTagReassignment(affectedTags, candidates);
 
-    for (const { tag } of affectedTags) {
-      if (best) {
+    for (const instr of instructions) {
+      if (instr.action === "reassign") {
         await db
           .update(packageDistTags)
-          .set({ versionId: best.id, updatedAt: new Date() })
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, tag)));
+          .set({ versionId: instr.newVersionId, updatedAt: new Date() })
+          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
       } else {
         await db
           .delete(packageDistTags)
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, tag)));
+          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
       }
     }
   }
