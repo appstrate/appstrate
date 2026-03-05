@@ -212,7 +212,6 @@ export const packageVersionsStub = {
   addDistTag: async () => {},
   removeDistTag: async () => {},
   getMatchingDistTags: async () => [],
-  getNextVersion: async () => "1.0.0",
   getVersionInfo: async () => null,
   getLatestVersionCreatedAt: async () => null,
   createVersionFromDraft: async () => null,

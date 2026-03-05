@@ -19,7 +19,6 @@ export {
   addDistTag,
   removeDistTag,
   getMatchingDistTags,
-  getNextVersion,
   getVersionInfo,
   getLatestVersionCreatedAt,
   createVersionFromDraft,

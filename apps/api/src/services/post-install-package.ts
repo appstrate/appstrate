@@ -1,6 +1,6 @@
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
-import { createVersionAndUpload, getNextVersion } from "./package-versions.ts";
+import { createVersionAndUpload } from "./package-versions.ts";
 import {
   upsertOrgItem,
   uploadPackageFiles,
@@ -52,12 +52,12 @@ export async function postInstallPackage(params: {
   const manifest = parseManifestFromFiles(files);
   const manifestVersion = manifest.version as string | undefined;
 
-  // Determine version: explicit override > manifest version > auto-bump
-  const version =
-    params.version ??
-    (manifestVersion && isValidVersion(manifestVersion)
-      ? manifestVersion
-      : await getNextVersion(packageId));
+  // Determine version: explicit override > manifest version > error
+  const rawVersion = params.version ?? manifestVersion;
+  if (!rawVersion || !isValidVersion(rawVersion)) {
+    throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
+  }
+  const version: string = rawVersion;
 
   /** Create a version snapshot (non-fatal on error). Deps handled by createVersionAndUpload. */
   async function createVersion(versionManifest: Record<string, unknown>): Promise<void> {
