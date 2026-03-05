@@ -1,4 +1,4 @@
-import { type ChangeEvent, useRef } from "react";
+import { type ChangeEvent, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -31,9 +31,21 @@ function VersionSelect({
   onChange: (version: string) => void;
 }) {
   const { data: versions, isLoading } = usePackageVersions(type, packageId);
+  const available = useMemo(() => versions?.filter((v) => !v.yanked), [versions]);
+  const latestVersion = available?.[0]?.version;
+
+  // Sync state when current value doesn't match any available option
+  useEffect(() => {
+    if (!latestVersion) return;
+    if (value === "*") return;
+    const hasMatch = available!.some((v) => v.version === value);
+    if (!hasMatch) {
+      onChange(latestVersion);
+    }
+  }, [latestVersion, available, value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
-  if (!versions || versions.length === 0) {
+  if (!available || available.length === 0) {
     return <span className="version-badge">*</span>;
   }
 
@@ -45,13 +57,11 @@ function VersionSelect({
       onClick={(e) => e.stopPropagation()}
     >
       {value === "*" && <option value="*">*</option>}
-      {versions
-        .filter((v) => !v.yanked)
-        .map((v) => (
-          <option key={v.id} value={v.version}>
-            {v.version}
-          </option>
-        ))}
+      {available.map((v) => (
+        <option key={v.id} value={v.version}>
+          {v.version}
+        </option>
+      ))}
     </select>
   );
 }
