@@ -58,7 +58,9 @@ export function ExecutionRow({
           <span className="exec-tokens">{execution.tokensUsed.toLocaleString()} tok</span>
         )}
         {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
-        {execution.packageVersion && <span className="tag">v{execution.packageVersion}</span>}
+        <span className={`tag${execution.packageVersion ? "" : " draft"}`}>
+          {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
+        </span>
         {execution.scheduleId && <span className="tag">cron</span>}
       </div>
       {resultPreview && (

@@ -203,9 +203,9 @@ export function ExecutionDetailPage() {
         {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
         <span className="exec-meta">{date}</span>
         {duration && <span className="exec-meta">{duration}</span>}
-        {execution.packageVersion && (
-          <span className="exec-meta tag">v{execution.packageVersion}</span>
-        )}
+        <span className={`exec-meta tag${execution.packageVersion ? "" : " draft"}`}>
+          {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
+        </span>
         {!isRunning && execution.tokensUsed != null && (
           <span className="exec-meta">{execution.tokensUsed.toLocaleString()} tokens</span>
         )}

@@ -8,7 +8,7 @@ import { getEnv } from "@appstrate/env";
 import { buildServiceTokens } from "./token-resolver.ts";
 import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
 import { getPackageZip } from "./package-storage.ts";
-import { getLatestVersionId } from "./package-versions.ts";
+import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxyUrl } from "./org-proxies.ts";
 
 /**
@@ -124,7 +124,7 @@ export async function buildExecutionContext(params: {
     previousState,
     providerDefs,
     flowPackage,
-    flowVersionId,
+    latestVersion,
     proxyUrl,
     memories,
   ] = await Promise.all([
@@ -136,11 +136,26 @@ export async function buildExecutionContext(params: {
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)
       : flow.source !== "built-in"
-        ? getLatestVersionId(flow.id).catch(() => null)
+        ? getLatestVersionWithManifest(flow.id).catch(() => null)
         : null,
     resolveProxyUrl(orgId, flow.id, params.config),
     getPackageMemories(flow.id, orgId),
   ]);
+
+  // Resolve version ID: explicit override is trusted; otherwise only associate
+  // the latest version if its manifest matches the live flow (dirty check).
+  let flowVersionId: number | null;
+  if (typeof latestVersion === "number") {
+    // overrideVersionId path — already a plain number
+    flowVersionId = latestVersion;
+  } else if (latestVersion) {
+    // Compare version manifest with live flow manifest
+    const liveKey = JSON.stringify(flow.manifest);
+    const versionKey = JSON.stringify(latestVersion.manifest);
+    flowVersionId = liveKey === versionKey ? latestVersion.id : null;
+  } else {
+    flowVersionId = null;
+  }
 
   const promptContext = buildPromptContext({
     flow,

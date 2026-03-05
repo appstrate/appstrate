@@ -157,6 +157,23 @@ export async function getLatestVersionId(packageId: string): Promise<number | nu
   return row?.id ?? null;
 }
 
+/** Get the latest version ID + manifest for dirty-check at execution time. */
+export async function getLatestVersionWithManifest(
+  packageId: string,
+): Promise<{ id: number; manifest: Record<string, unknown> } | null> {
+  const versionId = await getLatestVersionId(packageId);
+  if (!versionId) return null;
+
+  const [row] = await db
+    .select({ id: packageVersions.id, manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, versionId))
+    .limit(1);
+
+  if (!row) return null;
+  return { id: row.id, manifest: row.manifest as Record<string, unknown> };
+}
+
 /** 3-step version resolution: exact → dist-tag → semver range. */
 export async function resolveVersion(packageId: string, query: string): Promise<number | null> {
   const allVersions: CatalogVersion[] = await db

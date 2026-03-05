@@ -49,6 +49,7 @@
   "exec.emptyState": "Aucun state",
   "exec.breadcrumb": "Exécution #{{number}}",
   "exec.resultLabel": "Résultat :",
+  "exec.draft": "brouillon",
   "exec.user": "par {{name}}",
   "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier ZIP ici",

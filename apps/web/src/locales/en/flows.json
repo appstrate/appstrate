@@ -49,6 +49,7 @@
   "exec.emptyState": "No state",
   "exec.breadcrumb": "Execution #{{number}}",
   "exec.resultLabel": "Result:",
+  "exec.draft": "draft",
   "exec.user": "by {{name}}",
   "import.title": "Import package",
   "import.dropText": "Drop a ZIP file here",
