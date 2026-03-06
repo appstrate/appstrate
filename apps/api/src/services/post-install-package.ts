@@ -1,4 +1,3 @@
-import { extractSkillMeta } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
@@ -103,13 +102,6 @@ export async function postInstallPackage(params: {
   if (packageType === "skill" || packageType === "extension") {
     const cfg = packageType === "skill" ? SKILL_CONFIG : EXTENSION_CONFIG;
     const item: CreateItemInput = { id: packageId, content, createdBy: userId };
-
-    if (packageType === "skill") {
-      const skillMeta = extractSkillMeta(content);
-      item.name = skillMeta.name || undefined;
-      item.description = skillMeta.description || undefined;
-    }
-
     await upsertItem(orgId, packageId, item, cfg, manifest);
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
   }

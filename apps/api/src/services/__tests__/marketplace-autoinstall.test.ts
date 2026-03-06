@@ -88,10 +88,6 @@ mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-fixed",
 }));
 
-mock.module("@appstrate/core/validation", () => ({
-  extractSkillMeta: () => ({ name: "test", description: "test" }),
-}));
-
 // @appstrate/core/naming — NOT mocked (pure functions, use real impl)
 // @appstrate/core/dependencies — NOT mocked (pure function, use real impl)
 

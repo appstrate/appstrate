@@ -79,10 +79,6 @@ mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-abc123",
 }));
 
-mock.module("@appstrate/core/validation", () => ({
-  extractSkillMeta: () => ({ name: "test", description: "test" }),
-}));
-
 mock.module("@appstrate/db/storage", () => ({
   ensureBucket: async () => {},
   uploadFile: async () => {},
