@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ExecutionRow } from "../execution-row";
 import { ScheduleRow } from "../schedule-row";
-import { Spinner } from "../spinner";
+import { RunFlowButton } from "../run-flow-button";
 import { EmptyState } from "../page-states";
 import { formatDateField } from "../../lib/markdown";
 
@@ -18,28 +18,16 @@ export function FlowExecutionsTab({
   const ctx = useFlowDetailContext();
   const {
     detail,
+    packageId,
     executions,
     profileMap,
-    runFlow,
     deleteExecutions,
     allConnected,
     hasReconnectionNeeded,
     hasRequiredConfig,
-    hasInputSchema,
-    setInputOpen,
-    profileId,
   } = ctx;
 
-  const handleRun = () => {
-    if (hasInputSchema) {
-      setInputOpen(true);
-    } else {
-      runFlow.mutate({
-        profileId: profileId ?? undefined,
-        version: resolvedVersion,
-      });
-    }
-  };
+  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
 
   return (
     <>
@@ -65,14 +53,13 @@ export function FlowExecutionsTab({
       )}
       {!executions || executions.length === 0 ? (
         <EmptyState message={t("detail.emptyExec")} compact>
-          <Button
-            onClick={handleRun}
-            disabled={
-              !allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending
-            }
-          >
-            {runFlow.isPending && <Spinner />} {t("detail.run")}
-          </Button>
+          <RunFlowButton
+            packageId={packageId}
+            detail={detail}
+            version={resolvedVersion}
+            disabled={runDisabled}
+            showLabel
+          />
         </EmptyState>
       ) : (
         <div className="space-y-1">

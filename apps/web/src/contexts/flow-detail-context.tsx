@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import type { FlowDetail, JSONSchemaObject, Schedule } from "@appstrate/shared-types";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import {
-  useRunFlow,
   useConnect,
   useDeleteFlow,
   useDeleteFlowExecutions,
@@ -85,7 +84,6 @@ export function FlowDetailProvider({
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
 
-  const runFlow = useRunFlow(packageId);
   const deleteFlow = useDeleteFlow();
   const deleteExecutions = useDeleteFlowExecutions(packageId);
   const connectMutation = useConnect();
@@ -102,7 +100,6 @@ export function FlowDetailProvider({
 
   // Modal states
   const [configOpen, setConfigOpen] = useState(false);
-  const [inputOpen, setInputOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
   const [apiKeyService, setApiKeyService] = useState<ApiKeyServiceState | null>(null);
@@ -124,9 +121,6 @@ export function FlowDetailProvider({
     (s) => s.status === "needs_reconnection",
   );
   const hasRequiredConfig = checkRequiredConfig(detail);
-  const hasInputSchema = !!(
-    detail.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0
-  );
   const hasConfigSchema = !!(
     detail.config?.schema?.properties && Object.keys(detail.config.schema.properties).length > 0
   );
@@ -159,7 +153,6 @@ export function FlowDetailProvider({
     profileMap,
     profileId,
     pParam,
-    runFlow,
     deleteFlow,
     deleteExecutions,
     connectMutation,
@@ -176,8 +169,6 @@ export function FlowDetailProvider({
     setFlowProxy,
     configOpen,
     setConfigOpen,
-    inputOpen,
-    setInputOpen,
     scheduleOpen,
     setScheduleOpen,
     editingSchedule,
@@ -190,7 +181,6 @@ export function FlowDetailProvider({
     allConnected,
     hasReconnectionNeeded,
     hasRequiredConfig,
-    hasInputSchema,
     hasConfigSchema,
     getServiceAuthMode,
     isCredentialAuth,

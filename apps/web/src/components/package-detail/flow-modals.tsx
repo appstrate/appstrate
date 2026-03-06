@@ -1,18 +1,15 @@
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ConfigModal } from "../config-modal";
-import { InputModal } from "../input-modal";
 import { ScheduleModal } from "../schedule-modal";
 import { ApiKeyModal } from "../api-key-modal";
 import { CustomCredentialsModal } from "../custom-credentials-modal";
 
-export function FlowModals({ resolvedVersion }: { resolvedVersion: string | undefined }) {
+export function FlowModals() {
   const ctx = useFlowDetailContext();
   const {
     detail,
     configOpen,
     setConfigOpen,
-    inputOpen,
-    setInputOpen,
     scheduleOpen,
     setScheduleOpen,
     editingSchedule,
@@ -22,34 +19,18 @@ export function FlowModals({ resolvedVersion }: { resolvedVersion: string | unde
     customCredService,
     setCustomCredService,
     customCredSchema,
-    runFlow,
     apiKeyMutation,
     credentialsMutation,
     createSchedule,
     updateSchedule,
     deleteSchedule,
     bindAdmin,
-    profileId,
     pParam,
   } = ctx;
 
   return (
     <>
       <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} flow={detail} />
-      <InputModal
-        open={inputOpen}
-        onClose={() => setInputOpen(false)}
-        flow={detail}
-        onSubmit={(input, files) =>
-          runFlow.mutate({
-            input,
-            files,
-            profileId: profileId ?? undefined,
-            version: resolvedVersion,
-          })
-        }
-        isPending={runFlow.isPending}
-      />
       <ScheduleModal
         open={scheduleOpen}
         onClose={() => {
