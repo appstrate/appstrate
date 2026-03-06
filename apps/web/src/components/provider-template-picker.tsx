@@ -32,7 +32,7 @@ export function ProviderTemplatePicker({
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title={t("providers.templates.title")}>
+    <Modal open={open} onClose={handleClose} title={t("providers.templates.title")} className="sm:max-w-2xl">
       <div className="relative mb-4">
         <Search
           size={14}
@@ -50,50 +50,42 @@ export function ProviderTemplatePicker({
       {isLoading ? (
         <LoadingState />
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {data?.templates.map((tpl) => (
             <Button
               key={tpl.templateId}
               variant="outline"
-              className="h-auto p-4 justify-start text-left hover:border-primary hover:bg-muted/30 w-full flex-col items-start"
+              className="h-auto p-3 justify-start text-left hover:border-primary hover:bg-muted/30 w-full flex-col items-center gap-2"
               onClick={() => onSelectTemplate(tpl, data.callbackUrl)}
             >
-              <div className="flex items-center gap-2 mb-1">
-                {tpl.iconUrl && (
-                  <img
-                    src={tpl.iconUrl}
-                    alt=""
-                    className="h-5 w-5 rounded object-contain"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                )}
-                <span className="font-medium text-sm">{tpl.displayName}</span>
-              </div>
-              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground mb-1">
+              {tpl.iconUrl ? (
+                <img
+                  src={tpl.iconUrl}
+                  alt=""
+                  className="h-8 w-8 rounded object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              ) : (
+                <div className="h-8 w-8 rounded bg-muted" />
+              )}
+              <span className="font-medium text-sm text-center">{tpl.displayName}</span>
+              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                 {t(authModeI18nKey(tpl.authMode), { defaultValue: tpl.authMode })}
-              </span>
-              <span className="text-sm text-muted-foreground mt-1 block font-normal">
-                {tpl.description}
               </span>
             </Button>
           ))}
 
           <Button
             variant="outline"
-            className="h-auto p-4 justify-start text-left border-dashed hover:border-primary hover:bg-muted/30 w-full flex-col items-start"
+            className="h-auto p-3 justify-start text-left border-dashed hover:border-primary hover:bg-muted/30 w-full flex-col items-center gap-2"
             onClick={onSelectCustom}
           >
-            <div className="flex items-center gap-2 mb-1">
-              <div className="flex items-center justify-center h-5 w-5 rounded bg-muted text-muted-foreground">
-                <Plus size={16} />
-              </div>
-              <span className="font-medium text-sm">{t("providers.templates.custom")}</span>
+            <div className="flex items-center justify-center h-8 w-8 rounded bg-muted text-muted-foreground">
+              <Plus size={18} />
             </div>
-            <span className="text-sm text-muted-foreground mt-1 block font-normal">
-              {t("providers.templates.customDesc")}
-            </span>
+            <span className="font-medium text-sm text-center">{t("providers.templates.custom")}</span>
           </Button>
         </div>
       )}
