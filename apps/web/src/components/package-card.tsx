@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { TypeBadge } from "./type-badge";
 import { Spinner } from "./spinner";
+import { RunFlowButton } from "./run-flow-button";
 
 interface PackageCardProps {
   id: string;
@@ -9,10 +10,8 @@ interface PackageCardProps {
   description?: string | null;
   type: "flow" | "skill" | "extension";
   source?: "built-in" | "local";
-  // Flow-specific
   runningExecutions?: number;
   tags?: string[];
-  // Skill/Extension-specific
   usedByFlows?: number;
 }
 
@@ -38,6 +37,14 @@ export function PackageCard({
       <div className="flex items-start justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">{displayName}</h2>
         <div className="flex items-center gap-1.5 shrink-0">
+          {type === "flow" && (
+            <RunFlowButton
+              packageId={id}
+              variant="ghost"
+              size="icon"
+              className="size-7 text-muted-foreground hover:text-primary"
+            />
+          )}
           <TypeBadge type={type} />
           {source === "built-in" && (
             <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">

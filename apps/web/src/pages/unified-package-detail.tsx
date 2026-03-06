@@ -490,7 +490,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       />
 
       {/* Flow modals */}
-      {type === "flow" && <FlowModals resolvedVersion={resolvedVersion} />}
+      {type === "flow" && <FlowModals />}
     </>
   );
 

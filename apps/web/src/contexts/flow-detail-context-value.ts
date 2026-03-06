@@ -1,7 +1,6 @@
 import { createContext } from "react";
 import type { FlowDetail, JSONSchemaObject, Schedule } from "@appstrate/shared-types";
 import type {
-  useRunFlow,
   useConnect,
   useDeleteFlow,
   useDeleteFlowExecutions,
@@ -54,7 +53,6 @@ export interface FlowDetailContextValue {
   pParam: ReturnType<typeof profileIdParam>;
 
   // Mutations
-  runFlow: ReturnType<typeof useRunFlow>;
   deleteFlow: ReturnType<typeof useDeleteFlow>;
   deleteExecutions: ReturnType<typeof useDeleteFlowExecutions>;
   connectMutation: ReturnType<typeof useConnect>;
@@ -73,8 +71,6 @@ export interface FlowDetailContextValue {
   // Modal states
   configOpen: boolean;
   setConfigOpen: (v: boolean) => void;
-  inputOpen: boolean;
-  setInputOpen: (v: boolean) => void;
   scheduleOpen: boolean;
   setScheduleOpen: (v: boolean) => void;
   editingSchedule: Schedule | null;
@@ -89,7 +85,6 @@ export interface FlowDetailContextValue {
   allConnected: boolean;
   hasReconnectionNeeded: boolean;
   hasRequiredConfig: boolean;
-  hasInputSchema: boolean;
   hasConfigSchema: boolean;
   getServiceAuthMode: (svc: { provider: string; authMode?: string }) => string | undefined;
   isCredentialAuth: (provider: string) => boolean;

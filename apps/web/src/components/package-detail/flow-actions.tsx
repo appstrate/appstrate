@@ -4,7 +4,7 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ShareDropdown } from "../share-dropdown";
-import { Spinner } from "../spinner";
+import { RunFlowButton } from "../run-flow-button";
 
 export function FlowActions({
   isOrgAdmin,
@@ -28,46 +28,33 @@ export function FlowActions({
   const {
     detail,
     packageId,
-    runFlow,
     deleteFlow,
     allConnected,
     hasReconnectionNeeded,
     hasRequiredConfig,
-    hasInputSchema,
     hasConfigSchema,
     setConfigOpen,
-    setInputOpen,
-    profileId,
   } = ctx;
 
-  const handleRun = () => {
-    if (hasInputSchema) {
-      setInputOpen(true);
-    } else {
-      runFlow.mutate({
-        profileId: profileId ?? undefined,
-        version: resolvedVersion,
-      });
-    }
-  };
+  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
+  const runDisabledTitle = hasReconnectionNeeded
+    ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
+    : !allConnected
+      ? t("detail.titleConnect")
+      : !hasRequiredConfig
+        ? t("detail.titleConfig")
+        : undefined;
 
   return (
     <div className="flex items-center gap-2 flex-wrap mb-4">
-      <Button
-        onClick={handleRun}
-        disabled={!allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending}
-        title={
-          hasReconnectionNeeded
-            ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
-            : !allConnected
-              ? t("detail.titleConnect")
-              : !hasRequiredConfig
-                ? t("detail.titleConfig")
-                : t("detail.titleRun")
-        }
-      >
-        {runFlow.isPending && <Spinner />} {t("detail.run")}
-      </Button>
+      <RunFlowButton
+        packageId={packageId}
+        detail={detail}
+        version={resolvedVersion}
+        disabled={runDisabled}
+        disabledTitle={runDisabledTitle}
+        showLabel
+      />
       <ShareDropdown
         packageId={packageId}
         isAdmin={isOrgAdmin}
