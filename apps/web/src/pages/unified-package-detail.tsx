@@ -170,12 +170,12 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
     hasUnpublishedChanges,
   };
 
-  // ── Flow diff tab logic ──
+  // ── Diff tab logic ──
+  const currentManifest = type === "flow" ? flowDetail?.manifest : pkgDetail?.manifest;
+
   const hasPromptChanges = type === "flow" && flowDetail?.prompt !== latestVersionForDiff?.prompt;
   const hasManifestChanges =
-    type === "flow" &&
-    JSON.stringify(flowDetail?.manifest ?? {}) !==
-      JSON.stringify(latestVersionForDiff?.manifest ?? {});
+    JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
   const hasContentChanges =
     type !== "flow" &&
     latestVersionForDiff?.content != null &&
@@ -183,10 +183,16 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
     latestVersionForDiff.content !== pkgDetail.content;
 
   const diffTab = (() => {
-    if (type !== "flow") return "content";
+    if (type === "flow") {
+      const preferred = diffTabOverride ?? "manifest";
+      if (preferred === "prompt" && !hasPromptChanges && hasManifestChanges) return "manifest";
+      if (preferred === "manifest" && !hasManifestChanges && hasPromptChanges) return "prompt";
+      return preferred;
+    }
+    // Skills/Extensions: manifest + content tabs
     const preferred = diffTabOverride ?? "manifest";
-    if (preferred === "prompt" && !hasPromptChanges && hasManifestChanges) return "manifest";
-    if (preferred === "manifest" && !hasManifestChanges && hasPromptChanges) return "prompt";
+    if (preferred === "content" && !hasContentChanges && hasManifestChanges) return "manifest";
+    if (preferred === "manifest" && !hasManifestChanges && hasContentChanges) return "content";
     return preferred;
   })();
 
@@ -416,17 +422,48 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
                 )}
             </>
           )}
-          {type !== "flow" &&
-            latestVersionForDiff &&
-            pkgDetail &&
-            (hasContentChanges ? (
-              <DraftDiffView
-                original={latestVersionForDiff.content!}
-                modified={pkgDetail.content}
-              />
-            ) : (
-              <p className="detail-empty">{t("version.noDiff")}</p>
-            ))}
+          {type !== "flow" && latestVersionForDiff && pkgDetail && (
+            <>
+              <div className="exec-tabs" role="tablist">
+                {hasManifestChanges && (
+                  <button
+                    role="tab"
+                    aria-selected={diffTab === "manifest"}
+                    className={`tab ${diffTab === "manifest" ? "active" : ""}`}
+                    onClick={() => setDiffTab("manifest")}
+                  >
+                    {t("version.diffManifest")}
+                  </button>
+                )}
+                {hasContentChanges && (
+                  <button
+                    role="tab"
+                    aria-selected={diffTab === "content"}
+                    className={`tab ${diffTab === "content" ? "active" : ""}`}
+                    onClick={() => setDiffTab("content")}
+                  >
+                    {t("packages.content")}
+                  </button>
+                )}
+              </div>
+              {diffTab === "manifest" && hasManifestChanges && (
+                <DraftDiffView
+                  original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
+                  modified={JSON.stringify(pkgDetail.manifest ?? {}, null, 2)}
+                  language="json"
+                />
+              )}
+              {diffTab === "content" && hasContentChanges && (
+                <DraftDiffView
+                  original={latestVersionForDiff.content!}
+                  modified={pkgDetail.content}
+                />
+              )}
+              {!hasManifestChanges && !hasContentChanges && (
+                <p className="detail-empty">{t("version.noDiff")}</p>
+              )}
+            </>
+          )}
         </>
       )}
 

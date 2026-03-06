@@ -444,6 +444,7 @@ export const schemas = {
       lastPublishedVersion: { type: ["string", "null"] },
       lastPublishedAt: { type: ["string", "null"], format: "date-time" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
+      manifest: { type: "object", description: "Full manifest object" },
       manifestName: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
