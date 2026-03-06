@@ -21,7 +21,11 @@ mock.module("../../lib/logger.ts", () => ({
 mock.module("../../lib/db.ts", () => ({ db }));
 mock.module("@appstrate/db/schema", () => schemaStubs);
 mock.module("../builtin-packages.ts", () => builtinPackagesStub);
-mock.module("../package-storage.ts", () => packageStorageStub);
+const mockDownloadVersionZip = mock(async () => null as Buffer | null);
+mock.module("../package-storage.ts", () => ({
+  ...packageStorageStub,
+  downloadVersionZip: mockDownloadVersionZip,
+}));
 mock.module("@appstrate/registry-client", () => registryClientStub);
 
 // --- Service mocks ---
@@ -75,6 +79,16 @@ function makePackageRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeVersionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    version: "1.0.0",
+    manifest: { name: "@acme/my-flow", version: "1.0.0" },
+    yanked: false,
+    integrity: "sha256-abc",
+    ...overrides,
+  };
+}
+
 const publishResult = {
   scope: "acme",
   name: "my-flow",
@@ -84,12 +98,15 @@ const publishResult = {
   type: "flow",
 };
 
+const fakeZip = Buffer.from("fake-zip-content");
+
 // --- Tests ---
 
 describe("publishPackage", () => {
   beforeEach(() => {
     resetQueues();
     mockRegistryClient = { publish: mock(async () => publishResult) };
+    mockDownloadVersionZip.mockImplementation(async () => fakeZip);
   });
 
   test("throws when registry not connected", async () => {
@@ -109,11 +126,11 @@ describe("publishPackage", () => {
     );
   });
 
-  test("publishes draft when no targetVersion", async () => {
+  test("throws VERSION_REQUIRED when no targetVersion", async () => {
     queues.select = [[makePackageRow()]];
-    const result = await publishPackage("@acme/my-flow", "org-1", "user-1");
-    expect(result).toEqual(publishResult);
-    expect(mockRegistryClient!.publish).toHaveBeenCalledTimes(1);
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PublishValidationError);
+    expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_REQUIRED");
   });
 
   test("throws VERSION_NOT_FOUND for missing targetVersion", async () => {
@@ -159,7 +176,7 @@ describe("publishPackage", () => {
         },
       ],
     ];
-    // downloadVersionZip already mocked to return null
+    mockDownloadVersionZip.mockImplementation(async () => null);
     const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "2.0.0").catch(
       (e: unknown) => e,
     );
@@ -168,64 +185,68 @@ describe("publishPackage", () => {
   });
 
   test("throws VERSION_MISSING when manifest has no version", async () => {
-    queues.select = [[makePackageRow({ manifest: { name: "@acme/my-flow" } })]];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    queues.select = [[makePackageRow()], [makeVersionRow({ manifest: { name: "@acme/my-flow" } })]];
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_MISSING");
   });
 
   test("throws VERSION_INVALID for invalid semver", async () => {
-    queues.select = [[makePackageRow({ manifest: { name: "@acme/my-flow", version: "abc" } })]];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    queues.select = [
+      [makePackageRow()],
+      [makeVersionRow({ manifest: { name: "@acme/my-flow", version: "abc" } })],
+    ];
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_INVALID");
   });
 
   test("throws VERSION_NOT_HIGHER when version not greater", async () => {
     queues.select = [
-      [
-        makePackageRow({
-          lastPublishedVersion: "2.0.0",
-          manifest: { name: "@acme/my-flow", version: "1.0.0" },
-        }),
-      ],
+      [makePackageRow({ lastPublishedVersion: "2.0.0" })],
+      [makeVersionRow({ manifest: { name: "@acme/my-flow", version: "1.0.0" } })],
     ];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_NOT_HIGHER");
   });
 
   test("throws VERSION_EXISTS when version already published", async () => {
     queues.select = [
-      [
-        makePackageRow({
-          lastPublishedVersion: "1.0.0",
-          manifest: { name: "@acme/my-flow", version: "1.0.0" },
-        }),
-      ],
+      [makePackageRow({ lastPublishedVersion: "1.0.0" })],
+      [makeVersionRow({ manifest: { name: "@acme/my-flow", version: "1.0.0" } })],
     ];
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_EXISTS");
   });
 
   test("successful publish updates lastPublishedVersion", async () => {
-    queues.select = [[makePackageRow()]];
-    const result = await publishPackage("@acme/my-flow", "org-1", "user-1");
+    queues.select = [[makePackageRow()], [makeVersionRow()]];
+    const result = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0");
     expect(result).toEqual(publishResult);
     expect(tracking.updateCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("publishes skill type draft", async () => {
+  test("publishes skill type", async () => {
     queues.select = [
       [makePackageRow({ type: "skill", manifest: { name: "@acme/my-skill", version: "1.0.0" } })],
+      [makeVersionRow({ manifest: { name: "@acme/my-skill", version: "1.0.0" } })],
     ];
-    const result = await publishPackage("@acme/my-skill", "org-1", "user-1");
+    const result = await publishPackage("@acme/my-skill", "org-1", "user-1", "1.0.0");
     expect(result).toEqual(publishResult);
     expect(mockRegistryClient!.publish).toHaveBeenCalledTimes(1);
   });
 
-  test("publishes extension type draft", async () => {
+  test("publishes extension type", async () => {
     queues.select = [
       [
         makePackageRow({
@@ -233,19 +254,22 @@ describe("publishPackage", () => {
           manifest: { name: "@acme/my-ext", version: "1.0.0" },
         }),
       ],
+      [makeVersionRow({ manifest: { name: "@acme/my-ext", version: "1.0.0" } })],
     ];
-    const result = await publishPackage("@acme/my-ext", "org-1", "user-1");
+    const result = await publishPackage("@acme/my-ext", "org-1", "user-1", "1.0.0");
     expect(result).toEqual(publishResult);
   });
 
   test("RegistryClientError 409 maps to REGISTRY_CONFLICT", async () => {
-    queues.select = [[makePackageRow()]];
+    queues.select = [[makePackageRow()], [makeVersionRow()]];
     mockRegistryClient = {
       publish: mock(async () => {
         throw new registryClientStub.RegistryClientError(409, "CONFLICT", "Already exists");
       }),
     };
-    const err = await publishPackage("@acme/my-flow", "org-1", "user-1").catch((e: unknown) => e);
+    const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(PublishValidationError);
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("REGISTRY_CONFLICT");
   });

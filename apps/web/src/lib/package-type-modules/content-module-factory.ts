@@ -54,6 +54,7 @@ export function makeContentPackageModule(
       return {
         manifest: {
           ...state._manifestBase,
+          type: state._type,
           version: state.metadata.version,
           displayName: state.metadata.displayName,
           description: state.metadata.description,

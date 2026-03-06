@@ -28,11 +28,7 @@ import {
   FLOW_CONFIG,
   type PackageTypeConfig,
 } from "../services/package-items.ts";
-import {
-  extractSkillMeta,
-  validateExtensionSource,
-  validateManifest,
-} from "@appstrate/core/validation";
+import { validateExtensionSource, validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
 import { parseScopedName } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
@@ -104,8 +100,6 @@ async function parsePackageUpload(
     requiredFile: string | null;
     /** Find the content file by extension (e.g. ".ts") — null to use requiredFile */
     contentFileExt: string | null;
-    /** Extract metadata from content (skill YAML frontmatter) */
-    extractMeta: boolean;
   },
 ): Promise<ParsedUpload | Response> {
   const contentType = c.req.header("content-type") ?? "";
@@ -164,11 +158,6 @@ async function parsePackageUpload(
 
     let name: string | undefined;
     let description: string | undefined;
-    if (opts.extractMeta) {
-      const meta = extractSkillMeta(content);
-      name = meta.name || undefined;
-      description = meta.description || undefined;
-    }
 
     // Parse manifest.json from ZIP if present — store as-is (like the registry)
     let manifest: Record<string, unknown> | undefined;
@@ -218,12 +207,7 @@ async function parsePackageUpload(
     );
   }
 
-  let { name, description } = body;
-  if (opts.extractMeta && (!name || !description)) {
-    const meta = extractSkillMeta(body.content);
-    if (!name) name = meta.name || undefined;
-    if (!description) description = meta.description || undefined;
-  }
+  const { name, description } = body;
 
   // Synthesize normalizedFiles so the ZIP is uploaded to storage (same as multipart path)
   const encoded = new TextEncoder().encode(body.content);
@@ -295,7 +279,6 @@ interface PackageRouteConfig {
   parseOpts: {
     requiredFile: string | null;
     contentFileExt: string | null;
-    extractMeta: boolean;
   };
   responseKey: string;
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
@@ -321,20 +304,20 @@ interface PackageRouteConfig {
 const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
   skills: {
     cfg: SKILL_CONFIG,
-    parseOpts: { requiredFile: "SKILL.md", contentFileExt: null, extractMeta: true },
+    parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
   },
   extensions: {
     cfg: EXTENSION_CONFIG,
-    parseOpts: { requiredFile: null, contentFileExt: ".ts", extractMeta: false },
+    parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "extension",
     validateContent: validateExtensionSource,
     storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
   },
   flows: {
     cfg: FLOW_CONFIG,
-    parseOpts: { requiredFile: null, contentFileExt: null, extractMeta: false },
+    parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "flow",
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
