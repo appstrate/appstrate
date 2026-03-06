@@ -28,6 +28,7 @@ interface DataTableProps<TData> {
 export function DataTable<TData>({ columns, data, onRowClick }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data,
     columns,
