@@ -1,6 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useFlowDetail } from "../hooks/use-packages";
 import { useExecutionRealtime } from "../hooks/use-realtime";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
@@ -106,9 +108,9 @@ export function ShareableRunPage() {
 
   if (isLoading) {
     return (
-      <div className="shareable-run">
-        <div className="shareable-run-card">
-          <div className="empty-state">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="flex items-center justify-center py-8">
             <Spinner />
           </div>
         </div>
@@ -118,24 +120,28 @@ export function ShareableRunPage() {
 
   if (error || !flow) {
     return (
-      <div className="shareable-run">
-        <div className="shareable-run-card">
-          <div className="exec-error">{error?.message || t("shareable.notFound")}</div>
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error?.message || t("shareable.notFound")}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="shareable-run">
-      <div className="shareable-run-card">
-        <div className="shareable-run-header">
-          <h2>{flow.displayName}</h2>
-          {flow.description && <p className="description">{flow.description}</p>}
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold">{flow.displayName}</h2>
+          {flow.description && (
+            <p className="text-sm text-muted-foreground mt-1">{flow.description}</p>
+          )}
         </div>
 
         {services.length > 0 && (
-          <div className="shareable-run-services">
+          <div className="flex flex-wrap gap-2 mb-4">
             {services.map((svc) => {
               const isConnected = svc.status === "connected";
               const isAdminMode = svc.connectionMode === "admin";
@@ -144,18 +150,25 @@ export function ShareableRunPage() {
                 return (
                   <div
                     key={svc.id}
-                    className={`service ${svc.adminProvided && isConnected ? "admin-provided" : "admin-pending"}`}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
                     title={svc.description}
                   >
                     <span
-                      className={`status-dot ${svc.adminProvided && isConnected ? "connected" : "disconnected"}`}
+                      className={cn(
+                        "h-2 w-2 rounded-full inline-block",
+                        svc.adminProvided && isConnected ? "bg-success" : "bg-destructive",
+                      )}
                     />
                     {svc.id}
                     {svc.adminProvided && isConnected && (
-                      <span className="admin-service-badge">{t("admin")}</span>
+                      <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        {t("admin")}
+                      </span>
                     )}
                     {!(svc.adminProvided && isConnected) && (
-                      <span className="admin-service-badge pending">{t("detail.pending")}</span>
+                      <span className="ml-1 rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
+                        {t("detail.pending")}
+                      </span>
                     )}
                   </div>
                 );
@@ -164,8 +177,12 @@ export function ShareableRunPage() {
               // User-mode service
               if (isConnected) {
                 return (
-                  <div key={svc.id} className="service" title={svc.description}>
-                    <span className="status-dot connected" />
+                  <div
+                    key={svc.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                    title={svc.description}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-success inline-block" />
                     {svc.id}
                   </div>
                 );
@@ -180,23 +197,24 @@ export function ShareableRunPage() {
               };
 
               return (
-                <button
+                <Button
                   key={svc.id}
+                  variant="outline"
                   type="button"
-                  className="service not-connected"
+                  className="flex items-center gap-1.5 border-dashed px-2.5 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground"
                   onClick={handleServiceConnect}
                   title={svc.description}
                 >
-                  <span className="status-dot disconnected" />
+                  <span className="h-2 w-2 rounded-full bg-destructive inline-block" />
                   {svc.id} ({t("detail.connect")})
-                </button>
+                </Button>
               );
             })}
           </div>
         )}
 
         {status === "idle" && (
-          <div className="shareable-run-form">
+          <div className="space-y-4">
             {hasInput && (
               <InputFields
                 schema={schema!}
@@ -207,31 +225,35 @@ export function ShareableRunPage() {
                 idPrefix="shareable-input"
               />
             )}
-            <button
-              className="primary shareable-run-btn"
+            <Button
+              className="w-full"
               onClick={handleRun}
               disabled={!allConnected}
               title={!allConnected ? t("shareable.connectFirst") : t("shareable.titleRun")}
             >
               {t("shareable.execute")}
-            </button>
+            </Button>
           </div>
         )}
 
         {status === "running" && (
-          <div className="shareable-run-status">
+          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
             <Spinner />
             <span>{t("shareable.running")}</span>
           </div>
         )}
 
         {(status === "success" || status === "failed" || status === "timeout") && (
-          <div className="shareable-run-result">
-            {execError && <div className="exec-error">{execError}</div>}
+          <div className="space-y-4">
+            {execError && (
+              <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {execError}
+              </div>
+            )}
             {result && <ResultRenderer data={result} outputSchema={flow.output?.schema} />}
-            <button className="shareable-run-btn" onClick={handleRestart}>
+            <Button variant="outline" className="w-full" onClick={handleRestart}>
               {t("shareable.rerun")}
-            </button>
+            </Button>
           </div>
         )}
       </div>

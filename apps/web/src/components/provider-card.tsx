@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { authModeI18nKey } from "../lib/auth-mode";
 import { getServiceStatusDisplay } from "../lib/service-status";
 import type { ProviderConfig, Integration } from "@appstrate/shared-types";
@@ -39,11 +40,11 @@ export function ProviderCard({
   const isBuiltIn = provider.source === "built-in";
 
   return (
-    <div className="service-card">
-      <div className="service-card-header">
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="flex items-start gap-3">
         {(provider.iconUrl || integration?.logo) && (
           <img
-            className="service-logo"
+            className="h-8 w-8 rounded object-contain shrink-0"
             src={provider.iconUrl || integration?.logo}
             alt={provider.displayName}
             onError={(e) => {
@@ -51,18 +52,24 @@ export function ProviderCard({
             }}
           />
         )}
-        <div className="service-info">
-          <h3 className="provider-name">{provider.displayName}</h3>
-          <div className="provider-badges">
-            <span className="badge badge-pending">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-foreground">{provider.displayName}</h3>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <span className="text-[0.7rem] px-2 py-0.5 rounded bg-muted/50 text-muted-foreground font-medium">
               {t(authModeI18nKey(provider.authMode), { defaultValue: provider.authMode })}
             </span>
-            {isBuiltIn && <span className="badge badge-dim">{t("providers.builtIn")}</span>}
+            {isBuiltIn && (
+              <span className="text-[0.7rem] px-2 py-0.5 rounded bg-muted/50 text-muted-foreground font-medium">
+                {t("providers.builtIn")}
+              </span>
+            )}
             {provider.source === "custom" && (
-              <span className="badge badge-dim">{t("providers.custom")}</span>
+              <span className="text-[0.7rem] px-2 py-0.5 rounded bg-muted/50 text-muted-foreground font-medium">
+                {t("providers.custom")}
+              </span>
             )}
             {provider.usedByFlows != null && provider.usedByFlows > 0 && (
-              <span className="badge badge-success">
+              <span className="text-[0.7rem] px-2 py-0.5 rounded bg-success/15 text-success font-medium">
                 {t("providers.usedByFlows", { count: provider.usedByFlows })}
               </span>
             )}
@@ -70,16 +77,24 @@ export function ProviderCard({
         </div>
       </div>
 
-      <div className="service-card-status">
-        <span className={`status-dot ${statusDotClass}`} />
-        <span className={`badge ${badgeClass}`}>{statusLabel}</span>
-        {connDate && <span className="service-date">{connDate}</span>}
+      <div className="flex items-center gap-2 text-xs">
+        <span
+          className={`inline-block h-2 w-2 rounded-full ${statusDotClass === "connected" ? "bg-success" : statusDotClass === "warning" ? "bg-warning" : "bg-destructive"}`}
+        />
+        <span
+          className={`text-[0.7rem] px-2 py-0.5 rounded font-medium ${badgeClass === "badge-success" ? "bg-success/15 text-success" : badgeClass === "badge-warning" ? "bg-warning/15 text-warning" : "bg-destructive/15 text-destructive"}`}
+        >
+          {statusLabel}
+        </span>
+        {connDate && <span className="text-muted-foreground">{connDate}</span>}
       </div>
 
-      <div className="service-card-actions">
+      <div className="flex items-center gap-2 pt-1 border-t border-border">
         {isConnected ? (
           <>
-            <button
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={() => {
                 if (confirm(t("services.disconnectConfirm", { name: provider.id }))) {
                   onDisconnect(provider.id, integration?.connectionId);
@@ -88,8 +103,10 @@ export function ProviderCard({
               disabled={disconnectPending}
             >
               {t("btn.disconnect")}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() =>
                 onConnect({
                   uniqueKey: provider.id,
@@ -100,11 +117,10 @@ export function ProviderCard({
               disabled={connectPending}
             >
               {t("btn.reconnect")}
-            </button>
+            </Button>
           </>
         ) : (
-          <button
-            className="primary"
+          <Button
             onClick={() =>
               onConnect({
                 uniqueKey: provider.id,
@@ -115,12 +131,16 @@ export function ProviderCard({
             disabled={connectPending}
           >
             {needsReconnection ? t("btn.reconnect") : t("btn.connect")}
-          </button>
+          </Button>
         )}
         {isAdmin && !isBuiltIn && (
           <>
-            <button onClick={() => onEdit(provider)}>{t("btn.edit")}</button>
-            <button
+            <Button variant="ghost" size="sm" onClick={() => onEdit(provider)}>
+              {t("btn.edit")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => onDelete(provider)}
               disabled={!!provider.usedByFlows && provider.usedByFlows > 0}
               title={
@@ -130,7 +150,7 @@ export function ProviderCard({
               }
             >
               {t("btn.delete")}
-            </button>
+            </Button>
           </>
         )}
       </div>

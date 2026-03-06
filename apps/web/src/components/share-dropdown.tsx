@@ -1,6 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 interface ServiceStatus {
   id: string;
@@ -17,26 +24,14 @@ interface ShareDropdownProps {
 
 export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownProps) {
   const { t } = useTranslation(["flows", "common"]);
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
 
   const copyLink = () => {
     const url = `${window.location.origin}/flows/${packageId}/run`;
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      setOpen(false);
     });
   };
 
@@ -61,7 +56,6 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      setOpen(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : t("share.errorGenerate"));
     } finally {
@@ -72,39 +66,36 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
   // Non-admin: simple button
   if (!isAdmin) {
     return (
-      <button onClick={copyLink} title={t("share.copyLinkTitle")}>
+      <Button variant="outline" onClick={copyLink} title={t("share.copyLinkTitle")}>
         {copied ? t("share.copied") : t("share.share")}
-      </button>
+      </Button>
     );
   }
 
   // Admin: dropdown with two options
   return (
-    <div className="share-dropdown" ref={ref}>
-      <button onClick={() => setOpen(!open)} title={t("share.optionsTitle")}>
-        {copied ? t("share.copied") : t("share.share")}
-      </button>
-      {open && (
-        <div className="share-dropdown-menu">
-          <button className="share-dropdown-item" onClick={copyLink}>
-            {t("share.copyLink")}
-          </button>
-          <button
-            className="share-dropdown-item"
-            onClick={generateShareLink}
-            disabled={!canSharePublic || generating}
-            title={
-              hasUserModeServices
-                ? t("share.cantShareUserMode")
-                : !canSharePublic
-                  ? t("share.cantShareNotConnected")
-                  : t("share.generatePublicLink")
-            }
-          >
-            {generating ? t("share.generating") : t("share.publicLink")}
-          </button>
-        </div>
-      )}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" title={t("share.optionsTitle")}>
+          {copied ? t("share.copied") : t("share.share")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={copyLink}>{t("share.copyLink")}</DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={generateShareLink}
+          disabled={!canSharePublic || generating}
+          title={
+            hasUserModeServices
+              ? t("share.cantShareUserMode")
+              : !canSharePublic
+                ? t("share.cantShareNotConnected")
+                : t("share.generatePublicLink")
+          }
+        >
+          {generating ? t("share.generating") : t("share.publicLink")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

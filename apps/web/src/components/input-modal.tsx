@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { InputFields } from "./input-fields";
 import { Spinner } from "./spinner";
 import { initInputValues, buildInputPayload } from "./input-utils";
@@ -127,13 +128,13 @@ function InputModalForm({
         }}
         errors={errors}
       />
-      <div className="modal-actions">
-        <button onClick={onClose} disabled={isPending}>
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="outline" onClick={onClose} disabled={isPending}>
           {t("btn.cancel")}
-        </button>
-        <button className="primary" onClick={handleSubmit} disabled={isPending}>
+        </Button>
+        <Button onClick={handleSubmit} disabled={isPending}>
           {isPending ? <Spinner /> : t("input.run")}
-        </button>
+        </Button>
       </div>
     </>
   );

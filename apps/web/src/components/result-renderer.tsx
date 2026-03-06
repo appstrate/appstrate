@@ -8,6 +8,8 @@ import {
   truncate,
   formatDateField,
 } from "../lib/markdown";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface ResultRendererProps {
   data: Record<string, unknown>;
@@ -33,7 +35,7 @@ function renderMetadata(
     parts.push(t("result.meetingsSkipped", { count: data.meetings_skipped }));
   if (data.ignored_count) parts.push(t("result.ignoredCount", { count: data.ignored_count }));
   if (parts.length === 0) return "";
-  return `<p class="result-metadata">${parts.join(" — ")}</p>`;
+  return `<p style="font-size:0.8rem;color:var(--color-muted-foreground);margin-bottom:0.75rem">${parts.join(" — ")}</p>`;
 }
 
 interface ResultItem {
@@ -47,22 +49,26 @@ interface ResultItem {
 
 function renderResultItems(items: ResultItem[]): string {
   if (!items || items.length === 0) return "";
-  return `<div class="result-items">${items
+  return `<div style="display:flex;flex-direction:column;gap:0.75rem">${items
     .map((item) => {
-      const relevanceClass =
-        item.relevance === "high" ? "high" : item.relevance === "medium" ? "medium" : "low";
+      const badgeColor =
+        item.relevance === "high"
+          ? "color:var(--color-success)"
+          : item.relevance === "medium"
+            ? "color:var(--color-warning)"
+            : "color:var(--color-muted-foreground)";
       return `
-      <div class="result-item">
-        <div class="result-item-header">
-          ${item.newsletter ? `<span class="result-item-source">${escapeHtml(item.newsletter)}</span>` : ""}
-          ${item.relevance ? `<span class="relevance-badge ${relevanceClass}">${item.relevance}</span>` : ""}
+      <div style="border:1px solid var(--color-border);border-radius:var(--radius-md);padding:0.75rem">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem">
+          ${item.newsletter ? `<span style="font-weight:600;font-size:0.8rem">${escapeHtml(item.newsletter)}</span>` : ""}
+          ${item.relevance ? `<span style="font-size:0.7rem;font-weight:500;${badgeColor}">${item.relevance}</span>` : ""}
         </div>
-        ${item.subject ? `<div class="result-item-subject">${escapeHtml(item.subject)}</div>` : ""}
-        <div class="result-item-meta">
+        ${item.subject ? `<div style="font-weight:500;margin-bottom:0.25rem">${escapeHtml(item.subject)}</div>` : ""}
+        <div style="font-size:0.8rem;color:var(--color-muted-foreground);display:flex;gap:0.5rem">
           ${item.from ? `<span>${escapeHtml(item.from)}</span>` : ""}
           ${item.date ? `<span>${escapeHtml(item.date)}</span>` : ""}
         </div>
-        ${item.relevant_content ? `<div class="result-item-content">${convertMarkdown(item.relevant_content)}</div>` : ""}
+        ${item.relevant_content ? `<div style="margin-top:0.5rem;font-size:0.85rem">${convertMarkdown(item.relevant_content)}</div>` : ""}
       </div>
     `;
     })
@@ -70,8 +76,8 @@ function renderResultItems(items: ResultItem[]): string {
 }
 
 function renderNestedObject(label: string, obj: Record<string, unknown>): string {
-  let html = `<div class="result-item-content"><strong>${escapeHtml(label)}</strong>`;
-  html += `<ul class="ticket-list">`;
+  let html = `<div style="margin-top:0.5rem;font-size:0.85rem"><strong>${escapeHtml(label)}</strong>`;
+  html += `<ul style="list-style:disc;padding-left:1.25rem;margin-top:0.25rem">`;
   for (const [k, v] of Object.entries(obj)) {
     if (v === null || v === undefined) continue;
     if (Array.isArray(v)) {
@@ -91,7 +97,7 @@ function renderNestedObject(label: string, obj: Record<string, unknown>): string
 
 function renderNestedArray(label: string, arr: unknown[]): string {
   if (arr.length === 0) return "";
-  let html = `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><ul class="ticket-list">`;
+  let html = `<div style="margin-top:0.5rem;font-size:0.85rem"><strong>${escapeHtml(label)}</strong><ul style="list-style:disc;padding-left:1.25rem;margin-top:0.25rem">`;
   for (const item of arr) {
     if (typeof item === "string") {
       html += `<li>${linkifyText(item)}</li>`;
@@ -114,18 +120,18 @@ function renderNestedArray(label: string, arr: unknown[]): string {
 function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]): string {
   const title = sectionKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   let html = `<h4>${escapeHtml(title)}</h4>`;
-  html += `<div class="result-items">`;
+  html += `<div style="display:flex;flex-direction:column;gap:0.75rem">`;
 
   for (const item of items) {
-    html += `<div class="result-item">`;
+    html += `<div style="border:1px solid var(--color-border);border-radius:var(--radius-md);padding:0.75rem">`;
 
     const itemTitle = (item.title || item.name || item.subject || "") as string;
     const subtitle = item.start ? formatDateField(item.start as string) : "";
     if (itemTitle) {
-      html += `<div class="result-item-header"><strong>${escapeHtml(itemTitle)}</strong></div>`;
+      html += `<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem"><strong>${escapeHtml(itemTitle)}</strong></div>`;
     }
     if (subtitle) {
-      html += `<div class="result-item-meta"><span>${escapeHtml(subtitle)}</span>${item.end ? ` — ${escapeHtml(formatDateField(item.end as string))}` : ""}${item.location ? ` · ${escapeHtml(truncate(item.location as string, 50))}` : ""}</div>`;
+      html += `<div style="font-size:0.8rem;color:var(--color-muted-foreground);display:flex;gap:0.5rem"><span>${escapeHtml(subtitle)}</span>${item.end ? ` — ${escapeHtml(formatDateField(item.end as string))}` : ""}${item.location ? ` · ${escapeHtml(truncate(item.location as string, 50))}` : ""}</div>`;
     }
 
     const skipFields = new Set([
@@ -150,9 +156,9 @@ function renderGenericCards(sectionKey: string, items: Record<string, unknown>[]
       } else {
         const strVal = String(v);
         if (strVal.length > 80) {
-          html += `<div class="result-item-content"><strong>${escapeHtml(label)}</strong><br>${convertMarkdown(strVal)}</div>`;
+          html += `<div style="margin-top:0.5rem;font-size:0.85rem"><strong>${escapeHtml(label)}</strong><br>${convertMarkdown(strVal)}</div>`;
         } else {
-          html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${linkifyText(strVal)}</div>`;
+          html += `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(label)}:</strong> ${linkifyText(strVal)}</div>`;
         }
       }
     }
@@ -172,29 +178,29 @@ function renderSchemaField(
 ): string {
   const desc = prop.description || key;
   if (value === undefined || value === null) {
-    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>—</em></div>`;
+    return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> <em>—</em></div>`;
   }
 
   if (prop.type === "string") {
     const strVal = String(value);
     if (strVal.length > 80) {
-      return `<div class="result-item-content"><strong>${escapeHtml(desc)}</strong><br>${convertMarkdown(strVal)}</div>`;
+      return `<div style="margin-top:0.5rem;font-size:0.85rem"><strong>${escapeHtml(desc)}</strong><br>${convertMarkdown(strVal)}</div>`;
     }
-    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(strVal)}</div>`;
+    return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(strVal)}</div>`;
   }
 
   if (prop.type === "number") {
-    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
+    return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> ${escapeHtml(String(value))}</div>`;
   }
 
   if (prop.type === "boolean") {
     const label = value ? t("result.boolYes") : t("result.boolNo");
-    return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <span class="relevance-badge ${value ? "high" : "low"}">${label}</span></div>`;
+    return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> <span style="font-weight:500;color:${value ? "var(--color-success)" : "var(--color-muted-foreground)"}">${label}</span></div>`;
   }
 
   if (prop.type === "array" && Array.isArray(value)) {
     if (value.length === 0) {
-      return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> <em>${t("result.emptyArray")}</em></div>`;
+      return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> <em>${t("result.emptyArray")}</em></div>`;
     }
     if (typeof value[0] === "object" && value[0] !== null) {
       return renderGenericCards(key, value as Record<string, unknown>[]);
@@ -206,7 +212,7 @@ function renderSchemaField(
     return renderNestedObject(desc, value as Record<string, unknown>);
   }
 
-  return `<div class="result-item-meta"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(String(value))}</div>`;
+  return `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(desc)}:</strong> ${linkifyText(String(value))}</div>`;
 }
 
 function buildSchemaResultHtml(
@@ -218,7 +224,7 @@ function buildSchemaResultHtml(
 
   // Render summary first if present in schema
   if (schema.properties.summary && data.summary) {
-    html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
+    html += `<div style="margin-bottom:0.75rem;line-height:1.6">${convertMarkdown(data.summary as string)}</div>`;
   }
 
   html += renderMetadata(data, t);
@@ -254,7 +260,7 @@ function buildSchemaResultHtml(
       } else if (typeof value === "object" && !Array.isArray(value)) {
         html += renderNestedObject(label, value as Record<string, unknown>);
       } else {
-        html += `<div class="result-item-meta"><strong>${escapeHtml(label)}:</strong> ${linkifyText(String(value))}</div>`;
+        html += `<div style="font-size:0.8rem;color:var(--color-muted-foreground)"><strong>${escapeHtml(label)}:</strong> ${linkifyText(String(value))}</div>`;
       }
     }
   }
@@ -266,13 +272,13 @@ function buildResultHtml(data: Record<string, unknown>, t: (key: string) => stri
   let html = `<h4>${t("result.title")}</h4>`;
 
   if (data.summary) {
-    html += `<div class="result-summary">${convertMarkdown(data.summary as string)}</div>`;
+    html += `<div style="margin-bottom:0.75rem;line-height:1.6">${convertMarkdown(data.summary as string)}</div>`;
   }
 
   html += renderMetadata(data, t);
 
   if (Array.isArray(data.tickets_created) && data.tickets_created.length > 0) {
-    html += `<h4>${t("result.ticketsCreated")}</h4><ul class="ticket-list">`;
+    html += `<h4>${t("result.ticketsCreated")}</h4><ul style="list-style:disc;padding-left:1.25rem;margin-top:0.25rem">`;
     for (const ticket of data.tickets_created as Record<string, string>[]) {
       html += `<li>
         ${ticket.url ? `<a href="${escapeHtml(ticket.url)}" target="_blank">${escapeHtml(ticket.title)}</a>` : escapeHtml(ticket.title)}
@@ -283,7 +289,7 @@ function buildResultHtml(data: Record<string, unknown>, t: (key: string) => stri
   }
 
   if (Array.isArray(data.informational) && data.informational.length > 0) {
-    html += `<h4 style="margin-top: 0.75rem">${t("result.informational")}</h4><ul class="ticket-list">`;
+    html += `<h4 style="margin-top: 0.75rem">${t("result.informational")}</h4><ul style="list-style:disc;padding-left:1.25rem;margin-top:0.25rem">`;
     for (const info of data.informational as Record<string, string>[]) {
       html += `<li><strong>${escapeHtml(info.from)}</strong>: ${escapeHtml(info.summary || info.subject)}</li>`;
     }
@@ -335,25 +341,31 @@ export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
   const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
   return (
-    <div className="result-section">
-      <div className="result-view-toggle">
-        <button
-          className={`result-toggle-btn ${viewMode === "formatted" ? "active" : ""}`}
+    <div className="mt-4">
+      <div className="flex gap-1 mb-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(viewMode === "formatted" && "border-primary text-primary bg-primary/10")}
           onClick={() => setViewMode("formatted")}
         >
           {t("result.formatted")}
-        </button>
-        <button
-          className={`result-toggle-btn ${viewMode === "json" ? "active" : ""}`}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(viewMode === "json" && "border-primary text-primary bg-primary/10")}
           onClick={() => setViewMode("json")}
         >
           {t("result.json")}
-        </button>
+        </Button>
       </div>
       {viewMode === "formatted" ? (
         <div dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
-        <pre className="result-json-viewer">{jsonString}</pre>
+        <pre className="font-mono text-sm bg-card border border-border rounded-lg p-4 overflow-auto max-h-[500px] text-muted-foreground whitespace-pre-wrap break-words">
+          {jsonString}
+        </pre>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { FormField } from "./form-field";
 import { useSaveConfig } from "../hooks/use-mutations";
 import type { FlowDetail } from "@appstrate/shared-types";
@@ -71,11 +72,13 @@ function ConfigModalForm({ flow, onClose }: { flow: FlowDetail; onClose: () => v
             enumValues={prop.enum as string[] | undefined}
           />
         ))}
-      <div className="modal-actions">
-        <button onClick={onClose}>{t("btn.cancel")}</button>
-        <button className="primary" onClick={handleSave} disabled={mutation.isPending}>
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="outline" onClick={onClose}>
+          {t("btn.cancel")}
+        </Button>
+        <Button onClick={handleSave} disabled={mutation.isPending}>
           {t("btn.save")}
-        </button>
+        </Button>
       </div>
     </>
   );

@@ -1,5 +1,6 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   children: ReactNode;
@@ -13,12 +14,12 @@ interface State {
 function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="empty-state">
+    <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
       <p>{t("error.unexpected")}</p>
-      <p className="empty-hint">{error?.message || t("error.unknown")}</p>
-      <button className="error-retry" onClick={onRetry}>
+      <p className="text-sm text-muted-foreground mt-2">{error?.message || t("error.unknown")}</p>
+      <Button className="mt-4" onClick={onRetry}>
         {t("btn.retry")}
-      </button>
+      </Button>
     </div>
   );
 }

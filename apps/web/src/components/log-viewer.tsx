@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Check, Clock, ArrowDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export interface LogEntry {
   message: string;
@@ -29,6 +31,13 @@ function formatTimestamp(d: Date | string | null | undefined, lang: string): str
     return "\u2014";
   }
 }
+
+const logEntryColors: Record<string, string> = {
+  error: "text-destructive",
+  success: "text-success",
+  system: "text-primary",
+  warning: "text-warning",
+};
 
 export function LogViewer({ entries }: LogViewerProps) {
   const { t, i18n } = useTranslation("flows");
@@ -79,18 +88,22 @@ export function LogViewer({ entries }: LogViewerProps) {
   };
 
   return (
-    <div className="log-viewer">
-      <div className="log-toolbar">
-        <button
-          className={`log-icon-btn${showTimestamps ? " log-icon-btn--active" : ""}`}
+    <div className="border border-border rounded-lg overflow-hidden bg-card">
+      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("h-7 w-7 text-muted-foreground", showTimestamps && "text-primary")}
           onClick={() => setShowTimestamps((v) => !v)}
           title={t("log.toggleTimestamps")}
           style={{ marginLeft: "auto" }}
         >
           <Clock size={14} />
-        </button>
-        <button
-          className={`log-icon-btn${autoScroll ? " log-icon-btn--active" : ""}`}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("h-7 w-7 text-muted-foreground", autoScroll && "text-primary")}
           onClick={() => {
             setAutoScroll(true);
             if (entries.length > 0) {
@@ -100,17 +113,19 @@ export function LogViewer({ entries }: LogViewerProps) {
           title={t("log.autoScroll")}
         >
           <ArrowDown size={14} />
-        </button>
-        <button
-          className={`log-icon-btn${copied ? " log-icon-btn--copied" : ""}`}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("h-7 w-7 text-muted-foreground", copied && "text-success")}
           onClick={handleCopy}
           title={copied ? t("log.copied") : t("log.copyLogs")}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
-        </button>
+        </Button>
       </div>
 
-      <div className="log-content" ref={scrollRef}>
+      <div className="h-[400px] overflow-auto" ref={scrollRef}>
         <div
           style={{
             height: virtualizer.getTotalSize(),
@@ -137,14 +152,24 @@ export function LogViewer({ entries }: LogViewerProps) {
                   setExpandedIndex((prev) => (prev === virtualRow.index ? null : virtualRow.index))
                 }
               >
-                <div className={`log-entry ${entry.type}${expanded ? " log-entry--expanded" : ""}`}>
+                <div
+                  className={cn(
+                    "px-3 py-0.5 text-sm font-mono text-muted-foreground cursor-pointer select-none leading-7 truncate hover:bg-muted/50",
+                    logEntryColors[entry.type],
+                    entry.type === "progress" &&
+                      "before:content-[''] before:inline-block before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary before:mr-1.5 before:animate-pulse",
+                    expanded && "whitespace-normal break-words bg-muted/30",
+                  )}
+                >
                   {showTimestamps && (
-                    <span className="log-timestamp">
+                    <span className="mr-2 text-xs text-muted-foreground/60 font-mono">
                       {formatTimestamp(entry.createdAt, i18n.language)}
                     </span>
                   )}
                   {entry.message}
-                  {entry.detail && <span className="log-detail">{entry.detail}</span>}
+                  {entry.detail && (
+                    <span className="ml-2 text-xs text-muted-foreground">{entry.detail}</span>
+                  )}
                 </div>
               </div>
             );

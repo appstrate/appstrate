@@ -11,6 +11,14 @@ import {
   AlertTriangle,
   Upload,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { apiBlob } from "../api";
 import {
   useMarketplacePackage,
@@ -59,7 +67,7 @@ export function MarketplaceDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="marketplace-page">
+      <div className="max-w-[900px]">
         <LoadingState />
       </div>
     );
@@ -67,7 +75,7 @@ export function MarketplaceDetailPage() {
 
   if (error || !pkg) {
     return (
-      <div className="marketplace-page">
+      <div className="max-w-[900px]">
         <ErrorState message={error?.message} />
       </div>
     );
@@ -122,39 +130,42 @@ export function MarketplaceDetailPage() {
 
   const publishAheadBadge = pkg.localVersionAhead && (
     <>
-      <span className="marketplace-update-badge">
+      <span className="inline-flex items-center gap-1.5 text-xs text-warning">
         <Upload size={14} />
         {t("marketplace.localVersionAhead", { version: pkg.localVersionAhead })}
       </span>
-      <button className="btn-install" onClick={handlePublish} disabled={publishPlan.isFetching}>
+      <Button size="sm" onClick={handlePublish} disabled={publishPlan.isFetching}>
         {publishPlan.isFetching ? <Spinner /> : t("marketplace.publishAction")}
-      </button>
+      </Button>
     </>
   );
 
   return (
-    <div className="marketplace-page">
-      <Link to="/marketplace" className="breadcrumb">
+    <div className="max-w-[900px]">
+      <Link
+        to="/marketplace"
+        className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4 hover:text-foreground"
+      >
         <ArrowLeft size={14} />
         <span>{t("marketplace.backToMarketplace")}</span>
       </Link>
 
-      <div className="marketplace-detail-header">
-        <div className="marketplace-detail-title">
-          <h2>
+      <div className="flex flex-col gap-2 mb-6">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">
             {pkg.scope}/{pkg.name}
           </h2>
           <TypeBadge type={pkg.type} />
         </div>
-        <p className="marketplace-detail-desc">{pkg.description}</p>
+        <p className="text-sm text-muted-foreground leading-relaxed">{pkg.description}</p>
 
-        <div className="marketplace-detail-meta">
-          <span className="marketplace-detail-meta-item">
+        <div className="flex items-center gap-4 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <Download size={14} />
             {t("marketplace.downloads", { count: pkg.downloads })}
           </span>
           {pkg.license && (
-            <span className="marketplace-detail-meta-item">
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <Scale size={14} />
               {pkg.license}
             </span>
@@ -164,14 +175,14 @@ export function MarketplaceDetailPage() {
               href={pkg.repositoryUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="marketplace-detail-meta-item marketplace-detail-link"
+              className="inline-flex items-center gap-1.5 text-xs text-primary no-underline hover:underline"
             >
               <ExternalLink size={14} />
               {t("marketplace.repository")}
             </a>
           )}
           {registryStatus?.connected && registryScopes?.some((s) => s.name === scope) && (
-            <span className="marketplace-detail-meta-item">
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <CheckCircle size={14} />
               {t("marketplace.ownedByYou")}
             </span>
@@ -179,10 +190,10 @@ export function MarketplaceDetailPage() {
         </div>
       </div>
 
-      <div className="marketplace-detail-actions">
+      <div className="mb-6">
         {isInstalled ? (
-          <div className="marketplace-detail-install-row">
-            <span className="marketplace-installed-badge">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs text-success">
               <CheckCircle size={14} />
               {t("marketplace.installedVersion", { version: pkg.installedVersion })}
             </span>
@@ -190,30 +201,30 @@ export function MarketplaceDetailPage() {
               <>{publishAheadBadge}</>
             ) : hasUpdate ? (
               <>
-                <span className="marketplace-update-badge">
+                <span className="inline-flex items-center gap-1.5 text-xs text-warning">
                   <ArrowUpCircle size={14} />
                   {t("marketplace.updateAvailable", { version: latestVersion })}
                 </span>
-                <button className="btn-install" onClick={handleUpdate} disabled={update.isPending}>
+                <Button size="sm" onClick={handleUpdate} disabled={update.isPending}>
                   {update.isPending ? <Spinner /> : t("marketplace.update")}
-                </button>
+                </Button>
               </>
             ) : (
-              <span className="marketplace-uptodate">{t("marketplace.upToDate")}</span>
+              <span className="text-xs text-muted-foreground">{t("marketplace.upToDate")}</span>
             )}
           </div>
         ) : pkg.integrityConflict ? (
-          <div className="marketplace-detail-install-row">
+          <div className="flex items-center gap-2">
             {pkg.localVersionAhead ? (
               <>{publishAheadBadge}</>
             ) : (
               <>
-                <span className="marketplace-conflict-badge">
+                <span className="inline-flex items-center gap-1.5 text-xs text-warning">
                   <AlertTriangle size={14} />
                   {t("marketplace.integrityConflict")}
                 </span>
-                <button
-                  className="btn-install"
+                <Button
+                  size="sm"
                   disabled={install.isPending}
                   onClick={() => {
                     if (!scope || !name) return;
@@ -228,36 +239,40 @@ export function MarketplaceDetailPage() {
                   }}
                 >
                   {install.isPending ? <Spinner /> : t("marketplace.install")}
-                </button>
+                </Button>
               </>
             )}
           </div>
         ) : (
-          <div className="marketplace-detail-install-row">
+          <div className="flex items-center gap-2">
             {pkg.versions.length > 0 && (
-              <select
-                className="marketplace-version-select"
+              <Select
                 value={selectedVersion ?? pkg.versions[0]?.version ?? ""}
-                onChange={(e) => setSelectedVersion(e.target.value)}
+                onValueChange={setSelectedVersion}
               >
-                {pkg.versions.map((v) => (
-                  <option key={v.id} value={v.version}>
-                    v{v.version}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-[100px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {pkg.versions.map((v) => (
+                    <SelectItem key={v.id} value={v.version}>
+                      v{v.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
-            <button
-              className="btn-install"
+            <Button
+              size="sm"
               onClick={handleInstall}
               disabled={install.isPending || pkg.versions.length === 0}
             >
               {install.isPending ? <Spinner /> : t("marketplace.install")}
-            </button>
+            </Button>
           </div>
         )}
         {install.isSuccess && (
-          <p className="marketplace-install-success">
+          <p className="mt-2 text-sm text-success">
             {t("marketplace.installSuccess")}
             {install.data?.autoInstalledDeps && install.data.autoInstalledDeps.length > 0 && (
               <>
@@ -271,7 +286,7 @@ export function MarketplaceDetailPage() {
           </p>
         )}
         {update.isSuccess && (
-          <p className="marketplace-install-success">
+          <p className="mt-2 text-sm text-success">
             {t("marketplace.updateSuccess")}
             {update.data?.autoInstalledDeps && update.data.autoInstalledDeps.length > 0 && (
               <>
@@ -287,31 +302,42 @@ export function MarketplaceDetailPage() {
       </div>
 
       {pkg.readme && (
-        <div className="marketplace-detail-section">
-          <h3>{t("marketplace.readme")}</h3>
-          <div className="marketplace-readme">{pkg.readme}</div>
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-2">
+            {t("marketplace.readme")}
+          </h3>
+          <div className="text-sm leading-relaxed text-muted-foreground">{pkg.readme}</div>
         </div>
       )}
 
       {pkg.versions.length > 0 && (
-        <div className="marketplace-detail-section">
-          <h3>{t("marketplace.versions")}</h3>
-          <div className="marketplace-versions">
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-2">
+            {t("marketplace.versions")}
+          </h3>
+          <div className="flex flex-col gap-1.5">
             {pkg.versions.map((v) => (
-              <div key={v.id} className="marketplace-version-row">
-                <span className="version-tag">v{v.version}</span>
+              <div
+                key={v.id}
+                className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
+              >
+                <span className="font-semibold font-mono">{`v${v.version}`}</span>
                 {localIntegrities.has(v.integrity) && (
-                  <CheckCircle size={14} className="version-match-icon" />
+                  <CheckCircle size={14} className="text-success" />
                 )}
-                <span className="version-size">{formatBytes(v.artifactSize)}</span>
-                <span className="version-date">{new Date(v.createdAt).toLocaleDateString()}</span>
-                <button
-                  className="btn-icon"
+                <span className="text-xs text-muted-foreground">{formatBytes(v.artifactSize)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(v.createdAt).toLocaleDateString()}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
                   title={t("marketplace.downloadVersion")}
                   onClick={() => handleDownloadVersion(v.version)}
                 >
                   <Download size={14} />
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -319,11 +345,16 @@ export function MarketplaceDetailPage() {
       )}
 
       {pkg.keywords.length > 0 && (
-        <div className="marketplace-detail-section">
-          <h3>{t("marketplace.keywords")}</h3>
-          <div className="marketplace-keywords">
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-2">
+            {t("marketplace.keywords")}
+          </h3>
+          <div className="flex flex-wrap gap-1.5">
             {pkg.keywords.map((kw) => (
-              <span key={kw} className="marketplace-keyword">
+              <span
+                key={kw}
+                className="inline-block rounded border border-border bg-card px-2 py-0.5 text-xs text-muted-foreground"
+              >
                 {kw}
               </span>
             ))}

@@ -2,6 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useRegistryStatus } from "../hooks/use-registry";
 import {
   useFlows,
@@ -42,40 +50,44 @@ function PublishItemCard({
   const effectiveVersion = selectedVersion || availableVersions[0]?.version;
 
   return (
-    <div className="service-card">
-      <div className="service-card-header">
-        <div className="service-info">
-          <h3>{item.displayName}</h3>
-          <span className="service-provider">
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium">{item.displayName}</h3>
+          <span className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
             <TypeBadge type={item.type} />
             {item.version && ` · v${item.version}`}
           </span>
         </div>
       </div>
-      <div className="service-card-actions">
+      <div className="flex items-center gap-2 pt-2 border-t border-border">
         {availableVersions.length > 0 ? (
-          <select
+          <Select
             value={selectedVersion || availableVersions[0]?.version || ""}
-            onChange={(e) => setSelectedVersion(e.target.value)}
+            onValueChange={setSelectedVersion}
             disabled={fetchingPlan}
           >
-            {availableVersions.map((v: VersionListItem) => (
-              <option key={v.id} value={v.version}>
-                v{v.version}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-[100px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableVersions.map((v: VersionListItem) => (
+                <SelectItem key={v.id} value={v.version}>
+                  v{v.version}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         ) : (
-          <span className="text-muted" style={{ fontSize: "0.8rem" }}>
-            {t("marketplace.noVersions")}
-          </span>
+          <span className="text-muted-foreground text-xs">{t("marketplace.noVersions")}</span>
         )}
-        <button
+        <Button
+          size="sm"
           onClick={() => onPublish(item.id, effectiveVersion)}
           disabled={fetchingPlan || !effectiveVersion}
         >
           {fetchingPlan ? <Spinner /> : t("publish.publish", { ns: "flows" })}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -138,31 +150,37 @@ export function MarketplacePublishPage() {
 
   if (isLoading) {
     return (
-      <div className="marketplace-page">
+      <div className="max-w-[900px]">
         <LoadingState />
       </div>
     );
   }
 
   return (
-    <div className="marketplace-page">
-      <Link to="/marketplace" className="breadcrumb">
+    <div className="max-w-[900px]">
+      <Link
+        to="/marketplace"
+        className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4 hover:text-foreground"
+      >
         <ArrowLeft size={14} />
         <span>{t("marketplace.backToMarketplace")}</span>
       </Link>
 
-      <div className="page-header">
-        <h2>{t("marketplace.publishTitle")}</h2>
-        <p className="description">{t("marketplace.publishDesc")}</p>
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold">{t("marketplace.publishTitle")}</h2>
+        <p className="text-sm text-muted-foreground">{t("marketplace.publishDesc")}</p>
       </div>
 
       {!registryStatus?.connected ? (
-        <div className="service-card service-card-spaced">
-          <div className="connectors-intro">
-            <p className="service-provider">{t("registry.description")}</p>
+        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+          <div>
+            <p className="text-sm text-muted-foreground">{t("registry.description")}</p>
           </div>
-          <div className="tab-toolbar">
-            <Link to="/marketplace/connection" className="btn primary">
+          <div className="flex items-center gap-2">
+            <Link
+              to="/marketplace/connection"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
               {t("registry.connect")}
             </Link>
           </div>
@@ -176,7 +194,7 @@ export function MarketplacePublishPage() {
               hint={t("marketplace.publishableHint")}
             />
           ) : (
-            <div className="services-grid">
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
               {publishableItems.map((item) => (
                 <PublishItemCard
                   key={item.id}

@@ -1,5 +1,9 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "../hooks/use-auth";
 import { useFormErrors } from "../hooks/use-form-errors";
 
@@ -36,7 +40,7 @@ export function LoginPage() {
 
   const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setServerError(null);
 
@@ -63,16 +67,16 @@ export function LoginPage() {
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="login-logo">
-          <img src="/logo.svg" alt="Appstrate" className="app-logo" />
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+        <div className="flex justify-center mb-4">
+          <img src="/logo.svg" alt="Appstrate" className="h-8" />
         </div>
         <form onSubmit={handleSubmit}>
           {mode === "signup" && (
-            <div className="form-group">
-              <label htmlFor="displayName">{t("login.name")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="displayName">{t("login.name")}</Label>
+              <Input
                 id="displayName"
                 type="text"
                 value={displayName}
@@ -84,14 +88,16 @@ export function LoginPage() {
                 placeholder={t("login.namePlaceholder")}
                 autoComplete="name"
                 aria-invalid={errors.displayName ? true : undefined}
-                className={errors.displayName ? "input-error" : undefined}
+                className={cn(errors.displayName && "border-destructive")}
               />
-              {errors.displayName && <div className="field-error">{errors.displayName}</div>}
+              {errors.displayName && (
+                <div className="text-sm text-destructive">{errors.displayName}</div>
+              )}
             </div>
           )}
-          <div className="form-group">
-            <label htmlFor="email">{t("login.email")}</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="email">{t("login.email")}</Label>
+            <Input
               id="email"
               type="email"
               value={email}
@@ -103,13 +109,13 @@ export function LoginPage() {
               placeholder="email@example.com"
               autoComplete="email"
               aria-invalid={errors.email ? true : undefined}
-              className={errors.email ? "input-error" : undefined}
+              className={cn(errors.email && "border-destructive")}
             />
-            {errors.email && <div className="field-error">{errors.email}</div>}
+            {errors.email && <div className="text-sm text-destructive">{errors.email}</div>}
           </div>
-          <div className="form-group">
-            <label htmlFor="password">{t("login.password")}</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="password">{t("login.password")}</Label>
+            <Input
               id="password"
               type="password"
               value={password}
@@ -121,29 +127,39 @@ export function LoginPage() {
               placeholder="••••••••"
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               aria-invalid={errors.password ? true : undefined}
-              className={errors.password ? "input-error" : undefined}
+              className={cn(errors.password && "border-destructive")}
             />
-            {errors.password && <div className="field-error">{errors.password}</div>}
+            {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
           </div>
-          {serverError && <p className="form-error">{serverError}</p>}
-          <button className="primary login-btn" type="submit" disabled={loading}>
+          {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+          <Button className="w-full mt-4" type="submit" disabled={loading}>
             {loading ? t("loading") : mode === "login" ? t("login.login") : t("login.signup")}
-          </button>
+          </Button>
         </form>
-        <p className="login-switch">
+        <p className="text-center text-sm text-muted-foreground mt-4">
           {mode === "login" ? (
             <>
               {t("login.noAccount")}{" "}
-              <button type="button" className="link-btn" onClick={() => switchMode("signup")}>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 text-sm"
+                onClick={() => switchMode("signup")}
+              >
                 {t("login.signup")}
-              </button>
+              </Button>
             </>
           ) : (
             <>
               {t("login.hasAccount")}{" "}
-              <button type="button" className="link-btn" onClick={() => switchMode("login")}>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 text-sm"
+                onClick={() => switchMode("login")}
+              >
                 {t("login.login")}
-              </button>
+              </Button>
             </>
           )}
         </p>

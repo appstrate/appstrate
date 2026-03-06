@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ShareDropdown } from "../share-dropdown";
 import { Spinner } from "../spinner";
@@ -51,9 +52,8 @@ export function FlowActions({
   };
 
   return (
-    <div className="actions">
-      <button
-        className="primary"
+    <div className="flex items-center gap-2 flex-wrap mb-4">
+      <Button
         onClick={handleRun}
         disabled={!allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending}
         title={
@@ -67,41 +67,47 @@ export function FlowActions({
         }
       >
         {runFlow.isPending && <Spinner />} {t("detail.run")}
-      </button>
+      </Button>
       <ShareDropdown
         packageId={packageId}
         isAdmin={isOrgAdmin}
         services={detail.requires.services}
       />
       {isOrgAdmin && (
-        <div className="actions-admin">
+        <div className="flex items-center gap-2 flex-wrap">
           {hasConfigSchema && (
-            <button onClick={() => setConfigOpen(true)}>{t("detail.configure")}</button>
+            <Button variant="outline" onClick={() => setConfigOpen(true)}>
+              {t("detail.configure")}
+            </Button>
           )}
           {downloadVersion && (
-            <button
+            <Button
+              variant="outline"
               onClick={() => downloadPackage(downloadVersion)}
               title={t("btn.download", { ns: "common" })}
             >
               <Download size={14} /> {t("btn.download", { ns: "common" })}
-            </button>
+            </Button>
           )}
           {detail.source !== "built-in" && !isHistoricalVersion && (
             <>
-              <button onClick={onCreateVersion} disabled={!hasDraftChanges}>
+              <Button variant="outline" onClick={onCreateVersion} disabled={!hasDraftChanges}>
                 {t("version.createVersion")}
-              </button>
-              <Link to={`/flows/${packageId}/edit`}>
-                <button>{t("btn.edit")}</button>
-              </Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link to={`/flows/${packageId}/edit`}>{t("btn.edit")}</Link>
+              </Button>
             </>
           )}
           {isHistoricalVersion && (
-            <span className="version-readonly-badge">{t("version.readOnly")}</span>
+            <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              {t("version.readOnly")}
+            </span>
           )}
           {detail.source !== "built-in" && (
-            <button
-              className="btn-danger"
+            <Button
+              variant="destructive"
+              size="sm"
               disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
               title={
                 detail.runningExecutions > 0
@@ -115,7 +121,7 @@ export function FlowActions({
               }}
             >
               {t("btn.delete")}
-            </button>
+            </Button>
           )}
         </div>
       )}

@@ -31,29 +31,41 @@ export function PackageCard({
   const href = `/${PREFIX[type]}/${id}`;
 
   return (
-    <Link className="flow-card" to={href}>
-      <div className="flow-card-header">
-        <h2>{displayName}</h2>
-        <div className="flow-card-badges">
+    <Link
+      className="block rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50"
+      to={href}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="text-sm font-medium text-foreground">{displayName}</h2>
+        <div className="flex items-center gap-1.5 shrink-0">
           <TypeBadge type={type} />
-          {source === "built-in" && <span className="source-badge">{t("list.badgeBuiltIn")}</span>}
+          {source === "built-in" && (
+            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
+              {t("list.badgeBuiltIn")}
+            </span>
+          )}
           {type === "flow" && !!runningExecutions && runningExecutions > 0 && (
-            <span className="running-badge">
+            <span className="text-[0.7rem] px-2 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1.5">
               <Spinner /> {t("list.running", { count: runningExecutions })}
             </span>
           )}
         </div>
       </div>
-      <p className="description">{description || ""}</p>
-      <div className="tags">
+      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{description || ""}</p>
+      <div className="mt-2 flex flex-wrap gap-1">
         {type === "flow" &&
           tags?.map((tag) => (
-            <span key={tag} className="tag">
+            <span
+              key={tag}
+              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border"
+            >
               {tag}
             </span>
           ))}
         {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
-          <span className="tag">{t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}</span>
+          <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border">
+            {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
+          </span>
         )}
       </div>
     </Link>

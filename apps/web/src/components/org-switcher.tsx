@@ -1,4 +1,3 @@
-import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -12,17 +11,20 @@ import {
   Settings,
   Plus,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
-import { useClickOutside } from "../hooks/use-click-outside";
 import { Spinner } from "./spinner";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 export function OrgSwitcher() {
   const { t } = useTranslation();
   const { currentOrg, orgs, switchOrg, loading, isOrgAdmin } = useOrg();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useClickOutside(ref, open, close);
 
   if (loading) {
     return <Spinner />;
@@ -33,78 +35,77 @@ export function OrgSwitcher() {
   }
 
   return (
-    <div className="user-menu org-switcher" ref={ref}>
-      <button
-        className="org-switcher-trigger"
-        onClick={() => setOpen(!open)}
-        aria-label={t("orgSwitcher.ariaLabel")}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      >
-        <Users size={16} className="flex-shrink-0" />
-        <span className="text-ellipsis">{currentOrg.name}</span>
-        <ChevronDown size={10} strokeWidth={2.5} className="flex-shrink-0 opacity-50" />
-      </button>
-
-      {open && (
-        <div
-          className="user-menu-dropdown org-switcher-dropdown"
-          role="listbox"
-          aria-label={t("orgSwitcher.ariaLabelList")}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          className="gap-1.5 text-muted-foreground max-w-[180px]"
+          aria-label={t("orgSwitcher.ariaLabel")}
         >
-          {orgs.map((org) => {
-            const isActive = org.id === currentOrg.id;
-            return (
-              <button
-                key={org.id}
-                role="option"
-                aria-selected={isActive}
-                className={`org-switcher-option${isActive ? " active" : ""}`}
-                onClick={() => {
-                  if (!isActive) switchOrg(org.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="text-ellipsis-nowrap">{org.name}</span>
-                {isActive && <Check size={14} strokeWidth={2.5} className="org-switcher-check" />}
-              </button>
-            );
-          })}
+          <Users size={16} className="flex-shrink-0" />
+          <span className="text-ellipsis">{currentOrg.name}</span>
+          <ChevronDown size={10} strokeWidth={2.5} className="flex-shrink-0 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
 
-          <div className="org-switcher-divider">
-            <Link to="/executions" className="org-switcher-link" onClick={() => setOpen(false)}>
-              <Activity size={14} />
-              {t("orgSwitcher.executions")}
-            </Link>
-            <Link to="/schedules" className="org-switcher-link" onClick={() => setOpen(false)}>
-              <Calendar size={14} />
-              {t("orgSwitcher.schedules")}
-            </Link>
-            <Link to="/marketplace" className="org-switcher-link" onClick={() => setOpen(false)}>
-              <ShoppingBag size={14} />
-              {t("orgSwitcher.marketplace")}
-            </Link>
-            <Link to="/connectors" className="org-switcher-link" onClick={() => setOpen(false)}>
-              <Plug size={14} />
-              {t("orgSwitcher.connectors")}
-            </Link>
-            {isOrgAdmin && (
-              <Link to="/org-settings" className="org-switcher-link" onClick={() => setOpen(false)}>
-                <Settings size={14} />
-                {t("orgSwitcher.settings")}
-              </Link>
-            )}
-            <Link
-              to="/create-org"
-              className="org-switcher-link org-switcher-link-primary"
-              onClick={() => setOpen(false)}
+      <DropdownMenuContent align="end">
+        {orgs.map((org) => {
+          const isActive = org.id === currentOrg.id;
+          return (
+            <DropdownMenuItem
+              key={org.id}
+              className="flex items-center justify-between gap-2"
+              onSelect={() => {
+                if (!isActive) switchOrg(org.id);
+              }}
             >
-              <Plus size={14} />
-              {t("orgSwitcher.create")}
+              <span className="truncate">{org.name}</span>
+              {isActive && <Check size={14} strokeWidth={2.5} className="flex-shrink-0" />}
+            </DropdownMenuItem>
+          );
+        })}
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem asChild>
+          <Link to="/executions" className="flex items-center gap-2">
+            <Activity size={14} />
+            {t("orgSwitcher.executions")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/schedules" className="flex items-center gap-2">
+            <Calendar size={14} />
+            {t("orgSwitcher.schedules")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/marketplace" className="flex items-center gap-2">
+            <ShoppingBag size={14} />
+            {t("orgSwitcher.marketplace")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/connectors" className="flex items-center gap-2">
+            <Plug size={14} />
+            {t("orgSwitcher.connectors")}
+          </Link>
+        </DropdownMenuItem>
+        {isOrgAdmin && (
+          <DropdownMenuItem asChild>
+            <Link to="/org-settings" className="flex items-center gap-2">
+              <Settings size={14} />
+              {t("orgSwitcher.settings")}
             </Link>
-          </div>
-        </div>
-      )}
-    </div>
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem asChild>
+          <Link to="/create-org" className="flex items-center gap-2 text-primary">
+            <Plus size={14} />
+            {t("orgSwitcher.create")}
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

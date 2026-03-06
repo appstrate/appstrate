@@ -1,6 +1,10 @@
 import { useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { useFormErrors } from "../hooks/use-form-errors";
@@ -76,17 +80,17 @@ export function WelcomePage() {
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1 className="login-title">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+        <h1 className="text-2xl font-bold text-center mb-2">
           <span>App</span>strate
         </h1>
-        <p className="auth-subtitle">{t("welcome.subtitle")}</p>
+        <p className="text-center text-sm text-muted-foreground mb-6">{t("welcome.subtitle")}</p>
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="displayName">{t("welcome.displayName")}</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="displayName">{t("welcome.displayName")}</Label>
+            <Input
               id="displayName"
               type="text"
               value={displayName}
@@ -97,11 +101,14 @@ export function WelcomePage() {
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="password">
-              {t("welcome.password")} <span className="label-hint">({t("welcome.optional")})</span>
-            </label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="password">
+              {t("welcome.password")}{" "}
+              <span className="text-xs text-muted-foreground font-normal">
+                ({t("welcome.optional")})
+              </span>
+            </Label>
+            <Input
               id="password"
               type="password"
               value={password}
@@ -114,15 +121,15 @@ export function WelcomePage() {
               minLength={8}
               autoComplete="new-password"
               aria-invalid={errors.password ? true : undefined}
-              className={errors.password ? "input-error" : undefined}
+              className={cn(errors.password && "border-destructive")}
             />
-            {errors.password && <div className="field-error">{errors.password}</div>}
+            {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
           </div>
 
           {password && (
-            <div className="form-group">
-              <label htmlFor="confirmPassword">{t("preferences.confirmPassword")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">{t("preferences.confirmPassword")}</Label>
+              <Input
                 id="confirmPassword"
                 type="password"
                 value={confirmPassword}
@@ -135,25 +142,30 @@ export function WelcomePage() {
                 minLength={8}
                 autoComplete="new-password"
                 aria-invalid={errors.confirmPassword ? true : undefined}
-                className={errors.confirmPassword ? "input-error" : undefined}
+                className={cn(errors.confirmPassword && "border-destructive")}
               />
               {errors.confirmPassword && (
-                <div className="field-error">{errors.confirmPassword}</div>
+                <div className="text-sm text-destructive">{errors.confirmPassword}</div>
               )}
             </div>
           )}
 
-          {serverError && <p className="form-error">{serverError}</p>}
+          {serverError && <p className="text-sm text-destructive">{serverError}</p>}
 
-          <button className="primary login-btn" type="submit" disabled={loading}>
+          <Button className="w-full mt-4" type="submit" disabled={loading}>
             {loading ? <Spinner /> : t("welcome.save")}
-          </button>
+          </Button>
         </form>
 
-        <p className="login-switch">
-          <button type="button" className="link-btn" onClick={finishAndRedirect}>
+        <p className="text-center text-sm text-muted-foreground mt-4">
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0 text-sm"
+            onClick={finishAndRedirect}
+          >
             {t("welcome.skip")}
-          </button>
+          </Button>
         </p>
       </div>
     </div>

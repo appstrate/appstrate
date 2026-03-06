@@ -1,23 +1,25 @@
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
+import { Badge as UIBadge } from "@/components/ui/badge";
+import type { BadgeProps } from "@/components/ui/badge";
 
-const badgeClassMap: Record<string, string> = {
-  success: "badge-success",
-  failed: "badge-failed",
-  running: "badge-running",
-  pending: "badge-pending",
-  timeout: "badge-timeout",
-  cancelled: "badge-cancelled",
+const statusVariantMap: Record<string, BadgeProps["variant"]> = {
+  success: "success",
+  failed: "failed",
+  running: "running",
+  pending: "pending",
+  timeout: "timeout",
+  cancelled: "cancelled",
 };
 
 export function Badge({ status }: { status: string }) {
   const { t } = useTranslation();
-  const cls = badgeClassMap[status] || "badge-pending";
+  const variant = statusVariantMap[status] || "pending";
   const isRunning = status === "running" || status === "pending";
   return (
-    <span className={`badge ${cls}`}>
-      {isRunning && <Spinner />}
+    <UIBadge variant={variant} className="gap-1">
+      {isRunning && <Spinner className="h-3 w-3" />}
       {t(`status.${status}`, status)}
-    </span>
+    </UIBadge>
   );
 }

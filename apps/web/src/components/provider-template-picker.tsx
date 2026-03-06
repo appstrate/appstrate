@@ -6,6 +6,8 @@ import { useProviderTemplates } from "../hooks/use-provider-templates";
 import { authModeI18nKey } from "../lib/auth-mode";
 import type { ProviderTemplate } from "@appstrate/shared-types";
 import { Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface ProviderTemplatePickerProps {
   open: boolean;
@@ -31,56 +33,68 @@ export function ProviderTemplatePicker({
 
   return (
     <Modal open={open} onClose={handleClose} title={t("providers.templates.title")}>
-      <div className="template-picker-search">
-        <Search size={14} />
-        <input
-          type="text"
+      <div className="relative mb-4">
+        <Search
+          size={14}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("providers.templates.searchPlaceholder")}
           autoFocus
+          className="pl-9"
         />
       </div>
 
       {isLoading ? (
         <LoadingState />
       ) : (
-        <div className="template-grid">
+        <div className="grid grid-cols-1 gap-3">
           {data?.templates.map((tpl) => (
-            <button
+            <Button
               key={tpl.templateId}
-              className="template-card"
+              variant="outline"
+              className="h-auto p-4 justify-start text-left hover:border-primary hover:bg-muted/30 w-full flex-col items-start"
               onClick={() => onSelectTemplate(tpl, data.callbackUrl)}
             >
-              <div className="template-card-header">
+              <div className="flex items-center gap-2 mb-1">
                 {tpl.iconUrl && (
                   <img
                     src={tpl.iconUrl}
                     alt=""
-                    className="template-card-icon"
+                    className="h-5 w-5 rounded object-contain"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = "none";
                     }}
                   />
                 )}
-                <span className="template-card-name">{tpl.displayName}</span>
+                <span className="font-medium text-sm">{tpl.displayName}</span>
               </div>
-              <span className="badge badge-pending badge-sm">
+              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground mb-1">
                 {t(authModeI18nKey(tpl.authMode), { defaultValue: tpl.authMode })}
               </span>
-              <span className="template-card-desc">{tpl.description}</span>
-            </button>
+              <span className="text-sm text-muted-foreground mt-1 block font-normal">
+                {tpl.description}
+              </span>
+            </Button>
           ))}
 
-          <button className="template-card template-card-custom" onClick={onSelectCustom}>
-            <div className="template-card-header">
-              <div className="template-card-icon-placeholder">
+          <Button
+            variant="outline"
+            className="h-auto p-4 justify-start text-left border-dashed hover:border-primary hover:bg-muted/30 w-full flex-col items-start"
+            onClick={onSelectCustom}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center justify-center h-5 w-5 rounded bg-muted text-muted-foreground">
                 <Plus size={16} />
               </div>
-              <span className="template-card-name">{t("providers.templates.custom")}</span>
+              <span className="font-medium text-sm">{t("providers.templates.custom")}</span>
             </div>
-            <span className="template-card-desc">{t("providers.templates.customDesc")}</span>
-          </button>
+            <span className="text-sm text-muted-foreground mt-1 block font-normal">
+              {t("providers.templates.customDesc")}
+            </span>
+          </Button>
         </div>
       )}
     </Modal>

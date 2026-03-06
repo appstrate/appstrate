@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 
@@ -51,34 +53,30 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
-        <button
-          className="primary"
-          onClick={handleSubmit}
-          disabled={!canCreate || createVersion.isPending}
-        >
+        <Button onClick={handleSubmit} disabled={!canCreate || createVersion.isPending}>
           {createVersion.isPending && <Spinner />} {t("version.createVersion")}
-        </button>
+        </Button>
       }
     >
-      <div className="create-version-modal">
-        <div className="version-input-group">
+      <div className="space-y-4">
+        <div className="space-y-2">
           {latestVersion && (
-            <label>
+            <Label className="block text-sm">
               {t("version.latestPublished")}: <strong>{latestVersion}</strong>
-            </label>
+            </Label>
           )}
-          <label>
+          <Label className="block text-sm">
             {t("version.draftVersionLabel")}:{" "}
             <strong>{draftVersion ?? t("version.noVersion")}</strong>
-          </label>
+          </Label>
         </div>
         {!canCreate && draftVersion && latestVersion && (
-          <p className="version-warning">{t("version.mustBeHigher")}</p>
+          <p className="text-sm text-warning">{t("version.mustBeHigher")}</p>
         )}
         {!canCreate && !draftVersion && (
-          <p className="version-warning">{t("version.noVersionInManifest")}</p>
+          <p className="text-sm text-warning">{t("version.noVersionInManifest")}</p>
         )}
-        {error && <span className="version-error">{error}</span>}
+        {error && <span className="text-sm text-destructive">{error}</span>}
       </div>
     </Modal>
   );

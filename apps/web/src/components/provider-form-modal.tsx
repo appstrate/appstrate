@@ -1,7 +1,19 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import { useFormErrors } from "../hooks/use-form-errors";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "./spinner";
 import { SchemaSection, type SchemaField } from "./flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "./flow-editor/utils";
@@ -233,20 +245,20 @@ function ProviderFormBody({
       title={title}
       actions={
         <>
-          <button onClick={onClose} disabled={isPending}>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
-          </button>
-          <button className="primary" onClick={handleSubmit} disabled={isPending}>
+          </Button>
+          <Button onClick={handleSubmit} disabled={isPending}>
             {isPending ? <Spinner /> : t("btn.save")}
-          </button>
+          </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="provider-form">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-0">
         {/* General section */}
-        <div className="form-group">
-          <label htmlFor="pf-displayName">{t("providers.form.displayName")}</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="pf-displayName">{t("providers.form.displayName")}</Label>
+          <Input
             id="pf-displayName"
             type="text"
             value={form.displayName}
@@ -263,14 +275,16 @@ function ProviderFormBody({
             required
             readOnly={isBuiltIn}
             aria-invalid={errors.displayName ? true : undefined}
-            className={errors.displayName ? "input-error" : undefined}
+            className={cn(errors.displayName && "border-destructive")}
           />
-          {errors.displayName && <div className="field-error">{errors.displayName}</div>}
+          {errors.displayName && (
+            <div className="text-sm text-destructive">{errors.displayName}</div>
+          )}
         </div>
 
-        <div className="form-group">
-          <label htmlFor="pf-id">{t("providers.form.id")}</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="pf-id">{t("providers.form.id")}</Label>
+          <Input
             id="pf-id"
             type="text"
             value={form.id}
@@ -288,33 +302,39 @@ function ProviderFormBody({
             readOnly={isEdit}
             pattern="[a-z0-9][a-z0-9-]*"
             aria-invalid={errors.id ? true : undefined}
-            className={errors.id ? "input-error" : undefined}
+            className={cn(errors.id && "border-destructive")}
           />
-          {!isEdit && <div className="hint">{t("providers.form.idHint")}</div>}
-          {errors.id && <div className="field-error">{errors.id}</div>}
+          {!isEdit && (
+            <div className="text-sm text-muted-foreground">{t("providers.form.idHint")}</div>
+          )}
+          {errors.id && <div className="text-sm text-destructive">{errors.id}</div>}
         </div>
 
-        <div className="form-group">
-          <label htmlFor="pf-authMode">{t("providers.form.authMode")}</label>
-          <select
-            id="pf-authMode"
+        <div className="space-y-2">
+          <Label htmlFor="pf-authMode">{t("providers.form.authMode")}</Label>
+          <Select
             value={form.authMode}
-            onChange={(e) => setField("authMode", e.target.value)}
+            onValueChange={(v) => setField("authMode", v)}
             disabled={isEdit}
           >
-            <option value="oauth2">{t("providers.authMode.oauth2")}</option>
-            <option value="oauth1">{t("providers.authMode.oauth1")}</option>
-            <option value="api_key">{t("providers.authMode.apiKey")}</option>
-            <option value="basic">{t("providers.authMode.basic")}</option>
-            <option value="custom">{t("providers.authMode.custom")}</option>
-            <option value="proxy">{t("providers.authMode.proxy")}</option>
-          </select>
+            <SelectTrigger id="pf-authMode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="oauth2">{t("providers.authMode.oauth2")}</SelectItem>
+              <SelectItem value="oauth1">{t("providers.authMode.oauth1")}</SelectItem>
+              <SelectItem value="api_key">{t("providers.authMode.apiKey")}</SelectItem>
+              <SelectItem value="basic">{t("providers.authMode.basic")}</SelectItem>
+              <SelectItem value="custom">{t("providers.authMode.custom")}</SelectItem>
+              <SelectItem value="proxy">{t("providers.authMode.proxy")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div className="form-row">
-          <div className="form-group flex-1">
-            <label htmlFor="pf-iconUrl">{t("providers.form.iconUrl")}</label>
-            <input
+        <div className="flex gap-3">
+          <div className="space-y-1 flex-1">
+            <Label htmlFor="pf-iconUrl">{t("providers.form.iconUrl")}</Label>
+            <Input
               id="pf-iconUrl"
               type="text"
               value={form.iconUrl}
@@ -322,9 +342,9 @@ function ProviderFormBody({
               placeholder="https://..."
             />
           </div>
-          <div className="form-group flex-1">
-            <label htmlFor="pf-docsUrl">{t("providers.form.docsUrl")}</label>
-            <input
+          <div className="space-y-1 flex-1">
+            <Label htmlFor="pf-docsUrl">{t("providers.form.docsUrl")}</Label>
+            <Input
               id="pf-docsUrl"
               type="text"
               value={form.docsUrl}
@@ -334,9 +354,9 @@ function ProviderFormBody({
           </div>
         </div>
 
-        <div className="form-group">
-          <label htmlFor="pf-categories">{t("providers.form.categories")}</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="pf-categories">{t("providers.form.categories")}</Label>
+          <Input
             id="pf-categories"
             type="text"
             value={form.categories}
@@ -348,13 +368,13 @@ function ProviderFormBody({
         {/* OAuth2 section */}
         {form.authMode === "oauth2" && (
           <>
-            <div className="section-title section-title-mt-sm">
+            <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
               {t("providers.form.sectionOAuth2")}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-authorizationUrl">{t("providers.form.authorizationUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-authorizationUrl">{t("providers.form.authorizationUrl")}</Label>
+              <Input
                 id="pf-authorizationUrl"
                 type="text"
                 value={form.authorizationUrl}
@@ -363,9 +383,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-tokenUrl">{t("providers.form.tokenUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-tokenUrl">{t("providers.form.tokenUrl")}</Label>
+              <Input
                 id="pf-tokenUrl"
                 type="text"
                 value={form.tokenUrl}
@@ -374,9 +394,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-refreshUrl">{t("providers.form.refreshUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-refreshUrl">{t("providers.form.refreshUrl")}</Label>
+              <Input
                 id="pf-refreshUrl"
                 type="text"
                 value={form.refreshUrl}
@@ -385,9 +405,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-clientId">{t("providers.form.clientId")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-clientId">{t("providers.form.clientId")}</Label>
+              <Input
                 id="pf-clientId"
                 type="password"
                 value={form.clientId}
@@ -398,9 +418,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-clientSecret">{t("providers.form.clientSecret")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-clientSecret">{t("providers.form.clientSecret")}</Label>
+              <Input
                 id="pf-clientSecret"
                 type="password"
                 value={form.clientSecret}
@@ -411,70 +431,84 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-scopes">{t("providers.form.defaultScopes")}</label>
-              <textarea
+            <div className="space-y-2">
+              <Label htmlFor="pf-scopes">{t("providers.form.defaultScopes")}</Label>
+              <Textarea
                 id="pf-scopes"
                 value={form.defaultScopes}
                 onChange={(e) => setField("defaultScopes", e.target.value)}
                 rows={3}
                 readOnly={isBuiltIn}
               />
-              <div className="hint">{t("providers.form.scopesHint")}</div>
+              <div className="text-sm text-muted-foreground">{t("providers.form.scopesHint")}</div>
             </div>
 
-            <div className="form-row">
-              <div className="form-group flex-1">
-                <label htmlFor="pf-scopeSep">{t("providers.form.scopeSeparator")}</label>
-                <select
-                  id="pf-scopeSep"
+            <div className="flex gap-3">
+              <div className="space-y-1 flex-1">
+                <Label htmlFor="pf-scopeSep">{t("providers.form.scopeSeparator")}</Label>
+                <Select
                   value={form.scopeSeparator}
-                  onChange={(e) => setField("scopeSeparator", e.target.value)}
+                  onValueChange={(v) => setField("scopeSeparator", v)}
                   disabled={isBuiltIn}
                 >
-                  <option value=" ">{t("providers.form.scopeSepSpace")}</option>
-                  <option value=",">{t("providers.form.scopeSepComma")}</option>
-                  <option value="+">{t("providers.form.scopeSepPlus")}</option>
-                </select>
+                  <SelectTrigger id="pf-scopeSep">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value=" ">{t("providers.form.scopeSepSpace")}</SelectItem>
+                    <SelectItem value=",">{t("providers.form.scopeSepComma")}</SelectItem>
+                    <SelectItem value="+">{t("providers.form.scopeSepPlus")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="form-group flex-1">
-                <label htmlFor="pf-tokenAuthMethod">{t("providers.form.tokenAuthMethod")}</label>
-                <select
-                  id="pf-tokenAuthMethod"
+              <div className="space-y-1 flex-1">
+                <Label htmlFor="pf-tokenAuthMethod">{t("providers.form.tokenAuthMethod")}</Label>
+                <Select
                   value={form.tokenAuthMethod}
-                  onChange={(e) => setField("tokenAuthMethod", e.target.value)}
+                  onValueChange={(v) => setField("tokenAuthMethod", v)}
                   disabled={isBuiltIn}
                 >
-                  <option value="client_secret_post">{t("providers.form.tokenAuthPost")}</option>
-                  <option value="client_secret_basic">{t("providers.form.tokenAuthBasic")}</option>
-                </select>
+                  <SelectTrigger id="pf-tokenAuthMethod">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="client_secret_post">
+                      {t("providers.form.tokenAuthPost")}
+                    </SelectItem>
+                    <SelectItem value="client_secret_basic">
+                      {t("providers.form.tokenAuthBasic")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="form-group flex-1 form-group-inline-end">
+              <div className="space-y-1 flex-1 flex items-end gap-2">
                 <input
                   id="pf-pkce"
                   type="checkbox"
                   checked={form.pkceEnabled}
                   onChange={(e) => setField("pkceEnabled", e.target.checked)}
                   disabled={isBuiltIn}
-                  className="checkbox-auto"
+                  className="w-auto"
                 />
-                <label htmlFor="pf-pkce" className="label-inline">
+                <Label htmlFor="pf-pkce" className="text-sm text-muted-foreground cursor-pointer">
                   {t("providers.form.pkceEnabled")}
-                </label>
+                </Label>
               </div>
             </div>
 
             {/* Available scopes section */}
             {!isBuiltIn && (
               <>
-                <div className="section-title section-title-mt-sm">
+                <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
                   {t("providers.form.sectionAvailableScopes")}
                 </div>
-                <div className="hint hint-spaced">{t("providers.form.availableScopesHint")}</div>
+                <div className="text-xs text-muted-foreground mb-3">
+                  {t("providers.form.availableScopesHint")}
+                </div>
                 {availableScopes.map((scope, idx) => (
-                  <div key={idx} className="field-card">
-                    <div className="scope-row">
-                      <input
+                  <div key={idx} className="border border-border rounded-md p-2.5 mb-2 bg-card">
+                    <div className="flex items-center gap-2">
+                      <Input
                         type="text"
                         placeholder={t("providers.form.scopeValue")}
                         value={scope.value}
@@ -483,9 +517,9 @@ function ProviderFormBody({
                           next[idx] = { ...next[idx], value: e.target.value };
                           setAvailableScopes(next);
                         }}
-                        className="flex-2"
+                        className="flex-[2] min-w-0"
                       />
-                      <input
+                      <Input
                         type="text"
                         placeholder={t("providers.form.scopeLabel")}
                         value={scope.label}
@@ -496,40 +530,49 @@ function ProviderFormBody({
                         }}
                         className="flex-1"
                       />
-                      <button
+                      <Button
                         type="button"
-                        className="btn-remove"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
                         onClick={() =>
                           setAvailableScopes(availableScopes.filter((_, i) => i !== idx))
                         }
                       >
                         &times;
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
-                <button
+                <Button
                   type="button"
-                  className="add-field-btn"
+                  variant="outline"
+                  size="sm"
+                  className="border-dashed text-xs text-muted-foreground hover:text-foreground hover:border-primary"
                   onClick={() => setAvailableScopes([...availableScopes, { value: "", label: "" }])}
                 >
                   {t("providers.form.addAvailableScope")}
-                </button>
+                </Button>
               </>
             )}
 
             {/* Read-only display for built-in providers */}
             {isBuiltIn && provider?.availableScopes && provider.availableScopes.length > 0 && (
               <>
-                <div className="section-title section-title-mt-sm">
+                <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
                   {t("providers.form.sectionAvailableScopes")}
                 </div>
-                <div className="scope-options">
+                <div className="flex flex-col gap-1.5">
                   {provider.availableScopes.map((scope) => (
-                    <div key={scope.value} className="scope-option">
-                      <div className="scope-option-info">
-                        <span className="scope-label">{scope.label}</span>
-                        <span className="scope-value">{scope.value}</span>
+                    <div
+                      key={scope.value}
+                      className="rounded-md border border-border bg-card px-3 py-2"
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm">{scope.label}</span>
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {scope.value}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -542,13 +585,13 @@ function ProviderFormBody({
         {/* OAuth1 section */}
         {form.authMode === "oauth1" && (
           <>
-            <div className="section-title section-title-mt-sm">
+            <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
               {t("providers.form.sectionOAuth1")}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-requestTokenUrl">{t("providers.form.requestTokenUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-requestTokenUrl">{t("providers.form.requestTokenUrl")}</Label>
+              <Input
                 id="pf-requestTokenUrl"
                 type="text"
                 value={form.requestTokenUrl}
@@ -557,9 +600,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-authorizationUrl">{t("providers.form.authorizationUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-authorizationUrl">{t("providers.form.authorizationUrl")}</Label>
+              <Input
                 id="pf-authorizationUrl"
                 type="text"
                 value={form.authorizationUrl}
@@ -568,9 +611,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-accessTokenUrl">{t("providers.form.accessTokenUrl")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-accessTokenUrl">{t("providers.form.accessTokenUrl")}</Label>
+              <Input
                 id="pf-accessTokenUrl"
                 type="text"
                 value={form.accessTokenUrl}
@@ -579,9 +622,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-clientId">{t("providers.form.clientId")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-clientId">{t("providers.form.clientId")}</Label>
+              <Input
                 id="pf-clientId"
                 type="password"
                 value={form.clientId}
@@ -592,9 +635,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-clientSecret">{t("providers.form.clientSecret")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-clientSecret">{t("providers.form.clientSecret")}</Label>
+              <Input
                 id="pf-clientSecret"
                 type="password"
                 value={form.clientSecret}
@@ -610,13 +653,13 @@ function ProviderFormBody({
         {/* API Key section */}
         {form.authMode === "api_key" && (
           <>
-            <div className="section-title section-title-mt-sm">
+            <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
               {t("providers.form.sectionApiKey")}
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-credFieldName">{t("providers.form.credentialFieldName")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-credFieldName">{t("providers.form.credentialFieldName")}</Label>
+              <Input
                 id="pf-credFieldName"
                 type="text"
                 value={form.credentialFieldName}
@@ -626,9 +669,9 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-credHeaderName">{t("providers.form.credentialHeaderName")}</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="pf-credHeaderName">{t("providers.form.credentialHeaderName")}</Label>
+              <Input
                 id="pf-credHeaderName"
                 type="text"
                 value={form.credentialHeaderName}
@@ -638,11 +681,11 @@ function ProviderFormBody({
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="pf-credHeaderPrefix">
+            <div className="space-y-2">
+              <Label htmlFor="pf-credHeaderPrefix">
                 {t("providers.form.credentialHeaderPrefix")}
-              </label>
-              <input
+              </Label>
+              <Input
                 id="pf-credHeaderPrefix"
                 type="text"
                 value={form.credentialHeaderPrefix}
@@ -667,33 +710,37 @@ function ProviderFormBody({
         {/* Authorized URIs section (hidden for proxy — backend forces allowAllUris) */}
         {!isBuiltIn && form.authMode !== "proxy" && (
           <>
-            <div className="section-title section-title-mt-sm">
+            <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
               {t("providers.form.sectionUris")}
             </div>
 
-            <div className="form-group">
-              <label className="field-label field-label-checkbox">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.allowAllUris}
                   onChange={(e) => setField("allowAllUris", e.target.checked)}
                 />
                 {t("providers.form.allowAllUris")}
-              </label>
-              <div className="hint">{t("providers.form.allowAllUrisHint")}</div>
+              </Label>
+              <div className="text-sm text-muted-foreground">
+                {t("providers.form.allowAllUrisHint")}
+              </div>
             </div>
 
             {!form.allowAllUris && (
-              <div className="form-group">
-                <label htmlFor="pf-uris">{t("providers.form.authorizedUris")}</label>
-                <textarea
+              <div className="space-y-2">
+                <Label htmlFor="pf-uris">{t("providers.form.authorizedUris")}</Label>
+                <Textarea
                   id="pf-uris"
                   value={form.authorizedUris}
                   onChange={(e) => setField("authorizedUris", e.target.value)}
                   rows={3}
                   placeholder="https://api.example.com/*"
                 />
-                <div className="hint">{t("providers.form.authorizedUrisHint")}</div>
+                <div className="text-sm text-muted-foreground">
+                  {t("providers.form.authorizedUrisHint")}
+                </div>
               </div>
             )}
           </>

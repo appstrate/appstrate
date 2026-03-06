@@ -1,3 +1,14 @@
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+
 export interface FormFieldProps {
   id: string;
   label: string;
@@ -32,28 +43,31 @@ export function FormField({
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
 
   return (
-    <div className="form-group">
-      <label htmlFor={id}>
+    <div className="space-y-2">
+      <Label htmlFor={id}>
         {label}
         {required ? " *" : ""}
-      </label>
+      </Label>
       {enumValues ? (
-        <select
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-describedby={describedBy}
-          aria-invalid={error ? true : undefined}
-          className={error ? "input-error" : undefined}
-        >
-          {enumValues.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger
+            id={id}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : undefined}
+            className={cn(error && "border-destructive")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {enumValues.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : (
-        <input
+        <Input
           id={id}
           type={type}
           value={value}
@@ -63,18 +77,18 @@ export function FormField({
           disabled={disabled}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
-          className={error ? "input-error" : undefined}
+          className={cn(error && "border-destructive")}
         />
       )}
       {description && (
-        <div id={hintId} className="hint">
+        <p id={hintId} className="text-sm text-muted-foreground">
           {description}
-        </div>
+        </p>
       )}
       {error && (
-        <div id={errorId} className="field-error">
+        <p id={errorId} className="text-sm text-destructive">
           {error}
-        </div>
+        </p>
       )}
     </div>
   );

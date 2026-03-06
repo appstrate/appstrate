@@ -1,12 +1,22 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { getServiceStatusDisplay, computeServicesSummary } from "../../lib/service-status";
 
 function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
-  const { statusDotClass, statusLabel, statusIcon } = getServiceStatusDisplay(status, t);
+  const { statusLabel, statusIcon } = getServiceStatusDisplay(status, t);
+  const colorMap: Record<string, string> = {
+    connected: "text-success",
+    not_connected: "text-destructive",
+    needs_reconnection: "text-warning",
+  };
   return (
-    <span className={`status-icon ${statusDotClass}`} aria-label={statusLabel}>
+    <span
+      className={cn("text-sm leading-none", colorMap[status] ?? "text-muted-foreground")}
+      aria-label={statusLabel}
+    >
       {statusIcon}
     </span>
   );
@@ -34,18 +44,18 @@ export function FlowServicesSection() {
   return (
     <>
       {summary && (
-        <div className="services-summary">
+        <div className="text-sm text-muted-foreground mb-2">
           {summary.connectedCount > 0 &&
             t("detail.servicesSummaryOk", { connected: summary.connectedCount })}
           {summary.connectedCount > 0 && summary.actionCount > 0 && " — "}
           {summary.actionCount > 0 && (
-            <span className="summary-action">
+            <span className="text-warning font-medium">
               {t("detail.servicesSummaryAction", { count: summary.actionCount })}
             </span>
           )}
         </div>
       )}
-      <div className="services">
+      <div className="flex flex-wrap gap-2 mb-4">
         {detail.requires.services.map((svc) => {
           const isConnected = svc.status === "connected";
           const isAdminMode = svc.connectionMode === "admin";
@@ -91,38 +101,52 @@ export function FlowServicesSection() {
 
             if (svc.adminProvided && isConnected) {
               return (
-                <div key={svc.id} className="service admin-provided" title={svc.description}>
+                <div
+                  key={svc.id}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                  title={svc.description}
+                >
                   <ServiceIcon status="connected" t={t} />
                   {svc.name || svc.id}
-                  <span className="admin-service-badge">{t("admin")}</span>
+                  <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                    {t("admin")}
+                  </span>
                   {isOrgAdmin && (
-                    <button
-                      type="button"
-                      className="btn-unbind"
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-1 h-6 px-2 text-xs"
                       onClick={() => unbindAdmin.mutate(svc.id)}
                       disabled={unbindAdmin.isPending}
                     >
                       {t("detail.unbind")}
-                    </button>
+                    </Button>
                   )}
                 </div>
               );
             }
             return (
-              <div key={svc.id} className="service admin-pending" title={svc.description}>
+              <div
+                key={svc.id}
+                className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                title={svc.description}
+              >
                 <ServiceIcon status="not_connected" t={t} />
                 {svc.name || svc.id}
                 {isOrgAdmin ? (
-                  <button
-                    type="button"
-                    className="btn-bind"
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-1 h-6 px-2 text-xs"
                     onClick={handleBind}
                     disabled={bindAdmin.isPending || connectMutation.isPending}
                   >
                     {t("detail.bindAccount")}
-                  </button>
+                  </Button>
                 ) : (
-                  <span className="admin-service-badge pending">{t("detail.pending")}</span>
+                  <span className="ml-1 rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
+                    {t("detail.pending")}
+                  </span>
                 )}
               </div>
             );
@@ -150,17 +174,22 @@ export function FlowServicesSection() {
 
           if (needsReconnection) {
             return (
-              <div key={svc.id} className="service needs-reconnection" title={svc.description}>
+              <div
+                key={svc.id}
+                className="flex items-center gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-1.5 text-sm"
+                title={svc.description}
+              >
                 <ServiceIcon status="needs_reconnection" t={t} />
                 {svc.name || svc.id}
-                <button
-                  type="button"
-                  className="btn-scope-upgrade"
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-1 h-6 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
                   onClick={handleServiceConnect}
                   disabled={connectMutation.isPending}
                 >
                   {t("detail.reconnect", { defaultValue: "Reconnect" })}
-                </button>
+                </Button>
               </div>
             );
           }
@@ -168,25 +197,30 @@ export function FlowServicesSection() {
             return (
               <div
                 key={svc.id}
-                className={`service${hasScopeIssue ? " scope-warning" : ""}`}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm",
+                  hasScopeIssue && "border-warning/30 bg-warning/5",
+                )}
                 title={svc.description}
               >
                 <ServiceIcon status={effectiveStatus} t={t} />
                 {svc.name || svc.id}
                 {hasScopeIssue && svc.scopesMissing && (
-                  <button
-                    type="button"
-                    className="btn-scope-upgrade"
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-1 h-6 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
                     onClick={handleServiceConnect}
                     disabled={connectMutation.isPending}
                     title={`Missing: ${svc.scopesMissing.join(", ")}`}
                   >
                     {t("detail.updatePermissions", { defaultValue: "Update permissions" })}
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
-                  className="btn-unbind"
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-1 h-6 px-2 text-xs"
                   onClick={() => {
                     if (confirm(t("detail.disconnectConfirm", { name: svc.name || svc.id }))) {
                       disconnectMutation.mutate({
@@ -198,22 +232,23 @@ export function FlowServicesSection() {
                   disabled={disconnectMutation.isPending}
                 >
                   {t("detail.disconnect")}
-                </button>
+                </Button>
               </div>
             );
           }
           return (
-            <button
+            <Button
               key={svc.id}
               type="button"
-              className="service not-connected"
+              variant="outline"
+              className="flex items-center gap-1.5 border-dashed text-muted-foreground hover:border-primary hover:text-foreground"
               onClick={handleServiceConnect}
               title={svc.description}
             >
               <ServiceIcon status="not_connected" t={t} />
               {svc.name || svc.id}
               {` (${t("detail.connect")})`}
-            </button>
+            </Button>
           );
         })}
       </div>

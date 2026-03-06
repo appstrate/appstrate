@@ -1,5 +1,12 @@
 import { useTranslation } from "react-i18next";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   DndContext,
   closestCenter,
   KeyboardSensor,
@@ -16,6 +23,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toSlug, toLiveSlug } from "../../lib/strings";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export interface SchemaField {
   _id: string;
@@ -89,113 +99,140 @@ function SortableFieldCard({
   const showDetails = hasDetailsRow(mode);
 
   return (
-    <div ref={setNodeRef} style={style} className="field-card">
-      <div className="field-row-main">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="border border-border rounded-md p-2.5 mb-2 bg-card [&[style*='transform']]:shadow-lg [&[style*='transform']]:z-10"
+    >
+      <div className="flex items-center gap-2">
         {!readOnly && (
-          <span className="drag-handle" {...attributes} {...listeners}>
+          <span
+            className="cursor-grab text-muted-foreground select-none text-base leading-none hover:text-foreground active:cursor-grabbing"
+            {...attributes}
+            {...listeners}
+          >
             ⠿
           </span>
         )}
-        <input
+        <Input
           type="text"
           placeholder={t("editor.fieldKey")}
           value={field.key}
           onChange={(e) => onUpdate(index, { key: toLiveSlug(e.target.value) })}
           onBlur={() => onUpdate(index, { key: toSlug(field.key) })}
-          className="field-key"
+          className="w-[120px] min-w-0 shrink-0 h-7 text-xs font-mono"
           disabled={readOnly}
         />
-        <select
+        <Select
           value={field.type}
-          onChange={(e) => onUpdate(index, { type: e.target.value })}
+          onValueChange={(v) => onUpdate(index, { type: v })}
           disabled={readOnly}
         >
-          {typeOptions.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <input
+          <SelectTrigger className="h-7 w-[100px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {typeOptions.map((t) => (
+              <SelectItem key={t} value={t}>
+                {t}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
           type="text"
           placeholder={t("editor.fieldDesc")}
           value={field.description}
           onChange={(e) => onUpdate(index, { description: e.target.value })}
-          className="field-row-grow"
+          className="flex-1 min-w-0 h-7 text-xs"
           disabled={readOnly}
         />
-        <label className="field-checkbox">
+        <Label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer font-normal">
           <input
             type="checkbox"
             checked={field.required}
             onChange={(e) => onUpdate(index, { required: e.target.checked })}
             disabled={readOnly}
+            className="w-3.5 h-3.5 rounded"
           />
           {t("editor.fieldReq")}
-        </label>
+        </Label>
         {!readOnly && (
-          <button type="button" className="btn-remove" onClick={() => onRemove(index)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={() => onRemove(index)}
+          >
             &times;
-          </button>
+          </Button>
         )}
       </div>
       {showDetails && (
-        <div className="field-row-details">
+        <div className="flex gap-2 mt-2 flex-wrap">
           {isFile ? (
             <>
-              <input
+              <Input
                 type="text"
                 placeholder={t("editor.fieldAccept")}
                 value={field.accept ?? ""}
                 onChange={(e) => onUpdate(index, { accept: e.target.value })}
+                className="flex-1 min-w-[100px] h-7 text-xs"
               />
-              <input
+              <Input
                 type="text"
                 placeholder={t("editor.fieldMaxSize")}
                 value={field.maxSize ?? ""}
                 onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
+                className="flex-1 min-w-[100px] h-7 text-xs"
               />
-              <label className="field-checkbox">
+              <Label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer font-normal">
                 <input
                   type="checkbox"
                   checked={field.multiple ?? false}
                   onChange={(e) => onUpdate(index, { multiple: e.target.checked })}
+                  className="w-3.5 h-3.5 rounded"
                 />
                 {t("editor.fieldMultiple")}
-              </label>
+              </Label>
               {field.multiple && (
-                <input
+                <Input
                   type="text"
                   placeholder={t("editor.fieldMaxFiles")}
                   value={field.maxFiles ?? ""}
                   onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
+                  className="flex-1 min-w-[100px] h-7 text-xs"
                 />
               )}
             </>
           ) : (
             <>
               {(mode === "input" || mode === "config") && (
-                <input
+                <Input
                   type="text"
                   placeholder={t("editor.fieldDefault")}
                   value={field.default ?? ""}
                   onChange={(e) => onUpdate(index, { default: e.target.value })}
+                  className="flex-1 min-w-[100px] h-7 text-xs"
                 />
               )}
               {mode === "input" && (
-                <input
+                <Input
                   type="text"
                   placeholder={t("editor.fieldPlaceholder")}
                   value={field.placeholder ?? ""}
                   onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
+                  className="flex-1 min-w-[100px] h-7 text-xs"
                 />
               )}
               {mode === "config" && (
-                <input
+                <Input
                   type="text"
                   placeholder={t("editor.fieldEnum")}
                   value={field.enumValues ?? ""}
                   onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
+                  className="flex-1 min-w-[100px] h-7 text-xs"
                 />
               )}
             </>
@@ -234,9 +271,11 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
   }
 
   return (
-    <div className="editor-section">
-      <div className="editor-section-header">{title}</div>
-      <div className="editor-section-body">
+    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
+      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
+        {title}
+      </div>
+      <div className="space-y-3 p-4">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
             {fields.map((field, i) => (
@@ -253,9 +292,15 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
           </SortableContext>
         </DndContext>
         {!readOnly && (
-          <button type="button" className="add-field-btn" onClick={add}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-dashed text-muted-foreground hover:text-foreground"
+            onClick={add}
+          >
             {t("editor.addField")}
-          </button>
+          </Button>
         )}
       </div>
     </div>

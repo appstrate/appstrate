@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface ApiKeyModalProps {
   open: boolean;
@@ -33,9 +36,9 @@ export function ApiKeyModal({
 
   return (
     <Modal open={open} onClose={handleClose} title={t("apiKey.title", { name: providerName })}>
-      <div className="form-group">
-        <label htmlFor="api-key-input">{t("apiKey.label")}</label>
-        <input
+      <div className="space-y-2">
+        <Label htmlFor="api-key-input">{t("apiKey.label")}</Label>
+        <Input
           id="api-key-input"
           type="password"
           value={apiKey}
@@ -46,11 +49,13 @@ export function ApiKeyModal({
           }}
         />
       </div>
-      <div className="modal-actions">
-        <button onClick={handleClose}>{t("btn.cancel")}</button>
-        <button className="primary" onClick={handleSubmit} disabled={!apiKey.trim() || isPending}>
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+        <Button variant="outline" onClick={handleClose}>
+          {t("btn.cancel")}
+        </Button>
+        <Button onClick={handleSubmit} disabled={!apiKey.trim() || isPending}>
           {t("btn.connect")}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

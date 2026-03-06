@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useUnreadCount, useAllExecutions, useMarkAllRead } from "../hooks/use-notifications";
-import { ExecutionRow } from "../components/execution-row";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { ExecutionRow } from "../components/execution-row";
 import type { Execution } from "@appstrate/shared-types";
 
 export function ExecutionsPage() {
@@ -24,23 +25,25 @@ export function ExecutionsPage() {
     }
   }
 
-  if (isLoading && page === 0) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
-
   const executions = data?.executions ?? [];
   const total = data?.total ?? 0;
   const hasMore = (page + 1) * limit < total;
 
+  if (isLoading && page === 0) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
   return (
     <>
-      <div className="section-header">
-        <div className="section-title">{t("executions.title")}</div>
-        <button
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm font-medium text-muted-foreground">{t("executions.title")}</div>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => markAllRead.mutate()}
           disabled={markAllRead.isPending || !unreadCount}
         >
           {t("executions.markAllRead")}
-        </button>
+        </Button>
       </div>
 
       {executions.length === 0 ? (
@@ -50,28 +53,28 @@ export function ExecutionsPage() {
           icon={PlayCircle}
         >
           <Link to="/">
-            <button>{t("executions.goToFlows")}</button>
+            <Button variant="outline">{t("executions.goToFlows")}</Button>
           </Link>
         </EmptyState>
       ) : (
-        <div className="exec-list">
-          {executions.map((exec: Execution, index: number) => (
-            <ExecutionRow
-              key={exec.id}
-              execution={exec}
-              executionNumber={total - page * limit - index}
-              flowName={
-                (exec.packageId && flowNameMap.get(exec.packageId)) ?? exec.packageId ?? "—"
-              }
-            />
-          ))}
+        <>
+          <div className="space-y-1">
+            {executions.map((exec: Execution, index: number) => (
+              <ExecutionRow
+                key={exec.id}
+                execution={exec}
+                executionNumber={total - page * limit - index}
+                flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
+              />
+            ))}
+          </div>
 
           {hasMore && (
-            <button className="load-more-btn" onClick={() => setPage((p) => p + 1)}>
+            <Button variant="outline" className="w-full mt-4" onClick={() => setPage((p) => p + 1)}>
               {t("executions.loadMore")}
-            </button>
+            </Button>
           )}
-        </div>
+        </>
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function VersionBanners({
   isHistorical,
@@ -12,14 +13,18 @@ export function VersionBanners({
   return (
     <>
       {versionDetail.yanked && (
-        <div className="version-banner warning">
-          {t("version.yanked")}
-          {versionDetail.yankedReason ? ` — ${versionDetail.yankedReason}` : ""}
-        </div>
+        <Alert variant="warning" className="mb-3">
+          <AlertDescription>
+            {t("version.yanked")}
+            {versionDetail.yankedReason ? ` — ${versionDetail.yankedReason}` : ""}
+          </AlertDescription>
+        </Alert>
       )}
-      <div className="version-banner info">
-        {t("version.viewing", { version: versionDetail.version })}
-      </div>
+      <Alert className="mb-3">
+        <AlertDescription>
+          {t("version.viewing", { version: versionDetail.version })}
+        </AlertDescription>
+      </Alert>
     </>
   );
 }

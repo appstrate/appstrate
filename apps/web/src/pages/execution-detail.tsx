@@ -1,7 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useFlowDetail } from "../hooks/use-packages";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
@@ -87,7 +91,8 @@ export function ExecutionDetailPage() {
   const runFlow = useRunFlow(packageId!);
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
-  const [userTab, setUserTab] = useState<"logs" | "result" | "state" | null>(null);
+  const [activeTab, setActiveTab] = useTabWithHash(["logs", "result", "state"] as const, "logs");
+  const hasUserSelected = useRef(false);
 
   // Build log entries from historical data, merging consecutive text-only
   // progress entries into a single flowing block so small streaming fragments
@@ -138,8 +143,17 @@ export function ExecutionDetailPage() {
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
-  // Derive active tab: user override > auto-switch to result when done
-  const activeTab = userTab ?? (resultData && !isRunning ? "result" : "logs");
+  // Reset hasUserSelected when switching executions
+  useEffect(() => {
+    hasUserSelected.current = false;
+  }, [execId]);
+
+  // Auto-switch to result when execution completes (unless user manually picked a tab)
+  useEffect(() => {
+    if (resultData && !isRunning && !hasUserSelected.current) {
+      setActiveTab("result");
+    }
+  }, [resultData, isRunning, setActiveTab]);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -186,41 +200,55 @@ export function ExecutionDetailPage() {
 
   return (
     <>
-      <nav className="breadcrumb">
-        <Link to="/">{t("detail.breadcrumb")}</Link>
-        <span className="separator">/</span>
-        <Link to={`/flows/${packageId}`}>{flow?.displayName || packageId}</Link>
-        <span className="separator">/</span>
-        <span className="current">
+      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
+        <Link to="/" className="text-muted-foreground hover:text-foreground">
+          {t("detail.breadcrumb")}
+        </Link>
+        <span className="opacity-50">/</span>
+        <Link to={`/flows/${packageId}`} className="text-muted-foreground hover:text-foreground">
+          {flow?.displayName || packageId}
+        </Link>
+        <span className="opacity-50">/</span>
+        <span>
           {executionNumber
             ? t("exec.breadcrumb", { number: executionNumber })
             : date || execId?.slice(0, 8)}
         </span>
       </nav>
 
-      <div className="exec-detail-header">
+      <div className="flex items-center gap-2 flex-wrap mb-4">
         <Badge status={displayStatus} />
-        {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
-        <span className="exec-meta">{date}</span>
-        {duration && <span className="exec-meta">{duration}</span>}
-        <span className={`exec-meta tag${execution.packageVersion ? "" : " draft"}`}>
+        {userName && (
+          <span className="text-sm text-muted-foreground">
+            {t("exec.user", { name: userName })}
+          </span>
+        )}
+        <span className="text-xs text-muted-foreground">{date}</span>
+        {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
+        <span
+          className={cn(
+            "text-xs text-muted-foreground font-mono rounded bg-muted px-1.5 py-0.5",
+            !execution.packageVersion && "italic",
+          )}
+        >
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </span>
         {!isRunning && execution.tokensUsed != null && (
-          <span className="exec-meta">{execution.tokensUsed.toLocaleString()} tokens</span>
+          <span className="text-xs text-muted-foreground">
+            {execution.tokensUsed.toLocaleString()} tokens
+          </span>
         )}
         {isRunning && (
-          <button
-            className="danger"
+          <Button
+            variant="destructive"
             onClick={() => cancelExecution.mutate(execId!)}
             disabled={cancelExecution.isPending}
           >
             {cancelExecution.isPending && <Spinner />} {t("btn.cancel")}
-          </button>
+          </Button>
         )}
         {!isRunning && flow && (
-          <button
-            className="primary"
+          <Button
             onClick={() => {
               const hasInput = flow.input?.schema && Object.keys(flow.input.schema).length > 0;
               if (hasInput) {
@@ -232,7 +260,7 @@ export function ExecutionDetailPage() {
             disabled={runFlow.isPending}
           >
             {t("exec.rerun")}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -249,35 +277,27 @@ export function ExecutionDetailPage() {
         />
       )}
 
-      <div className="exec-tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={activeTab === "logs"}
-          className={`tab ${activeTab === "logs" ? "active" : ""}`}
-          onClick={() => setUserTab("logs")}
-        >
-          {t("exec.tabLogs")} <span>{t("exec.tabLogEvents", { count: allLogs.length })}</span>
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === "result"}
-          className={`tab ${activeTab === "result" ? "active" : ""}`}
-          onClick={() => setUserTab("result")}
-        >
-          {t("exec.tabResult")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={activeTab === "state"}
-          className={`tab ${activeTab === "state" ? "active" : ""}`}
-          onClick={() => setUserTab("state")}
-        >
-          {t("exec.tabState")}
-        </button>
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => {
+          hasUserSelected.current = true;
+          setActiveTab(v as "logs" | "result" | "state");
+        }}
+        className="mb-4"
+      >
+        <TabsList>
+          <TabsTrigger value="logs">
+            {t("exec.tabLogs")} <span>{t("exec.tabLogEvents", { count: allLogs.length })}</span>
+          </TabsTrigger>
+          <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
+          <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {displayStatus === "failed" && execution.error && (
-        <div className="exec-error">{execution.error}</div>
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {execution.error}
+        </div>
       )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
@@ -291,7 +311,9 @@ export function ExecutionDetailPage() {
 
       {activeTab === "state" &&
         (stateData ? (
-          <pre className="result-json-viewer">{JSON.stringify(stateData, null, 2)}</pre>
+          <pre className="p-4 text-xs font-mono rounded-lg border border-border bg-card overflow-auto max-h-[600px]">
+            {JSON.stringify(stateData, null, 2)}
+          </pre>
         ) : (
           <EmptyState message={t("exec.emptyState")} compact />
         ))}

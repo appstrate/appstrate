@@ -33,7 +33,7 @@ export function SharedHeader({
 }) {
   const { t } = useTranslation(["flows", "settings", "common"]);
 
-  const breadcrumbPath = detail.type === "flow" ? "/" : `/?tab=${detail.type}s`;
+  const breadcrumbPath = detail.type === "flow" ? "/" : `/#${detail.type}s`;
   const breadcrumbLabel =
     detail.type === "flow"
       ? t("detail.breadcrumb")
@@ -41,44 +41,54 @@ export function SharedHeader({
 
   return (
     <>
-      <nav className="breadcrumb">
-        <Link to={breadcrumbPath}>{breadcrumbLabel}</Link>
-        <span className="separator">/</span>
-        <span className="current">{detail.displayName}</span>
+      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
+        <Link to={breadcrumbPath} className="text-muted-foreground hover:text-foreground">
+          {breadcrumbLabel}
+        </Link>
+        <span className="opacity-50">/</span>
+        <span>{detail.displayName}</span>
       </nav>
 
-      <div className="flow-detail-header">
-        <div className="header-row">
-          <h2>{detail.displayName}</h2>
-          <div className="flow-card-badges">
+      <div className="mb-6">
+        <div className="flex items-center flex-wrap gap-2">
+          <h2 className="text-xl font-semibold">{detail.displayName}</h2>
+          <div className="flex items-center gap-1.5">
             {detail.type !== "flow" && <TypeBadge type={detail.type} />}
             {detail.source === "built-in" && (
-              <span className="source-badge">
+              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
                 {t("packages.sourceBuiltIn", { ns: "settings" })}
               </span>
             )}
             {hasDraftChanges && !isVersionView && (
-              <span className="version-badge unpublished">{t("version.unpublished")}</span>
+              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-warning/15 text-warning font-medium">
+                {t("version.unpublished")}
+              </span>
             )}
             {isHistoricalVersion && (
-              <span className="version-readonly-badge">{t("version.readOnly")}</span>
+              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                {t("version.readOnly")}
+              </span>
             )}
           </div>
-          <div className="header-selectors">
+          <div className="ml-auto flex items-center gap-2">
             {detail.versionCount && detail.versionCount > 0 && (
               <VersionSelector
                 packageId={packageId}
                 currentVersion={versionParam}
                 type={detail.type}
                 hasDraftChanges={hasDraftChanges}
-                currentIsDraft={!versionParam}
+                currentIsDraft={!versionParam && hasDraftChanges}
               />
             )}
             {headerExtras}
           </div>
         </div>
-        {detail.description && <p className="description">{detail.description}</p>}
-        {detail.type !== "flow" && <code className="detail-id">{detail.id}</code>}
+        {detail.description && (
+          <p className="text-sm text-muted-foreground mt-1">{detail.description}</p>
+        )}
+        {detail.type !== "flow" && (
+          <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
+        )}
       </div>
     </>
   );

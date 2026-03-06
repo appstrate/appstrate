@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "./spinner";
 import { useCreateApiKey } from "../hooks/use-api-keys";
 
@@ -56,15 +66,22 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
   if (createdKey) {
     return (
       <Modal open={open} onClose={handleClose} title={t("apiKeys.created")}>
-        <p className="form-hint form-hint-warning">{t("apiKeys.createdWarning")}</p>
-        <div className="api-key-display">
-          <code className="api-key-value">{createdKey}</code>
-          <button onClick={handleCopy}>{copied ? t("btn.copied") : t("btn.copyLink")}</button>
+        <p className="text-sm text-warning bg-warning/10 rounded-md px-3 py-2">
+          {t("apiKeys.createdWarning")}
+        </p>
+        <div className="flex items-center gap-2 mt-3 rounded-md border border-border bg-muted/50 px-3 py-2">
+          <code className="flex-1 text-xs font-mono text-foreground break-all">{createdKey}</code>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-primary hover:underline shrink-0"
+            onClick={handleCopy}
+          >
+            {copied ? t("btn.copied") : t("btn.copyLink")}
+          </Button>
         </div>
-        <div className="modal-actions">
-          <button className="primary" onClick={handleClose}>
-            {t("btn.done")}
-          </button>
+        <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+          <Button onClick={handleClose}>{t("btn.done")}</Button>
         </div>
       </Modal>
     );
@@ -78,24 +95,23 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
       title={t("apiKeys.createTitle")}
       actions={
         <>
-          <button type="button" onClick={handleClose}>
+          <Button variant="outline" type="button" onClick={handleClose}>
             {t("btn.cancel")}
-          </button>
-          <button
-            className="primary"
+          </Button>
+          <Button
             type="submit"
             form="create-api-key-form"
             disabled={createMutation.isPending || !name.trim()}
           >
             {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
-          </button>
+          </Button>
         </>
       }
     >
       <form id="create-api-key-form" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</Label>
+          <Input
             id="api-key-name"
             type="text"
             value={name}
@@ -106,21 +122,24 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
             autoFocus
           />
         </div>
-        <div className="form-group">
-          <label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</label>
-          <select
-            id="api-key-expires"
-            value={expiresIn}
-            onChange={(e) => setExpiresIn(e.target.value)}
-          >
-            <option value="30">{t("apiKeys.expires30")}</option>
-            <option value="90">{t("apiKeys.expires90")}</option>
-            <option value="180">{t("apiKeys.expires180")}</option>
-            <option value="365">{t("apiKeys.expires365")}</option>
-            <option value="never">{t("apiKeys.expiresNever")}</option>
-          </select>
+        <div className="space-y-2">
+          <Label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</Label>
+          <Select value={expiresIn} onValueChange={setExpiresIn}>
+            <SelectTrigger id="api-key-expires">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="30">{t("apiKeys.expires30")}</SelectItem>
+              <SelectItem value="90">{t("apiKeys.expires90")}</SelectItem>
+              <SelectItem value="180">{t("apiKeys.expires180")}</SelectItem>
+              <SelectItem value="365">{t("apiKeys.expires365")}</SelectItem>
+              <SelectItem value="never">{t("apiKeys.expiresNever")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        {createMutation.isError && <p className="form-error">{createMutation.error.message}</p>}
+        {createMutation.isError && (
+          <p className="text-sm text-destructive">{createMutation.error.message}</p>
+        )}
       </form>
     </Modal>
   );

@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
 import type { FlowFormState } from "./types";
 import { assemblePayload, payloadToFormState } from "./utils";
@@ -41,7 +42,7 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
   };
 
   return (
-    <div className="json-editor-wrapper">
+    <div className="flex flex-col gap-3">
       <Editor
         height="600px"
         language="json"
@@ -61,11 +62,15 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
           formatOnPaste: true,
         }}
       />
-      {parseError && <div className="json-editor-error">{parseError}</div>}
-      <div className="json-editor-actions">
-        <button type="button" className="primary" onClick={handleApply}>
+      {parseError && (
+        <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">
+          {parseError}
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button type="button" onClick={handleApply}>
           {t("editor.jsonApply")}
-        </button>
+        </Button>
       </div>
     </div>
   );
