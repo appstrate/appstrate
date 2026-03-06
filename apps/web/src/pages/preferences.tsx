@@ -15,9 +15,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useTheme } from "../components/theme-provider";
+import { useTheme } from "../hooks/use-theme";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
-import { useAuth } from "../hooks/use-auth";
+import { useAuth, refreshAuth } from "../hooks/use-auth";
+import { authClient } from "../lib/auth-client";
 import { useFormErrors } from "../hooks/use-form-errors";
 import { useDisconnect, useDeleteAllConnections } from "../hooks/use-mutations";
 import {
@@ -50,7 +51,9 @@ export function PreferencesPage() {
       </div>
       <Tabs
         value={tab}
-        onValueChange={(v) => setTab(v as "general" | "appearance" | "security" | "connectors" | "profiles")}
+        onValueChange={(v) =>
+          setTab(v as "general" | "appearance" | "security" | "connectors" | "profiles")
+        }
       >
         <TabsList className="mb-4">
           <TabsTrigger value="general">{t("preferences.tabGeneral")}</TabsTrigger>
@@ -115,6 +118,7 @@ function GeneralTab({
       <div className="text-sm font-medium text-muted-foreground mb-4">
         {t("preferences.account")}
       </div>
+      <EmailChangeForm />
       <DisplayNameForm />
     </>
   );
@@ -126,9 +130,7 @@ function AppearanceTab() {
 
   return (
     <>
-      <div className="text-sm font-medium text-muted-foreground mb-4">
-        {t("preferences.theme")}
-      </div>
+      <div className="text-sm font-medium text-muted-foreground mb-4">{t("preferences.theme")}</div>
       <div className="rounded-lg border border-border bg-card p-5 mb-4">
         <div className="flex items-center gap-3">
           <div className="flex-1">
@@ -159,6 +161,73 @@ function SecurityTab() {
       </div>
       <PasswordChangeForm />
     </>
+  );
+}
+
+function EmailChangeForm() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { user } = useAuth();
+  const [newEmail, setNewEmail] = useState("");
+  const [serverError, setServerError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const isDirty = newEmail.trim() !== "" && newEmail.trim() !== user?.email;
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim());
+  const canSubmit = isDirty && isValidEmail && !submitting;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setServerError("");
+    setSuccess("");
+    setSubmitting(true);
+    try {
+      const result = await authClient.changeEmail({ newEmail: newEmail.trim() });
+      if (result.error) {
+        if (result.error.status === 409) {
+          setServerError(t("preferences.emailConflict"));
+        } else {
+          setServerError(result.error.message || t("login.error"));
+        }
+      } else {
+        setSuccess(t("preferences.emailChanged"));
+        setNewEmail("");
+        await refreshAuth();
+      }
+    } catch {
+      setServerError(t("login.error"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+        <div className="space-y-2">
+          <Label>{t("preferences.email")}</Label>
+          <Input type="email" value={user?.email ?? ""} disabled />
+        </div>
+        <div className="space-y-2">
+          <Label>{t("preferences.newEmail")}</Label>
+          <Input
+            type="email"
+            value={newEmail}
+            onChange={(e) => {
+              setNewEmail(e.target.value);
+              setServerError("");
+              setSuccess("");
+            }}
+            placeholder={user?.email ?? ""}
+          />
+        </div>
+        {serverError && <div className="text-sm text-destructive">{serverError}</div>}
+        {success && <div className="text-sm text-success">{success}</div>}
+        <Button type="submit" disabled={!canSubmit}>
+          {submitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
+        </Button>
+      </form>
+    </div>
   );
 }
 

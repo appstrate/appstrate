@@ -24,7 +24,7 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "./components/theme-provider";
+import { useTheme } from "./hooks/use-theme";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";

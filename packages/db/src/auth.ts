@@ -33,6 +33,10 @@ export const auth = betterAuth({
 
   user: {
     additionalFields: {},
+    changeEmail: {
+      enabled: true,
+      updateEmailWithoutVerification: true,
+    },
   },
 
   trustedOrigins: env.TRUSTED_ORIGINS,

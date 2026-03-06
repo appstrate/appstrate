@@ -1,5 +1,5 @@
 import { DiffEditor } from "@monaco-editor/react";
-import { useTheme } from "./theme-provider";
+import { useTheme } from "../hooks/use-theme";
 
 interface DraftDiffViewProps {
   original: string;
