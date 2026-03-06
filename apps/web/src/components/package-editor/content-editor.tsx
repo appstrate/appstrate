@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { useTheme } from "../theme-provider";
+import { useTheme } from "../../hooks/use-theme";
 
 interface ContentEditorProps {
   value: string;

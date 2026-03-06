@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
-import { useTheme } from "../theme-provider";
+import { useTheme } from "../../hooks/use-theme";
 import type { FlowFormState } from "./types";
 import { assemblePayload, payloadToFormState } from "./utils";
 
