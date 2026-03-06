@@ -1,4 +1,5 @@
 import { DiffEditor } from "@monaco-editor/react";
+import { useTheme } from "./theme-provider";
 
 interface DraftDiffViewProps {
   original: string;
@@ -7,10 +8,11 @@ interface DraftDiffViewProps {
 }
 
 export function DraftDiffView({ original, modified, language = "plaintext" }: DraftDiffViewProps) {
+  const { resolvedTheme } = useTheme();
   return (
     <DiffEditor
       height="400px"
-      theme="vs-dark"
+      theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
       language={language}
       original={original}
       modified={modified}

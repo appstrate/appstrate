@@ -24,6 +24,7 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTheme } from "./components/theme-provider";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
@@ -113,6 +114,7 @@ function UserMenu({
 
 function MainLayout() {
   const queryClient = useQueryClient();
+  const { resolvedTheme } = useTheme();
   const { user, profile, logout } = useAuth();
   const { isOrgAdmin } = useOrg();
 
@@ -124,18 +126,23 @@ function MainLayout() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
       <header className="flex items-center gap-2 mb-8 pb-4 border-b border-border">
-        <Link to="/" className="flex items-center shrink-0">
-          <img src="/logo.svg" alt="Appstrate" className="h-[34px] w-auto" />
+        <Link to="/" className="flex items-center shrink-0 mr-auto">
+          <img
+            src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+            alt="Appstrate"
+            className="h-[34px] w-auto"
+          />
         </Link>
+        <OrgSwitcher />
         <Link
           to="/marketplace"
-          className="ml-auto inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          className="inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           title="Marketplace"
         >
           <ShoppingBag size={18} />
         </Link>
         <NotificationBell />
-        <OrgSwitcher />
+        <div className="mx-2 h-5 w-px bg-border" />
         <UserMenu
           displayName={profile?.displayName || user!.email || ""}
           isAdmin={isOrgAdmin}
