@@ -10,7 +10,6 @@ import {
   type VersionListItem,
 } from "../hooks/use-packages";
 import { usePublishPlanModal } from "../hooks/use-publish-plan-modal";
-import { RegistrySettings } from "../components/registry-settings";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
@@ -158,7 +157,16 @@ export function MarketplacePublishPage() {
       </div>
 
       {!registryStatus?.connected ? (
-        <RegistrySettings />
+        <div className="service-card service-card-spaced">
+          <div className="connectors-intro">
+            <p className="service-provider">{t("registry.description")}</p>
+          </div>
+          <div className="tab-toolbar">
+            <Link to="/marketplace/connection" className="btn primary">
+              {t("registry.connect")}
+            </Link>
+          </div>
+        </div>
       ) : (
         <>
           {publishableItems.length === 0 ? (
@@ -179,8 +187,6 @@ export function MarketplacePublishPage() {
               ))}
             </div>
           )}
-
-          <RegistrySettings />
         </>
       )}
 

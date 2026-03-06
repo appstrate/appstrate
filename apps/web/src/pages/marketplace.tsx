@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Download, Package, Store, RefreshCw, Upload } from "lucide-react";
+import { Download, Package, Store, RefreshCw, Upload, Plug } from "lucide-react";
 import { useMarketplaceStatus, useMarketplaceSearch } from "../hooks/use-marketplace";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
@@ -52,10 +52,6 @@ export function MarketplacePage() {
       <div className="page-header">
         <h2>{t("marketplace.title")}</h2>
         <div className="page-header-actions">
-          <Link to="/marketplace/installed" className="btn-sm">
-            <Package size={14} />
-            {t("marketplace.navInstalled")}
-          </Link>
           <Link to="/marketplace/updates" className="btn-sm">
             <RefreshCw size={14} />
             {t("marketplace.navUpdates")}
@@ -63,6 +59,10 @@ export function MarketplacePage() {
           <Link to="/marketplace/publish" className="btn-sm">
             <Upload size={14} />
             {t("marketplace.navPublish")}
+          </Link>
+          <Link to="/marketplace/connection" className="btn-sm">
+            <Plug size={14} />
+            {t("marketplace.navConnection")}
           </Link>
         </div>
       </div>
