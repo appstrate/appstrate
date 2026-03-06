@@ -4119,6 +4119,10 @@ button:disabled {
   font-weight: 600;
   min-width: 4rem;
 }
+.version-match-icon {
+  color: var(--success, #22c55e);
+  flex-shrink: 0;
+}
 .version-history-row .version-date {
   color: var(--text-muted);
   font-size: 0.8rem;

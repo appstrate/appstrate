@@ -17,6 +17,7 @@ import {
   useInstallPackage,
   useUpdatePackage,
 } from "../hooks/use-marketplace";
+import { usePackageVersions } from "../hooks/use-packages";
 import { useRegistryStatus, useRegistryScopes } from "../hooks/use-registry";
 import { usePublishPlanModal } from "../hooks/use-publish-plan-modal";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -45,10 +46,15 @@ export function MarketplaceDetailPage() {
   const { data: registryScopes } = useRegistryScopes();
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
   const publishPlan = usePublishPlanModal();
+  const localPackageId = scope && name ? `@${scope}/${name}` : undefined;
+  const { data: localVersions } = usePackageVersions(pkg?.type ?? "flow", localPackageId);
+  const localIntegrities = new Set(localVersions?.map((v) => v.integrity));
 
   const handlePublish = () => {
     if (!scope || !name) return;
-    publishPlan.open(`@${scope}/${name}`);
+    // Pass the local version ahead or installed version so we publish from a stored version ZIP
+    const versionToPublish = pkg?.localVersionAhead ?? pkg?.installedVersion ?? undefined;
+    publishPlan.open(`@${scope}/${name}`, versionToPublish);
   };
 
   if (isLoading) {
@@ -294,6 +300,9 @@ export function MarketplaceDetailPage() {
             {pkg.versions.map((v) => (
               <div key={v.id} className="marketplace-version-row">
                 <span className="version-tag">v{v.version}</span>
+                {localIntegrities.has(v.integrity) && (
+                  <CheckCircle size={14} className="version-match-icon" />
+                )}
                 <span className="version-size">{formatBytes(v.artifactSize)}</span>
                 <span className="version-date">{new Date(v.createdAt).toLocaleDateString()}</span>
                 <button

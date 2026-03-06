@@ -14,6 +14,9 @@ import {
 } from "@appstrate/core/semver";
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
+import { buildRegistryDependencies } from "./package-items/dependencies.ts";
+import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
+import { parseScopedName } from "@appstrate/core/naming";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -473,11 +476,19 @@ export async function createVersionFromDraft(params: {
 
   const manifest = { ...baseManifest, version };
 
+  // Enrich manifest with registryDependencies so the version ZIP
+  // matches what would be published to the registry (same integrity).
+  const registryDeps = await buildRegistryDependencies(packageId, orgId);
+  const parsed = parseScopedName(baseManifest.name as string);
+  const finalManifest = parsed
+    ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, registryDeps)
+    : manifest;
+
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
   if (pkg.type === "flow") {
     const { buildMinimalZip } = await import("./package-storage.ts");
-    zipBuffer = buildMinimalZip(manifest, content);
+    zipBuffer = buildMinimalZip(finalManifest, content);
   } else {
     // For skills/extensions, build ZIP from storage files or content
     const { downloadPackageFiles } = await import("./package-items/storage.ts");
@@ -490,15 +501,14 @@ export async function createVersionFromDraft(params: {
       const { zipArtifact } = await import("@appstrate/core/zip");
       // Include manifest.json if available
       const entries: Record<string, Uint8Array> = { ...files };
-      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
       zipBuffer = Buffer.from(zipArtifact(entries, 6));
     } else {
       // Fallback: create minimal ZIP with manifest + content using correct filename
       const { buildMinimalZip } = await import("./package-storage.ts");
-      const { parseScopedName } = await import("@appstrate/core/naming");
       const contentFileName =
         pkg.type === "skill" ? "SKILL.md" : `${parseScopedName(packageId)?.name ?? packageId}.ts`;
-      zipBuffer = buildMinimalZip(manifest, content, contentFileName);
+      zipBuffer = buildMinimalZip(finalManifest, content, contentFileName);
     }
   }
 
@@ -508,7 +518,7 @@ export async function createVersionFromDraft(params: {
     orgId,
     createdBy: userId,
     zipBuffer,
-    manifest,
+    manifest: finalManifest,
   });
 }
 
