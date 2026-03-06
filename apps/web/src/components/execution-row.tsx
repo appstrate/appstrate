@@ -22,11 +22,6 @@ export function ExecutionRow({
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
   const inputPreview = execution.input ? truncate(JSON.stringify(execution.input), 60) : "";
 
-  const resultPreview =
-    execution.status === "success" && execution.result
-      ? truncate(JSON.stringify(execution.result), 80)
-      : "";
-
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -63,11 +58,6 @@ export function ExecutionRow({
         </span>
         {execution.scheduleId && <span className="tag">cron</span>}
       </div>
-      {resultPreview && (
-        <div className="exec-result-preview">
-          {t("exec.resultLabel")} {resultPreview}
-        </div>
-      )}
     </Link>
   );
 }
