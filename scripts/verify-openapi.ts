@@ -117,6 +117,7 @@ const expectedEndpoints = [
   "GET /api/packages/skills/{skillId}/versions/info",
   "POST /api/packages/skills/{skillId}/versions",
   "POST /api/packages/skills/{skillId}/versions/{version}/restore",
+  "DELETE /api/packages/skills/{skillId}/versions/{version}",
   "GET /api/packages/skills/{skillId}/versions/{version}",
 
   // Packages — Extensions
@@ -129,6 +130,7 @@ const expectedEndpoints = [
   "GET /api/packages/extensions/{extensionId}/versions/info",
   "POST /api/packages/extensions/{extensionId}/versions",
   "POST /api/packages/extensions/{extensionId}/versions/{version}/restore",
+  "DELETE /api/packages/extensions/{extensionId}/versions/{version}",
   "GET /api/packages/extensions/{extensionId}/versions/{version}",
 
   // Packages — Flows
@@ -140,6 +142,7 @@ const expectedEndpoints = [
   "GET /api/packages/flows/{flowId}/versions/info",
   "POST /api/packages/flows/{flowId}/versions",
   "POST /api/packages/flows/{flowId}/versions/{version}/restore",
+  "DELETE /api/packages/flows/{flowId}/versions/{version}",
   "GET /api/packages/flows/{flowId}/versions/{version}",
 
   // Organizations

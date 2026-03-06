@@ -415,6 +415,23 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
+    delete: {
+      operationId: "deleteSkillVersion",
+      tags: ["Packages"],
+      summary: "Delete a skill version",
+      description:
+        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Version deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
   },
   "/api/packages/skills/{skillId}": {
     get: {
@@ -798,6 +815,23 @@ export const packagesPaths = {
             },
           },
         },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteExtensionVersion",
+      tags: ["Packages"],
+      summary: "Delete an extension version",
+      description:
+        "Permanently delete an extension version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Version deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1230,6 +1264,37 @@ export const packagesPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteFlowVersion",
+      tags: ["Packages"],
+      summary: "Delete a flow version",
+      description:
+        "Permanently delete a flow version. Reassigns affected dist-tags to the next best stable version. Requires admin role. Blocked if executions are running.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Version deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Flow has running executions",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
       },
     },
   },

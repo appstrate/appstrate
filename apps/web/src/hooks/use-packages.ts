@@ -219,6 +219,22 @@ export function useCreateVersion(type: "flow" | "skill" | "extension", packageId
   });
 }
 
+export function useDeleteVersion(type: "flow" | "skill" | "extension", packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (version: string) =>
+      api<void>(`${packageBasePath(type, packageId)}/versions/${version}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["package-versions"] });
+      qc.invalidateQueries({ queryKey: ["version-detail"] });
+      qc.invalidateQueries({ queryKey: ["version-info"] });
+      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+    },
+  });
+}
+
 export function useRestoreVersion(type: "flow" | "skill" | "extension", packageId: string) {
   const qc = useQueryClient();
   return useMutation({

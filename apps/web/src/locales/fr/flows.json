@@ -260,6 +260,7 @@
   "version.noVersionInManifest": "Aucune version définie dans le manifest. Ajoutez un champ version dans l'éditeur.",
   "version.restore": "Restaurer",
   "version.restoreConfirm": "Restaurer la version {{version}} ? Le brouillon actuel sera écrasé.",
+  "version.deleteConfirm": "Supprimer définitivement la version {{version}} ? Cette action est irréversible.",
   "version.diff": "Diff",
   "version.noDiff": "Impossible de comparer les modifications. Créez une nouvelle version pour corriger.",
   "version.noVersions": "Aucune version créée",
