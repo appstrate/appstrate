@@ -39,6 +39,10 @@ mock.module("../package-items/storage.ts", () => ({
   deletePackageFiles: async () => {},
 }));
 
+mock.module("../package-items/dependencies.ts", () => ({
+  buildRegistryDependencies: async () => null,
+}));
+
 const {
   createPackageVersion,
   listPackageVersions,

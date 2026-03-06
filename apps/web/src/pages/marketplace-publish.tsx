@@ -34,13 +34,13 @@ function PublishItemCard({
 }) {
   const { t } = useTranslation(["settings", "flows"]);
   const { data: versions } = usePackageVersions(item.type, item.id);
-  const [selectedVersion, setSelectedVersion] = useState<string>("");
 
   // Filter out yanked versions, newest first (already sorted by API)
   const availableVersions = versions?.filter((v: VersionListItem) => !v.yanked) ?? [];
 
-  // Default value: empty string means "use draft version"
-  const effectiveVersion = selectedVersion || undefined;
+  // Default to the latest (first) version — draft publish is not supported
+  const [selectedVersion, setSelectedVersion] = useState<string>("");
+  const effectiveVersion = selectedVersion || availableVersions[0]?.version;
 
   return (
     <div className="service-card">
@@ -54,25 +54,27 @@ function PublishItemCard({
         </div>
       </div>
       <div className="service-card-actions">
-        {availableVersions.length > 0 && (
+        {availableVersions.length > 0 ? (
           <select
-            value={selectedVersion}
+            value={selectedVersion || availableVersions[0]?.version || ""}
             onChange={(e) => setSelectedVersion(e.target.value)}
             disabled={fetchingPlan}
           >
-            <option value="">
-              {item.version ? `v${item.version}` : t("marketplace.versionLabel")}
-            </option>
-            {availableVersions
-              .filter((v: VersionListItem) => v.version !== item.version)
-              .map((v: VersionListItem) => (
-                <option key={v.id} value={v.version}>
-                  v{v.version}
-                </option>
-              ))}
+            {availableVersions.map((v: VersionListItem) => (
+              <option key={v.id} value={v.version}>
+                v{v.version}
+              </option>
+            ))}
           </select>
+        ) : (
+          <span className="text-muted" style={{ fontSize: "0.8rem" }}>
+            {t("marketplace.noVersions")}
+          </span>
         )}
-        <button onClick={() => onPublish(item.id, effectiveVersion)} disabled={fetchingPlan}>
+        <button
+          onClick={() => onPublish(item.id, effectiveVersion)}
+          disabled={fetchingPlan || !effectiveVersion}
+        >
           {fetchingPlan ? <Spinner /> : t("publish.publish", { ns: "flows" })}
         </button>
       </div>
