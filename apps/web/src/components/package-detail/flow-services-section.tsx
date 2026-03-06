@@ -2,7 +2,17 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
+import { useFlowDetail } from "../../hooks/use-packages";
+import { useOrg } from "../../hooks/use-org";
+import {
+  useConnect,
+  useBindAdminService,
+  useUnbindAdminService,
+  useDisconnect,
+} from "../../hooks/use-mutations";
+import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
+import { useProviders } from "../../hooks/use-providers";
+import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { getServiceStatusDisplay, computeServicesSummary } from "../../lib/service-status";
 
 function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
@@ -22,22 +32,38 @@ function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
   );
 }
 
-export function FlowServicesSection() {
+export function FlowServicesSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
-  const ctx = useFlowDetailContext();
-  const {
-    detail,
-    isOrgAdmin,
-    connectMutation,
-    bindAdmin,
-    unbindAdmin,
-    disconnectMutation,
-    getServiceAuthMode,
-    isCredentialAuth,
-    setApiKeyService,
-    setCustomCredService,
-    pParam,
-  } = ctx;
+  const { isOrgAdmin } = useOrg();
+  const { data: detail } = useFlowDetail(packageId);
+  const profileId = useCurrentProfileId();
+  const pParam = profileIdParam(profileId);
+
+  const connectMutation = useConnect();
+  const bindAdmin = useBindAdminService(packageId);
+  const unbindAdmin = useUnbindAdminService(packageId);
+  const disconnectMutation = useDisconnect();
+
+  const { data: providers } = useProviders();
+  const setApiKeyService = useFlowDetailUI((s) => s.setApiKeyService);
+  const setCustomCredService = useFlowDetailUI((s) => s.setCustomCredService);
+
+  const getServiceAuthMode = (svc: { provider: string; authMode?: string }): string | undefined => {
+    if (svc.authMode) return svc.authMode;
+    const pDef = providers?.find((p) => p.id === svc.provider);
+    return pDef?.authMode === "api_key"
+      ? "API_KEY"
+      : pDef?.authMode === "oauth2"
+        ? "OAUTH2"
+        : undefined;
+  };
+
+  const isCredentialAuth = (provider: string): boolean => {
+    const pDef = providers?.find((p) => p.id === provider);
+    return !!pDef?.credentialSchema;
+  };
+
+  if (!detail) return null;
 
   const summary = computeServicesSummary(detail.requires.services, t);
 

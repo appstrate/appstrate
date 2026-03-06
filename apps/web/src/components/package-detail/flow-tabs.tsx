@@ -1,6 +1,17 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
+import { useFlowDetail } from "../../hooks/use-packages";
+import { useExecutions } from "../../hooks/use-executions";
+import { useFlowMemories } from "../../hooks/use-memories";
+import { useSchedules } from "../../hooks/use-schedules";
+import {
+  useDeleteFlowExecutions,
+  useDeleteMemory,
+  useDeleteAllMemories,
+} from "../../hooks/use-mutations";
+import { useProfiles } from "../../hooks/use-profiles";
+import { useFlowReadiness } from "../../hooks/use-flow-readiness";
+import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { ExecutionRow } from "../execution-row";
 import { ScheduleRow } from "../schedule-row";
 import { RunFlowButton } from "../run-flow-button";
@@ -8,25 +19,26 @@ import { EmptyState } from "../page-states";
 import { formatDateField } from "../../lib/markdown";
 
 export function FlowExecutionsTab({
+  packageId,
   isOrgAdmin,
   resolvedVersion,
 }: {
+  packageId: string;
   isOrgAdmin: boolean;
   resolvedVersion: string | undefined;
 }) {
   const { t } = useTranslation(["flows", "common"]);
-  const ctx = useFlowDetailContext();
-  const {
-    detail,
-    packageId,
-    executions,
-    profileMap,
-    deleteExecutions,
-    allConnected,
-    hasReconnectionNeeded,
-    hasRequiredConfig,
-  } = ctx;
+  const { data: detail } = useFlowDetail(packageId);
+  const { data: executions } = useExecutions(packageId);
+  const deleteExecutions = useDeleteFlowExecutions(packageId);
+  const profileMap = useProfiles(
+    (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
+  );
+  const readiness = useFlowReadiness(detail);
 
+  if (!detail) return null;
+
+  const { allConnected, hasReconnectionNeeded, hasRequiredConfig } = readiness;
   const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
 
   return (
@@ -77,10 +89,14 @@ export function FlowExecutionsTab({
   );
 }
 
-export function FlowSchedulesTab() {
+export function FlowSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
-  const ctx = useFlowDetailContext();
-  const { detail, schedules, setEditingSchedule, setScheduleOpen } = ctx;
+  const { data: detail } = useFlowDetail(packageId);
+  const { data: schedules } = useSchedules(packageId);
+  const setEditingSchedule = useFlowDetailUI((s) => s.setEditingSchedule);
+  const setScheduleOpen = useFlowDetailUI((s) => s.setScheduleOpen);
+
+  if (!detail) return null;
 
   const hasFileInput =
     detail.input?.schema?.properties &&
@@ -133,10 +149,17 @@ export function FlowSchedulesTab() {
   );
 }
 
-export function FlowMemoriesTab({ isOrgAdmin }: { isOrgAdmin: boolean }) {
+export function FlowMemoriesTab({
+  packageId,
+  isOrgAdmin,
+}: {
+  packageId: string;
+  isOrgAdmin: boolean;
+}) {
   const { t } = useTranslation(["flows", "common"]);
-  const ctx = useFlowDetailContext();
-  const { memories, deleteMemory, deleteAllMemories } = ctx;
+  const { data: memories } = useFlowMemories(packageId);
+  const deleteMemory = useDeleteMemory(packageId);
+  const deleteAllMemories = useDeleteAllMemories(packageId);
 
   return (
     <>
