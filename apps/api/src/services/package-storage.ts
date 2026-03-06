@@ -49,6 +49,20 @@ export async function downloadVersionZip(
   return Buffer.from(data);
 }
 
+/** Delete a versioned package ZIP from Storage. Swallows errors (best-effort cleanup). */
+export async function deleteVersionZip(packageId: string, version: string): Promise<void> {
+  const path = `${packageId}/${version}.zip`;
+  try {
+    await storage.deleteFile(BUCKET, path);
+  } catch (error) {
+    logger.warn("Failed to delete version ZIP (best-effort)", {
+      packageId,
+      version,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Upload a package ZIP to Storage. */
 export async function uploadPackageZip(
   packageId: string,

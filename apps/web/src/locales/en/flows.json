@@ -260,6 +260,7 @@
   "version.noVersionInManifest": "No version set in the manifest. Add a version field in the editor.",
   "version.restore": "Restore",
   "version.restoreConfirm": "Restore version {{version}}? The current draft will be overwritten.",
+  "version.deleteConfirm": "Permanently delete version {{version}}? This action cannot be undone.",
   "version.diff": "Diff",
   "version.noDiff": "Unable to compare changes. Create a new version to fix.",
   "version.noVersions": "No versions created",

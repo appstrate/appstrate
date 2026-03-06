@@ -17,6 +17,7 @@ export {
   getVersionDetail,
   getVersionCount,
   yankVersion,
+  deletePackageVersion,
   addDistTag,
   removeDistTag,
   getMatchingDistTags,

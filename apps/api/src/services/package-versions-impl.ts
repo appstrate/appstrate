@@ -2,7 +2,12 @@ import { eq, and, desc, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { uploadPackageZip, downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
+import {
+  uploadPackageZip,
+  downloadVersionZip,
+  deleteVersionZip,
+  unzipAndNormalize,
+} from "./package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
@@ -361,6 +366,61 @@ export async function yankVersion(
     }
   }
 
+  return true;
+}
+
+// ─────────────────────────────────────────────
+// Delete version
+// ─────────────────────────────────────────────
+
+/** Permanently delete a version. Reassigns dist-tags, then removes the DB row and storage artifact. */
+export async function deletePackageVersion(packageId: string, version: string): Promise<boolean> {
+  // Find the version row
+  const [row] = await db
+    .select({ id: packageVersions.id })
+    .from(packageVersions)
+    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+    .limit(1);
+
+  if (!row) return false;
+
+  // Reassign dist-tags that point to this version before deleting
+  const affectedTags = await db
+    .select({ tag: packageDistTags.tag })
+    .from(packageDistTags)
+    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, row.id)));
+
+  if (affectedTags.length > 0) {
+    // Candidates = all non-yanked versions EXCEPT the one being deleted
+    const candidates = await db
+      .select({ id: packageVersions.id, version: packageVersions.version })
+      .from(packageVersions)
+      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
+
+    const filteredCandidates = candidates.filter((c) => c.id !== row.id);
+    const instructions = planTagReassignment(affectedTags, filteredCandidates);
+
+    for (const instr of instructions) {
+      if (instr.action === "reassign") {
+        await db
+          .update(packageDistTags)
+          .set({ versionId: instr.newVersionId, updatedAt: new Date() })
+          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
+      } else {
+        await db
+          .delete(packageDistTags)
+          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
+      }
+    }
+  }
+
+  // Delete the version row (CASCADE removes packageVersionDependencies)
+  await db.delete(packageVersions).where(eq(packageVersions.id, row.id));
+
+  // Best-effort storage cleanup (outside transaction — don't fail if missing)
+  await deleteVersionZip(packageId, version);
+
+  logger.info("Deleted package version", { packageId, version });
   return true;
 }
 

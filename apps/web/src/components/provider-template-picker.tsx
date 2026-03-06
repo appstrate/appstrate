@@ -32,7 +32,12 @@ export function ProviderTemplatePicker({
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title={t("providers.templates.title")} className="sm:max-w-2xl">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={t("providers.templates.title")}
+      className="sm:max-w-2xl"
+    >
       <div className="relative mb-4">
         <Search
           size={14}
@@ -85,7 +90,9 @@ export function ProviderTemplatePicker({
             <div className="flex items-center justify-center h-8 w-8 rounded bg-muted text-muted-foreground">
               <Plus size={18} />
             </div>
-            <span className="font-medium text-sm text-center">{t("providers.templates.custom")}</span>
+            <span className="font-medium text-sm text-center">
+              {t("providers.templates.custom")}
+            </span>
           </Button>
         </div>
       )}

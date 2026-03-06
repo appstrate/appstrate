@@ -42,6 +42,7 @@ import {
   getLatestVersionCreatedAt,
   createVersionFromDraft,
   createVersionAndUpload,
+  deletePackageVersion,
 } from "../services/package-versions.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin } from "../middleware/guards.ts";
@@ -991,6 +992,44 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   };
 }
 
+function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
+  return async (c: Context<AppEnv>) => {
+    const itemId = getItemId(c);
+    const label = rcfg.cfg.label.slice(0, -1);
+
+    if (rcfg.cfg.isBuiltIn(itemId)) {
+      return c.json(
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        403,
+      );
+    }
+
+    if (rcfg.requireMutableForVersionOps) {
+      const running = await getRunningExecutionsForPackage(itemId);
+      if (running > 0) {
+        return c.json(
+          {
+            error: "FLOW_IN_USE",
+            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
+          },
+          409,
+        );
+      }
+    }
+
+    const versionQuery = c.req.param("version")!;
+    const deleted = await deletePackageVersion(itemId, versionQuery);
+    if (!deleted) {
+      return c.json(
+        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+        404,
+      );
+    }
+
+    return c.body(null, 204);
+  };
+}
+
 // ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
@@ -1015,6 +1054,11 @@ export function createPackagesRouter() {
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
       requireAdmin(),
       makeRestoreVersionHandler(rcfg),
+    );
+    router.delete(
+      `/${path}/:scope{@[^/]+}/:name/versions/:version`,
+      requireAdmin(),
+      makeDeleteVersionHandler(rcfg),
     );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
