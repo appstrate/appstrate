@@ -2,11 +2,15 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
+import { useFlowDetail } from "../../hooks/use-packages";
+import { useDeleteFlow } from "../../hooks/use-mutations";
+import { useFlowReadiness } from "../../hooks/use-flow-readiness";
+import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { ShareDropdown } from "../share-dropdown";
 import { RunFlowButton } from "../run-flow-button";
 
 export function FlowActions({
+  packageId,
   isOrgAdmin,
   isHistoricalVersion,
   hasDraftChanges,
@@ -15,6 +19,7 @@ export function FlowActions({
   downloadPackage,
   onCreateVersion,
 }: {
+  packageId: string;
   isOrgAdmin: boolean;
   isHistoricalVersion: boolean;
   hasDraftChanges: boolean;
@@ -24,17 +29,14 @@ export function FlowActions({
   onCreateVersion: () => void;
 }) {
   const { t } = useTranslation(["flows", "common"]);
-  const ctx = useFlowDetailContext();
-  const {
-    detail,
-    packageId,
-    deleteFlow,
-    allConnected,
-    hasReconnectionNeeded,
-    hasRequiredConfig,
-    hasConfigSchema,
-    setConfigOpen,
-  } = ctx;
+  const { data: detail } = useFlowDetail(packageId);
+  const deleteFlow = useDeleteFlow();
+  const setConfigOpen = useFlowDetailUI((s) => s.setConfigOpen);
+  const readiness = useFlowReadiness(detail);
+
+  if (!detail) return null;
+
+  const { allConnected, hasReconnectionNeeded, hasRequiredConfig, hasConfigSchema } = readiness;
 
   const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
   const runDisabledTitle = hasReconnectionNeeded

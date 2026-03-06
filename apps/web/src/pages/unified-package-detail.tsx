@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import type { FlowDetail } from "@appstrate/shared-types";
 import {
   useFlowDetail,
   usePackageDetail,
@@ -26,6 +25,7 @@ import { useOrg } from "../hooks/use-org";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
+import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
@@ -36,7 +36,6 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ProfileSelector } from "../components/profile-selector";
 
 // Flow-specific components
-import { FlowDetailProvider } from "../contexts/flow-detail-context";
 import { FlowServicesSection } from "../components/package-detail/flow-services-section";
 import { FlowActions } from "../components/package-detail/flow-actions";
 import {
@@ -108,6 +107,12 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   const packageId = `${scope}/${name}`;
   const { isOrgAdmin } = useOrg();
   const isVersionView = !!versionParam;
+  const resetUI = useFlowDetailUI((s) => s.reset);
+
+  // Reset modal state when leaving the page or switching packages
+  useEffect(() => {
+    return () => resetUI();
+  }, [packageId, resetUI]);
 
   // ── Data loading (type-specific) ──
   const flowQuery = useFlowDetail(type === "flow" ? packageId : undefined);
@@ -228,7 +233,6 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
   // ── Render ──
   const isBuiltIn = source === "built-in";
-  const flowForProvider = flowDetail as FlowDetail;
 
   // Determine available tabs based on type
   const flowTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
@@ -252,7 +256,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
   const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
 
-  const renderContent = () => (
+  return (
     <>
       <SharedHeader
         detail={unifiedForHeader}
@@ -267,11 +271,12 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       <VersionBanners isHistorical={isHistoricalVersion} versionDetail={versionDetail} />
 
       {/* Flow: Services section */}
-      {type === "flow" && <FlowServicesSection />}
+      {type === "flow" && <FlowServicesSection packageId={packageId} />}
 
       {/* Actions */}
       {type === "flow" ? (
         <FlowActions
+          packageId={packageId}
           isOrgAdmin={isOrgAdmin}
           isHistoricalVersion={isHistoricalVersion}
           hasDraftChanges={hasDraftChanges}
@@ -365,10 +370,16 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
       {/* Tab content */}
       {type === "flow" && tab === "executions" && (
-        <FlowExecutionsTab isOrgAdmin={isOrgAdmin} resolvedVersion={resolvedVersion} />
+        <FlowExecutionsTab
+          packageId={packageId}
+          isOrgAdmin={isOrgAdmin}
+          resolvedVersion={resolvedVersion}
+        />
       )}
-      {type === "flow" && tab === "schedules" && <FlowSchedulesTab />}
-      {type === "flow" && tab === "memories" && <FlowMemoriesTab isOrgAdmin={isOrgAdmin} />}
+      {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
+      {type === "flow" && tab === "memories" && (
+        <FlowMemoriesTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
+      )}
 
       {type !== "flow" && tab === "content" && pkgDetail && (
         <div className="rounded-lg border border-border bg-card p-4">
@@ -490,18 +501,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       />
 
       {/* Flow modals */}
-      {type === "flow" && <FlowModals />}
+      {type === "flow" && <FlowModals packageId={packageId} />}
     </>
   );
-
-  // Wrap flow pages with FlowDetailProvider
-  if (type === "flow" && flowDetail) {
-    return (
-      <FlowDetailProvider detail={flowForProvider} packageId={packageId} isOrgAdmin={isOrgAdmin}>
-        {renderContent()}
-      </FlowDetailProvider>
-    );
-  }
-
-  return renderContent();
 }

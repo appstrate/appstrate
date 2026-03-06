@@ -1,13 +1,33 @@
-import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
+import { useFlowDetail } from "../../hooks/use-packages";
+import {
+  useConnectApiKey,
+  useConnectCredentials,
+  useBindAdminService,
+} from "../../hooks/use-mutations";
+import { useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../../hooks/use-schedules";
+import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
+import { useProviders } from "../../hooks/use-providers";
+import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { ConfigModal } from "../config-modal";
 import { ScheduleModal } from "../schedule-modal";
 import { ApiKeyModal } from "../api-key-modal";
 import { CustomCredentialsModal } from "../custom-credentials-modal";
 
-export function FlowModals() {
-  const ctx = useFlowDetailContext();
+export function FlowModals({ packageId }: { packageId: string }) {
+  const { data: detail } = useFlowDetail(packageId);
+  const { data: providers } = useProviders();
+  const profileId = useCurrentProfileId();
+  const pParam = profileIdParam(profileId);
+
+  const apiKeyMutation = useConnectApiKey();
+  const credentialsMutation = useConnectCredentials();
+  const bindAdmin = useBindAdminService(packageId);
+  const createSchedule = useCreateSchedule(packageId);
+  const updateSchedule = useUpdateSchedule();
+  const deleteSchedule = useDeleteSchedule();
+
   const {
-    detail,
     configOpen,
     setConfigOpen,
     scheduleOpen,
@@ -18,15 +38,15 @@ export function FlowModals() {
     setApiKeyService,
     customCredService,
     setCustomCredService,
-    customCredSchema,
-    apiKeyMutation,
-    credentialsMutation,
-    createSchedule,
-    updateSchedule,
-    deleteSchedule,
-    bindAdmin,
-    pParam,
-  } = ctx;
+  } = useFlowDetailUI();
+
+  if (!detail) return null;
+
+  const customCredProviderDef = customCredService
+    ? providers?.find((p) => p.id === customCredService.provider)
+    : undefined;
+  const customCredSchema =
+    (customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined) ?? undefined;
 
   return (
     <>
