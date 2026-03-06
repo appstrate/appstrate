@@ -1,4 +1,4 @@
-import { useFlowDetailContext } from "../../contexts/flow-detail-context";
+import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ConfigModal } from "../config-modal";
 import { InputModal } from "../input-modal";
 import { ScheduleModal } from "../schedule-modal";

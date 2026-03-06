@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useFlowDetailContext } from "../../contexts/flow-detail-context";
+import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { getServiceStatusDisplay, computeServicesSummary } from "../../lib/service-status";
 
 function ServiceIcon({ status, t }: { status: string; t: TFunction }) {

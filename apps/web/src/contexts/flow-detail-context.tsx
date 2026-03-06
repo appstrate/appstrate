@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { FlowDetail, JSONSchemaObject, Schedule } from "@appstrate/shared-types";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import {
@@ -25,6 +25,9 @@ import { useFlowMemories } from "../hooks/use-memories";
 import { useProviders } from "../hooks/use-providers";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { useProfiles } from "../hooks/use-profiles";
+import { FlowDetailContext, type FlowDetailContextValue } from "./flow-detail-context-value";
+
+export type { FlowDetailContextValue };
 
 interface ApiKeyServiceState {
   provider: string;
@@ -37,71 +40,6 @@ interface CustomCredServiceState {
   id: string;
   name?: string;
   bindAfter?: boolean;
-}
-
-export interface FlowDetailContextValue {
-  // Data
-  detail: FlowDetail;
-  isOrgAdmin: boolean;
-  packageId: string;
-  executions: ReturnType<typeof useExecutions>["data"];
-  schedules: ReturnType<typeof useSchedules>["data"];
-  memories: ReturnType<typeof useFlowMemories>["data"];
-  providers: ReturnType<typeof useProviders>["data"];
-  orgProxies: ReturnType<typeof useProxies>["data"];
-  flowProxy: ReturnType<typeof useFlowProxy>["data"];
-  profileMap: Map<string, string | undefined>;
-  profileId: string | null;
-  pParam: ReturnType<typeof profileIdParam>;
-
-  // Mutations
-  runFlow: ReturnType<typeof useRunFlow>;
-  deleteFlow: ReturnType<typeof useDeleteFlow>;
-  deleteExecutions: ReturnType<typeof useDeleteFlowExecutions>;
-  connectMutation: ReturnType<typeof useConnect>;
-  apiKeyMutation: ReturnType<typeof useConnectApiKey>;
-  credentialsMutation: ReturnType<typeof useConnectCredentials>;
-  bindAdmin: ReturnType<typeof useBindAdminService>;
-  unbindAdmin: ReturnType<typeof useUnbindAdminService>;
-  disconnectMutation: ReturnType<typeof useDisconnect>;
-  createSchedule: ReturnType<typeof useCreateSchedule>;
-  updateSchedule: ReturnType<typeof useUpdateSchedule>;
-  deleteSchedule: ReturnType<typeof useDeleteSchedule>;
-  deleteMemory: ReturnType<typeof useDeleteMemory>;
-  deleteAllMemories: ReturnType<typeof useDeleteAllMemories>;
-  setFlowProxy: ReturnType<typeof useSetFlowProxy>;
-
-  // Modal states
-  configOpen: boolean;
-  setConfigOpen: (v: boolean) => void;
-  inputOpen: boolean;
-  setInputOpen: (v: boolean) => void;
-  scheduleOpen: boolean;
-  setScheduleOpen: (v: boolean) => void;
-  editingSchedule: Schedule | null;
-  setEditingSchedule: (s: Schedule | null) => void;
-  apiKeyService: ApiKeyServiceState | null;
-  setApiKeyService: (v: ApiKeyServiceState | null) => void;
-  customCredService: CustomCredServiceState | null;
-  setCustomCredService: (v: CustomCredServiceState | null) => void;
-
-  // Derived helpers
-  customCredSchema: JSONSchemaObject | undefined;
-  allConnected: boolean;
-  hasReconnectionNeeded: boolean;
-  hasRequiredConfig: boolean;
-  hasInputSchema: boolean;
-  hasConfigSchema: boolean;
-  getServiceAuthMode: (svc: { provider: string; authMode?: string }) => string | undefined;
-  isCredentialAuth: (provider: string) => boolean;
-}
-
-const FlowDetailContext = createContext<FlowDetailContextValue | null>(null);
-
-export function useFlowDetailContext(): FlowDetailContextValue {
-  const ctx = useContext(FlowDetailContext);
-  if (!ctx) throw new Error("useFlowDetailContext must be used within FlowDetailProvider");
-  return ctx;
 }
 
 function checkRequiredConfig(detail: {
