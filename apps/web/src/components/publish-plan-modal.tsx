@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { TypeBadge } from "./type-badge";
 import { Spinner } from "./spinner";
 import { api, ApiError } from "../api";
@@ -137,15 +138,16 @@ export function PublishPlanModal({
   };
 
   const statusClassName = (item: PublishPlanItem) => {
+    const base = "text-xs font-medium shrink-0";
     const s = statuses.get(item.packageId);
     if (s === "done" || s === "skipped" || item.status === "published")
-      return "publish-plan-status published";
+      return `${base} text-success`;
     if (s === "failed" || item.status === "no_version" || item.status === "version_behind")
-      return "publish-plan-status error";
-    if (s === "publishing") return "publish-plan-status publishing";
-    if (item.status === "unpublished") return "publish-plan-status unpublished";
-    if (item.status === "outdated") return "publish-plan-status outdated";
-    return "publish-plan-status";
+      return `${base} text-destructive`;
+    if (s === "publishing") return `${base} text-primary`;
+    if (item.status === "unpublished") return `${base} text-warning`;
+    if (item.status === "outdated") return `${base} text-warning`;
+    return `${base} text-muted-foreground`;
   };
 
   return (
@@ -155,12 +157,12 @@ export function PublishPlanModal({
       title={isSingleItem ? t("publishPlan.titleSingle") : t("publishPlan.title")}
       actions={
         <>
-          {!publishing && <button onClick={handleClose}>{t("common:cancel", "Annuler")}</button>}
-          <button
-            className="btn-primary"
-            onClick={handlePublishAll}
-            disabled={isBlocked || publishing}
-          >
+          {!publishing && (
+            <Button variant="outline" onClick={handleClose}>
+              {t("common:cancel", "Annuler")}
+            </Button>
+          )}
+          <Button onClick={handlePublishAll} disabled={isBlocked || publishing}>
             {publishing ? (
               <Spinner />
             ) : isSingleItem ? (
@@ -168,37 +170,40 @@ export function PublishPlanModal({
             ) : (
               t("publishPlan.publishAll")
             )}
-          </button>
+          </Button>
         </>
       }
     >
-      <p className="publish-plan-description">
+      <p className="text-sm text-muted-foreground mb-4">
         {isSingleItem ? t("publishPlan.descriptionSingle") : t("publishPlan.description")}
       </p>
 
       {circular && (
-        <div className="publish-plan-warning publish-plan-warning-error">
+        <div className="rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2 mb-3">
           {t("publishPlan.circularWarning")}
         </div>
       )}
 
       {hasNoVersion && !circular && (
-        <div className="publish-plan-warning publish-plan-warning-warn">
+        <div className="rounded-md bg-warning/15 text-warning text-sm px-3 py-2 mb-3">
           {t("publishPlan.noVersionWarning")}
         </div>
       )}
 
       {hasVersionBehind && !circular && (
-        <div className="publish-plan-warning publish-plan-warning-warn">
+        <div className="rounded-md bg-warning/15 text-warning text-sm px-3 py-2 mb-3">
           {t("publishPlan.versionBehindWarning")}
         </div>
       )}
 
-      <div className="publish-plan-list">
+      <div className="space-y-1">
         {items.map((item) => (
-          <div key={item.packageId} className="publish-plan-item">
-            <div className="publish-plan-item-info">
-              <span className="publish-plan-item-icon">
+          <div
+            key={item.packageId}
+            className="flex items-center justify-between gap-2 py-2 px-2 rounded-md hover:bg-accent/50"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-5 text-center shrink-0">
                 {statuses.get(item.packageId) === "publishing" ? (
                   <Spinner />
                 ) : (
@@ -206,10 +211,12 @@ export function PublishPlanModal({
                 )}
               </span>
               <TypeBadge type={item.type} />
-              <span className="publish-plan-item-name">{item.displayName}</span>
-              {item.version && <span className="publish-plan-item-version">v{item.version}</span>}
+              <span className="font-medium text-sm truncate">{item.displayName}</span>
+              {item.version && (
+                <span className="text-xs text-muted-foreground">v{item.version}</span>
+              )}
               {item.status === "version_behind" && item.lastPublishedVersion && (
-                <span className="publish-plan-item-behind">
+                <span className="text-xs text-warning">
                   {t("publishPlan.lastPublished", { version: item.lastPublishedVersion })}
                 </span>
               )}
@@ -219,7 +226,11 @@ export function PublishPlanModal({
         ))}
       </div>
 
-      {errorMessage && <div className="publish-plan-error">{errorMessage}</div>}
+      {errorMessage && (
+        <div className="rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2 mt-3">
+          {errorMessage}
+        </div>
+      )}
     </Modal>
   );
 }

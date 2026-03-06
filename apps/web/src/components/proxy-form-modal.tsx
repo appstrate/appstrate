@@ -1,7 +1,11 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useFormErrors } from "../hooks/use-form-errors";
 import type { OrgProxyInfo } from "@appstrate/shared-types";
 
@@ -64,19 +68,19 @@ function ProxyFormBody({
       title={title}
       actions={
         <>
-          <button type="button" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
-          </button>
-          <button className="primary" type="submit" form="proxy-form" disabled={isPending}>
+          </Button>
+          <Button type="submit" form="proxy-form" disabled={isPending}>
             {isPending ? <Spinner /> : t("btn.save")}
-          </button>
+          </Button>
         </>
       }
     >
-      <form id="proxy-form" onSubmit={handleSubmit} className="provider-form">
-        <div className="form-group">
-          <label htmlFor="px-label">{t("proxies.modal.label")}</label>
-          <input
+      <form id="proxy-form" onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="px-label">{t("proxies.modal.label")}</Label>
+          <Input
             id="px-label"
             type="text"
             value={label}
@@ -88,13 +92,13 @@ function ProxyFormBody({
             placeholder={t("proxies.modal.labelPlaceholder")}
             autoFocus
             aria-invalid={errors.label ? true : undefined}
-            className={errors.label ? "input-error" : undefined}
+            className={cn(errors.label && "border-destructive")}
           />
-          {errors.label && <div className="field-error">{errors.label}</div>}
+          {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
         </div>
-        <div className="form-group">
-          <label htmlFor="px-url">{t("proxies.modal.url")}</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="px-url">{t("proxies.modal.url")}</Label>
+          <Input
             id="px-url"
             type="text"
             value={url}
@@ -105,10 +109,12 @@ function ProxyFormBody({
             onBlur={() => onBlur("url", url)}
             placeholder={t("proxies.modal.urlPlaceholder")}
             aria-invalid={errors.url ? true : undefined}
-            className={errors.url ? "input-error" : undefined}
+            className={cn(errors.url && "border-destructive")}
           />
-          {proxy && <div className="hint">{t("proxies.modal.urlHint")}</div>}
-          {errors.url && <div className="field-error">{errors.url}</div>}
+          {proxy && (
+            <div className="text-sm text-muted-foreground">{t("proxies.modal.urlHint")}</div>
+          )}
+          {errors.url && <div className="text-sm text-destructive">{errors.url}</div>}
         </div>
       </form>
     </Modal>

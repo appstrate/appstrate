@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { refreshAuth } from "../hooks/use-auth";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
@@ -95,9 +96,9 @@ export function InviteAcceptPage() {
 
   if (loading) {
     return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="empty-state">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="flex items-center justify-center py-8">
             <Spinner />
           </div>
         </div>
@@ -107,47 +108,47 @@ export function InviteAcceptPage() {
 
   if (error && !info) {
     return (
-      <div className="login-page">
-        <div className="login-card">
-          <h1 className="login-title">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+          <h1 className="text-2xl font-bold text-center mb-2">
             <span>App</span>strate
           </h1>
-          <p className="form-error form-error-centered">{error}</p>
-          <button className="primary login-btn" onClick={() => navigate("/")}>
+          <p className="text-sm text-destructive text-center">{error}</p>
+          <Button className="w-full mt-4" onClick={() => navigate("/")}>
             {t("invite.goHome")}
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1 className="login-title">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+        <h1 className="text-2xl font-bold text-center mb-2">
           <span>App</span>strate
         </h1>
-        <p className="auth-subtitle">
+        <p className="text-center text-sm text-muted-foreground mb-6">
           {t("invite.description", {
             inviter: info?.inviterName,
             org: info?.orgName,
           })}
         </p>
 
-        <div className="invite-info-card">
-          <div className="invite-info-label">{t("invite.emailLabel")}</div>
-          <div className="invite-info-value">{info?.email}</div>
-          <div className="invite-info-label invite-info-label-spaced">{t("invite.roleLabel")}</div>
-          <div className="invite-info-value">
+        <div className="rounded-lg border border-border bg-muted/50 p-4 mb-4">
+          <div className="text-xs text-muted-foreground">{t("invite.emailLabel")}</div>
+          <div className="text-sm font-medium">{info?.email}</div>
+          <div className="text-xs text-muted-foreground mt-2">{t("invite.roleLabel")}</div>
+          <div className="text-sm font-medium">
             {info?.role === "admin" ? t("orgSettings.roleAdmin") : t("orgSettings.roleMember")}
           </div>
         </div>
 
-        {error && <p className="form-error form-error-spaced">{error}</p>}
+        {error && <p className="text-sm text-destructive mt-2">{error}</p>}
 
-        <button className="primary login-btn" onClick={handleAccept} disabled={accepting}>
+        <Button className="w-full mt-4" onClick={handleAccept} disabled={accepting}>
           {accepting ? <Spinner /> : t("invite.accept")}
-        </button>
+        </Button>
       </div>
     </div>
   );

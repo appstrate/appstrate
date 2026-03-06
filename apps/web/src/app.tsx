@@ -1,4 +1,3 @@
-import { useState, useRef, useCallback } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PackageList } from "./pages/package-list";
@@ -29,9 +28,18 @@ import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
-import { useClickOutside } from "./hooks/use-click-outside";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download, FileText, LogOut, Store } from "lucide-react";
+import { User, Settings, Download, FileText, LogOut, ShoppingBag } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/toaster";
 
 function UserMenu({
   displayName,
@@ -43,56 +51,63 @@ function UserMenu({
   onLogout: () => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useClickOutside(ref, open, close);
 
   return (
-    <div className="user-menu" ref={ref}>
-      <button
-        className="user-menu-trigger"
-        onClick={() => setOpen(!open)}
-        aria-label={t("userMenu.ariaLabel")}
-      >
-        <User size={18} />
-      </button>
-      {open && (
-        <div className="user-menu-dropdown">
-          <div className="user-menu-info">
-            <span className="user-menu-name">{displayName}</span>
-            {isAdmin && <span className="admin-badge">{t("admin")}</span>}
-          </div>
-          <Link to="/preferences" className="user-menu-item" onClick={() => setOpen(false)}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-muted-foreground hover:text-foreground"
+          aria-label={t("userMenu.ariaLabel")}
+        >
+          <User size={18} className="shrink-0" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel className="flex items-center gap-2">
+          <span>{displayName}</span>
+          {isAdmin && (
+            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium uppercase">
+              {t("admin")}
+            </span>
+          )}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/preferences" className="flex items-center gap-2">
             <Settings size={14} />
             {t("userMenu.preferences")}
           </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <a
             href="/api/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="user-menu-item"
-            onClick={() => setOpen(false)}
+            className="flex items-center gap-2"
           >
             <FileText size={14} />
             {t("userMenu.apiDocs")}
           </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <a
             href="/assets/appstrate-api-guide.zip"
             download="appstrate-api-guide.zip"
-            className="user-menu-item"
-            onClick={() => setOpen(false)}
+            className="flex items-center gap-2"
           >
             <Download size={14} />
             {t("nav.downloadSkill")}
           </a>
-          <button className="user-menu-logout" onClick={onLogout}>
-            <LogOut size={14} />
-            {t("userMenu.logout")}
-          </button>
-        </div>
-      )}
-    </div>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onLogout} className="flex items-center gap-2">
+          <LogOut size={14} />
+          {t("userMenu.logout")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -107,13 +122,17 @@ function MainLayout() {
   };
 
   return (
-    <div className="container">
-      <header>
-        <Link to="/" className="logo-link">
-          <img src="/logo.svg" alt="Appstrate" className="app-logo" />
+    <div className="mx-auto max-w-3xl px-6 py-8">
+      <header className="flex items-center gap-2 mb-8 pb-4 border-b border-border">
+        <Link to="/" className="flex items-center shrink-0">
+          <img src="/logo.svg" alt="Appstrate" className="h-[34px] w-auto" />
         </Link>
-        <Link to="/marketplace" className="nav-icon-link" title="Marketplace">
-          <Store size={18} />
+        <Link
+          to="/marketplace"
+          className="ml-auto inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          title="Marketplace"
+        >
+          <ShoppingBag size={18} />
         </Link>
         <NotificationBell />
         <OrgSwitcher />
@@ -145,8 +164,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="container">
-        <div className="empty-state">
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Spinner />
         </div>
       </div>
@@ -161,8 +180,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   // Orgs exist but none selected yet (auto-select happening)
   if (!currentOrg) {
     return (
-      <div className="container">
-        <div className="empty-state">
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Spinner />
         </div>
       </div>
@@ -200,8 +219,8 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="container">
-        <div className="empty-state">
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Spinner />
         </div>
       </div>
@@ -214,6 +233,7 @@ export function App() {
 
   return (
     <ErrorBoundary>
+      <Toaster />
       <OrgGate>
         <GlobalRealtimeSync>
           <Routes>
@@ -264,7 +284,7 @@ export function App() {
                 path="/extensions/:scope/:name/:version"
                 element={<UnifiedPackageDetailPage type="extension" />}
               />
-              <Route path="/library" element={<Navigate to="/?tab=skills" replace />} />
+              <Route path="/library" element={<Navigate to="/#skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
               <Route path="/marketplace/publish" element={<MarketplacePublishPage />} />

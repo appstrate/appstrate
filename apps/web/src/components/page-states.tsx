@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function LoadingState() {
   return (
-    <div className="empty-state">
-      <Spinner />
+    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+      <Spinner className="h-6 w-6" />
     </div>
   );
 }
@@ -13,9 +14,9 @@ export function LoadingState() {
 export function ErrorState({ message }: { message?: string }) {
   const { t } = useTranslation();
   return (
-    <div className="empty-state">
+    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <p>{t("error.generic")}</p>
-      {message && <p className="empty-hint">{message}</p>}
+      {message && <p className="mt-1 text-sm">{message}</p>}
     </div>
   );
 }
@@ -34,20 +35,25 @@ export function EmptyState({
   children?: React.ReactNode;
 }) {
   return (
-    <div className={`empty-state${compact ? " empty-state-compact" : ""}`}>
-      {Icon && <Icon className="empty-state-icon" />}
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center text-muted-foreground",
+        compact ? "py-8" : "py-16",
+      )}
+    >
+      {Icon && <Icon className="mb-3 h-10 w-10 opacity-40" />}
       {compact ? (
         <>
-          <p className="empty-hint">{message}</p>
-          {hint && <p className="empty-hint">{hint}</p>}
+          <p className="text-sm">{message}</p>
+          {hint && <p className="mt-1 text-sm">{hint}</p>}
         </>
       ) : (
         <>
           <p>{message}</p>
-          {hint && <p className="empty-hint">{hint}</p>}
+          {hint && <p className="mt-1 text-sm">{hint}</p>}
         </>
       )}
-      {children && <div className="empty-state-actions">{children}</div>}
+      {children && <div className="mt-4">{children}</div>}
     </div>
   );
 }

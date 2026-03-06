@@ -1,7 +1,18 @@
 import { useState, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import { useFormErrors } from "../hooks/use-form-errors";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { InputFields } from "./input-fields";
 import { initInputValues, buildInputPayload } from "./input-utils";
 import type { JSONSchemaObject, Schedule } from "@appstrate/shared-types";
@@ -74,9 +85,11 @@ export function ScheduleModal({
           {flowPicker}
           {blockedMessage ? (
             <>
-              <p className="hint">{blockedMessage}</p>
-              <div className="modal-actions">
-                <button onClick={onClose}>{t("btn.cancel")}</button>
+              <p className="text-sm text-muted-foreground">{blockedMessage}</p>
+              <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+                <Button variant="outline" onClick={onClose}>
+                  {t("btn.cancel")}
+                </Button>
               </div>
             </>
           ) : (
@@ -156,9 +169,9 @@ function ScheduleForm({
 
   return (
     <>
-      <div className="form-group">
-        <label htmlFor="sched-name">{t("schedule.name")}</label>
-        <input
+      <div className="space-y-2">
+        <Label htmlFor="sched-name">{t("schedule.name")}</Label>
+        <Input
           id="sched-name"
           type="text"
           value={name}
@@ -167,28 +180,35 @@ function ScheduleForm({
         />
       </div>
 
-      <div className="form-group">
-        <label>{t("schedule.frequency")}</label>
-        <div className="cron-presets">
+      <div className="space-y-2">
+        <Label>{t("schedule.frequency")}</Label>
+        <div className="flex flex-wrap gap-1 mt-2">
           {cronPresets.map((p) => (
-            <button
+            <Button
               key={p.cron}
               type="button"
-              className={`cron-preset ${cronExpression === p.cron ? "active" : ""}`}
+              variant="outline"
+              size="sm"
+              className={cn(
+                "text-xs",
+                cronExpression === p.cron
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "text-muted-foreground",
+              )}
               onClick={() => {
                 setCronExpression(p.cron);
                 clearField("cronExpression");
               }}
             >
               {p.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      <div className="form-group">
-        <label htmlFor="sched-cron">{t("schedule.cronLabel")}</label>
-        <input
+      <div className="space-y-2">
+        <Label htmlFor="sched-cron">{t("schedule.cronLabel")}</Label>
+        <Input
           id="sched-cron"
           type="text"
           value={cronExpression}
@@ -198,39 +218,48 @@ function ScheduleForm({
           }}
           placeholder="*/30 * * * *"
           aria-invalid={errors.cronExpression ? true : undefined}
-          className={errors.cronExpression ? "input-error" : undefined}
+          className={cn(errors.cronExpression && "border-destructive")}
         />
-        <div className="hint">{t("schedule.cronHint")}</div>
-        {errors.cronExpression && <div className="field-error">{errors.cronExpression}</div>}
+        <div className="text-sm text-muted-foreground">{t("schedule.cronHint")}</div>
+        {errors.cronExpression && (
+          <div className="text-sm text-destructive">{errors.cronExpression}</div>
+        )}
       </div>
 
-      <div className="form-group">
-        <label htmlFor="sched-tz">{t("schedule.timezone")}</label>
-        <select id="sched-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-          {TIMEZONES.map((tz) => (
-            <option key={tz} value={tz}>
-              {tz}
-            </option>
-          ))}
-        </select>
+      <div className="space-y-2">
+        <Label htmlFor="sched-tz">{t("schedule.timezone")}</Label>
+        <Select value={timezone} onValueChange={setTimezone}>
+          <SelectTrigger id="sched-tz">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TIMEZONES.map((tz) => (
+              <SelectItem key={tz} value={tz}>
+                {tz}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {schedule && (
-        <div className="form-group">
-          <label className="toggle-label">
+        <div className="space-y-2">
+          <Label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
             {t("schedule.enabled")}
-          </label>
+          </Label>
         </div>
       )}
 
       {hasInputSchema && (
         <>
-          <div className="schedule-input-title">{t("schedule.inputTitle")}</div>
+          <div className="text-sm font-medium text-muted-foreground mt-4 mb-2">
+            {t("schedule.inputTitle")}
+          </div>
           <InputFields
             schema={schema}
             values={inputValues}
@@ -240,27 +269,36 @@ function ScheduleForm({
         </>
       )}
 
-      <div className="modal-actions">
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
         {schedule && onDelete && (
-          <div className="modal-actions-left">
+          <div className="flex gap-2 mr-auto">
             {confirmDelete ? (
               <>
-                <button className="btn-danger" onClick={onDelete}>
+                <Button variant="destructive" size="sm" onClick={onDelete}>
                   {t("btn.confirm")}
-                </button>
-                <button onClick={() => setConfirmDelete(false)}>{t("btn.cancel")}</button>
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
+                  {t("btn.cancel")}
+                </Button>
               </>
             ) : (
-              <button className="btn-danger" onClick={() => setConfirmDelete(true)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive/80"
+                onClick={() => setConfirmDelete(true)}
+              >
                 {t("btn.delete")}
-              </button>
+              </Button>
             )}
           </div>
         )}
-        <button onClick={onClose}>{t("btn.cancel")}</button>
-        <button className="primary" onClick={handleSubmit} disabled={isPending}>
+        <Button variant="outline" onClick={onClose}>
+          {t("btn.cancel")}
+        </Button>
+        <Button onClick={handleSubmit} disabled={isPending}>
           {schedule ? t("btn.save") : t("btn.create")}
-        </button>
+        </Button>
       </div>
     </>
   );

@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Badge } from "./badge";
+import { Badge as UIBadge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { formatDateField, truncate } from "../lib/markdown";
 import type { Execution } from "@appstrate/shared-types";
 
@@ -38,25 +40,40 @@ export function ExecutionRow({
 
   return (
     <Link
-      className={`exec-row${isUnread ? " unread" : ""}`}
+      className={cn(
+        "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
+        isUnread && "border-l-2 border-l-primary",
+      )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber }}
     >
-      <div className="exec-row-main">
-        {executionNumber != null && <span className="exec-number">#{executionNumber}</span>}
-        {flowName && <span className="exec-flow-name">{flowName}</span>}
-        <Badge status={execution.status} />
-        {userName && <span className="exec-user">{t("exec.user", { name: userName })}</span>}
-        <span className="exec-date">{date}</span>
-        {duration && <span className="exec-duration">{duration}</span>}
-        {execution.tokensUsed != null && (
-          <span className="exec-tokens">{execution.tokensUsed.toLocaleString()} tok</span>
+      <div className="flex flex-1 items-center gap-2 min-w-0">
+        {executionNumber != null && (
+          <span className="text-muted-foreground font-mono text-xs">#{executionNumber}</span>
         )}
-        {inputPreview && <span className="exec-input-preview">{inputPreview}</span>}
-        <span className={`tag${execution.packageVersion ? "" : " draft"}`}>
+        {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
+        <Badge status={execution.status} />
+        {userName && (
+          <span className="text-muted-foreground text-xs">
+            {t("exec.user", { name: userName })}
+          </span>
+        )}
+        <span className="text-muted-foreground text-xs">{date}</span>
+        {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
+        {execution.tokensUsed != null && (
+          <span className="text-muted-foreground text-xs">
+            {execution.tokensUsed.toLocaleString()} tok
+          </span>
+        )}
+        {inputPreview && (
+          <span className="text-muted-foreground text-xs truncate max-w-[200px]">
+            {inputPreview}
+          </span>
+        )}
+        <UIBadge variant={execution.packageVersion ? "outline" : "secondary"}>
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
-        </span>
-        {execution.scheduleId && <span className="tag">cron</span>}
+        </UIBadge>
+        {execution.scheduleId && <UIBadge variant="secondary">cron</UIBadge>}
       </div>
     </Link>
   );

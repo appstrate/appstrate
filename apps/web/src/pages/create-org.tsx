@@ -2,6 +2,10 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
 import { toSlug, toLiveSlug } from "../lib/strings";
@@ -72,13 +76,13 @@ export function CreateOrgPage() {
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1 className="login-title">{t("createOrg.title")}</h1>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+        <h1 className="text-2xl font-bold text-center mb-2">{t("createOrg.title")}</h1>
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="org-name">{t("createOrg.name")}</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="org-name">{t("createOrg.name")}</Label>
+            <Input
               id="org-name"
               type="text"
               value={name}
@@ -88,13 +92,13 @@ export function CreateOrgPage() {
               autoFocus
               autoComplete="organization"
               aria-invalid={errors.name ? true : undefined}
-              className={errors.name ? "input-error" : undefined}
+              className={cn(errors.name && "border-destructive")}
             />
-            {errors.name && <div className="field-error">{errors.name}</div>}
+            {errors.name && <div className="text-sm text-destructive">{errors.name}</div>}
           </div>
-          <div className="form-group">
-            <label htmlFor="org-slug">{t("createOrg.slug")}</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="org-slug">{t("createOrg.slug")}</Label>
+            <Input
               id="org-slug"
               type="text"
               value={slug}
@@ -109,21 +113,26 @@ export function CreateOrgPage() {
               }}
               placeholder={t("createOrg.slugPlaceholder")}
               aria-invalid={errors.slug ? true : undefined}
-              className={errors.slug ? "input-error" : undefined}
+              className={cn(errors.slug && "border-destructive")}
             />
-            <div className="hint">{t("createOrg.slugHint")}</div>
-            {errors.slug && <div className="field-error">{errors.slug}</div>}
+            <div className="text-sm text-muted-foreground">{t("createOrg.slugHint")}</div>
+            {errors.slug && <div className="text-sm text-destructive">{errors.slug}</div>}
           </div>
-          {serverError && <p className="form-error">{serverError}</p>}
-          <button className="primary login-btn" type="submit" disabled={createMutation.isPending}>
+          {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+          <Button className="w-full mt-4" type="submit" disabled={createMutation.isPending}>
             {createMutation.isPending ? t("createOrg.creating") : t("createOrg.submit")}
-          </button>
+          </Button>
         </form>
         {orgs.length > 0 && (
-          <p className="login-switch">
-            <button type="button" className="link-btn" onClick={() => navigate("/")}>
+          <p className="text-center text-sm text-muted-foreground mt-4">
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto p-0 text-sm"
+              onClick={() => navigate("/")}
+            >
               {t("btn.back")}
-            </button>
+            </Button>
           </p>
         )}
       </div>

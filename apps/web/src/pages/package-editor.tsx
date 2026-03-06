@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useFlowDetail, usePackageDetail, type PackageType } from "../hooks/use-packages";
 import {
   useCreateFlow,
@@ -130,35 +132,47 @@ function FlowEditorInner({
   ];
 
   return (
-    <div className="flow-editor">
-      <nav className="breadcrumb">
-        <Link to="/">{t("detail.breadcrumb")}</Link>
-        <span className="separator">/</span>
+    <div className="space-y-4">
+      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
+        <Link to="/" className="text-muted-foreground hover:text-foreground">
+          {t("detail.breadcrumb")}
+        </Link>
+        <span className="opacity-50">/</span>
         {isEdit && detail ? (
           <>
-            <Link to={`/flows/${packageId}`}>{form.metadata.displayName || packageId}</Link>
-            <span className="separator">/</span>
-            <span className="current">{t("editor.breadcrumbEdit")}</span>
+            <Link
+              to={`/flows/${packageId}`}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              {form.metadata.displayName || packageId}
+            </Link>
+            <span className="opacity-50">/</span>
+            <span>{t("editor.breadcrumbEdit")}</span>
           </>
         ) : (
-          <span className="current">{t("editor.breadcrumbNew")}</span>
+          <span>{t("editor.breadcrumbNew")}</span>
         )}
       </nav>
 
-      {error && <div className="editor-error">{error}</div>}
+      {error && (
+        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
+          {error}
+        </div>
+      )}
 
-      <div className="exec-tabs">
-        {flowTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`tab${activeTab === tab.id ? " active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as GenericEditorTab)}
+        className="mb-4"
+      >
+        <TabsList className="overflow-x-auto">
+          {flowTabs.map((tab) => (
+            <TabsTrigger key={tab.id} value={tab.id}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {activeTab === "general" && (
         <>
@@ -228,13 +242,17 @@ function FlowEditorInner({
       {activeTab === "json" && <JsonEditor form={form} onApply={handleJsonApply} />}
 
       {activeTab !== "json" && (
-        <div className="editor-actions">
-          <button type="button" onClick={() => navigate(isEdit ? `/flows/${packageId}` : "/")}>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+          <Button
+            variant="outline"
+            type="button"
+            onClick={() => navigate(isEdit ? `/flows/${packageId}` : "/")}
+          >
             {t("btn.cancel")}
-          </button>
-          <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
+          </Button>
+          <Button type="button" onClick={handleSubmit} disabled={isPending}>
             {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -304,35 +322,47 @@ function PackageEditorInner({
   const language = type === "skill" ? "markdown" : "typescript";
 
   return (
-    <div className="flow-editor">
-      <nav className="breadcrumb">
-        <Link to={`/?tab=${typePath}`}>{t(`packages.type.${typePath}`, { ns: "settings" })}</Link>
-        <span className="separator">/</span>
+    <div className="space-y-4">
+      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
+        <Link to={`/#${typePath}`} className="text-muted-foreground hover:text-foreground">
+          {t(`packages.type.${typePath}`, { ns: "settings" })}
+        </Link>
+        <span className="opacity-50">/</span>
         {isEdit && packageId ? (
           <>
-            <Link to={`/${typePath}/${packageId}`}>{form.metadata.displayName || packageId}</Link>
-            <span className="separator">/</span>
-            <span className="current">{t("editor.breadcrumbEdit")}</span>
+            <Link
+              to={`/${typePath}/${packageId}`}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              {form.metadata.displayName || packageId}
+            </Link>
+            <span className="opacity-50">/</span>
+            <span>{t("editor.breadcrumbEdit")}</span>
           </>
         ) : (
-          <span className="current">{t("editor.breadcrumbNew")}</span>
+          <span>{t("editor.breadcrumbNew")}</span>
         )}
       </nav>
 
-      {error && <div className="editor-error">{error}</div>}
+      {error && (
+        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
+          {error}
+        </div>
+      )}
 
-      <div className="exec-tabs">
-        {pkgTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`tab${activeTab === tab.id ? " active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as GenericEditorTab)}
+        className="mb-4"
+      >
+        <TabsList className="overflow-x-auto">
+          {pkgTabs.map((tab) => (
+            <TabsTrigger key={tab.id} value={tab.id}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {activeTab === "general" && (
         <MetadataSection
@@ -351,22 +381,25 @@ function PackageEditorInner({
       )}
 
       {activeTab === "json" && (
-        <div className="prompt-editor-wrapper">
-          <pre className="state-json">{JSON.stringify(form, null, 2)}</pre>
+        <div className="rounded-lg border border-border overflow-hidden my-4">
+          <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-card">
+            {JSON.stringify(form, null, 2)}
+          </pre>
         </div>
       )}
 
       {activeTab !== "json" && (
-        <div className="editor-actions">
-          <button
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+          <Button
+            variant="outline"
             type="button"
-            onClick={() => navigate(isEdit ? `/${typePath}/${packageId}` : `/?tab=${typePath}`)}
+            onClick={() => navigate(isEdit ? `/${typePath}/${packageId}` : `/#${typePath}`)}
           >
             {t("btn.cancel")}
-          </button>
-          <button type="button" className="primary" onClick={handleSubmit} disabled={isPending}>
+          </Button>
+          <Button type="button" onClick={handleSubmit} disabled={isPending}>
             {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -398,7 +431,7 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
     return (
       <EmptyState message={t("editor.adminOnly")} icon={ShieldAlert}>
         <Link to="/">
-          <button>{t("btn.back")}</button>
+          <Button variant="outline">{t("btn.back")}</Button>
         </Link>
       </EmptyState>
     );
@@ -406,7 +439,7 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
 
   if (isEdit && isLoading) {
     return (
-      <div className="empty-state">
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <Spinner />
       </div>
     );

@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   useRegistryStatus,
   useRegistryConnect,
@@ -20,12 +23,21 @@ function StatusBadge({ status }: { status: "connected" | "expired" | "disconnect
     expired: t("registry.statusExpired"),
     disconnected: t("registry.statusDisconnected"),
   };
-  const classes: Record<string, string> = {
-    connected: "badge badge-success",
-    expired: "badge badge-warning",
-    disconnected: "badge badge-muted",
+  const colors: Record<string, string> = {
+    connected: "bg-success/10 text-success border-success/20",
+    expired: "bg-warning/10 text-warning border-warning/20",
+    disconnected: "bg-muted text-muted-foreground border-border",
   };
-  return <span className={classes[status]}>{labels[status]}</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
+        colors[status],
+      )}
+    >
+      {labels[status]}
+    </span>
+  );
 }
 
 export function MarketplaceConnectionPage() {
@@ -68,7 +80,7 @@ export function MarketplaceConnectionPage() {
 
   if (statusLoading) {
     return (
-      <div className="marketplace-page">
+      <div className="max-w-[900px]">
         <LoadingState />
       </div>
     );
@@ -81,86 +93,95 @@ export function MarketplaceConnectionPage() {
     : "disconnected";
 
   return (
-    <div className="marketplace-page">
-      <Link to="/marketplace" className="breadcrumb">
+    <div className="max-w-[900px]">
+      <Link
+        to="/marketplace"
+        className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4 hover:text-foreground"
+      >
         <ArrowLeft size={14} />
         <span>{t("marketplace.backToMarketplace")}</span>
       </Link>
 
-      <div className="page-header">
-        <h2>{t("marketplace.connectionTitle")}</h2>
-        <p className="description">{t("marketplace.connectionDesc")}</p>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold">{t("marketplace.connectionTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("marketplace.connectionDesc")}</p>
+        </div>
       </div>
 
       {!status || !status.connected ? (
         <>
-          <div className="service-card service-card-spaced">
-            <div className="connectors-intro">
-              <p className="service-provider">{t("registry.description")}</p>
-            </div>
+          <div className="rounded-lg border border-border bg-card p-4 mb-4">
+            <p className="text-sm text-muted-foreground">{t("registry.description")}</p>
           </div>
-          <div className="tab-toolbar">
+          <div className="flex items-center gap-2">
             <StatusBadge status={connectionStatus} />
-            <button
-              className="primary"
-              onClick={() => connectMutation.mutate()}
-              disabled={connectMutation.isPending}
-            >
+            <Button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>
               {connectMutation.isPending ? <Spinner /> : t("registry.connect")}
-            </button>
+            </Button>
           </div>
         </>
       ) : (
         <>
-          <div className="service-card service-card-spaced">
-            <div className="service-card-header">
-              <div className="service-info">
-                <h3>{status.username}</h3>
-                <span className="service-provider">
+          <div className="rounded-lg border border-border bg-card p-4 mb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">{status.username}</h3>
+                <div className="flex items-center gap-2 mt-1">
                   <StatusBadge status={connectionStatus} />
                   {status.expiresAt && (
-                    <span style={{ marginLeft: "0.5rem" }}>
+                    <span className="text-xs text-muted-foreground">
                       {t("registry.expiresAt", {
                         date: new Date(status.expiresAt).toLocaleDateString(),
                       })}
                     </span>
                   )}
-                </span>
+                </div>
               </div>
-              <div className="service-card-actions">
-                <button onClick={handleTestConnection} disabled={testing} className="btn-sm">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestConnection}
+                  disabled={testing}
+                >
                   {testing ? <Spinner /> : <RefreshCw size={14} />}
                   {t("registry.testConnection")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => disconnectMutation.mutate()}
                   disabled={disconnectMutation.isPending}
                 >
                   {t("registry.disconnect")}
-                </button>
+                </Button>
               </div>
             </div>
             {testResult && (
               <div
-                className={`toast ${testResult === "success" ? "toast-success" : "toast-error"}`}
+                className={cn(
+                  "mt-3 rounded-md px-3 py-2 text-sm",
+                  testResult === "success"
+                    ? "bg-success/10 text-success"
+                    : "bg-destructive/10 text-destructive",
+                )}
               >
                 {testResult === "success" ? t("registry.testSuccess") : t("registry.testFailed")}
               </div>
             )}
           </div>
 
-          <div className="section-title section-title-mt">{t("registry.scopes")}</div>
+          <div className="text-sm font-medium text-muted-foreground mb-4 mt-6">
+            {t("registry.scopes")}
+          </div>
           {scopesLoading ? (
             <LoadingState />
           ) : scopes && scopes.length > 0 ? (
-            <div className="services-grid">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {scopes.map((s) => (
-                <div key={s.name} className="service-card">
-                  <div className="service-card-header service-card-header-flush">
-                    <div className="service-info service-info-sm">
-                      <h3>{s.name}</h3>
-                    </div>
-                  </div>
+                <div key={s.name} className="rounded-lg border border-border bg-card px-4 py-3">
+                  <h3 className="text-sm font-semibold">{s.name}</h3>
                 </div>
               ))}
             </div>
@@ -168,25 +189,22 @@ export function MarketplaceConnectionPage() {
             <EmptyState message={t("registry.noScopes")} compact />
           )}
 
-          <div className="service-card service-card-spaced">
-            <form onSubmit={handleClaimScope} className="form-compact form-inline">
-              <input
+          <div className="rounded-lg border border-border bg-card p-4 mt-4">
+            <form onSubmit={handleClaimScope} className="flex items-center gap-2">
+              <Input
                 type="text"
                 value={newScopeName}
                 onChange={(e) => setNewScopeName(e.target.value)}
                 placeholder={t("registry.scopeName")}
+                className="flex-1"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newScopeName.trim() && !claimScopeMutation.isPending)
                     handleClaimScope(e);
                 }}
               />
-              <button
-                className="primary"
-                type="submit"
-                disabled={claimScopeMutation.isPending || !newScopeName.trim()}
-              >
+              <Button type="submit" disabled={claimScopeMutation.isPending || !newScopeName.trim()}>
                 {claimScopeMutation.isPending ? <Spinner /> : t("registry.createScope")}
-              </button>
+              </Button>
             </form>
           </div>
         </>

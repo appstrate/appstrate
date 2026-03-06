@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { useCreateProvider } from "../hooks/use-mutations";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ExternalLink, Copy, Check } from "lucide-react";
 import type { ProviderTemplate } from "@appstrate/shared-types";
 
@@ -77,21 +80,21 @@ function ProviderTemplateFormBody({
       title={t("providers.templates.form.title", { name: template.displayName })}
     >
       <form onSubmit={handleSubmit}>
-        <div className="template-form-layout">
+        <div className="space-y-4">
           {/* Setup Guide */}
-          <div className="setup-guide">
-            <h4 className="setup-guide-title">{t("providers.templates.form.setupGuide")}</h4>
-            <ol className="setup-guide-steps">
+          <div className="rounded-lg bg-muted/50 p-4">
+            <h4 className="font-medium text-sm mb-2">{t("providers.templates.form.setupGuide")}</h4>
+            <ol className="list-decimal pl-4 space-y-2 text-sm text-muted-foreground">
               {template.setupGuide.steps.map((step, i) => (
-                <li key={i} className="setup-guide-step">
-                  <strong>{step.title}</strong>
+                <li key={i}>
+                  <strong className="text-foreground">{step.title}</strong>
                   <p>{step.description}</p>
                   {step.link && (
                     <a
                       href={step.link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="setup-guide-link"
+                      className="inline-flex items-center gap-1 text-primary text-xs hover:underline mt-1"
                     >
                       {step.linkLabel || step.link}
                       <ExternalLink size={12} />
@@ -102,16 +105,26 @@ function ProviderTemplateFormBody({
             </ol>
 
             {isOAuth && (
-              <div className="setup-guide-callback">
-                <label>{t("providers.templates.form.callbackUrl")}</label>
-                <div className="setup-guide-callback-box">
-                  <code>{callbackUrl}</code>
-                  <button type="button" className="btn-icon" onClick={handleCopy}>
+              <div className="mt-3 pt-3 border-t border-border">
+                <Label className="text-xs text-muted-foreground">
+                  {t("providers.templates.form.callbackUrl")}
+                </Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <code className="flex-1 rounded bg-background px-2 py-1 text-xs font-mono text-foreground border border-border overflow-x-auto">
+                    {callbackUrl}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleCopy}
+                  >
                     {copied ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
+                  </Button>
                 </div>
                 {template.setupGuide.callbackUrlHint && (
-                  <p className="hint">
+                  <p className="text-sm text-muted-foreground mt-1">
                     {template.setupGuide.callbackUrlHint.replace("{{callbackUrl}}", callbackUrl)}
                   </p>
                 )}
@@ -121,19 +134,19 @@ function ProviderTemplateFormBody({
 
           {/* Credential Fields */}
           {isOAuth ? (
-            <div className="template-form-fields">
-              <div className="form-group">
-                <label>{t("providers.form.clientId")}</label>
-                <input
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>{t("providers.form.clientId")}</Label>
+                <Input
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   autoFocus
                 />
               </div>
-              <div className="form-group">
-                <label>{t("providers.form.clientSecret")}</label>
-                <input
+              <div className="space-y-2">
+                <Label>{t("providers.form.clientSecret")}</Label>
+                <Input
                   type="password"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
@@ -141,19 +154,21 @@ function ProviderTemplateFormBody({
               </div>
             </div>
           ) : (
-            <div className="template-form-fields">
-              <p className="service-provider">{t("providers.templates.form.noCredsNeeded")}</p>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {t("providers.templates.form.noCredsNeeded")}
+              </p>
             </div>
           )}
         </div>
 
-        <div className="modal-actions">
-          <button type="button" onClick={onClose}>
+        <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+          <Button type="button" variant="outline" onClick={onClose}>
             {t("common:btn.cancel")}
-          </button>
-          <button type="submit" className="primary" disabled={createMutation.isPending}>
+          </Button>
+          <Button type="submit" disabled={createMutation.isPending}>
             {createMutation.isPending ? <Spinner /> : t("providers.templates.form.submit")}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

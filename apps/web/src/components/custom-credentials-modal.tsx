@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { getOrderedKeys, type JSONSchemaObject } from "@appstrate/shared-types";
 
 interface CustomCredentialsModalProps {
@@ -63,13 +66,13 @@ export function CustomCredentialsModal({
         const isRequired = required.includes(key);
         const isVisible = visibleFields[key] ?? false;
         return (
-          <div key={key} className="form-group">
-            <label htmlFor={`cred-${key}`}>
+          <div key={key} className="space-y-2">
+            <Label htmlFor={`cred-${key}`}>
               {prop.description || key}
               {isRequired && " *"}
-            </label>
-            <div className="input-with-toggle">
-              <input
+            </Label>
+            <div className="flex items-center gap-1">
+              <Input
                 id={`cred-${key}`}
                 type={isVisible ? "text" : "password"}
                 value={values[key] ?? ""}
@@ -79,27 +82,27 @@ export function CustomCredentialsModal({
                   if (e.key === "Enter" && allRequiredFilled && !isPending) handleSubmit();
                 }}
               />
-              <button
+              <Button
                 type="button"
-                className="input-toggle-btn"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground text-sm"
                 onClick={() => toggleVisibility(key)}
                 tabIndex={-1}
               >
                 {isVisible ? "◡" : "⦿"}
-              </button>
+              </Button>
             </div>
           </div>
         );
       })}
-      <div className="modal-actions">
-        <button onClick={handleClose}>{t("btn.cancel")}</button>
-        <button
-          className="primary"
-          onClick={handleSubmit}
-          disabled={!allRequiredFilled || isPending}
-        >
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+        <Button variant="outline" onClick={handleClose}>
+          {t("btn.cancel")}
+        </Button>
+        <Button onClick={handleSubmit} disabled={!allRequiredFilled || isPending}>
           {t("btn.save")}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

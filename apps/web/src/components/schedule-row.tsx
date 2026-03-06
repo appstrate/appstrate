@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { Schedule } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
@@ -9,15 +11,29 @@ interface ScheduleRowProps {
 
 export function ScheduleRow({ schedule, onClick, showFlowId }: ScheduleRowProps) {
   return (
-    <button type="button" className="schedule-row" onClick={onClick}>
-      <span className={`schedule-status ${schedule.enabled ? "enabled" : "disabled"}`} />
-      <span className="schedule-cron">{schedule.cronExpression}</span>
-      {schedule.name && <span className="schedule-name">{schedule.name}</span>}
-      {showFlowId && <span className="schedule-flow-id">{schedule.packageId}</span>}
-      <span className="schedule-tz">{schedule.timezone ?? "UTC"}</span>
-      {schedule.nextRunAt && (
-        <span className="schedule-next">{formatDateField(schedule.nextRunAt)}</span>
+    <Button
+      type="button"
+      variant="ghost"
+      className="flex items-center gap-3 w-full justify-start px-3 py-2 h-auto text-sm font-normal"
+      onClick={onClick}
+    >
+      <span
+        className={cn(
+          "h-2 w-2 rounded-full shrink-0",
+          schedule.enabled ? "bg-success" : "bg-muted-foreground",
+        )}
+      />
+      <span className="font-mono text-xs">{schedule.cronExpression}</span>
+      {schedule.name && <span className="font-medium truncate">{schedule.name}</span>}
+      {showFlowId && (
+        <span className="text-muted-foreground text-xs truncate">{schedule.packageId}</span>
       )}
-    </button>
+      <span className="text-muted-foreground text-xs">{schedule.timezone ?? "UTC"}</span>
+      {schedule.nextRunAt && (
+        <span className="text-muted-foreground text-xs ml-auto">
+          {formatDateField(schedule.nextRunAt)}
+        </span>
+      )}
+    </Button>
   );
 }

@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "../form-field";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
@@ -49,9 +53,11 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
   };
 
   return (
-    <div className="editor-section">
-      <div className="editor-section-header">{t("editor.metadata")}</div>
-      <div className="editor-section-body">
+    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
+      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
+        {t("editor.metadata")}
+      </div>
+      <div className="space-y-3 p-4">
         <FormField
           id="meta-displayName"
           label={t("editor.metaDisplayName")}
@@ -91,28 +97,37 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           placeholder="1.0.0"
           description={t("editor.metaVersionDesc")}
         />
-        <div className="form-group">
-          <label htmlFor="meta-description">{t("editor.metaDescription")}</label>
-          <textarea
+        <div className="space-y-2">
+          <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
+          <Textarea
             id="meta-description"
             value={value.description}
             onChange={(e) => update({ description: e.target.value })}
             placeholder={t("editor.metaDescPlaceholder")}
           />
         </div>
-        <div className="form-group">
-          <label>{t("editor.metaTags")}</label>
-          <div className="tag-chips">
+        <div className="space-y-2">
+          <Label>{t("editor.metaTags")}</Label>
+          <div className="flex flex-wrap gap-1.5 mb-2">
             {value.tags.map((tag) => (
-              <span key={tag} className="tag-chip">
+              <span
+                key={tag}
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs text-muted-foreground"
+              >
                 {tag}
-                <button type="button" className="btn-remove-inline" onClick={() => removeTag(tag)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-auto w-auto p-0 text-muted-foreground hover:text-destructive text-sm leading-none"
+                  onClick={() => removeTag(tag)}
+                >
                   &times;
-                </button>
+                </Button>
               </span>
             ))}
           </div>
-          <input
+          <Input
             type="text"
             placeholder={t("editor.metaTagPlaceholder")}
             onKeyDown={handleTagInput}

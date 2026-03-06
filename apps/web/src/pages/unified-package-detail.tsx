@@ -1,7 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import type { FlowDetail } from "@appstrate/shared-types";
 import {
   useFlowDetail,
@@ -56,25 +67,28 @@ function FlowHeaderExtras({ packageId }: { packageId: string }) {
   return (
     <>
       {isOrgAdmin && orgProxies && orgProxies.length > 0 && (
-        <div className="profile-selector">
-          <label>{t("proxies.flow.label")}</label>
-          <select
-            className="profile-select"
-            value={flowProxy?.proxyId ?? ""}
-            onChange={(e) => {
-              const val = e.target.value;
-              setFlowProxy.mutate(val === "" ? null : val);
-            }}
+        <div className="flex items-center gap-2">
+          <Label className="text-muted-foreground whitespace-nowrap">
+            {t("proxies.flow.label")}
+          </Label>
+          <Select
+            value={flowProxy?.proxyId ?? "__inherit__"}
+            onValueChange={(val) => setFlowProxy.mutate(val === "__inherit__" ? null : val)}
             disabled={setFlowProxy.isPending}
           >
-            <option value="">{t("proxies.flow.inherit")}</option>
-            <option value="none">{t("proxies.flow.none")}</option>
-            {orgProxies.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__inherit__">{t("proxies.flow.inherit")}</SelectItem>
+              <SelectItem value="none">{t("proxies.flow.none")}</SelectItem>
+              {orgProxies.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
       <ProfileSelector />
@@ -133,7 +147,23 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   const deletePkgMutation = useDeletePackage(type === "flow" ? "skill" : (type as PackageType));
 
   // ── State ──
-  const [tab, setTab] = useState<DetailTab>(type === "flow" ? "executions" : "content");
+  const allValidTabs: DetailTab[] = [
+    "executions",
+    "schedules",
+    "memories",
+    "versions",
+    "changes",
+    "content",
+    "usedBy",
+  ];
+  const defaultTab: DetailTab = type === "flow" ? "executions" : "content";
+  const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
+  // Reset tab if it becomes invalid (e.g. #changes when draft is published)
+  useEffect(() => {
+    if (tab === "changes" && (!hasDraftChanges || isVersionView)) setTab(defaultTab);
+    if (tab === "versions" && source === "built-in") setTab(defaultTab);
+  }, [tab, hasDraftChanges, isVersionView, source, defaultTab, setTab]);
+
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   const [diffTabOverride, setDiffTab] = useState<"prompt" | "manifest" | "content" | null>(null);
 
@@ -254,25 +284,34 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
         isOrgAdmin &&
         !isBuiltIn &&
         !isHistoricalVersion && (
-          <div className="actions">
+          <div className="flex items-center gap-2 flex-wrap mb-4">
             {downloadVersion && (
-              <button
-                className="btn-icon"
+              <Button
+                variant="ghost"
+                size="sm"
                 title={t("btn.download", { ns: "common" })}
                 onClick={() => downloadPackage(downloadVersion)}
               >
                 <Download size={14} /> {t("btn.download", { ns: "common" })}
-              </button>
+              </Button>
             )}
-            <button onClick={() => setCreateVersionOpen(true)} disabled={!hasDraftChanges}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCreateVersionOpen(true)}
+              disabled={!hasDraftChanges}
+            >
               {t("version.createVersion")}
-            </button>
+            </Button>
             <Link to={`/${type}s/${packageId}/edit`}>
-              <button>{t("btn.edit")}</button>
+              <Button variant="outline" size="sm">
+                {t("btn.edit")}
+              </Button>
             </Link>
             {pkgDetail && pkgDetail.flows.length === 0 && (
-              <button
-                className="btn-danger"
+              <Button
+                variant="destructive"
+                size="sm"
                 onClick={() => {
                   const nameStr = pkgDetail.name || pkgDetail.id;
                   const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
@@ -298,47 +337,31 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
                 disabled={deletePkgMutation.isPending}
               >
                 {t("btn.delete")}
-              </button>
+              </Button>
             )}
           </div>
         )
       )}
 
       {/* Tab bar */}
-      <div className="exec-tabs" role="tablist">
-        {tabDefs.map((td) => (
-          <button
-            key={td.id}
-            role="tab"
-            aria-selected={tab === td.id}
-            className={`tab ${tab === td.id ? "active" : ""}`}
-            onClick={() => setTab(td.id)}
-          >
-            {td.label}
-          </button>
-        ))}
-        {!isBuiltIn && (
-          <button
-            role="tab"
-            aria-selected={tab === "versions"}
-            className={`tab ${tab === "versions" ? "active" : ""}`}
-            onClick={() => setTab("versions")}
-          >
-            {t("version.history")}
-            {versionCount ? ` (${versionCount})` : ""}
-          </button>
-        )}
-        {hasDraftChanges && !isVersionView && (
-          <button
-            role="tab"
-            aria-selected={tab === "changes"}
-            className={`tab ${tab === "changes" ? "active" : ""}`}
-            onClick={() => setTab("changes")}
-          >
-            {t("version.diff")}
-          </button>
-        )}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
+        <TabsList>
+          {tabDefs.map((td) => (
+            <TabsTrigger key={td.id} value={td.id}>
+              {td.label}
+            </TabsTrigger>
+          ))}
+          {!isBuiltIn && (
+            <TabsTrigger value="versions">
+              {t("version.history")}
+              {versionCount ? ` (${versionCount})` : ""}
+            </TabsTrigger>
+          )}
+          {hasDraftChanges && !isVersionView && (
+            <TabsTrigger value="changes">{t("version.diff")}</TabsTrigger>
+          )}
+        </TabsList>
+      </Tabs>
 
       {/* Tab content */}
       {type === "flow" && tab === "executions" && (
@@ -348,8 +371,8 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       {type === "flow" && tab === "memories" && <FlowMemoriesTab isOrgAdmin={isOrgAdmin} />}
 
       {type !== "flow" && tab === "content" && pkgDetail && (
-        <div className="detail-section">
-          <pre className="state-json">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
             {isHistoricalVersion && versionDetail?.content != null
               ? versionDetail.content
               : pkgDetail.content}
@@ -358,13 +381,19 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       )}
 
       {type !== "flow" && tab === "usedBy" && pkgDetail && (
-        <div className="detail-section">
+        <div className="rounded-lg border border-border bg-card p-4">
           {pkgDetail.flows.length === 0 ? (
-            <p className="detail-empty">{t("packages.noFlows")}</p>
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              {t("packages.noFlows")}
+            </p>
           ) : (
-            <div className="detail-flows">
+            <div className="flex flex-wrap gap-2">
               {pkgDetail.flows.map((f) => (
-                <Link key={f.id} to={`/flows/${f.id}`} className="detail-flow-badge">
+                <Link
+                  key={f.id}
+                  to={`/flows/${f.id}`}
+                  className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-sm hover:border-primary transition-colors no-underline text-foreground"
+                >
                   {f.displayName || f.id}
                 </Link>
               ))}
@@ -381,28 +410,20 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
         <>
           {type === "flow" && latestVersionForDiff && (
             <>
-              <div className="exec-tabs" role="tablist">
-                {hasManifestChanges && (
-                  <button
-                    role="tab"
-                    aria-selected={diffTab === "manifest"}
-                    className={`tab ${diffTab === "manifest" ? "active" : ""}`}
-                    onClick={() => setDiffTab("manifest")}
-                  >
-                    {t("version.diffManifest")}
-                  </button>
-                )}
-                {hasPromptChanges && (
-                  <button
-                    role="tab"
-                    aria-selected={diffTab === "prompt"}
-                    className={`tab ${diffTab === "prompt" ? "active" : ""}`}
-                    onClick={() => setDiffTab("prompt")}
-                  >
-                    {t("version.diffPrompt")}
-                  </button>
-                )}
-              </div>
+              <Tabs
+                value={diffTab}
+                onValueChange={(v) => setDiffTab(v as "prompt" | "manifest" | "content")}
+                className="mb-4"
+              >
+                <TabsList>
+                  {hasManifestChanges && (
+                    <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
+                  )}
+                  {hasPromptChanges && (
+                    <TabsTrigger value="prompt">{t("version.diffPrompt")}</TabsTrigger>
+                  )}
+                </TabsList>
+              </Tabs>
               {diffTab === "manifest" && hasManifestChanges && (
                 <DraftDiffView
                   original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
@@ -424,28 +445,20 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
           )}
           {type !== "flow" && latestVersionForDiff && pkgDetail && (
             <>
-              <div className="exec-tabs" role="tablist">
-                {hasManifestChanges && (
-                  <button
-                    role="tab"
-                    aria-selected={diffTab === "manifest"}
-                    className={`tab ${diffTab === "manifest" ? "active" : ""}`}
-                    onClick={() => setDiffTab("manifest")}
-                  >
-                    {t("version.diffManifest")}
-                  </button>
-                )}
-                {hasContentChanges && (
-                  <button
-                    role="tab"
-                    aria-selected={diffTab === "content"}
-                    className={`tab ${diffTab === "content" ? "active" : ""}`}
-                    onClick={() => setDiffTab("content")}
-                  >
-                    {t("packages.content")}
-                  </button>
-                )}
-              </div>
+              <Tabs
+                value={diffTab}
+                onValueChange={(v) => setDiffTab(v as "prompt" | "manifest" | "content")}
+                className="mb-4"
+              >
+                <TabsList>
+                  {hasManifestChanges && (
+                    <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
+                  )}
+                  {hasContentChanges && (
+                    <TabsTrigger value="content">{t("packages.content")}</TabsTrigger>
+                  )}
+                </TabsList>
+              </Tabs>
               {diffTab === "manifest" && hasManifestChanges && (
                 <DraftDiffView
                   original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
@@ -460,7 +473,9 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
                 />
               )}
               {!hasManifestChanges && !hasContentChanges && (
-                <p className="detail-empty">{t("version.noDiff")}</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  {t("version.noDiff")}
+                </p>
               )}
             </>
           )}

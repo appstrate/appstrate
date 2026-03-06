@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { JSONSchemaObject, ServiceStatus } from "@appstrate/shared-types";
 import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
@@ -183,9 +185,9 @@ export function PublicShareRunPage() {
 
   if (pageStatus === "loading") {
     return (
-      <div className="shareable-run">
-        <div className="shareable-run-card">
-          <div className="empty-state">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="flex items-center justify-center py-8">
             <Spinner />
           </div>
         </div>
@@ -195,12 +197,14 @@ export function PublicShareRunPage() {
 
   if (pageStatus === "invalid") {
     return (
-      <div className="shareable-run">
-        <div className="shareable-run-card">
-          <div className="shareable-run-header">
-            <h2>{t("public.invalidTitle")}</h2>
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold">{t("public.invalidTitle")}</h2>
           </div>
-          <div className="exec-error">{t("public.invalidMessage")}</div>
+          <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {t("public.invalidMessage")}
+          </div>
         </div>
       </div>
     );
@@ -208,47 +212,72 @@ export function PublicShareRunPage() {
 
   if (!flowInfo) {
     return (
-      <div className="shareable-run">
-        <div className="shareable-run-card">
-          <div className="exec-error">{t("public.notFound")}</div>
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+          <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {t("public.notFound")}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="shareable-run">
-      <div className="shareable-run-card">
-        <div className="shareable-run-header">
-          <h2>{flowInfo.displayName}</h2>
-          {flowInfo.description && <p className="description">{flowInfo.description}</p>}
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold">{flowInfo.displayName}</h2>
+          {flowInfo.description && (
+            <p className="text-sm text-muted-foreground mt-1">{flowInfo.description}</p>
+          )}
         </div>
 
         {flowInfo.services && flowInfo.services.length > 0 && (
-          <div className="shareable-run-services">
+          <div className="flex flex-wrap gap-2 mb-4">
             {flowInfo.services.map((svc) => {
               const isConnected = svc.status === "connected";
               if (svc.connectionMode === "admin" && svc.adminProvided) {
                 return (
-                  <div key={svc.id} className="service admin-provided" title={svc.description}>
-                    <span className="status-dot connected" />
+                  <div
+                    key={svc.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                    title={svc.description}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-success inline-block" />
                     {svc.id}
-                    <span className="admin-service-badge">{t("admin")}</span>
+                    <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {t("admin")}
+                    </span>
                   </div>
                 );
               }
               if (svc.connectionMode === "admin") {
                 return (
-                  <div key={svc.id} className="service admin-pending" title={svc.description}>
-                    <span className="status-dot disconnected" />
+                  <div
+                    key={svc.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                    title={svc.description}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-destructive inline-block" />
                     {svc.id}
-                    <span className="admin-service-badge pending">{t("detail.pending")}</span>
+                    <span className="ml-1 rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
+                      {t("detail.pending")}
+                    </span>
                   </div>
                 );
               }
               return (
-                <div key={svc.id} className="service" title={svc.description}>
-                  <span className={`status-dot ${isConnected ? "connected" : "disconnected"}`} />
+                <div
+                  key={svc.id}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                  title={svc.description}
+                >
+                  <span
+                    className={cn(
+                      "h-2 w-2 rounded-full inline-block",
+                      isConnected ? "bg-success" : "bg-destructive",
+                    )}
+                  />
                   {svc.id}
                 </div>
               );
@@ -257,7 +286,7 @@ export function PublicShareRunPage() {
         )}
 
         {pageStatus === "idle" && (
-          <div className="shareable-run-form">
+          <div className="space-y-4">
             {hasInput && (
               <InputFields
                 schema={schema!}
@@ -268,22 +297,26 @@ export function PublicShareRunPage() {
                 idPrefix="public-input"
               />
             )}
-            <button className="primary shareable-run-btn" onClick={handleRun}>
+            <Button className="w-full" onClick={handleRun}>
               {t("shareable.execute")}
-            </button>
+            </Button>
           </div>
         )}
 
         {pageStatus === "running" && (
-          <div className="shareable-run-status">
+          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
             <Spinner />
             <span>{t("shareable.running")}</span>
           </div>
         )}
 
         {(pageStatus === "success" || pageStatus === "failed" || pageStatus === "timeout") && (
-          <div className="shareable-run-result">
-            {execError && <div className="exec-error">{execError}</div>}
+          <div className="space-y-4">
+            {execError && (
+              <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {execError}
+              </div>
+            )}
             {result && <ResultRenderer data={result} outputSchema={flowInfo.input?.schema} />}
           </div>
         )}

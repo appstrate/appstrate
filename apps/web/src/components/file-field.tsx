@@ -1,5 +1,9 @@
 import { useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { X } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface FileFieldProps {
   label: string;
@@ -39,7 +43,6 @@ export function FileField({
     (incoming: File[]) => {
       setError(null);
 
-      // Check extensions
       if (accept) {
         const allowed = accept
           .split(",")
@@ -54,7 +57,6 @@ export function FileField({
         }
       }
 
-      // Check size
       if (maxSize) {
         for (const f of incoming) {
           if (f.size > maxSize) {
@@ -108,15 +110,18 @@ export function FileField({
   );
 
   return (
-    <div className="form-group">
-      <label>
+    <div className="space-y-2">
+      <Label>
         {label}
         {required && " *"}
-      </label>
-      {description && <div className="hint">{description}</div>}
+      </Label>
+      {description && <p className="text-sm text-muted-foreground">{description}</p>}
       {files.length === 0 ? (
         <div
-          className={`drop-zone${dragOver ? " drag-over" : ""}`}
+          className={cn(
+            "flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm text-muted-foreground transition-colors hover:border-muted-foreground/50",
+            dragOver && "border-primary bg-primary/5",
+          )}
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
@@ -126,36 +131,46 @@ export function FileField({
           onDrop={handleDrop}
         >
           {t("file.dragDrop")}
-          {accept && <div className="drop-zone-hint">{t("file.formats", { formats: accept })}</div>}
+          {accept && <span className="mt-1 text-xs">{t("file.formats", { formats: accept })}</span>}
           {maxSize && (
-            <div className="drop-zone-hint">{t("file.maxSize", { size: formatSize(maxSize) })}</div>
+            <span className="mt-1 text-xs">{t("file.maxSize", { size: formatSize(maxSize) })}</span>
           )}
         </div>
       ) : (
         <>
-          <div className="file-list">
+          <div className="space-y-1">
             {files.map((f, i) => (
-              <div key={`${f.name}-${i}`} className="file-item">
-                <span className="file-name">{f.name}</span>
-                <span className="file-size">{formatSize(f.size)}</span>
-                <button type="button" className="file-remove" onClick={() => removeFile(i)}>
-                  &times;
-                </button>
+              <div
+                key={`${f.name}-${i}`}
+                className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+              >
+                <span className="truncate font-medium">{f.name}</span>
+                <span className="ml-2 shrink-0 text-muted-foreground">{formatSize(f.size)}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="ml-2 h-7 w-7 shrink-0 text-muted-foreground"
+                  onClick={() => removeFile(i)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             ))}
           </div>
           {multiple && (!maxFiles || files.length < maxFiles) && (
-            <button
+            <Button
               type="button"
-              className="add-field-btn"
+              variant="outline"
+              size="sm"
               onClick={() => inputRef.current?.click()}
             >
               {t("file.addFile")}
-            </button>
+            </Button>
           )}
         </>
       )}
-      {error && <div className="drop-zone-error">{error}</div>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <input
         ref={inputRef}
         type="file"

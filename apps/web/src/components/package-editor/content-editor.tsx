@@ -14,7 +14,7 @@ export function ContentEditor({ value, onChange, language, height = "500px" }: C
   }, []);
 
   return (
-    <div className="prompt-editor-wrapper">
+    <div className="rounded-lg border border-border overflow-hidden my-4">
       <Editor
         height={height}
         language={language}

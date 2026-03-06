@@ -3,6 +3,16 @@ import { useTranslation } from "react-i18next";
 import CreatableSelect from "react-select/creatable";
 import type { StylesConfig, MultiValue } from "react-select";
 import { Link } from "react-router-dom";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useProviders } from "../../hooks/use-providers";
 import { useOrg } from "../../hooks/use-org";
 import type { ServiceEntry } from "./types";
@@ -21,18 +31,18 @@ interface ScopeOption {
 const scopeSelectStyles: StylesConfig<ScopeOption, true> = {
   control: (base, state) => ({
     ...base,
-    background: "var(--bg)",
-    borderColor: state.isFocused ? "var(--primary)" : "var(--border)",
+    background: "var(--color-background)",
+    borderColor: state.isFocused ? "var(--color-primary)" : "var(--color-border)",
     borderRadius: "4px",
     minHeight: "34px",
     fontSize: "0.8rem",
     boxShadow: "none",
-    "&:hover": { borderColor: "var(--text-muted)" },
+    "&:hover": { borderColor: "var(--color-muted-foreground)" },
   }),
   menu: (base) => ({
     ...base,
-    background: "var(--surface)",
-    border: "1px solid var(--border)",
+    background: "var(--color-card)",
+    border: "1px solid var(--color-border)",
     borderRadius: "6px",
     zIndex: 20,
     overflow: "hidden",
@@ -43,61 +53,64 @@ const scopeSelectStyles: StylesConfig<ScopeOption, true> = {
   }),
   option: (base, state) => ({
     ...base,
-    background: state.isFocused ? "var(--surface-hover)" : "transparent",
-    color: state.isSelected ? "var(--primary)" : "var(--text)",
+    background: state.isFocused ? "var(--color-accent)" : "transparent",
+    color: state.isSelected ? "var(--color-primary)" : "var(--color-foreground)",
     fontSize: "0.8rem",
     padding: "0.375rem 0.5rem",
     borderRadius: "4px",
     cursor: "pointer",
-    "&:active": { background: "var(--surface-hover)" },
+    "&:active": { background: "var(--color-accent)" },
   }),
   multiValue: (base) => ({
     ...base,
-    background: "var(--surface)",
-    border: "1px solid var(--border)",
+    background: "var(--color-secondary)",
+    border: "1px solid var(--color-border)",
     borderRadius: "4px",
   }),
   multiValueLabel: (base) => ({
     ...base,
-    color: "var(--text)",
+    color: "var(--color-foreground)",
     fontSize: "0.75rem",
     padding: "0.1rem 0.375rem",
   }),
   multiValueRemove: (base) => ({
     ...base,
-    color: "var(--text-muted)",
-    "&:hover": { background: "rgba(239, 68, 68, 0.15)", color: "var(--danger)" },
+    color: "var(--color-muted-foreground)",
+    "&:hover": {
+      background: "color-mix(in oklab, var(--color-destructive) 15%, transparent)",
+      color: "var(--color-destructive)",
+    },
   }),
   input: (base) => ({
     ...base,
-    color: "var(--text)",
+    color: "var(--color-foreground)",
     fontSize: "0.8rem",
   }),
   placeholder: (base) => ({
     ...base,
-    color: "var(--text-muted)",
+    color: "var(--color-muted-foreground)",
     fontSize: "0.8rem",
   }),
   noOptionsMessage: (base) => ({
     ...base,
-    color: "var(--text-muted)",
+    color: "var(--color-muted-foreground)",
     fontSize: "0.8rem",
   }),
   clearIndicator: (base) => ({
     ...base,
-    color: "var(--text-muted)",
+    color: "var(--color-muted-foreground)",
     padding: "0 4px",
-    "&:hover": { color: "var(--text)" },
+    "&:hover": { color: "var(--color-foreground)" },
   }),
   dropdownIndicator: (base) => ({
     ...base,
-    color: "var(--text-muted)",
+    color: "var(--color-muted-foreground)",
     padding: "0 4px",
-    "&:hover": { color: "var(--text)" },
+    "&:hover": { color: "var(--color-foreground)" },
   }),
   indicatorSeparator: (base) => ({
     ...base,
-    backgroundColor: "var(--border)",
+    backgroundColor: "var(--color-border)",
   }),
   valueContainer: (base) => ({
     ...base,
@@ -139,8 +152,8 @@ function ScopeMultiSelect({
     if (ctx.context === "menu") {
       return (
         <div>
-          <div className="scope-menu-label">{option.label}</div>
-          <div className="scope-menu-value">{option.value}</div>
+          <div className="text-sm">{option.label}</div>
+          <div className="text-xs text-muted-foreground font-mono">{option.value}</div>
         </div>
       );
     }
@@ -198,8 +211,8 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
     <div>
       {/* Selected services */}
       {value.length > 0 && (
-        <div className="service-picker-selected">
-          <div className="section-title section-title-mb-sm">
+        <div className="mb-4">
+          <div className="text-sm font-medium text-muted-foreground mb-2">
             {t("editor.selectedServices", { count: value.length })}
           </div>
           {value.map((svc, i) => {
@@ -207,23 +220,35 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
               | ProviderConfig
               | undefined;
             return (
-              <div key={i} className="service-picker-selected-card">
-                <div className="service-picker-selected-header">
+              <div key={i} className="border border-border rounded-lg p-3 mb-2 bg-card">
+                <div className="flex items-center gap-2.5 mb-2">
                   {providerDef?.iconUrl && (
-                    <img src={providerDef.iconUrl} alt="" className="service-logo" />
+                    <img
+                      src={providerDef.iconUrl}
+                      alt=""
+                      className="h-6 w-6 rounded object-contain"
+                    />
                   )}
-                  <div className="service-picker-selected-info">
-                    <strong>{providerDef?.displayName ?? svc.id}</strong>
-                    <span className="service-provider">{svc.provider}</span>
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <strong className="text-sm">{providerDef?.displayName ?? svc.id}</strong>
+                    <span className="text-xs text-muted-foreground">{svc.provider}</span>
                   </div>
-                  <button type="button" className="btn-remove" onClick={() => remove(i)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-auto w-auto p-0 px-1 text-muted-foreground hover:text-destructive text-base leading-none"
+                    onClick={() => remove(i)}
+                  >
                     &times;
-                  </button>
+                  </Button>
                 </div>
-                <div className="service-picker-selected-fields">
+                <div className="flex flex-col gap-2.5 pl-0.5">
                   {providerDef?.authMode === "oauth2" && (
-                    <div className="service-picker-field">
-                      <label className="service-picker-label">{t("editor.scopesLabel")}</label>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs text-muted-foreground">
+                        {t("editor.scopesLabel")}
+                      </Label>
                       <ScopeMultiSelect
                         scopes={svc.scopes}
                         availableScopes={providerDef?.availableScopes}
@@ -231,19 +256,22 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                       />
                     </div>
                   )}
-                  <div className="service-picker-field">
-                    <label className="service-picker-label">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">
                       {t("editor.connectionModeLabel")}
-                    </label>
-                    <select
+                    </Label>
+                    <Select
                       value={svc.connectionMode}
-                      onChange={(e) =>
-                        update(i, { connectionMode: e.target.value as "user" | "admin" })
-                      }
+                      onValueChange={(v) => update(i, { connectionMode: v as "user" | "admin" })}
                     >
-                      <option value="user">{t("editor.modeUser")}</option>
-                      <option value="admin">{t("editor.modeAdmin")}</option>
-                    </select>
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">{t("editor.modeUser")}</SelectItem>
+                        <SelectItem value="admin">{t("editor.modeAdmin")}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
@@ -253,46 +281,61 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
       )}
 
       {/* Available providers */}
-      <div className={`section-title${value.length > 0 ? " section-title-mt-md" : ""}`}>
+      <div
+        className={cn("text-sm font-medium text-muted-foreground mb-4", value.length > 0 && "mt-6")}
+      >
         {t("editor.availableIntegrations")}
       </div>
       {isLoading ? (
-        <div className="empty-state empty-state-compact">{t("loading")}</div>
+        <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+          {t("loading")}
+        </div>
       ) : !providers || providers.length === 0 ? (
-        <div className="empty-state empty-state-compact">
+        <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
           {t("editor.noIntegration")}
-          <div className="empty-state-actions">
+          <div className="mt-3">
             <Link to="/connectors">
-              <button>{t("editor.goToConnectors")}</button>
+              <Button variant="outline" size="sm">
+                {t("editor.goToConnectors")}
+              </Button>
             </Link>
           </div>
         </div>
       ) : (
-        <div className="service-picker-grid">
+        <div className="grid grid-cols-2 gap-2">
           {providers.map((p) => {
             const isSelected = selectedIds.has(p.id);
             return (
-              <button
+              <Button
                 key={p.id}
                 type="button"
-                className={`service-picker-card${isSelected ? " selected" : ""}`}
+                variant="outline"
+                className={cn(
+                  "h-auto flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-muted/50",
+                  isSelected && "border-primary bg-primary/5 opacity-60",
+                )}
                 onClick={() => addFromProvider(p.id)}
                 disabled={isSelected}
               >
-                {p.iconUrl && <img src={p.iconUrl} alt="" className="service-logo" />}
-                <div className="service-picker-card-info">
-                  <span className="service-picker-card-name">{p.displayName}</span>
-                  <span className="service-provider">{p.id}</span>
+                {p.iconUrl && (
+                  <img src={p.iconUrl} alt="" className="h-6 w-6 rounded object-contain" />
+                )}
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate">{p.displayName}</span>
+                  <span className="text-xs text-muted-foreground">{p.id}</span>
                 </div>
-                {isSelected && <span className="service-picker-check">&#10003;</span>}
-              </button>
+                {isSelected && <span className="text-success text-sm">&#10003;</span>}
+              </Button>
             );
           })}
           {isOrgAdmin && (
-            <Link to="/connectors" className="service-picker-card service-picker-add-provider">
-              <span className="service-picker-add-icon">+</span>
-              <div className="service-picker-card-info">
-                <span className="service-picker-card-name">
+            <Link
+              to="/connectors"
+              className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground no-underline"
+            >
+              <span className="text-2xl leading-none">+</span>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-sm font-medium truncate">
                   {t("providers.addProvider", { ns: "settings" })}
                 </span>
               </div>

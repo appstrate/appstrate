@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useImportPackage } from "../hooks/use-mutations";
 import { ApiError } from "../api";
 import i18n from "../i18n";
@@ -113,14 +115,10 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       title={t("import.title")}
       actions={
         <>
-          <button onClick={handleClose} disabled={importPackage.isPending}>
+          <Button variant="outline" onClick={handleClose} disabled={importPackage.isPending}>
             {t("btn.cancel")}
-          </button>
-          <button
-            className="primary"
-            onClick={handleSubmit}
-            disabled={!file || importPackage.isPending}
-          >
+          </Button>
+          <Button onClick={handleSubmit} disabled={!file || importPackage.isPending}>
             {importPackage.isPending
               ? t("import.importing")
               : confirmOverwrite
@@ -128,12 +126,15 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
                 : confirmIntegrity
                   ? t("import.forceIntegrity")
                   : t("import.submit")}
-          </button>
+          </Button>
         </>
       }
     >
       <div
-        className={`drop-zone ${dragOver ? "drag-over" : ""}`}
+        className={cn(
+          "rounded-lg border-2 border-dashed border-border p-8 text-center cursor-pointer transition-colors hover:border-primary/50",
+          dragOver && "border-primary bg-primary/5",
+        )}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -153,27 +154,27 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           }}
         />
         {file ? (
-          <p className="drop-zone-file">{file.name}</p>
+          <p className="text-sm font-medium text-foreground">{file.name}</p>
         ) : (
           <>
-            <p>{t("import.dropText")}</p>
-            <p className="drop-zone-hint">{t("import.dropHint")}</p>
+            <p className="text-sm text-foreground">{t("import.dropText")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("import.dropHint")}</p>
           </>
         )}
       </div>
-      {error && <p className="drop-zone-error">{error}</p>}
+      {error && <p className="text-sm text-destructive mt-2">{error}</p>}
       {confirmOverwrite && (
-        <p className="drop-zone-error">
+        <p className="text-sm text-destructive mt-2">
           {t("import.confirmOverwrite", { draftVersion: confirmOverwrite.draftVersion ?? "?" })}
         </p>
       )}
       {confirmIntegrity && (
-        <p className="drop-zone-error">
+        <p className="text-sm text-destructive mt-2">
           {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
         </p>
       )}
       {importPackage.isError && !confirmOverwrite && !confirmIntegrity && (
-        <p className="drop-zone-error">{importPackage.error.message}</p>
+        <p className="text-sm text-destructive mt-2">{importPackage.error.message}</p>
       )}
     </Modal>
   );

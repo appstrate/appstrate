@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useFlows, usePackageList } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
 import { PackageCard } from "../components/package-card";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 
 type TabType = "flows" | "skills" | "extensions";
 
@@ -47,12 +50,15 @@ function PackageTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const importButton = <button onClick={() => setImportOpen(true)}>{t("list.import")}</button>;
+  const importButton = (
+    <Button variant="outline" onClick={() => setImportOpen(true)}>
+      {t("list.import")}
+    </Button>
+  );
 
   const header = (
-    <div className="flow-list-header">
-      <div />
-      <div className="flow-list-actions">
+    <div className="flex items-center justify-end gap-2 mb-4">
+      <div className="flex items-center gap-2">
         {isOrgAdmin && extraActions}
         {importButton}
       </div>
@@ -77,7 +83,7 @@ function PackageTab({
   return (
     <>
       {header}
-      <div className="flow-grid">
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
         {items.map((item) => (
           <PackageCard key={item.id} {...item} />
         ))}
@@ -113,7 +119,7 @@ function FlowsTab() {
       extraActions={
         isOrgAdmin ? (
           <Link to="/flows/new">
-            <button>{t("list.create")}</button>
+            <Button>{t("list.create")}</Button>
           </Link>
         ) : undefined
       }
@@ -178,7 +184,7 @@ function ItemTab({ config }: { config: ItemTabConfig }) {
       extraActions={
         isOrgAdmin ? (
           <Link to={`/${config.type}s/new`}>
-            <button>{t("list.createItem", { ns: "flows" })}</button>
+            <Button>{t("list.createItem", { ns: "flows" })}</Button>
           </Link>
         ) : undefined
       }
@@ -191,50 +197,23 @@ const extensionTabConfig = ITEM_TAB_CONFIGS[1];
 
 export function PackageList() {
   const { t } = useTranslation(["flows", "settings", "common"]);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab");
-  const tab: TabType = tabParam === "skills" || tabParam === "extensions" ? tabParam : "flows";
-
-  const setTab = (newTab: TabType) => {
-    if (newTab === "flows") {
-      setSearchParams({}, { replace: true });
-    } else {
-      setSearchParams({ tab: newTab }, { replace: true });
-    }
-  };
+  const [tab, setTab] = useTabWithHash<TabType>(["flows", "skills", "extensions"], "flows");
 
   return (
     <>
-      <div className="exec-tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "flows"}
-          className={`tab ${tab === "flows" ? "active" : ""}`}
-          onClick={() => setTab("flows")}
-        >
-          {t("list.tabFlows", { ns: "flows" })}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "skills"}
-          className={`tab ${tab === "skills" ? "active" : ""}`}
-          onClick={() => setTab("skills")}
-        >
-          {t("list.tabSkills", { ns: "flows" })}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "extensions"}
-          className={`tab ${tab === "extensions" ? "active" : ""}`}
-          onClick={() => setTab("extensions")}
-        >
-          {t("list.tabExtensions", { ns: "flows" })}
-        </button>
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)}>
+        <TabsList>
+          <TabsTrigger value="flows">{t("list.tabFlows", { ns: "flows" })}</TabsTrigger>
+          <TabsTrigger value="skills">{t("list.tabSkills", { ns: "flows" })}</TabsTrigger>
+          <TabsTrigger value="extensions">{t("list.tabExtensions", { ns: "flows" })}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      {tab === "flows" && <FlowsTab />}
-      {tab === "skills" && <ItemTab config={skillTabConfig} />}
-      {tab === "extensions" && <ItemTab config={extensionTabConfig} />}
+      <div className="mt-4">
+        {tab === "flows" && <FlowsTab />}
+        {tab === "skills" && <ItemTab config={skillTabConfig} />}
+        {tab === "extensions" && <ItemTab config={extensionTabConfig} />}
+      </div>
     </>
   );
 }

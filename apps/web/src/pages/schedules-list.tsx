@@ -11,6 +11,15 @@ import {
 import { ScheduleModal } from "../components/schedule-modal";
 import { ScheduleRow } from "../components/schedule-row";
 import { Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 
@@ -47,27 +56,30 @@ export function SchedulesListPage() {
 
   return (
     <>
-      <div className="section-header">
-        <div className="section-title">{t("schedules.title")}</div>
-        <button onClick={openCreate} disabled={!flows || flows.length === 0}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm font-medium text-muted-foreground">{t("schedules.title")}</div>
+        <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
           {t("btn.add")}
-        </button>
+        </Button>
       </div>
 
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
-          <button onClick={openCreate} disabled={!flows || flows.length === 0}>
+          <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
             {t("btn.add")}
-          </button>
+          </Button>
         </EmptyState>
       ) : (
-        <div className="schedule-list">
+        <div className="space-y-1">
           {schedules.map((sched) => {
             const flowName =
               flows?.find((f) => f.id === sched.packageId)?.displayName ?? sched.packageId;
             return (
-              <div key={sched.id} className="schedule-list-item">
-                <Link className="schedule-flow-link" to={`/flows/${sched.packageId}`}>
+              <div key={sched.id} className="border-b border-border last:border-0">
+                <Link
+                  className="text-xs text-muted-foreground hover:text-foreground px-3 pt-2 block"
+                  to={`/flows/${sched.packageId}`}
+                >
                   {flowName}
                 </Link>
                 <ScheduleRow schedule={sched} onClick={() => openEdit(sched)} />
@@ -99,19 +111,20 @@ export function SchedulesListPage() {
                 }
                 flowPicker={
                   flows && flows.length > 1 ? (
-                    <div className="form-group">
-                      <label htmlFor="sched-flow">{t("schedules.flowLabel")}</label>
-                      <select
-                        id="sched-flow"
-                        value={createFlowId}
-                        onChange={(e) => setCreateFlowId(e.target.value)}
-                      >
-                        {flows.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.displayName}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="space-y-2">
+                      <Label htmlFor="sched-flow">{t("schedules.flowLabel")}</Label>
+                      <Select value={createFlowId} onValueChange={setCreateFlowId}>
+                        <SelectTrigger id="sched-flow">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {flows.map((f) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              {f.displayName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   ) : undefined
                 }

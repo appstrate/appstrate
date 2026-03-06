@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { useFlowDetailContext } from "../../hooks/use-flow-detail-context";
 import { ExecutionRow } from "../execution-row";
 import { ScheduleRow } from "../schedule-row";
@@ -43,10 +44,11 @@ export function FlowExecutionsTab({
   return (
     <>
       {isOrgAdmin && executions && executions.length > 0 && (
-        <div className="section-header">
+        <div className="flex items-center justify-between mb-4">
           <div />
-          <button
-            className="btn-danger"
+          <Button
+            variant="destructive"
+            size="sm"
             disabled={detail.runningExecutions > 0 || deleteExecutions.isPending}
             title={
               detail.runningExecutions > 0 ? t("detail.clearExecRunning") : t("detail.clearExec")
@@ -58,23 +60,22 @@ export function FlowExecutionsTab({
             }}
           >
             {t("detail.clearExec")}
-          </button>
+          </Button>
         </div>
       )}
       {!executions || executions.length === 0 ? (
         <EmptyState message={t("detail.emptyExec")} compact>
-          <button
-            className="primary"
+          <Button
             onClick={handleRun}
             disabled={
               !allConnected || hasReconnectionNeeded || !hasRequiredConfig || runFlow.isPending
             }
           >
             {runFlow.isPending && <Spinner />} {t("detail.run")}
-          </button>
+          </Button>
         </EmptyState>
       ) : (
-        <div className="exec-list">
+        <div className="space-y-1">
           {executions.map((exec, index) => (
             <ExecutionRow
               key={exec.id}
@@ -104,30 +105,31 @@ export function FlowSchedulesTab() {
 
   return (
     <>
-      <div className="section-header">
+      <div className="flex items-center justify-between mb-4">
         <div />
-        <button
+        <Button
+          variant="outline"
           onClick={() => {
             setEditingSchedule(null);
             setScheduleOpen(true);
           }}
         >
           {t("btn.add")}
-        </button>
+        </Button>
       </div>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} compact>
-          <button
+          <Button
             onClick={() => {
               setEditingSchedule(null);
               setScheduleOpen(true);
             }}
           >
             {t("btn.add")}
-          </button>
+          </Button>
         </EmptyState>
       ) : (
-        <div className="schedule-list">
+        <div className="space-y-1">
           {schedules.map((sched) => (
             <ScheduleRow
               key={sched.id}
@@ -152,10 +154,11 @@ export function FlowMemoriesTab({ isOrgAdmin }: { isOrgAdmin: boolean }) {
   return (
     <>
       {isOrgAdmin && memories && memories.length > 0 && (
-        <div className="section-header">
+        <div className="flex items-center justify-between mb-4">
           <div />
-          <button
-            className="btn-danger"
+          <Button
+            variant="destructive"
+            size="sm"
             disabled={deleteAllMemories.isPending}
             onClick={() => {
               if (confirm(t("detail.clearMemoriesConfirm"))) {
@@ -164,7 +167,7 @@ export function FlowMemoriesTab({ isOrgAdmin }: { isOrgAdmin: boolean }) {
             }}
           >
             {t("detail.clearMemories")}
-          </button>
+          </Button>
         </div>
       )}
       {!memories || memories.length === 0 ? (
@@ -174,22 +177,25 @@ export function FlowMemoriesTab({ isOrgAdmin }: { isOrgAdmin: boolean }) {
           compact
         />
       ) : (
-        <div className="memory-list">
+        <div className="space-y-1">
           {memories.map((mem) => (
-            <div key={mem.id} className="memory-row">
-              <span className="memory-content">{mem.content}</span>
-              <span className="memory-date">
+            <div
+              key={mem.id}
+              className="flex items-center gap-3 rounded-md border border-border px-3 py-2"
+            >
+              <span className="flex-1 text-sm text-foreground truncate">{mem.content}</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {mem.createdAt ? formatDateField(mem.createdAt) : ""}
               </span>
               {isOrgAdmin && (
-                <button
-                  type="button"
-                  className="btn-unbind"
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => deleteMemory.mutate(mem.id)}
                   disabled={deleteMemory.isPending}
                 >
                   {t("btn.delete")}
-                </button>
+                </Button>
               )}
             </div>
           ))}

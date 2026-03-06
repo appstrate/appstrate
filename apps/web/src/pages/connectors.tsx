@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { useServices } from "../hooks/use-services";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
@@ -117,16 +118,14 @@ export function ConnectorsPage() {
 
   return (
     <>
-      <div className="header-row">
+      <div className="flex items-center justify-between gap-4 mb-6">
         <h2>{t("connectors.pageTitle", { orgName: currentOrg?.name })}</h2>
         <ProfileSelector />
       </div>
 
       {isOrgAdmin && (
-        <div className="tab-toolbar">
-          <button className="primary" onClick={() => setTemplatePickerOpen(true)}>
-            {t("providers.addProvider")}
-          </button>
+        <div className="flex items-center gap-2 mb-4">
+          <Button onClick={() => setTemplatePickerOpen(true)}>{t("providers.addProvider")}</Button>
         </div>
       )}
 
@@ -145,13 +144,13 @@ export function ConnectorsPage() {
           icon={Plug}
         >
           {isOrgAdmin && (
-            <button className="primary" onClick={() => setTemplatePickerOpen(true)}>
+            <Button onClick={() => setTemplatePickerOpen(true)}>
               {t("providers.addProvider")}
-            </button>
+            </Button>
           )}
         </EmptyState>
       ) : (
-        <div className="services-grid">
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
           {mergedItems.map(({ provider, integration }) => (
             <ProviderCard
               key={provider.id}

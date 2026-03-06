@@ -1,7 +1,19 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -32,13 +44,9 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
-  const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab");
   const validTabs = ["general", "members", "proxies", "api-keys"] as const;
   type Tab = (typeof validTabs)[number];
-  const [tab, setTab] = useState<Tab>(
-    validTabs.includes(initialTab as Tab) ? (initialTab as Tab) : "general",
-  );
+  const [tab, setTab] = useTabWithHash<Tab>(validTabs, "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -210,7 +218,7 @@ export function OrgSettingsPage() {
     return (
       <EmptyState message={t("orgSettings.adminOnly")} icon={ShieldAlert}>
         <Link to="/">
-          <button>{t("btn.back")}</button>
+          <Button variant="outline">{t("btn.back")}</Button>
         </Link>
       </EmptyState>
     );
@@ -254,88 +262,62 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      <div className="page-header">
+      <div className="mb-6">
         <h2>{t("orgSettings.pageTitle")}</h2>
       </div>
-      <div className="exec-tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "general"}
-          className={`tab ${tab === "general" ? "active" : ""}`}
-          onClick={() => setTab("general")}
-        >
-          {t("orgSettings.tabGeneral")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "members"}
-          className={`tab ${tab === "members" ? "active" : ""}`}
-          onClick={() => setTab("members")}
-        >
-          {t("orgSettings.tabMembers", { count: members.length })}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "proxies"}
-          className={`tab ${tab === "proxies" ? "active" : ""}`}
-          onClick={() => setTab("proxies")}
-        >
-          {t("proxies.tabTitle")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "api-keys"}
-          className={`tab ${tab === "api-keys" ? "active" : ""}`}
-          onClick={() => setTab("api-keys")}
-        >
-          {t("orgSettings.tabApiKeys")}
-        </button>
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>
+          <TabsTrigger value="members">
+            {t("orgSettings.tabMembers", { count: members.length })}
+          </TabsTrigger>
+          <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
+          <TabsTrigger value="api-keys">{t("orgSettings.tabApiKeys")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {tab === "general" && (
         <>
           {/* Organisation info */}
-          <div className="section-title">{t("orgSettings.orgTitle")}</div>
-          <div className="service-card service-card-spaced">
-            <div className="service-card-header">
-              <div className="service-info">
+          <div className="text-sm font-medium text-muted-foreground mb-4">
+            {t("orgSettings.orgTitle")}
+          </div>
+          <div className="rounded-lg border border-border bg-card p-5 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
                 {editingName ? (
-                  <form onSubmit={handleSaveName} className="org-edit-form">
-                    <input
+                  <form onSubmit={handleSaveName} className="flex items-center gap-2">
+                    <Input
                       type="text"
-                      className="inline-input"
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
                       placeholder={currentOrg.name}
                       autoFocus
                     />
-                    <button
-                      className="primary"
-                      type="submit"
-                      disabled={updateNameMutation.isPending}
-                    >
+                    <Button type="submit" disabled={updateNameMutation.isPending}>
                       {updateNameMutation.isPending ? <Spinner /> : t("btn.save")}
-                    </button>
-                    <button type="button" onClick={() => setEditingName(false)}>
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setEditingName(false)}>
                       {t("btn.cancel")}
-                    </button>
+                    </Button>
                   </form>
                 ) : (
                   <>
-                    <h3>{currentOrg.name}</h3>
-                    <span className="service-provider">{currentOrg.slug}</span>
+                    <h3 className="text-[0.95rem] font-semibold">{currentOrg.name}</h3>
+                    <span className="text-sm text-muted-foreground">{currentOrg.slug}</span>
                   </>
                 )}
               </div>
               {isOrgOwner && !editingName && (
-                <button
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setNewName(currentOrg.name);
                     setEditingName(true);
                   }}
                 >
                   {t("btn.edit")}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -343,15 +325,19 @@ export function OrgSettingsPage() {
           {/* Danger zone */}
           {isOrgOwner && (
             <>
-              <div className="section-title section-title-mt-lg">{t("orgSettings.dangerZone")}</div>
-              <div className="service-card service-card-danger">
-                <div className="service-card-header service-card-header-flush">
-                  <div className="service-info service-info-sm">
-                    <h3>{t("orgSettings.deleteOrg")}</h3>
-                    <span className="service-provider">{t("orgSettings.deleteOrgDesc")}</span>
+              <div className="text-sm font-medium text-muted-foreground mb-4 mt-8">
+                {t("orgSettings.dangerZone")}
+              </div>
+              <div className="rounded-lg border border-destructive bg-card p-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold">{t("orgSettings.deleteOrg")}</h3>
+                    <span className="text-sm text-muted-foreground">
+                      {t("orgSettings.deleteOrgDesc")}
+                    </span>
                   </div>
-                  <button
-                    className="btn-danger"
+                  <Button
+                    variant="destructive"
                     disabled={deleteOrgMutation.isPending}
                     onClick={() => {
                       if (confirm(t("orgSettings.deleteConfirm", { name: currentOrg.name }))) {
@@ -360,7 +346,7 @@ export function OrgSettingsPage() {
                     }}
                   >
                     {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </>
@@ -371,10 +357,10 @@ export function OrgSettingsPage() {
       {tab === "members" && (
         <>
           {/* Add member form */}
-          <form onSubmit={handleInvite} className="invite-form">
-            <div className="invite-form-field">
-              <div className="invite-form-row">
-                <input
+          <form onSubmit={handleInvite} className="flex gap-2 mb-4 items-start">
+            <div className="flex-1">
+              <div className="flex gap-2">
+                <Input
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => {
@@ -384,27 +370,34 @@ export function OrgSettingsPage() {
                   placeholder="email@example.com"
                   required
                 />
-                <select
-                  className="inline-select"
+                <Select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as "member" | "admin")}
+                  onValueChange={(v) => setInviteRole(v as "member" | "admin")}
                 >
-                  <option value="member">{t("orgSettings.roleMember")}</option>
-                  <option value="admin">{t("orgSettings.roleAdmin")}</option>
-                </select>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="member">{t("orgSettings.roleMember")}</SelectItem>
+                    <SelectItem value="admin">{t("orgSettings.roleAdmin")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              {inviteError && <p className="form-error">{inviteError}</p>}
+              {inviteError && <p className="text-sm text-destructive mt-1">{inviteError}</p>}
               {inviteLink && (
-                <div className="invite-link-box">
-                  <input
+                <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5">
+                  <Input
                     type="text"
                     readOnly
                     value={inviteLink}
-                    className="invite-link-input"
+                    className="flex-1 border-none bg-transparent text-xs font-mono text-muted-foreground min-w-0"
                     onFocus={(e) => e.target.select()}
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 whitespace-nowrap"
                     onClick={() => {
                       navigator.clipboard.writeText(inviteLink);
                       setLinkCopied(true);
@@ -412,60 +405,74 @@ export function OrgSettingsPage() {
                     }}
                   >
                     {linkCopied ? t("btn.copied") : t("btn.copyLink")}
-                  </button>
-                  <button type="button" className="btn-dismiss" onClick={() => setInviteLink(null)}>
-                    ✕
-                  </button>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="px-1 py-0.5"
+                    onClick={() => setInviteLink(null)}
+                  >
+                    &#10005;
+                  </Button>
                 </div>
               )}
             </div>
-            <button className="primary" type="submit" disabled={addMemberMutation.isPending}>
+            <Button type="submit" disabled={addMemberMutation.isPending}>
               {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
-            </button>
+            </Button>
           </form>
 
           {/* Member list */}
-          <div className="services-grid">
+          <div className="flex flex-col gap-3">
             {members.map((member) => {
               const label = member.displayName || member.email || member.userId;
               const isOwner = member.role === "owner";
 
               return (
-                <div key={member.userId} className="service-card">
-                  <div className="service-card-header service-card-header-flush">
-                    <div className="service-info service-info-sm">
-                      <h3>{label}</h3>
-                      {member.email && <span className="service-provider">{member.email}</span>}
+                <div key={member.userId} className="rounded-lg border border-border bg-card p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <h3 className="text-sm font-semibold">{label}</h3>
+                      {member.email && (
+                        <span className="text-sm text-muted-foreground">{member.email}</span>
+                      )}
                     </div>
-                    <span
-                      className={`badge ${isOwner ? "badge-running" : member.role === "admin" ? "badge-success" : "badge-pending"}`}
+                    <Badge
+                      variant={
+                        isOwner ? "running" : member.role === "admin" ? "success" : "pending"
+                      }
                     >
                       {roleLabel[member.role]}
-                    </span>
+                    </Badge>
                   </div>
                   {isOrgAdmin && !isOwner && (
-                    <div className="service-card-actions service-card-actions-bordered">
+                    <div className="mt-3 pt-3 border-t border-border flex gap-2">
                       {isOrgOwner && (
-                        <select
-                          className="inline-select"
+                        <Select
                           value={member.role}
-                          onChange={(e) =>
-                            handleRoleChange(member.userId, e.target.value as OrgRole)
-                          }
+                          onValueChange={(v) => handleRoleChange(member.userId, v as OrgRole)}
                           disabled={changeRoleMutation.isPending}
                         >
-                          <option value="member">{t("orgSettings.roleMember")}</option>
-                          <option value="admin">{t("orgSettings.roleAdmin")}</option>
-                          <option value="owner">{t("orgSettings.roleOwner")}</option>
-                        </select>
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="member">{t("orgSettings.roleMember")}</SelectItem>
+                            <SelectItem value="admin">{t("orgSettings.roleAdmin")}</SelectItem>
+                            <SelectItem value="owner">{t("orgSettings.roleOwner")}</SelectItem>
+                          </SelectContent>
+                        </Select>
                       )}
-                      <button
+                      <Button
+                        variant="destructive"
+                        size="sm"
                         className="ml-auto"
                         onClick={() => handleRemove(member)}
                         disabled={removeMemberMutation.isPending}
                       >
                         {t("btn.remove")}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -476,48 +483,54 @@ export function OrgSettingsPage() {
           {/* Pending invitations */}
           {invitations.length > 0 && (
             <>
-              <div className="section-title section-title-mt">
+              <div className="text-sm font-medium text-muted-foreground mb-4 mt-6">
                 {t("orgSettings.pendingInvitations")}
               </div>
-              <div className="services-grid">
+              <div className="flex flex-col gap-3">
                 {invitations.map((inv) => (
-                  <div key={inv.id} className="service-card">
-                    <div className="service-card-header service-card-header-flush">
-                      <div className="service-info service-info-sm">
-                        <h3>{inv.email}</h3>
-                        <span className="service-provider">
+                  <div key={inv.id} className="rounded-lg border border-border bg-card p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold">{inv.email}</h3>
+                        <span className="text-sm text-muted-foreground">
                           {inv.role === "admin"
                             ? t("orgSettings.roleAdmin")
                             : t("orgSettings.roleMember")}
                         </span>
                       </div>
-                      <span className="badge badge-pending">{t("orgSettings.invited")}</span>
+                      <Badge variant="pending">{t("orgSettings.invited")}</Badge>
                     </div>
-                    <div className="service-card-actions service-card-actions-bordered">
+                    <div className="mt-3 pt-3 border-t border-border flex gap-2">
                       {isOrgOwner && (
-                        <select
-                          className="inline-select"
+                        <Select
                           value={inv.role}
-                          onChange={(e) =>
+                          onValueChange={(v) =>
                             changeInvitationRoleMutation.mutate({
                               invitationId: inv.id,
-                              role: e.target.value as "member" | "admin",
+                              role: v as "member" | "admin",
                             })
                           }
                           disabled={changeInvitationRoleMutation.isPending}
                         >
-                          <option value="member">{t("orgSettings.roleMember")}</option>
-                          <option value="admin">{t("orgSettings.roleAdmin")}</option>
-                        </select>
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="member">{t("orgSettings.roleMember")}</SelectItem>
+                            <SelectItem value="admin">{t("orgSettings.roleAdmin")}</SelectItem>
+                          </SelectContent>
+                        </Select>
                       )}
                       <CopyLinkButton token={inv.token} />
-                      <button
+                      <Button
+                        variant="destructive"
+                        size="sm"
                         className="ml-auto"
                         onClick={() => cancelInvitationMutation.mutate(inv.id)}
                         disabled={cancelInvitationMutation.isPending}
                       >
                         {t("btn.cancel")}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -598,7 +611,9 @@ function CopyLinkButton({ token }: { token: string }) {
   const link = `${window.location.origin}/invite/${token}`;
 
   return (
-    <button
+    <Button
+      variant="outline"
+      size="sm"
       onClick={() => {
         navigator.clipboard.writeText(link);
         setCopied(true);
@@ -606,7 +621,7 @@ function CopyLinkButton({ token }: { token: string }) {
       }}
     >
       {copied ? t("btn.copied") : t("btn.copyLink")}
-    </button>
+    </Button>
   );
 }
 
@@ -636,52 +651,60 @@ function ProxiesTab({
 
   return (
     <>
-      <div className="service-card service-card-spaced">
-        <div className="connectors-intro">
-          <p className="service-provider">{t("proxies.description")}</p>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">{t("proxies.description")}</p>
         </div>
       </div>
 
-      <div className="tab-toolbar">
-        <button className="primary" onClick={onCreate}>
-          {t("proxies.add")}
-        </button>
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <Button onClick={onCreate}>{t("proxies.add")}</Button>
       </div>
 
       {proxies && proxies.length > 0 ? (
-        <div className="services-grid">
+        <div className="flex flex-col gap-3">
           {proxies.map((p) => {
             const isBuiltIn = p.source === "built-in";
             return (
-              <div key={p.id} className="service-card">
-                <div className="service-card-header">
-                  <div className="service-info">
-                    <h3>{p.label}</h3>
-                    <span className="service-provider">{p.urlPrefix}</span>
-                    <div className="provider-badges">
-                      {p.isDefault && (
-                        <span className="badge badge-success">{t("proxies.default")}</span>
+              <div key={p.id} className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex-1">
+                    <h3 className="text-[0.95rem] font-semibold">{p.label}</h3>
+                    <span className="text-sm text-muted-foreground">{p.urlPrefix}</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {p.isDefault && <Badge variant="success">{t("proxies.default")}</Badge>}
+                      {isBuiltIn && (
+                        <Badge variant="secondary" className="opacity-60">
+                          {t("proxies.builtIn")}
+                        </Badge>
                       )}
-                      {isBuiltIn && <span className="badge badge-dim">{t("proxies.builtIn")}</span>}
                       {!isBuiltIn && (
-                        <span className="badge badge-dim">
+                        <Badge variant="secondary" className="opacity-60">
                           {p.enabled ? t("proxies.enabled") : t("proxies.disabled")}
-                        </span>
+                        </Badge>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
                   {p.isDefault && !isBuiltIn && (
-                    <button onClick={onRemoveDefault}>{t("proxies.removeDefault")}</button>
+                    <Button variant="outline" size="sm" onClick={onRemoveDefault}>
+                      {t("proxies.removeDefault")}
+                    </Button>
                   )}
                   {!p.isDefault && !isBuiltIn && (
-                    <button onClick={() => onSetDefault(p)}>{t("proxies.setDefault")}</button>
+                    <Button variant="outline" size="sm" onClick={() => onSetDefault(p)}>
+                      {t("proxies.setDefault")}
+                    </Button>
                   )}
                   {!isBuiltIn && (
                     <>
-                      <button onClick={() => onEdit(p)}>{t("proxies.edit")}</button>
-                      <button onClick={() => onDelete(p)}>{t("proxies.delete")}</button>
+                      <Button variant="ghost" size="sm" onClick={() => onEdit(p)}>
+                        {t("proxies.edit")}
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => onDelete(p)}>
+                        {t("proxies.delete")}
+                      </Button>
                     </>
                   )}
                 </div>
@@ -691,9 +714,7 @@ function ProxiesTab({
         </div>
       ) : (
         <EmptyState message={t("proxies.empty")} compact>
-          <button className="primary" onClick={onCreate}>
-            {t("proxies.add")}
-          </button>
+          <Button onClick={onCreate}>{t("proxies.add")}</Button>
         </EmptyState>
       )}
     </>
@@ -719,7 +740,7 @@ function ApiKeysTab({
   if (error) return <ErrorState message={error.message} />;
 
   const formatDate = (iso: string | null) => {
-    if (!iso) return "—";
+    if (!iso) return "\u2014";
     return new Date(iso).toLocaleDateString(undefined, {
       year: "numeric",
       month: "short",
@@ -732,53 +753,60 @@ function ApiKeysTab({
 
   return (
     <>
-      <div className="tab-toolbar">
-        <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="btn-link">
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <a
+          href="/api/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mr-auto text-primary text-sm no-underline hover:underline"
+        >
           {t("apiKeys.swaggerLink")}
         </a>
-        <button className="primary" onClick={onCreate}>
-          {t("apiKeys.createBtn")}
-        </button>
+        <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
       </div>
 
       {apiKeys && apiKeys.length > 0 ? (
-        <div className="services-grid">
+        <div className="flex flex-col gap-3">
           {apiKeys.map((key) => {
             const expired = isExpired(key.expiresAt);
             return (
-              <div key={key.id} className="service-card">
-                <div className="service-card-header">
-                  <div className="service-info">
-                    <h3>{key.name}</h3>
-                    <div className="provider-badges">
-                      <span className="badge badge-dim">{key.keyPrefix}...</span>
+              <div key={key.id} className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex-1">
+                    <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      <Badge variant="secondary" className="opacity-60">
+                        {key.keyPrefix}...
+                      </Badge>
                       {expired ? (
-                        <span className="badge badge-failed">{t("apiKeys.expired")}</span>
+                        <Badge variant="failed">{t("apiKeys.expired")}</Badge>
                       ) : (
-                        <span className="badge badge-success">{t("apiKeys.active")}</span>
+                        <Badge variant="success">{t("apiKeys.active")}</Badge>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="service-card-body">
-                  <span className="service-provider">
+                <div className="flex flex-col gap-1 mt-3">
+                  <span className="text-sm text-muted-foreground">
                     {key.expiresAt
                       ? t("apiKeys.expiresOn", { date: formatDate(key.expiresAt) })
                       : t("apiKeys.neverExpires")}
                   </span>
                   {key.lastUsedAt && (
-                    <span className="service-provider">
+                    <span className="text-sm text-muted-foreground">
                       {t("apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
                     </span>
                   )}
                   {key.createdByName && (
-                    <span className="service-provider">
+                    <span className="text-sm text-muted-foreground">
                       {t("apiKeys.createdByLabel", { name: key.createdByName })}
                     </span>
                   )}
                 </div>
-                <div className="service-card-actions service-card-actions-bordered service-card-actions-end">
-                  <button onClick={() => onRevoke(key)}>{t("apiKeys.revoke")}</button>
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
+                  <Button variant="destructive" size="sm" onClick={() => onRevoke(key)}>
+                    {t("apiKeys.revoke")}
+                  </Button>
                 </div>
               </div>
             );
@@ -786,9 +814,7 @@ function ApiKeysTab({
         </div>
       ) : (
         <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} compact>
-          <button className="primary" onClick={onCreate}>
-            {t("apiKeys.createBtn")}
-          </button>
+          <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
         </EmptyState>
       )}
     </>

@@ -1,6 +1,20 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth } from "../hooks/use-auth";
 import { useFormErrors } from "../hooks/use-form-errors";
@@ -23,47 +37,27 @@ import type { UserConnectionItem } from "@appstrate/shared-types";
 export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
   const updateLanguage = useUpdateLanguage();
-  const [tab, setTab] = useState<"general" | "security" | "connectors" | "profiles">("general");
+  const [tab, setTab] = useTabWithHash(
+    ["general", "security", "connectors", "profiles"] as const,
+    "general",
+  );
 
   return (
     <>
-      <div className="page-header">
+      <div className="mb-6">
         <h2>{t("preferences.title")}</h2>
       </div>
-      <div className="exec-tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "general"}
-          className={`tab ${tab === "general" ? "active" : ""}`}
-          onClick={() => setTab("general")}
-        >
-          {t("preferences.tabGeneral")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "security"}
-          className={`tab ${tab === "security" ? "active" : ""}`}
-          onClick={() => setTab("security")}
-        >
-          {t("preferences.tabSecurity")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "connectors"}
-          className={`tab ${tab === "connectors" ? "active" : ""}`}
-          onClick={() => setTab("connectors")}
-        >
-          {t("preferences.tabConnectors")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "profiles"}
-          className={`tab ${tab === "profiles" ? "active" : ""}`}
-          onClick={() => setTab("profiles")}
-        >
-          {t("preferences.tabProfiles")}
-        </button>
-      </div>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as "general" | "security" | "connectors" | "profiles")}
+      >
+        <TabsList className="mb-4">
+          <TabsTrigger value="general">{t("preferences.tabGeneral")}</TabsTrigger>
+          <TabsTrigger value="security">{t("preferences.tabSecurity")}</TabsTrigger>
+          <TabsTrigger value="connectors">{t("preferences.tabConnectors")}</TabsTrigger>
+          <TabsTrigger value="profiles">{t("preferences.tabProfiles")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {tab === "general" && (
         <GeneralTab
@@ -95,24 +89,28 @@ function GeneralTab({
 
   return (
     <>
-      <div className="section-title">{t("preferences.language")}</div>
-      <div className="service-card service-card-spaced">
-        <div className="service-card-header service-card-header-flush">
-          <div className="service-info">
-            <select
-              className="language-select"
-              value={language}
-              onChange={(e) => onLanguageChange(e.target.value)}
-              disabled={languagePending}
-            >
-              <option value="fr">{t("preferences.langFr")}</option>
-              <option value="en">{t("preferences.langEn")}</option>
-            </select>
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.language")}
+      </div>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <Select value={language} onValueChange={onLanguageChange} disabled={languagePending}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
+                <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>
 
-      <div className="section-title">{t("preferences.account")}</div>
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.account")}
+      </div>
       <DisplayNameForm />
     </>
   );
@@ -123,7 +121,9 @@ function SecurityTab() {
 
   return (
     <>
-      <div className="section-title">{t("preferences.changePassword")}</div>
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.changePassword")}
+      </div>
       <PasswordChangeForm />
     </>
   );
@@ -150,11 +150,11 @@ function DisplayNameForm() {
   };
 
   return (
-    <div className="service-card service-card-spaced">
-      <form onSubmit={handleSubmit} className="form-compact">
-        <div className="form-group">
-          <label>{t("preferences.displayName")}</label>
-          <input
+    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+        <div className="space-y-2">
+          <Label>{t("preferences.displayName")}</Label>
+          <Input
             type="text"
             value={name}
             onChange={(e) => {
@@ -164,12 +164,12 @@ function DisplayNameForm() {
             maxLength={100}
           />
         </div>
-        {success && <div className="form-success">{success}</div>}
-        <button type="submit" className="primary" disabled={!canSubmit}>
+        {success && <div className="text-sm text-success">{success}</div>}
+        <Button type="submit" disabled={!canSubmit}>
           {updateDisplayName.isPending
             ? t("preferences.savingDisplayName")
             : t("preferences.saveDisplayName")}
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -230,11 +230,11 @@ function PasswordChangeForm() {
   };
 
   return (
-    <div className="service-card service-card-spaced">
-      <form onSubmit={handleSubmit} className="form-compact">
-        <div className="form-group">
-          <label>{t("preferences.currentPassword")}</label>
-          <input
+    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+        <div className="space-y-2">
+          <Label>{t("preferences.currentPassword")}</Label>
+          <Input
             type="password"
             value={currentPassword}
             onChange={(e) => {
@@ -246,13 +246,15 @@ function PasswordChangeForm() {
             onBlur={() => onBlur("currentPassword", currentPassword)}
             autoComplete="current-password"
             aria-invalid={errors.currentPassword ? true : undefined}
-            className={errors.currentPassword ? "input-error" : undefined}
+            className={cn(errors.currentPassword && "border-destructive")}
           />
-          {errors.currentPassword && <div className="field-error">{errors.currentPassword}</div>}
+          {errors.currentPassword && (
+            <p className="text-xs text-destructive">{errors.currentPassword}</p>
+          )}
         </div>
-        <div className="form-group">
-          <label>{t("preferences.newPassword")}</label>
-          <input
+        <div className="space-y-2">
+          <Label>{t("preferences.newPassword")}</Label>
+          <Input
             type="password"
             value={newPassword}
             onChange={(e) => {
@@ -265,13 +267,13 @@ function PasswordChangeForm() {
             minLength={6}
             autoComplete="new-password"
             aria-invalid={errors.newPassword ? true : undefined}
-            className={errors.newPassword ? "input-error" : undefined}
+            className={cn(errors.newPassword && "border-destructive")}
           />
-          {errors.newPassword && <div className="field-error">{errors.newPassword}</div>}
+          {errors.newPassword && <p className="text-xs text-destructive">{errors.newPassword}</p>}
         </div>
-        <div className="form-group">
-          <label>{t("preferences.confirmPassword")}</label>
-          <input
+        <div className="space-y-2">
+          <Label>{t("preferences.confirmPassword")}</Label>
+          <Input
             type="password"
             value={confirmPassword}
             onChange={(e) => {
@@ -283,15 +285,17 @@ function PasswordChangeForm() {
             onBlur={() => onBlur("confirmPassword", confirmPassword)}
             autoComplete="new-password"
             aria-invalid={errors.confirmPassword ? true : undefined}
-            className={errors.confirmPassword ? "input-error" : undefined}
+            className={cn(errors.confirmPassword && "border-destructive")}
           />
-          {errors.confirmPassword && <div className="field-error">{errors.confirmPassword}</div>}
+          {errors.confirmPassword && (
+            <p className="text-xs text-destructive">{errors.confirmPassword}</p>
+          )}
         </div>
-        {serverError && <div className="form-error">{serverError}</div>}
-        {success && <div className="form-success">{success}</div>}
-        <button type="submit" className="primary" disabled={submitting}>
+        {serverError && <div className="text-sm text-destructive">{serverError}</div>}
+        {success && <div className="text-sm text-success">{success}</div>}
+        <Button type="submit" disabled={submitting}>
           {submitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -339,22 +343,24 @@ function ConnectorsTab() {
 
   return (
     <>
-      <div className="section-header">
-        <div className="section-title">{t("connectors.myConnections")}</div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm font-medium text-muted-foreground">
+          {t("connectors.myConnections")}
+        </div>
         <ProfileSelector />
       </div>
 
-      <div className="service-card service-card-spaced">
-        <div className="connectors-intro">
-          <p className="service-provider">
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
             {t("connectors.description")}{" "}
-            <Link to="/connectors" className="link-inline">
+            <Link to="/connectors" className="text-primary text-sm no-underline hover:underline">
               {t("connectors.connectMore")}
             </Link>
           </p>
           {totalConnections > 0 && (
-            <button
-              className="danger"
+            <Button
+              variant="destructive"
               onClick={() => {
                 if (confirm(t("connectors.deleteAllConfirm"))) {
                   deleteAllMutation.mutate();
@@ -365,7 +371,7 @@ function ConnectorsTab() {
               {deleteAllMutation.isPending
                 ? t("connectors.deletingAll")
                 : t("connectors.deleteAll")}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -377,86 +383,99 @@ function ConnectorsTab() {
           icon={Unplug}
         >
           <Link to="/connectors">
-            <button>{t("connectors.goToConnectors")}</button>
+            <Button variant="outline">{t("connectors.goToConnectors")}</Button>
           </Link>
         </EmptyState>
       ) : (
-        <div className="services-grid">
+        <div className="flex flex-col gap-3">
           {providerIds.map((providerId) => {
             const conns = grouped[providerId];
             const info = userConns?.providerInfo[providerId];
             const expanded = expandedProviders.has(providerId);
 
             return (
-              <div key={providerId} className="service-card">
-                <div className="provider-group-header" onClick={() => toggleExpand(providerId)}>
-                  <div className="service-card-header service-card-header-flush">
+              <div key={providerId} className="rounded-lg border border-border bg-card p-5">
+                <div
+                  className="flex items-center justify-between cursor-pointer"
+                  onClick={() => toggleExpand(providerId)}
+                >
+                  <div className="flex items-center gap-3">
                     {info?.logo && (
                       <img
-                        className="service-logo"
+                        className="h-8 w-8 rounded-md object-contain"
                         src={info.logo}
                         alt={info?.displayName ?? providerId}
                       />
                     )}
-                    <div className="service-info">
-                      <h3>{info?.displayName ?? providerId}</h3>
-                      <span className="service-provider">
+                    <div className="flex-1">
+                      <h3 className="text-[0.95rem] font-semibold">
+                        {info?.displayName ?? providerId}
+                      </h3>
+                      <span className="text-sm text-muted-foreground">
                         {t("connectors.connectionCount", { count: conns.length })}
                       </span>
                     </div>
                   </div>
-                  <span className={`provider-group-toggle${expanded ? " expanded" : ""}`}>
+                  <span
+                    className={cn(
+                      "text-xs text-muted-foreground transition-transform duration-200",
+                      expanded && "rotate-90",
+                    )}
+                  >
                     &#9654;
                   </span>
                 </div>
 
                 {expanded && (
-                  <div className="provider-group-connections">
+                  <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2">
                     {conns.map((conn) => (
-                      <div key={conn.connectionId} className="connection-item">
-                        <div className="connection-meta">
+                      <div
+                        key={conn.connectionId}
+                        className="flex items-center justify-between py-2 text-sm"
+                      >
+                        <div className="flex flex-col gap-0.5">
                           <span>
                             {conn.profile.name}
                             {conn.profile.isDefault && (
-                              <span className="tag" style={{ marginLeft: "0.4rem" }}>
+                              <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
                                 {t("profiles.default")}
                               </span>
                             )}
                           </span>
-                          <span className="connection-details">
+                          <span className="text-xs text-muted-foreground">
                             {t(`connectors.authMode.${conn.authMode}`, {
                               defaultValue: conn.authMode,
                             })}
-                            {conn.scopesGranted.length > 0 && ` · ${conn.scopesGranted.join(", ")}`}
-                            {conn.connectedAt && ` · ${formatDateField(conn.connectedAt)}`}
+                            {conn.scopesGranted.length > 0 &&
+                              ` \u00b7 ${conn.scopesGranted.join(", ")}`}
+                            {conn.connectedAt && ` \u00b7 ${formatDateField(conn.connectedAt)}`}
                           </span>
                           {(() => {
                             const validOrgs = conn.orgs?.filter((o) => o.status === "valid") ?? [];
                             return validOrgs.length > 0 ? (
-                              <span className="connection-orgs">
+                              <span className="flex flex-wrap gap-1 mt-1">
                                 {validOrgs.map((org) => (
-                                  <span
+                                  <Badge
                                     key={org.id}
-                                    className="badge badge-success"
+                                    variant="success"
                                     title={t("connectors.orgValid", { org: org.name })}
                                   >
                                     {org.name}
-                                  </span>
+                                  </Badge>
                                 ))}
                               </span>
                             ) : (
-                              <span className="connection-orgs">
-                                <span
-                                  className="badge badge-muted"
-                                  title={t("connectors.unusedHint")}
-                                >
+                              <span className="flex flex-wrap gap-1 mt-1">
+                                <Badge variant="secondary" title={t("connectors.unusedHint")}>
                                   {t("connectors.unused")}
-                                </span>
+                                </Badge>
                               </span>
                             );
                           })()}
                         </div>
-                        <button
+                        <Button
+                          variant="destructive"
+                          size="sm"
                           onClick={() => {
                             if (
                               confirm(
@@ -475,7 +494,7 @@ function ConnectorsTab() {
                           disabled={disconnectMutation.isPending}
                         >
                           {t("btn.disconnect")}
-                        </button>
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -513,11 +532,11 @@ function ProfilesTab() {
 
   return (
     <>
-      <div className="section-title">{t("profiles.title")}</div>
+      <div className="text-sm font-medium text-muted-foreground mb-4">{t("profiles.title")}</div>
 
-      <div className="service-card service-card-spaced">
-        <div className="form-compact form-inline">
-          <input
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center gap-2 py-1">
+          <Input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -526,25 +545,21 @@ function ProfilesTab() {
               if (e.key === "Enter" && newName.trim() && !createProfile.isPending) handleCreate();
             }}
           />
-          <button
-            className="primary"
-            onClick={handleCreate}
-            disabled={!newName.trim() || createProfile.isPending}
-          >
+          <Button onClick={handleCreate} disabled={!newName.trim() || createProfile.isPending}>
             {t("profiles.create")}
-          </button>
+          </Button>
         </div>
       </div>
 
       {profiles && profiles.length > 0 && (
-        <div className="services-grid">
+        <div className="flex flex-col gap-3">
           {profiles.map((profile) => (
-            <div key={profile.id} className="service-card">
-              <div className="service-card-header">
-                <div className="service-info">
+            <div key={profile.id} className="rounded-lg border border-border bg-card p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex-1">
                   {editingId === profile.id ? (
-                    <div className="form-inline">
-                      <input
+                    <div className="flex items-center gap-2">
+                      <Input
                         type="text"
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
@@ -559,7 +574,8 @@ function ProfilesTab() {
                         }}
                         autoFocus
                       />
-                      <button
+                      <Button
+                        size="sm"
                         onClick={() => {
                           if (editName.trim()) {
                             renameProfile.mutate(
@@ -571,20 +587,22 @@ function ProfilesTab() {
                         disabled={!editName.trim() || renameProfile.isPending}
                       >
                         {t("btn.save")}
-                      </button>
-                      <button onClick={() => setEditingId(null)}>{t("btn.cancel")}</button>
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>
+                        {t("btn.cancel")}
+                      </Button>
                     </div>
                   ) : (
                     <>
-                      <h3>
+                      <h3 className="text-[0.95rem] font-semibold">
                         {profile.name}
                         {profile.isDefault && (
-                          <span className="tag" style={{ marginLeft: "0.4rem" }}>
+                          <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
                             {t("profiles.default")}
                           </span>
                         )}
                       </h3>
-                      <span className="service-provider">
+                      <span className="text-sm text-muted-foreground">
                         {t("profiles.connections", { count: profile.connectionCount })}
                       </span>
                     </>
@@ -592,17 +610,21 @@ function ProfilesTab() {
                 </div>
               </div>
               {editingId !== profile.id && (
-                <div className="service-card-actions">
-                  <button
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => {
                       setEditingId(profile.id);
                       setEditName(profile.name);
                     }}
                   >
                     {t("profiles.rename")}
-                  </button>
+                  </Button>
                   {!profile.isDefault && (
-                    <button
+                    <Button
+                      variant="destructive"
+                      size="sm"
                       onClick={() => {
                         if (confirm(t("profiles.deleteConfirm", { name: profile.name }))) {
                           deleteProfile.mutate(profile.id);
@@ -611,7 +633,7 @@ function ProfilesTab() {
                       disabled={deleteProfile.isPending}
                     >
                       {t("profiles.delete")}
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}

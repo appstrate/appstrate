@@ -16,9 +16,11 @@ export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
   const update = (patch: Partial<ExecutionSettings>) => onChange({ ...value, ...patch });
 
   return (
-    <div className="editor-section">
-      <div className="editor-section-header">{t("editor.execution")}</div>
-      <div className="editor-section-body">
+    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
+      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
+        {t("editor.execution")}
+      </div>
+      <div className="space-y-3 p-4">
         <FormField
           id="exec-timeout"
           label={t("editor.execTimeout")}

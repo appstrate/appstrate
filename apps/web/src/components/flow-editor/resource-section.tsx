@@ -1,6 +1,7 @@
 import { type ChangeEvent, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import {
   usePackageList,
   useUploadPackage,
@@ -8,6 +9,13 @@ import {
   PACKAGE_CONFIG,
   type PackageType,
 } from "../../hooks/use-packages";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
 
@@ -43,23 +51,27 @@ function VersionSelect({
 
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {
-    return <span className="version-badge">*</span>;
+    return (
+      <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
+        *
+      </span>
+    );
   }
 
   return (
-    <select
-      className="version-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {value === "*" && <option value="*">*</option>}
-      {available.map((v) => (
-        <option key={v.id} value={v.version}>
-          {v.version}
-        </option>
-      ))}
-    </select>
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-7 w-[80px] text-xs" onClick={(e) => e.stopPropagation()}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {value === "*" && <SelectItem value="*">*</SelectItem>}
+        {available.map((v) => (
+          <SelectItem key={v.id} value={v.version}>
+            {v.version}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -111,10 +123,10 @@ export function ResourceSection({
   };
 
   return (
-    <div className="editor-section">
-      <div className="editor-section-header editor-section-header-actions">
+    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
+      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border flex items-center justify-between">
         {title}
-        <label className="btn-upload btn-upload-sm">
+        <label className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer normal-case tracking-normal">
           {upload.isPending ? <Spinner /> : t("editor.importZip")}
           <input
             type="file"
@@ -126,38 +138,53 @@ export function ResourceSection({
           />
         </label>
       </div>
-      <div className="editor-section-body">
+      <div className="space-y-3 p-4">
         {isLoading ? (
-          <div className="empty-state">
+          <div className="flex items-center justify-center py-6 text-muted-foreground">
             <Spinner />
           </div>
         ) : !items || items.length === 0 ? (
           <>
-            <p className="editor-hint">{emptyLabel}</p>
-            <p className="editor-hint">
-              <Link to="/?tab=skills">{t("editor.goToPackages")}</Link>
+            <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+            <p className="text-xs text-muted-foreground">
+              <Link to="/#skills">{t("editor.goToPackages")}</Link>
             </p>
           </>
         ) : (
-          <div className="pkg-checkbox-list">
+          <div className="flex flex-col gap-1">
             {items.map((item) => {
               const isSelected = selectedMap.has(item.id);
               const isBuiltIn = item.source === "built-in";
               const entry = selectedMap.get(item.id);
 
               return (
-                <label key={item.id} className={`pkg-checkbox-item${isSelected ? " checked" : ""}`}>
-                  <input type="checkbox" checked={isSelected} onChange={() => toggle(item.id)} />
-                  <div className="pkg-checkbox-info">
-                    <span className="pkg-checkbox-name">{item.name || item.id}</span>
+                <label
+                  key={item.id}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer transition-colors hover:bg-muted/50",
+                    isSelected && "border-primary bg-primary/5",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggle(item.id)}
+                    className="w-3.5 h-3.5 rounded"
+                  />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-sm font-medium truncate">{item.name || item.id}</span>
                     {item.description && (
-                      <span className="pkg-checkbox-desc">{item.description}</span>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {item.description}
+                      </span>
                     )}
                   </div>
                   {isSelected && (
-                    <div className="pkg-checkbox-version">
+                    <div className="ml-auto shrink-0">
                       {isBuiltIn ? (
-                        <span className="version-badge">{t("editor.builtIn", "Integree")}</span>
+                        <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
+                          {t("editor.builtIn", "Integree")}
+                        </span>
                       ) : (
                         <VersionSelect
                           type={type}

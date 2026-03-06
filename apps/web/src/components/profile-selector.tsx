@@ -1,6 +1,14 @@
 import { useTranslation } from "react-i18next";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { useCurrentProfileId, setCurrentProfileId } from "../hooks/use-current-profile";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 export function ProfileSelector() {
   const { t } = useTranslation("settings");
@@ -11,20 +19,24 @@ export function ProfileSelector() {
   if (!profiles || profiles.length <= 1) return null;
 
   return (
-    <div className="profile-selector">
-      <label>{t("profiles.selectorLabel")}</label>
-      <select
-        className="profile-select"
+    <div className="profile-selector flex items-center gap-2">
+      <Label>{t("profiles.selectorLabel")}</Label>
+      <Select
         value={currentProfileId ?? ""}
-        onChange={(e) => setCurrentProfileId(e.target.value || null)}
+        onValueChange={(value) => setCurrentProfileId(value || null)}
       >
-        {profiles.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-            {p.isDefault ? ` (${t("profiles.default")})` : ""}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="w-[200px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {profiles.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.name}
+              {p.isDefault ? ` (${t("profiles.default")})` : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

@@ -1,6 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePackageVersions, type VersionListItem } from "../hooks/use-packages";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 interface VersionSelectorProps {
   packageId: string;
@@ -24,8 +32,7 @@ export function VersionSelector({
 
   if (!versions || versions.length === 0) return null;
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = e.target.value;
+  const handleChange = (selected: string) => {
     if (selected === "draft") {
       navigate(detailPath);
     } else {
@@ -33,25 +40,25 @@ export function VersionSelector({
     }
   };
 
-  const selectValue = currentIsDraft ? "draft" : (currentVersion ?? "");
+  const selectValue = currentIsDraft ? "draft" : (currentVersion ?? versions[0]?.version ?? "");
 
   return (
-    <div className="version-selector">
-      <label>{t("version.selector")}</label>
-      <select className="profile-select" value={selectValue} onChange={handleChange}>
-        {hasDraftChanges && <option value="draft">{t("version.draftLabel")}</option>}
-        {!currentVersion && !currentIsDraft && (
-          <option value="" disabled>
-            {t("version.selector")}
-          </option>
-        )}
-        {versions.map((v: VersionListItem) => (
-          <option key={v.id} value={v.version}>
-            {v.version}
-            {v.yanked ? ` (${t("version.yanked")})` : ""}
-          </option>
-        ))}
-      </select>
+    <div className="version-selector flex items-center gap-2">
+      <Label>{t("version.selector")}</Label>
+      <Select value={selectValue} onValueChange={handleChange}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue placeholder={t("version.selector")} />
+        </SelectTrigger>
+        <SelectContent>
+          {hasDraftChanges && <SelectItem value="draft">{t("version.draftLabel")}</SelectItem>}
+          {versions.map((v: VersionListItem) => (
+            <SelectItem key={v.id} value={v.version}>
+              {v.version}
+              {v.yanked ? ` (${t("version.yanked")})` : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
