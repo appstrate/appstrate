@@ -71,7 +71,7 @@ export function SharedHeader({
             )}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {detail.versionCount && detail.versionCount > 0 && (
+            {detail.versionCount != null && detail.versionCount > 0 && (
               <VersionSelector
                 packageId={packageId}
                 currentVersion={versionParam}
