@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
+import { useTheme } from "../theme-provider";
 import type { FlowFormState } from "./types";
 import { assemblePayload, payloadToFormState } from "./utils";
 
@@ -12,6 +13,7 @@ interface JsonEditorProps {
 
 export function JsonEditor({ form, onApply }: JsonEditorProps) {
   const { t } = useTranslation(["flows", "common"]);
+  const { resolvedTheme } = useTheme();
 
   const initialJson = useMemo(() => {
     const { manifest, prompt } = assemblePayload(form);
@@ -46,7 +48,7 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
       <Editor
         height="600px"
         language="json"
-        theme="vs-dark"
+        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         value={jsonValue}
         onChange={(v) => {
           setJsonValue(v ?? "");

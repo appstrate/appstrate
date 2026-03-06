@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useTheme } from "../components/theme-provider";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth } from "../hooks/use-auth";
 import { useFormErrors } from "../hooks/use-form-errors";
@@ -38,7 +39,7 @@ export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
   const updateLanguage = useUpdateLanguage();
   const [tab, setTab] = useTabWithHash(
-    ["general", "security", "connectors", "profiles"] as const,
+    ["general", "appearance", "security", "connectors", "profiles"] as const,
     "general",
   );
 
@@ -49,10 +50,11 @@ export function PreferencesPage() {
       </div>
       <Tabs
         value={tab}
-        onValueChange={(v) => setTab(v as "general" | "security" | "connectors" | "profiles")}
+        onValueChange={(v) => setTab(v as "general" | "appearance" | "security" | "connectors" | "profiles")}
       >
         <TabsList className="mb-4">
           <TabsTrigger value="general">{t("preferences.tabGeneral")}</TabsTrigger>
+          <TabsTrigger value="appearance">{t("preferences.tabAppearance")}</TabsTrigger>
           <TabsTrigger value="security">{t("preferences.tabSecurity")}</TabsTrigger>
           <TabsTrigger value="connectors">{t("preferences.tabConnectors")}</TabsTrigger>
           <TabsTrigger value="profiles">{t("preferences.tabProfiles")}</TabsTrigger>
@@ -66,6 +68,8 @@ export function PreferencesPage() {
           languagePending={updateLanguage.isPending}
         />
       )}
+
+      {tab === "appearance" && <AppearanceTab />}
 
       {tab === "security" && <SecurityTab />}
 
@@ -112,6 +116,35 @@ function GeneralTab({
         {t("preferences.account")}
       </div>
       <DisplayNameForm />
+    </>
+  );
+}
+
+function AppearanceTab() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <>
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.theme")}
+      </div>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
+                <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
+                <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
     </>
   );
 }

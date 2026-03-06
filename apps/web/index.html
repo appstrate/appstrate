@@ -1,9 +1,17 @@
 <!DOCTYPE html>
-<html lang="fr" class="dark">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Appstrate</title>
+  <script>
+    // Key must match THEME_STORAGE_KEY in components/theme-provider.tsx
+    (function() {
+      var t = localStorage.getItem('appstrate-theme') || 'system';
+      if (t === 'system') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.classList.add(t);
+    })();
+  </script>
   <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />

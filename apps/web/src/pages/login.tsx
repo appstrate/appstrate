@@ -4,11 +4,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useTheme } from "../components/theme-provider";
 import { useAuth } from "../hooks/use-auth";
 import { useFormErrors } from "../hooks/use-form-errors";
 
 export function LoginPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { resolvedTheme } = useTheme();
   const { login, signup } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,7 +72,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
         <div className="flex justify-center mb-4">
-          <img src="/logo.svg" alt="Appstrate" className="h-8" />
+          <img src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"} alt="Appstrate" className="h-8" />
         </div>
         <form onSubmit={handleSubmit}>
           {mode === "signup" && (

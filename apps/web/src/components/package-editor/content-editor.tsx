@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import { useTheme } from "../theme-provider";
 
 interface ContentEditorProps {
   value: string;
@@ -9,6 +10,7 @@ interface ContentEditorProps {
 }
 
 export function ContentEditor({ value, onChange, language, height = "500px" }: ContentEditorProps) {
+  const { resolvedTheme } = useTheme();
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
   }, []);
@@ -18,7 +20,7 @@ export function ContentEditor({ value, onChange, language, height = "500px" }: C
       <Editor
         height={height}
         language={language}
-        theme="vs-dark"
+        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
         value={value}
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
