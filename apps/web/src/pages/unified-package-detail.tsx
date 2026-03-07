@@ -241,9 +241,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
   // Determine available tabs based on type
   const servicesSummary =
-    type === "flow" && flowDetail
-      ? computeServicesSummary(flowDetail.requires.services, t)
-      : null;
+    type === "flow" && flowDetail ? computeServicesSummary(flowDetail.requires.services, t) : null;
 
   const flowTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
     { id: "executions", label: t("detail.tabExecutions") },
@@ -381,9 +379,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       </Tabs>
 
       {/* Tab content */}
-      {type === "flow" && tab === "connectors" && (
-        <FlowConnectorsTab packageId={packageId} />
-      )}
+      {type === "flow" && tab === "connectors" && <FlowConnectorsTab packageId={packageId} />}
       {type === "flow" && tab === "executions" && (
         <FlowExecutionsTab packageId={packageId} resolvedVersion={resolvedVersion} />
       )}

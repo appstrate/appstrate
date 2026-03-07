@@ -307,7 +307,7 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
         return null;
 
       case "error":
-        return { type: "progress", message: `Error: ${obj.message || "unknown error"}` };
+        return { type: "error", message: obj.message || "unknown error" };
 
       default:
         return null;

@@ -63,6 +63,7 @@ export async function executeFlowInBackground(
 
     const timeout = flow.manifest.execution?.timeout ?? 300;
     let result: Record<string, unknown> | null = null;
+    let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
     try {
@@ -82,6 +83,17 @@ export async function executeFlowInBackground(
             orgId,
             "progress",
             "progress",
+            msg.message ?? null,
+            msg.data ?? null,
+          );
+        } else if (msg.type === "error") {
+          lastAdapterError = msg.message ?? null;
+          await appendExecutionLog(
+            executionId,
+            userId,
+            orgId,
+            "error",
+            "adapter_error",
             msg.message ?? null,
             msg.data ?? null,
           );
@@ -260,9 +272,20 @@ export async function executeFlowInBackground(
       if (signal.aborted) return;
 
       const duration = Date.now() - startTime;
+      const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+
+      // Prefer the precise adapter error over generic heuristics
+      const error =
+        lastAdapterError ??
+        (totalTokens === 0
+          ? promptContext.proxyUrl
+            ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
+            : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
+          : "No result returned from adapter");
+
       await updateExecution(executionId, {
         status: "failed",
-        error: "No result returned from adapter",
+        error,
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
@@ -270,7 +293,7 @@ export async function executeFlowInBackground(
       await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
         executionId,
         status: "failed",
-        error: "No result returned from adapter",
+        error,
       });
     }
   } catch (err) {

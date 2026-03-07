@@ -277,6 +277,12 @@ export function ExecutionDetailPage() {
         />
       )}
 
+      {displayStatus === "failed" && execution.error && (
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive mb-4">
+          {execution.error}
+        </div>
+      )}
+
       <Tabs
         value={activeTab}
         onValueChange={(v) => {
@@ -287,18 +293,17 @@ export function ExecutionDetailPage() {
       >
         <TabsList>
           <TabsTrigger value="logs">
-            {t("exec.tabLogs")} <span>{t("exec.tabLogEvents", { count: allLogs.length })}</span>
+            {t("exec.tabLogs")}
+            {allLogs.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                {allLogs.length}
+              </span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
           <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
         </TabsList>
       </Tabs>
-
-      {displayStatus === "failed" && execution.error && (
-        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {execution.error}
-        </div>
-      )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 

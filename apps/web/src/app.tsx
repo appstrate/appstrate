@@ -30,7 +30,18 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download, FileText, LogOut, ShoppingBag, Sun, Moon, Monitor, Palette } from "lucide-react";
+import {
+  User,
+  Settings,
+  Download,
+  FileText,
+  LogOut,
+  ShoppingBag,
+  Sun,
+  Moon,
+  Monitor,
+  Palette,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -105,9 +116,7 @@ function UserMenu({
               >
                 <opt.icon size={14} />
                 {opt.label}
-                {theme === opt.value && (
-                  <span className="ml-auto text-primary">✓</span>
-                )}
+                {theme === opt.value && <span className="ml-auto text-primary">✓</span>}
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>
