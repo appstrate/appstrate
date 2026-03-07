@@ -21,7 +21,7 @@ export const executions = pgTable(
   "executions",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }),
+    packageId: text("package_id"),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),

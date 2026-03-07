@@ -36,14 +36,6 @@ export function PackageCard({
       <div className="flex items-start justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">{displayName}</h2>
         <div className="flex items-center gap-1.5 shrink-0">
-          {type === "flow" && (
-            <RunFlowButton
-              packageId={id}
-              variant="ghost"
-              size="icon"
-              className="size-7 text-muted-foreground hover:text-primary"
-            />
-          )}
           {source === "built-in" && (
             <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
               {t("list.badgeBuiltIn")}
@@ -53,6 +45,21 @@ export function PackageCard({
             <span className="text-[0.7rem] px-2 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1.5">
               <Spinner /> {t("list.running", { count: runningExecutions })}
             </span>
+          )}
+          {type === "flow" && (
+            <div
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              <RunFlowButton
+                packageId={id}
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground hover:text-primary"
+              />
+            </div>
           )}
         </div>
       </div>
