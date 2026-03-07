@@ -52,7 +52,7 @@ export function SharedHeader({
         <span>{detail.displayName}</span>
       </nav>
 
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="flex items-center flex-wrap gap-2">
           <h2 className="text-xl font-semibold">{detail.displayName}</h2>
           <div className="flex items-center gap-1.5">
@@ -93,6 +93,8 @@ export function SharedHeader({
           </div>
         )}
       </div>
+
+      <div className="w-full h-px border-b border-border border-dashed my-6"></div>
     </>
   );
 }

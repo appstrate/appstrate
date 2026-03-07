@@ -30,12 +30,15 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { Spinner } from "./components/spinner";
-import { User, Settings, Download, FileText, LogOut, ShoppingBag } from "lucide-react";
+import { User, Settings, Download, FileText, LogOut, ShoppingBag, Sun, Moon, Monitor, Palette } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -52,6 +55,13 @@ function UserMenu({
   onLogout: () => void;
 }) {
   const { t } = useTranslation();
+  const { theme, setTheme } = useTheme();
+
+  const themeOptions = [
+    { value: "light" as const, label: t("userMenu.themeLight"), icon: Sun },
+    { value: "dark" as const, label: t("userMenu.themeDark"), icon: Moon },
+    { value: "system" as const, label: t("userMenu.themeSystem"), icon: Monitor },
+  ];
 
   return (
     <DropdownMenu>
@@ -81,6 +91,27 @@ function UserMenu({
             {t("userMenu.preferences")}
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Palette size={14} />
+            {t("userMenu.theme")}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {themeOptions.map((opt) => (
+              <DropdownMenuItem
+                key={opt.value}
+                onSelect={() => setTheme(opt.value)}
+                className="flex items-center gap-2"
+              >
+                <opt.icon size={14} />
+                {opt.label}
+                {theme === opt.value && (
+                  <span className="ml-auto text-primary">✓</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuItem asChild>
           <a
             href="/api/docs"
