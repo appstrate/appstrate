@@ -44,7 +44,6 @@ export function VersionSelector({
 
   return (
     <div className="version-selector flex items-center gap-2">
-      <Label>{t("version.selector")}</Label>
       <Select value={selectValue} onValueChange={handleChange}>
         <SelectTrigger className="w-[180px]">
           <SelectValue placeholder={t("version.selector")} />

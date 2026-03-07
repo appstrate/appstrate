@@ -1,20 +1,21 @@
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useFlowDetail } from "../../hooks/use-packages";
-import { useDeleteFlow } from "../../hooks/use-mutations";
+import { useExecutions } from "../../hooks/use-executions";
+import { useFlowMemories } from "../../hooks/use-memories";
+import {
+  useDeleteFlow,
+  useDeleteFlowExecutions,
+  useDeleteAllMemories,
+} from "../../hooks/use-mutations";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
-import { ShareDropdown } from "../share-dropdown";
-import { RunFlowButton } from "../run-flow-button";
+import { PackageActionsDropdown } from "./package-actions-dropdown";
 
 export function FlowActions({
   packageId,
   isOrgAdmin,
   isHistoricalVersion,
   hasDraftChanges,
-  resolvedVersion,
   downloadVersion,
   downloadPackage,
   onCreateVersion,
@@ -23,97 +24,67 @@ export function FlowActions({
   isOrgAdmin: boolean;
   isHistoricalVersion: boolean;
   hasDraftChanges: boolean;
-  resolvedVersion: string | undefined;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
   onCreateVersion: () => void;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = useFlowDetail(packageId);
+  const { data: executions } = useExecutions(packageId);
+  const { data: memories } = useFlowMemories(packageId);
   const deleteFlow = useDeleteFlow();
+  const deleteExecutions = useDeleteFlowExecutions(packageId);
+  const deleteAllMemories = useDeleteAllMemories(packageId);
   const setConfigOpen = useFlowDetailUI((s) => s.setConfigOpen);
+  const setScheduleOpen = useFlowDetailUI((s) => s.setScheduleOpen);
+  const setEditingSchedule = useFlowDetailUI((s) => s.setEditingSchedule);
   const readiness = useFlowReadiness(detail);
 
   if (!detail) return null;
 
-  const { allConnected, hasReconnectionNeeded, hasRequiredConfig, hasConfigSchema } = readiness;
+  const { hasConfigSchema } = readiness;
 
-  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
-  const runDisabledTitle = hasReconnectionNeeded
-    ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
-    : !allConnected
-      ? t("detail.titleConnect")
-      : !hasRequiredConfig
-        ? t("detail.titleConfig")
-        : undefined;
+  const hasFileInput =
+    detail.input?.schema?.properties &&
+    Object.values(detail.input.schema.properties).some((p) => p.type === "file");
 
   return (
-    <div className="flex items-center gap-2 flex-wrap mb-4">
-      <RunFlowButton
-        packageId={packageId}
-        detail={detail}
-        version={resolvedVersion}
-        disabled={runDisabled}
-        disabledTitle={runDisabledTitle}
-        showLabel
-      />
-      <ShareDropdown
-        packageId={packageId}
-        isAdmin={isOrgAdmin}
-        services={detail.requires.services}
-      />
-      {isOrgAdmin && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {hasConfigSchema && (
-            <Button variant="outline" onClick={() => setConfigOpen(true)}>
-              {t("detail.configure")}
-            </Button>
-          )}
-          {downloadVersion && (
-            <Button
-              variant="outline"
-              onClick={() => downloadPackage(downloadVersion)}
-              title={t("btn.download", { ns: "common" })}
-            >
-              <Download size={14} /> {t("btn.download", { ns: "common" })}
-            </Button>
-          )}
-          {detail.source !== "built-in" && !isHistoricalVersion && (
-            <>
-              <Button variant="outline" onClick={onCreateVersion} disabled={!hasDraftChanges}>
-                {t("version.createVersion")}
-              </Button>
-              <Button variant="outline" asChild>
-                <Link to={`/flows/${packageId}/edit`}>{t("btn.edit")}</Link>
-              </Button>
-            </>
-          )}
-          {isHistoricalVersion && (
-            <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-              {t("version.readOnly")}
-            </span>
-          )}
-          {detail.source !== "built-in" && (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={detail.runningExecutions > 0 || deleteFlow.isPending}
-              title={
-                detail.runningExecutions > 0
-                  ? t("detail.titleDeleteRunning")
-                  : t("detail.titleDelete")
-              }
-              onClick={() => {
-                if (confirm(t("detail.deleteConfirm", { name: detail.displayName }))) {
-                  deleteFlow.mutate(detail.id);
-                }
-              }}
-            >
-              {t("btn.delete")}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
+    <PackageActionsDropdown
+      packageId={packageId}
+      type="flow"
+      isOrgAdmin={isOrgAdmin}
+      isBuiltIn={detail.source === "built-in"}
+      isHistoricalVersion={isHistoricalVersion}
+      hasDraftChanges={hasDraftChanges}
+      downloadVersion={downloadVersion}
+      onDownload={downloadPackage}
+      onCreateVersion={onCreateVersion}
+      hasConfigSchema={hasConfigSchema}
+      onConfigure={() => setConfigOpen(true)}
+      runningExecutions={detail.runningExecutions}
+      hasExecutions={!!executions && executions.length > 0}
+      hasMemories={!!memories && memories.length > 0}
+      hasFileInput={!!hasFileInput}
+      onDeleteFlow={() => {
+        if (confirm(t("detail.deleteConfirm", { name: detail.displayName }))) {
+          deleteFlow.mutate(detail.id);
+        }
+      }}
+      onDeleteExecutions={() => {
+        if (confirm(t("detail.clearExecConfirm"))) {
+          deleteExecutions.mutate();
+        }
+      }}
+      onAddSchedule={() => {
+        setEditingSchedule(null);
+        setScheduleOpen(true);
+      }}
+      onDeleteMemories={() => {
+        if (confirm(t("detail.clearMemoriesConfirm"))) {
+          deleteAllMemories.mutate();
+        }
+      }}
+      shareServices={detail.requires.services}
+    />
   );
 }
