@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { TypeBadge } from "../type-badge";
 import { VersionSelector } from "../version-selector";
 
 interface SharedHeaderDetail {
@@ -56,7 +55,6 @@ export function SharedHeader({
         <div className="flex items-center flex-wrap gap-2">
           <h2 className="text-xl font-semibold">{detail.displayName}</h2>
           <div className="flex items-center gap-1.5">
-            {detail.type !== "flow" && <TypeBadge type={detail.type} />}
             {detail.source === "built-in" && (
               <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
                 {t("packages.sourceBuiltIn", { ns: "settings" })}
@@ -72,9 +70,7 @@ export function SharedHeader({
         {detail.description && (
           <p className="text-sm text-muted-foreground mt-1">{detail.description}</p>
         )}
-        {detail.type !== "flow" && (
-          <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
-        )}
+        <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
         {(hasActions || hasVersionSelector) && (
           <div className="flex items-center gap-2 mt-3">
             {actionsLeft}
