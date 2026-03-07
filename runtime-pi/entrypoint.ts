@@ -226,6 +226,11 @@ try {
               totalUsage.cost += u.cost?.total ?? 0;
             }
 
+            // Emit SDK errors (e.g. LLM API unreachable, auth failures)
+            if ((last as any).stopReason === "error" && (last as any).errorMessage) {
+              emit({ type: "error", message: (last as any).errorMessage });
+            }
+
             const content = (last as any).content;
             if (Array.isArray(content)) {
               const text = content
@@ -276,9 +281,21 @@ try {
 
   // --- 7. Run the prompt ---
 
-  await session.prompt(systemPrompt);
+  try {
+    await session.prompt(systemPrompt);
+  } catch (promptErr) {
+    emit({
+      type: "error",
+      message: promptErr instanceof Error ? promptErr.message : String(promptErr),
+    });
+    process.exit(1);
+  }
 
   process.exit(0);
 } catch (err) {
-  die(`Agent session failed: ${err}`);
+  emit({
+    type: "error",
+    message: err instanceof Error ? err.message : String(err),
+  });
+  process.exit(1);
 }

@@ -50,10 +50,12 @@ export async function* runContainerLifecycle(
   }, timeoutMs);
 
   let hasResult = false;
+  let lastError: string | undefined;
 
   try {
     for await (const msg of options.processLogs(streamLogs(containerId, signal))) {
       if (msg.type === "result") hasResult = true;
+      if (msg.type === "error") lastError = msg.message;
       yield msg;
     }
 
@@ -69,7 +71,7 @@ export async function* runContainerLifecycle(
     }
 
     if (exitCode !== 0 && !hasResult) {
-      throw new Error(`${adapterName} container exited with code ${exitCode}`);
+      throw new Error(lastError ?? `${adapterName} container exited with code ${exitCode}`);
     }
   } finally {
     clearTimeout(timeoutHandle);

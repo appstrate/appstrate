@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, Check, Clock, ArrowDown } from "lucide-react";
+import { Copy, Check, Clock, ArrowDown, WrapText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +46,7 @@ export function LogViewer({ entries }: LogViewerProps) {
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [expandAll, setExpandAll] = useState(false);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -93,10 +94,19 @@ export function LogViewer({ entries }: LogViewerProps) {
         <Button
           variant="ghost"
           size="icon"
+          className={cn("h-7 w-7 text-muted-foreground", expandAll && "text-primary")}
+          onClick={() => setExpandAll((v) => !v)}
+          title={t("log.expandAll")}
+          style={{ marginLeft: "auto" }}
+        >
+          <WrapText size={14} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           className={cn("h-7 w-7 text-muted-foreground", showTimestamps && "text-primary")}
           onClick={() => setShowTimestamps((v) => !v)}
           title={t("log.toggleTimestamps")}
-          style={{ marginLeft: "auto" }}
         >
           <Clock size={14} />
         </Button>
@@ -135,7 +145,8 @@ export function LogViewer({ entries }: LogViewerProps) {
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index];
-            const expanded = expandedIndex === virtualRow.index;
+            const expanded =
+              expandAll || expandedIndex === virtualRow.index || entry.type === "error";
             return (
               <div
                 key={virtualRow.index}
@@ -157,7 +168,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                     "px-3 py-0.5 text-sm font-mono text-muted-foreground cursor-pointer select-none leading-7 truncate hover:bg-muted/50",
                     logEntryColors[entry.type],
                     entry.type === "progress" &&
-                      "before:content-[''] before:inline-block before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary before:mr-1.5 before:animate-pulse",
+                      "before:content-[''] before:inline-block before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary before:mr-1.5 before:opacity-60",
                     expanded && "whitespace-normal break-words bg-muted/30",
                   )}
                 >

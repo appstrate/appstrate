@@ -6,7 +6,7 @@ export interface TokenUsage {
 }
 
 export interface ExecutionMessage {
-  type: "progress" | "result";
+  type: "progress" | "result" | "error";
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;
