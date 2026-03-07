@@ -19,17 +19,17 @@ export function SharedHeader({
   packageId,
   versionParam,
   hasDraftChanges,
-  isVersionView,
   isHistoricalVersion,
-  headerExtras,
+  actionsLeft,
+  actionsRight,
 }: {
   detail: SharedHeaderDetail;
   packageId: string;
   versionParam: string | undefined;
   hasDraftChanges: boolean;
-  isVersionView: boolean;
   isHistoricalVersion: boolean;
-  headerExtras?: React.ReactNode;
+  actionsLeft?: React.ReactNode;
+  actionsRight?: React.ReactNode;
 }) {
   const { t } = useTranslation(["flows", "settings", "common"]);
 
@@ -38,6 +38,9 @@ export function SharedHeader({
     detail.type === "flow"
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
+
+  const hasActions = actionsLeft || actionsRight;
+  const hasVersionSelector = detail.versionCount != null && detail.versionCount > 0;
 
   return (
     <>
@@ -59,28 +62,11 @@ export function SharedHeader({
                 {t("packages.sourceBuiltIn", { ns: "settings" })}
               </span>
             )}
-            {hasDraftChanges && !isVersionView && (
-              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-warning/15 text-warning font-medium">
-                {t("version.unpublished")}
-              </span>
-            )}
             {isHistoricalVersion && (
               <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
                 {t("version.readOnly")}
               </span>
             )}
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {detail.versionCount != null && detail.versionCount > 0 && (
-              <VersionSelector
-                packageId={packageId}
-                currentVersion={versionParam}
-                type={detail.type}
-                hasDraftChanges={hasDraftChanges}
-                currentIsDraft={!versionParam && hasDraftChanges}
-              />
-            )}
-            {headerExtras}
           </div>
         </div>
         {detail.description && (
@@ -88,6 +74,23 @@ export function SharedHeader({
         )}
         {detail.type !== "flow" && (
           <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
+        )}
+        {(hasActions || hasVersionSelector) && (
+          <div className="flex items-center gap-2 mt-3">
+            {actionsLeft}
+            <div className="ml-auto flex items-center gap-2">
+              {hasVersionSelector && (
+                <VersionSelector
+                  packageId={packageId}
+                  currentVersion={versionParam}
+                  type={detail.type}
+                  hasDraftChanges={hasDraftChanges}
+                  currentIsDraft={!versionParam && hasDraftChanges}
+                />
+              )}
+              {actionsRight}
+            </div>
+          </div>
         )}
       </div>
     </>

@@ -1,16 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -22,13 +12,13 @@ import {
   type PackageType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
-import { useProxies, useFlowProxy, useSetFlowProxy } from "../hooks/use-proxies";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
 import { VersionHistory } from "../components/version-history";
 import { DraftDiffView } from "../components/draft-diff-view";
@@ -44,6 +34,8 @@ import {
   FlowMemoriesTab,
 } from "../components/package-detail/flow-tabs";
 import { FlowModals } from "../components/package-detail/flow-modals";
+import { RunFlowButton } from "../components/run-flow-button";
+import { useFlowReadiness } from "../hooks/use-flow-readiness";
 
 type DetailTab =
   | "executions"
@@ -56,42 +48,45 @@ type DetailTab =
 
 // ─── Flow Header Extras ─────────────────────────────────────────────
 
-function FlowHeaderExtras({ packageId }: { packageId: string }) {
-  const { t } = useTranslation("settings");
-  const { isOrgAdmin } = useOrg();
-  const { data: orgProxies } = useProxies();
-  const { data: flowProxy } = useFlowProxy(packageId);
-  const setFlowProxy = useSetFlowProxy(packageId);
+function FlowHeaderExtras() {
+  return <ProfileSelector />;
+}
+
+// ─── Flow Run Button (inline, no wrapper) ────────────────────────────
+
+function FlowRunButtonInline({
+  packageId,
+  resolvedVersion,
+}: {
+  packageId: string;
+  resolvedVersion: string | undefined;
+}) {
+  const { t } = useTranslation("flows");
+  const { data: detail } = useFlowDetail(packageId);
+  const readiness = useFlowReadiness(detail);
+
+  if (!detail) return null;
+
+  const { allConnected, hasReconnectionNeeded, hasRequiredConfig } = readiness;
+  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
+  const runDisabledTitle = hasReconnectionNeeded
+    ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
+    : !allConnected
+      ? t("detail.titleConnect")
+      : !hasRequiredConfig
+        ? t("detail.titleConfig")
+        : undefined;
 
   return (
-    <>
-      {isOrgAdmin && orgProxies && orgProxies.length > 0 && (
-        <div className="flex items-center gap-2">
-          <Label className="text-muted-foreground whitespace-nowrap">
-            {t("proxies.flow.label")}
-          </Label>
-          <Select
-            value={flowProxy?.proxyId ?? "__inherit__"}
-            onValueChange={(val) => setFlowProxy.mutate(val === "__inherit__" ? null : val)}
-            disabled={setFlowProxy.isPending}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__inherit__">{t("proxies.flow.inherit")}</SelectItem>
-              <SelectItem value="none">{t("proxies.flow.none")}</SelectItem>
-              {orgProxies.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      <ProfileSelector />
-    </>
+    <RunFlowButton
+      packageId={packageId}
+      detail={detail}
+      version={resolvedVersion}
+      disabled={runDisabled}
+      disabledTitle={runDisabledTitle}
+      showLabel
+      showProxy
+    />
   );
 }
 
@@ -185,6 +180,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
     versionParam,
     versionDetail,
     liveVersion: version,
+    hasDraftChanges,
   });
   if ("redirect" in versionResult) {
     return <Navigate to={versionResult.redirect} replace />;
@@ -263,90 +259,76 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
         packageId={packageId}
         versionParam={versionParam}
         hasDraftChanges={hasDraftChanges}
-        isVersionView={isVersionView}
         isHistoricalVersion={isHistoricalVersion}
-        headerExtras={type === "flow" ? <FlowHeaderExtras packageId={packageId} /> : undefined}
+        actionsLeft={
+          type === "flow" ? (
+            <FlowRunButtonInline packageId={packageId} resolvedVersion={resolvedVersion} />
+          ) : undefined
+        }
+        actionsRight={
+          type === "flow" ? (
+            <>
+              <FlowHeaderExtras />
+              <FlowActions
+                packageId={packageId}
+                isOrgAdmin={isOrgAdmin}
+                isHistoricalVersion={isHistoricalVersion}
+                hasDraftChanges={hasDraftChanges}
+                downloadVersion={downloadVersion ?? undefined}
+                downloadPackage={downloadPackage}
+                onCreateVersion={() => setCreateVersionOpen(true)}
+              />
+            </>
+          ) : isOrgAdmin ? (
+            <PackageActionsDropdown
+              packageId={packageId}
+              type={type}
+              isOrgAdmin={isOrgAdmin}
+              isBuiltIn={isBuiltIn}
+              isHistoricalVersion={isHistoricalVersion}
+              hasDraftChanges={hasDraftChanges}
+              downloadVersion={downloadVersion ?? undefined}
+              onDownload={downloadPackage}
+              onCreateVersion={() => setCreateVersionOpen(true)}
+              canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
+              onDeletePackage={() => {
+                if (!pkgDetail) return;
+                const nameStr = pkgDetail.name || pkgDetail.id;
+                const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+                if (
+                  !confirm(
+                    t("packages.deleteConfirm", {
+                      type: typeLabel,
+                      name: nameStr,
+                      ns: "settings",
+                    }),
+                  )
+                )
+                  return;
+                deletePkgMutation.mutate(packageId, {
+                  onError: (err) =>
+                    alert(
+                      err instanceof Error
+                        ? err.message
+                        : t("packages.deleteDependedOn", { ns: "settings" }),
+                    ),
+                });
+              }}
+            />
+          ) : undefined
+        }
       />
 
-      <VersionBanners isHistorical={isHistoricalVersion} versionDetail={versionDetail} />
+      <VersionBanners
+        isHistorical={isHistoricalVersion}
+        versionDetail={versionDetail}
+        hasDraftChanges={hasDraftChanges}
+        latestUrl={type === "flow" ? `/flows/${packageId}` : `/${type}s/${packageId}`}
+        latestVersion={version}
+      />
 
       {/* Flow: Services section */}
       {type === "flow" && <FlowServicesSection packageId={packageId} />}
-
-      {/* Actions */}
-      {type === "flow" ? (
-        <FlowActions
-          packageId={packageId}
-          isOrgAdmin={isOrgAdmin}
-          isHistoricalVersion={isHistoricalVersion}
-          hasDraftChanges={hasDraftChanges}
-          resolvedVersion={resolvedVersion}
-          downloadVersion={downloadVersion ?? undefined}
-          downloadPackage={downloadPackage}
-          onCreateVersion={() => setCreateVersionOpen(true)}
-        />
-      ) : (
-        isOrgAdmin &&
-        !isBuiltIn &&
-        !isHistoricalVersion && (
-          <div className="flex items-center gap-2 flex-wrap mb-4">
-            {downloadVersion && (
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t("btn.download", { ns: "common" })}
-                onClick={() => downloadPackage(downloadVersion)}
-              >
-                <Download size={14} /> {t("btn.download", { ns: "common" })}
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreateVersionOpen(true)}
-              disabled={!hasDraftChanges}
-            >
-              {t("version.createVersion")}
-            </Button>
-            <Link to={`/${type}s/${packageId}/edit`}>
-              <Button variant="outline" size="sm">
-                {t("btn.edit")}
-              </Button>
-            </Link>
-            {pkgDetail && pkgDetail.flows.length === 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  const nameStr = pkgDetail.name || pkgDetail.id;
-                  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                  if (
-                    !confirm(
-                      t("packages.deleteConfirm", {
-                        type: typeLabel,
-                        name: nameStr,
-                        ns: "settings",
-                      }),
-                    )
-                  )
-                    return;
-                  deletePkgMutation.mutate(packageId, {
-                    onError: (err) =>
-                      alert(
-                        err instanceof Error
-                          ? err.message
-                          : t("packages.deleteDependedOn", { ns: "settings" }),
-                      ),
-                  });
-                }}
-                disabled={deletePkgMutation.isPending}
-              >
-                {t("btn.delete")}
-              </Button>
-            )}
-          </div>
-        )
-      )}
 
       {/* Tab bar */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
@@ -370,11 +352,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
       {/* Tab content */}
       {type === "flow" && tab === "executions" && (
-        <FlowExecutionsTab
-          packageId={packageId}
-          isOrgAdmin={isOrgAdmin}
-          resolvedVersion={resolvedVersion}
-        />
+        <FlowExecutionsTab packageId={packageId} resolvedVersion={resolvedVersion} />
       )}
       {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
       {type === "flow" && tab === "memories" && (

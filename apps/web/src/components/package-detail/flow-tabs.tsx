@@ -4,11 +4,7 @@ import { useFlowDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
 import { useSchedules } from "../../hooks/use-schedules";
-import {
-  useDeleteFlowExecutions,
-  useDeleteMemory,
-  useDeleteAllMemories,
-} from "../../hooks/use-mutations";
+import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
@@ -20,17 +16,14 @@ import { formatDateField } from "../../lib/markdown";
 
 export function FlowExecutionsTab({
   packageId,
-  isOrgAdmin,
   resolvedVersion,
 }: {
   packageId: string;
-  isOrgAdmin: boolean;
   resolvedVersion: string | undefined;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = useFlowDetail(packageId);
   const { data: executions } = useExecutions(packageId);
-  const deleteExecutions = useDeleteFlowExecutions(packageId);
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
@@ -43,26 +36,6 @@ export function FlowExecutionsTab({
 
   return (
     <>
-      {isOrgAdmin && executions && executions.length > 0 && (
-        <div className="flex items-center justify-between mb-4">
-          <div />
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={detail.runningExecutions > 0 || deleteExecutions.isPending}
-            title={
-              detail.runningExecutions > 0 ? t("detail.clearExecRunning") : t("detail.clearExec")
-            }
-            onClick={() => {
-              if (confirm(t("detail.clearExecConfirm"))) {
-                deleteExecutions.mutate();
-              }
-            }}
-          >
-            {t("detail.clearExec")}
-          </Button>
-        </div>
-      )}
       {!executions || executions.length === 0 ? (
         <EmptyState message={t("detail.emptyExec")} compact>
           <RunFlowButton
@@ -108,18 +81,6 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div />
-        <Button
-          variant="outline"
-          onClick={() => {
-            setEditingSchedule(null);
-            setScheduleOpen(true);
-          }}
-        >
-          {t("btn.add")}
-        </Button>
-      </div>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} compact>
           <Button
@@ -159,27 +120,9 @@ export function FlowMemoriesTab({
   const { t } = useTranslation(["flows", "common"]);
   const { data: memories } = useFlowMemories(packageId);
   const deleteMemory = useDeleteMemory(packageId);
-  const deleteAllMemories = useDeleteAllMemories(packageId);
 
   return (
     <>
-      {isOrgAdmin && memories && memories.length > 0 && (
-        <div className="flex items-center justify-between mb-4">
-          <div />
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={deleteAllMemories.isPending}
-            onClick={() => {
-              if (confirm(t("detail.clearMemoriesConfirm"))) {
-                deleteAllMemories.mutate();
-              }
-            }}
-          >
-            {t("detail.clearMemories")}
-          </Button>
-        </div>
-      )}
       {!memories || memories.length === 0 ? (
         <EmptyState
           message={t("detail.emptyMemories")}
