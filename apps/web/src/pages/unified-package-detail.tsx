@@ -26,9 +26,9 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ProfileSelector } from "../components/profile-selector";
 
 // Flow-specific components
-import { FlowServicesSection } from "../components/package-detail/flow-services-section";
 import { FlowActions } from "../components/package-detail/flow-actions";
 import {
+  FlowConnectorsTab,
   FlowExecutionsTab,
   FlowSchedulesTab,
   FlowMemoriesTab,
@@ -36,8 +36,10 @@ import {
 import { FlowModals } from "../components/package-detail/flow-modals";
 import { RunFlowButton } from "../components/run-flow-button";
 import { useFlowReadiness } from "../hooks/use-flow-readiness";
+import { computeServicesSummary } from "../lib/service-status";
 
 type DetailTab =
+  | "connectors"
   | "executions"
   | "schedules"
   | "memories"
@@ -148,6 +150,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
+    "connectors",
     "executions",
     "schedules",
     "memories",
@@ -156,7 +159,13 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
     "content",
     "usedBy",
   ];
-  const defaultTab: DetailTab = type === "flow" ? "executions" : "content";
+  const hasDisconnectedServices =
+    type === "flow" &&
+    flowQuery.data?.requires.services.some(
+      (s) => s.status !== "connected" || s.scopesSufficient === false,
+    );
+  const defaultTab: DetailTab =
+    type === "flow" ? (hasDisconnectedServices ? "connectors" : "executions") : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
@@ -231,8 +240,18 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   const isBuiltIn = source === "built-in";
 
   // Determine available tabs based on type
+  const servicesSummary =
+    type === "flow" && flowDetail
+      ? computeServicesSummary(flowDetail.requires.services, t)
+      : null;
+
   const flowTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
     { id: "executions", label: t("detail.tabExecutions") },
+    {
+      id: "connectors",
+      label: t("detail.tabConnectors"),
+      badge: servicesSummary?.actionCount ? String(servicesSummary.actionCount) : undefined,
+    },
     {
       id: "schedules",
       label: t("detail.tabSchedules"),
@@ -243,7 +262,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
     },
   ];
 
-  const pkgTabs: Array<{ id: DetailTab; label: string }> = [
+  const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
     { id: "content", label: t("packages.content") },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
@@ -327,8 +346,14 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
         latestVersion={version}
       />
 
-      {/* Flow: Services section */}
-      {type === "flow" && <FlowServicesSection packageId={packageId} />}
+      {type === "flow" && servicesSummary && servicesSummary.actionCount > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
+          <span className="text-warning text-base leading-none">⚠</span>
+          <span className="text-warning">
+            {t("detail.servicesAlert", { count: servicesSummary.actionCount })}
+          </span>
+        </div>
+      )}
 
       {/* Tab bar */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
@@ -336,6 +361,11 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
           {tabDefs.map((td) => (
             <TabsTrigger key={td.id} value={td.id}>
               {td.label}
+              {td.badge && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-warning/15 text-warning text-xs font-medium min-w-[1.25rem] h-5 px-1">
+                  {td.badge}
+                </span>
+              )}
             </TabsTrigger>
           ))}
           {!isBuiltIn && (
@@ -351,6 +381,9 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
       </Tabs>
 
       {/* Tab content */}
+      {type === "flow" && tab === "connectors" && (
+        <FlowConnectorsTab packageId={packageId} />
+      )}
       {type === "flow" && tab === "executions" && (
         <FlowExecutionsTab packageId={packageId} resolvedVersion={resolvedVersion} />
       )}
