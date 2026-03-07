@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { TypeBadge } from "./type-badge";
 import { Spinner } from "./spinner";
 import { RunFlowButton } from "./run-flow-button";
 
@@ -45,7 +44,6 @@ export function PackageCard({
               className="size-7 text-muted-foreground hover:text-primary"
             />
           )}
-          <TypeBadge type={type} />
           {source === "built-in" && (
             <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
               {t("list.badgeBuiltIn")}
