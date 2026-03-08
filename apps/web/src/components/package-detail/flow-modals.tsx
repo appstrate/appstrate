@@ -1,5 +1,5 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
-import { useFlowDetail } from "../../hooks/use-packages";
+import { usePackageDetail } from "../../hooks/use-packages";
 import {
   useConnectApiKey,
   useConnectCredentials,
@@ -15,7 +15,7 @@ import { ApiKeyModal } from "../api-key-modal";
 import { CustomCredentialsModal } from "../custom-credentials-modal";
 
 export function FlowModals({ packageId }: { packageId: string }) {
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const { data: providersData } = useProviders();
   const providers = providersData?.providers;
   const profileId = useCurrentProfileId();

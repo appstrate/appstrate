@@ -27,7 +27,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     });
 
     qc.invalidateQueries({ queryKey: ["flows", orgId] });
-    qc.invalidateQueries({ queryKey: ["flow", orgId, packageId] });
+    qc.invalidateQueries({ queryKey: ["packages", "flow", orgId, packageId] });
 
     if (TERMINAL_STATUSES.has(status)) {
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });

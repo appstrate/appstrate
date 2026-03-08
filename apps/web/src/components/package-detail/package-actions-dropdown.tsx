@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ShareLinkModal } from "../share-link-modal";
 import { api } from "../../api";
+import { packageEditPath } from "../../lib/package-paths";
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -183,7 +184,7 @@ export function PackageActionsDropdown({
 
           {/* ── Edit ── */}
           {isOrgAdmin && isMutable && (
-            <DropdownMenuItem onSelect={() => navigate(`/${type}s/${packageId}/edit`)}>
+            <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
               <Pencil size={14} />
               {t("btn.edit")}
             </DropdownMenuItem>

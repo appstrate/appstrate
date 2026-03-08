@@ -98,7 +98,7 @@ export function useSetFlowProxy(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flow-proxy"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
   });
 }

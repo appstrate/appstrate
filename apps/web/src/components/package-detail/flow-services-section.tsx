@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useFlowDetail } from "../../hooks/use-packages";
+import { usePackageDetail } from "../../hooks/use-packages";
 import { useOrg } from "../../hooks/use-org";
 import {
   useConnect,
@@ -35,7 +35,7 @@ function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
 export function FlowServicesSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
   const { isOrgAdmin } = useOrg();
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
 

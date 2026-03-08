@@ -2,17 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import i18n from "../i18n";
 import { api, apiFetch, uploadFormData } from "../api";
+import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
+import { packageDetailPath } from "../lib/package-paths";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 function onMutationError(err: Error) {
   alert(i18n.t("error.prefix", { message: err.message }));
-}
-
-function invalidateFlowQueries(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["flows"] });
-  qc.invalidateQueries({ queryKey: ["version-info"] });
-  return qc.invalidateQueries({ queryKey: ["flow"] });
 }
 
 export function useSaveConfig(packageId: string) {
@@ -25,7 +21,7 @@ export function useSaveConfig(packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
     onError: onMutationError,
   });
@@ -80,7 +76,7 @@ function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["services"] });
   qc.invalidateQueries({ queryKey: ["user-connections"] });
   // Invalidate all flow detail queries (service status may have changed)
-  qc.invalidateQueries({ queryKey: ["flow"] });
+  qc.invalidateQueries({ queryKey: ["packages", "flow"] });
   qc.invalidateQueries({ queryKey: ["flows"] });
 }
 
@@ -221,50 +217,6 @@ export function useImportPackage() {
   });
 }
 
-export function useCreateFlow() {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  return useMutation({
-    mutationFn: async (body: { manifest: Record<string, unknown>; prompt: string }) => {
-      return api<{ packageId: string; lockVersion: number }>("/packages/flows", {
-        method: "POST",
-        body: JSON.stringify({ manifest: body.manifest, content: body.prompt }),
-      });
-    },
-    onSuccess: async (data) => {
-      await invalidateFlowQueries(qc);
-      navigate(`/flows/${data.packageId}`);
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useUpdateFlow(packageId: string) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  return useMutation({
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      prompt: string;
-      lockVersion: number;
-    }) => {
-      return api<{ flow: { id: string }; lockVersion: number }>(`/packages/flows/${packageId}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          manifest: body.manifest,
-          content: body.prompt,
-          lockVersion: body.lockVersion,
-        }),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateFlowQueries(qc);
-      navigate(`/flows/${packageId}`);
-    },
-    onError: onMutationError,
-  });
-}
-
 export function useCancelExecution() {
   const qc = useQueryClient();
   return useMutation({
@@ -309,7 +261,7 @@ export function useDeleteFlowExecutions(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
     },
     onError: onMutationError,
@@ -361,18 +313,18 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/extension) create/update mutations ---
 
-export function useCreatePackage(type: "skill" | "extension" | "provider") {
+export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const path = type === "skill" ? "skills" : type === "extension" ? "extensions" : "providers";
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (body: {
-      id: string;
+      id?: string;
       manifest: Record<string, unknown>;
       content: string;
     }) => {
       return api<{ [key: string]: { id: string; name: string; description: string } }>(
-        `/packages/${path}`,
+        `/packages/${cfg.path}`,
         {
           method: "POST",
           body: JSON.stringify(body),
@@ -380,37 +332,37 @@ export function useCreatePackage(type: "skill" | "extension" | "provider") {
       );
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["packages", path] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+      if (type === "flow") qc.invalidateQueries({ queryKey: ["flows"] });
       const result = data[type];
       if (result?.id) {
-        navigate(`/${type}s/${result.id}`);
+        navigate(packageDetailPath(type, result.id));
       }
     },
     onError: onMutationError,
   });
 }
 
-export function useUpdatePackage(type: "skill" | "extension" | "provider", packageId: string) {
+export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const path = type === "skill" ? "skills" : type === "extension" ? "extensions" : "providers";
-  const detailKey = type;
+  const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
       lockVersion: number;
     }) => {
-      return api<{ lockVersion: number }>(`/packages/${path}/${packageId}`, {
+      return api<{ lockVersion: number }>(`/packages/${cfg.path}/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", path] });
-      qc.invalidateQueries({ queryKey: ["packages", detailKey] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+      if (type === "flow") qc.invalidateQueries({ queryKey: ["flows"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      navigate(`/${type}s/${packageId}`);
+      navigate(packageDetailPath(type, packageId));
     },
     onError: onMutationError,
   });
@@ -419,9 +371,10 @@ export function useUpdatePackage(type: "skill" | "extension" | "provider", packa
 // --- Provider mutations ---
 
 function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
+  const cfg = PACKAGE_CONFIG.provider;
   qc.invalidateQueries({ queryKey: ["providers"] });
-  qc.invalidateQueries({ queryKey: ["packages", "providers"] });
-  qc.invalidateQueries({ queryKey: ["packages", "provider"] });
+  qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+  qc.invalidateQueries({ queryKey: ["packages", cfg.detailKey] });
   qc.invalidateQueries({ queryKey: ["version-info"] });
   qc.invalidateQueries({ queryKey: ["services"] });
 }

@@ -5,17 +5,18 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
-  useFlowDetail,
   usePackageDetail,
   useVersionDetail,
   usePackageDownload,
   useDeletePackage,
 } from "../hooks/use-packages";
+import type { FlowDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
+import { packageDetailPath } from "../lib/package-paths";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
 import { Settings, CheckCircle } from "lucide-react";
 
@@ -69,7 +70,7 @@ function FlowRunButtonInline({
   resolvedVersion: string | undefined;
 }) {
   const { t } = useTranslation("flows");
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const readiness = useFlowReadiness(detail);
 
   if (!detail) return null;
@@ -121,14 +122,8 @@ export function UnifiedPackageDetailPage({
     return () => resetUI();
   }, [packageId, resetUI]);
 
-  // ── Data loading (type-specific) ──
-  const flowQuery = useFlowDetail(type === "flow" ? packageId : undefined);
-  const pkgQuery = usePackageDetail(
-    type === "flow" ? "skill" : type,
-    type !== "flow" ? packageId : undefined,
-  );
-  const isLoading = type === "flow" ? flowQuery.isLoading : pkgQuery.isLoading;
-  const error = type === "flow" ? flowQuery.error : pkgQuery.error;
+  // ── Data loading (unified) ──
+  const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
 
   // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
   const providersQuery = useProviders();
@@ -138,18 +133,17 @@ export function UnifiedPackageDetailPage({
       : undefined;
   const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
 
-  // Unified detail values
-  const flowDetail = flowQuery.data;
-  const pkgDetail = pkgQuery.data;
+  // Type-narrowed aliases for type-specific branches
+  const flowDetail = type === "flow" ? (detail as FlowDetail | undefined) : undefined;
+  const pkgDetail = type !== "flow" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const displayName =
-    type === "flow" ? (flowDetail?.displayName ?? "") : (pkgDetail?.name ?? pkgDetail?.id ?? "");
-  const source = type === "flow" ? flowDetail?.source : pkgDetail?.source;
-  const version = type === "flow" ? flowDetail?.version : pkgDetail?.version;
-  const versionCount = type === "flow" ? flowDetail?.versionCount : pkgDetail?.versionCount;
+  const displayName = flowDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
+  const source = flowDetail?.source ?? pkgDetail?.source;
+  const version = flowDetail?.version ?? pkgDetail?.version;
+  const versionCount = flowDetail?.versionCount ?? pkgDetail?.versionCount;
   const hasUnpublishedChanges =
-    type === "flow" ? flowDetail?.hasUnpublishedChanges : pkgDetail?.hasUnpublishedChanges;
-  const forkedFrom = (type === "flow" ? flowDetail?.forkedFrom : pkgDetail?.forkedFrom) ?? null;
+    flowDetail?.hasUnpublishedChanges ?? pkgDetail?.hasUnpublishedChanges;
+  const forkedFrom = flowDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -165,7 +159,7 @@ export function UnifiedPackageDetailPage({
   );
 
   const downloadPackage = usePackageDownload(scope, name);
-  const deletePkgMutation = useDeletePackage(type === "flow" ? "skill" : type);
+  const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
   const [forkOpen, setForkOpen] = useState(false);
 
@@ -182,7 +176,7 @@ export function UnifiedPackageDetailPage({
   ];
   const hasDisconnectedServices =
     type === "flow" &&
-    flowQuery.data?.requires.services.some(
+    flowDetail?.requires.services.some(
       (s) => s.status !== "connected" || s.scopesSufficient === false,
     );
   const defaultTab: DetailTab =
@@ -196,11 +190,11 @@ export function UnifiedPackageDetailPage({
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
-  const [diffTabOverride, setDiffTab] = useState<"prompt" | "manifest" | "content" | null>(null);
+  const [diffTabOverride, setDiffTab] = useState<"manifest" | "content" | null>(null);
 
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
-  if (error || (type === "flow" && !flowDetail) || (type !== "flow" && !pkgDetail)) {
+  if (error || !detail) {
     return <Navigate to="/" replace />;
   }
 
@@ -234,24 +228,17 @@ export function UnifiedPackageDetailPage({
 
   // ── Diff tab logic ──
   const currentManifest = type === "flow" ? flowDetail?.manifest : pkgDetail?.manifest;
+  const currentContent = flowDetail?.prompt ?? pkgDetail?.content;
+  const contentLabel = type === "flow" ? t("version.diffPrompt") : t("packages.content");
 
-  const hasPromptChanges = type === "flow" && flowDetail?.prompt !== latestVersionForDiff?.content;
   const hasManifestChanges =
     JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
   const hasContentChanges =
-    type !== "flow" &&
     latestVersionForDiff?.content != null &&
-    pkgDetail?.content != null &&
-    latestVersionForDiff.content !== pkgDetail.content;
+    currentContent != null &&
+    latestVersionForDiff.content !== currentContent;
 
   const diffTab = (() => {
-    if (type === "flow") {
-      const preferred = diffTabOverride ?? "manifest";
-      if (preferred === "prompt" && !hasPromptChanges && hasManifestChanges) return "manifest";
-      if (preferred === "manifest" && !hasManifestChanges && hasPromptChanges) return "prompt";
-      return preferred;
-    }
-    // Skills/Extensions: manifest + content tabs
     const preferred = diffTabOverride ?? "manifest";
     if (preferred === "content" && !hasContentChanges && hasManifestChanges) return "manifest";
     if (preferred === "manifest" && !hasManifestChanges && hasContentChanges) return "content";
@@ -387,7 +374,7 @@ export function UnifiedPackageDetailPage({
         isHistorical={isHistoricalVersion}
         versionDetail={versionDetail}
         hasDraftChanges={hasDraftChanges}
-        latestUrl={type === "flow" ? `/flows/${packageId}` : `/${type}s/${packageId}`}
+        latestUrl={packageDetailPath(type, packageId)}
         latestVersion={version}
       />
 
@@ -398,7 +385,7 @@ export function UnifiedPackageDetailPage({
             <span className="text-muted-foreground">
               — {t("ownership.forkedFrom")}
               <Link
-                to={`/${type === "flow" ? "flows" : `${type}s`}/${forkedFrom}`}
+                to={packageDetailPath(type, forkedFrom)}
                 className="text-blue-400 hover:underline"
               >
                 {forkedFrom}
@@ -412,7 +399,7 @@ export function UnifiedPackageDetailPage({
           <span className="text-muted-foreground">
             {t("ownership.forkedFrom")}
             <Link
-              to={`/${type === "flow" ? "flows" : `${type}s`}/${forkedFrom}`}
+              to={packageDetailPath(type, forkedFrom)}
               className="text-blue-400 hover:underline"
             >
               {forkedFrom}
@@ -525,85 +512,46 @@ export function UnifiedPackageDetailPage({
         <VersionHistory packageId={packageId} type={type} isAdmin={isOrgAdmin} isOwned={isOwned} />
       )}
 
-      {tab === "changes" && hasDraftChanges && !isVersionView && (
+      {tab === "changes" && hasDraftChanges && !isVersionView && latestVersionForDiff && (
         <>
-          {type === "flow" && latestVersionForDiff && (
-            <>
-              <Tabs
-                value={diffTab}
-                onValueChange={(v) => setDiffTab(v as "prompt" | "manifest" | "content")}
-                className="mb-4"
-              >
-                <TabsList>
-                  {hasManifestChanges && (
-                    <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
-                  )}
-                  {hasPromptChanges && (
-                    <TabsTrigger value="prompt">{t("version.diffPrompt")}</TabsTrigger>
-                  )}
-                </TabsList>
-              </Tabs>
-              {diffTab === "manifest" && hasManifestChanges && (
-                <DraftDiffView
-                  original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
-                  modified={JSON.stringify(flowDetail?.manifest ?? {}, null, 2)}
-                  language="json"
-                />
+          <Tabs
+            value={diffTab}
+            onValueChange={(v) => setDiffTab(v as "manifest" | "content")}
+            className="mb-4"
+          >
+            <TabsList>
+              {hasManifestChanges && (
+                <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
               )}
-              {diffTab === "prompt" &&
-                hasPromptChanges &&
-                flowDetail?.prompt != null &&
-                latestVersionForDiff.content != null && (
-                  <DraftDiffView
-                    original={latestVersionForDiff.content}
-                    modified={flowDetail.prompt}
-                    language="markdown"
-                  />
-                )}
-            </>
+              {hasContentChanges && <TabsTrigger value="content">{contentLabel}</TabsTrigger>}
+            </TabsList>
+          </Tabs>
+          {diffTab === "manifest" && hasManifestChanges && (
+            <DraftDiffView
+              original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
+              modified={JSON.stringify(currentManifest ?? {}, null, 2)}
+              language="json"
+            />
           )}
-          {type !== "flow" && latestVersionForDiff && pkgDetail && (
-            <>
-              <Tabs
-                value={diffTab}
-                onValueChange={(v) => setDiffTab(v as "prompt" | "manifest" | "content")}
-                className="mb-4"
-              >
-                <TabsList>
-                  {hasManifestChanges && (
-                    <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
-                  )}
-                  {hasContentChanges && (
-                    <TabsTrigger value="content">{t("packages.content")}</TabsTrigger>
-                  )}
-                </TabsList>
-              </Tabs>
-              {diffTab === "manifest" && hasManifestChanges && (
-                <DraftDiffView
-                  original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
-                  modified={JSON.stringify(pkgDetail.manifest ?? {}, null, 2)}
-                  language="json"
-                />
-              )}
-              {diffTab === "content" && hasContentChanges && (
-                <DraftDiffView
-                  original={latestVersionForDiff.content!}
-                  modified={pkgDetail.content}
-                />
-              )}
-              {!hasManifestChanges && !hasContentChanges && (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  {t("version.noDiff")}
-                </p>
-              )}
-            </>
-          )}
-          {!latestVersionForDiff && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              {t("version.noVersionYet")}
-            </p>
+          {diffTab === "content" &&
+            hasContentChanges &&
+            currentContent != null &&
+            latestVersionForDiff.content != null && (
+              <DraftDiffView
+                original={latestVersionForDiff.content}
+                modified={currentContent}
+                language={type === "flow" ? "markdown" : undefined}
+              />
+            )}
+          {!hasManifestChanges && !hasContentChanges && (
+            <p className="text-sm text-muted-foreground py-4 text-center">{t("version.noDiff")}</p>
           )}
         </>
+      )}
+      {tab === "changes" && hasDraftChanges && !isVersionView && !latestVersionForDiff && (
+        <p className="text-sm text-muted-foreground py-4 text-center">
+          {t("version.noVersionYet")}
+        </p>
       )}
 
       <CreateVersionModal

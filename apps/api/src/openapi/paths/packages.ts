@@ -1015,18 +1015,32 @@ export const packagesPaths = {
     get: {
       operationId: "getFlowPackage",
       tags: ["Packages"],
-      summary: "Get flow package detail",
-      description: "Get a flow's package details including content, manifest, and lockVersion.",
+      summary: "Get flow detail",
+      description:
+        "Returns flow detail including services, config, state, skills, and extensions. Supports profileId for per-user service status resolution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "profileId",
+          in: "query",
+          required: false,
+          description:
+            "Connection profile ID to use for resolving service statuses. Defaults to user's effective profile.",
+          schema: { type: "string" },
+        },
       ],
       responses: {
         "200": {
-          description: "Flow package detail",
+          description: "Flow detail",
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+              schema: {
+                type: "object",
+                properties: {
+                  flow: { $ref: "#/components/schemas/FlowDetail" },
+                },
+              },
             },
           },
         },

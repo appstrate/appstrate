@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 import { RunFlowButton } from "./run-flow-button";
+import { packageDetailPath } from "../lib/package-paths";
 
 interface PackageCardProps {
   id: string;
@@ -33,13 +34,7 @@ export function PackageCard({
   autoInstalled,
 }: PackageCardProps) {
   const { t } = useTranslation(["flows", "settings", "common"]);
-  const PREFIX = {
-    flow: "flows",
-    skill: "skills",
-    extension: "extensions",
-    provider: "providers",
-  } as const;
-  const href = `/${PREFIX[type]}/${id}`;
+  const href = packageDetailPath(type, id);
 
   return (
     <Link

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { useFlowDetail } from "../hooks/use-packages";
+import { usePackageDetail } from "../hooks/use-packages";
 import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
@@ -40,7 +40,7 @@ export function ExecutionDetailPage() {
   const location = useLocation();
   const executionNumber = (location.state as { executionNumber?: number } | null)?.executionNumber;
   const orgId = useCurrentOrgId();
-  const { data: flow } = useFlowDetail(packageId);
+  const { data: flow } = usePackageDetail("flow", packageId);
   const { data: execution, isLoading, error } = useExecution(execId);
   const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);

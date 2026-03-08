@@ -77,7 +77,7 @@ export function useSetFlowProfile(packageId: string) {
         body: JSON.stringify({ profileId }),
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
       qc.invalidateQueries({ queryKey: ["services"] });
     },
   });

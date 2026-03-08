@@ -3,9 +3,7 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getPackageConfig,
   setPackageConfig,
-  getLastExecution,
   getRunningExecutionsCounts,
-  getRunningExecutionsForPackage,
   getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
@@ -13,11 +11,9 @@ import {
   deletePackageMemory,
   deleteAllPackageMemories,
 } from "../services/state.ts";
-import { getConnectionStatus, resolveServiceStatuses } from "../services/connection-manager.ts";
+import { getConnectionStatus } from "../services/connection-manager.ts";
 import { validateConfig } from "../services/schema.ts";
-import { getPackageById } from "../services/package-items.ts";
 import { listPackages } from "../services/flow-service.ts";
-import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
 import {
@@ -62,103 +58,6 @@ export function createFlowsRouter() {
     });
 
     return c.json({ flows: flowList });
-  });
-
-  // GET /api/flows/:scope/:name — flow detail with dependency status
-  router.get("/:scope{@[^/]+}/:name", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const user = c.get("user");
-    const orgId = c.get("orgId");
-    const m = flow.manifest;
-
-    // Fetch admin connections and user's effective profile
-    const queryProfileId = c.req.query("profileId");
-    const [adminConns, userProfileId] = await Promise.all([
-      getAdminConnections(orgId, flow.id),
-      queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(user.id, flow.id),
-    ]);
-
-    const serviceStatuses = await resolveServiceStatuses(
-      resolveManifestServices(m),
-      adminConns,
-      orgId,
-      userProfileId,
-    );
-
-    // Get config (global), last execution (per-user), running count (per-user), version count
-    // For user flows, also fetch the raw DB row for editable content
-    const [currentConfig, lastExec, runningCount, userFlowRow, versionCount, latestVersionDate] =
-      await Promise.all([
-        getPackageConfig(orgId, flow.id),
-        getLastExecution(flow.id, user.id, orgId),
-        getRunningExecutionsForPackage(flow.id, user.id),
-        flow.source !== "system" ? getPackageById(flow.id) : Promise.resolve(null),
-        flow.source !== "system" ? getVersionCount(flow.id) : Promise.resolve(0),
-        flow.source !== "system" ? getLatestVersionCreatedAt(flow.id) : Promise.resolve(null),
-      ]);
-
-    // Merge defaults with current config
-    const configWithDefaults: Record<string, unknown> = {};
-    if (m.config?.schema?.properties) {
-      for (const [key, prop] of Object.entries(m.config.schema.properties)) {
-        configWithDefaults[key] = currentConfig[key] ?? prop.default ?? null;
-      }
-    }
-
-    const detailParsed = parseScopedName(m.name);
-
-    return c.json({
-      id: flow.id,
-      displayName: m.displayName,
-      description: m.description,
-      source: flow.source,
-      scope: detailParsed?.scope ?? null,
-      version: m.version ?? null,
-      requires: {
-        services: serviceStatuses,
-        skills: flow.skills.map((s) => ({
-          id: s.id,
-          version: s.version ?? "*",
-          ...(s.name ? { name: s.name } : {}),
-          ...(s.description ? { description: s.description } : {}),
-        })),
-        extensions: flow.extensions.map((e) => ({
-          id: e.id,
-          version: e.version ?? "*",
-          ...(e.name ? { name: e.name } : {}),
-          ...(e.description ? { description: e.description } : {}),
-        })),
-      },
-      ...(m.input ? { input: { schema: m.input.schema } } : {}),
-      ...(m.output ? { output: { schema: m.output.schema } } : {}),
-      config: {
-        schema: m.config?.schema ?? { type: "object", properties: {} },
-        current: configWithDefaults,
-      },
-      runningExecutions: runningCount,
-      lastExecution: lastExec
-        ? {
-            id: lastExec.id,
-            status: lastExec.status,
-            startedAt: lastExec.startedAt,
-            duration: lastExec.duration,
-          }
-        : null,
-      versionCount,
-      forkedFrom: userFlowRow?.forkedFrom ?? null,
-      ...(flow.source !== "system" && userFlowRow
-        ? {
-            manifest: flow.manifest,
-            updatedAt: userFlowRow.updatedAt,
-            lockVersion: userFlowRow.version,
-            prompt: flow.prompt,
-            hasUnpublishedChanges:
-              versionCount > 0 && latestVersionDate
-                ? (userFlowRow.updatedAt ?? new Date()) > latestVersionDate
-                : false,
-          }
-        : {}),
-    });
   });
 
   // PUT /api/flows/:scope/:name/config — save flow configuration (admin-only)
