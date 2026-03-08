@@ -292,7 +292,7 @@ export function ProviderEditorInner({
     <div className="space-y-4">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/#providers" className="text-muted-foreground hover:text-foreground">
+        <Link to="/providers" className="text-muted-foreground hover:text-foreground">
           {t("packages.type.providers")}
         </Link>
         <span className="opacity-50">/</span>
@@ -793,7 +793,7 @@ export function ProviderEditorInner({
           <Button
             variant="outline"
             type="button"
-            onClick={() => navigate(isEdit ? `/providers/${packageId}` : "/#providers")}
+            onClick={() => navigate(isEdit ? `/providers/${packageId}` : "/providers")}
           >
             {t("btn.cancel", { ns: "flows" })}
           </Button>

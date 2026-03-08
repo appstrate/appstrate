@@ -147,7 +147,7 @@ export function ResourceSection({
           <>
             <p className="text-xs text-muted-foreground">{emptyLabel}</p>
             <p className="text-xs text-muted-foreground">
-              <Link to="/#skills">{t("editor.goToPackages")}</Link>
+              <Link to="/skills">{t("editor.goToPackages")}</Link>
             </p>
           </>
         ) : (

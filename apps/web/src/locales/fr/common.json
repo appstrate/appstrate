@@ -53,6 +53,9 @@
   "validation.slugFormat": "Lettres minuscules, chiffres et tirets uniquement",
   "validation.emailFormat": "Adresse email invalide",
   "orgSwitcher.marketplace": "Marketplace",
+  "orgSwitcher.skills": "Skills",
+  "orgSwitcher.extensions": "Extensions",
+  "orgSwitcher.import": "Importer un package",
   "btn.install": "Installer",
   "btn.installing": "Installation...",
   "btn.download": "Télécharger"

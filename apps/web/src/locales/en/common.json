@@ -53,6 +53,9 @@
   "validation.slugFormat": "Lowercase letters, numbers and hyphens only",
   "validation.emailFormat": "Invalid email address",
   "orgSwitcher.marketplace": "Marketplace",
+  "orgSwitcher.skills": "Skills",
+  "orgSwitcher.extensions": "Extensions",
+  "orgSwitcher.import": "Import package",
   "btn.install": "Install",
   "btn.installing": "Installing...",
   "btn.download": "Download"

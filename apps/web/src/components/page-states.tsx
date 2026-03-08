@@ -53,7 +53,7 @@ export function EmptyState({
           {hint && <p className="mt-1 text-sm">{hint}</p>}
         </>
       )}
-      {children && <div className="mt-4">{children}</div>}
+      {children && <div className="mt-4 flex items-center gap-2">{children}</div>}
     </div>
   );
 }

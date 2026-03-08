@@ -456,7 +456,7 @@ function ConnectorsTab() {
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">
             {t("connectors.description")}{" "}
-            <Link to="/#providers" className="text-primary text-sm no-underline hover:underline">
+            <Link to="/providers" className="text-primary text-sm no-underline hover:underline">
               {t("connectors.connectMore")}
             </Link>
           </p>
@@ -484,7 +484,7 @@ function ConnectorsTab() {
           hint={t("connectors.noConnectionsHint")}
           icon={Unplug}
         >
-          <Link to="/#providers">
+          <Link to="/providers">
             <Button variant="outline">{t("connectors.goToConnectors")}</Button>
           </Link>
         </EmptyState>

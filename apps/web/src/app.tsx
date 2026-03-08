@@ -17,7 +17,9 @@ import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OrgSettingsPage } from "./pages/org-settings";
-// ConnectorsPage removed — providers now accessible via /#providers
+import { SkillsPage } from "./pages/skills-page";
+import { ExtensionsPage } from "./pages/extensions-page";
+import { ProvidersPage } from "./pages/providers-page";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
@@ -305,6 +307,9 @@ export function App() {
               />
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
+              <Route path="/skills" element={<SkillsPage />} />
+              <Route path="/extensions" element={<ExtensionsPage />} />
+              <Route path="/providers" element={<ProvidersPage />} />
               <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
               <Route
                 path="/skills/:scope/:name/edit"
@@ -344,14 +349,14 @@ export function App() {
                 path="/providers/:scope/:name/:version"
                 element={<UnifiedPackageDetailPage type="provider" />}
               />
-              <Route path="/library" element={<Navigate to="/#skills" replace />} />
+              <Route path="/library" element={<Navigate to="/skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
               <Route path="/marketplace/publish" element={<MarketplacePublishPage />} />
               <Route path="/marketplace/connection" element={<MarketplaceConnectionPage />} />
               <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
-              <Route path="/connectors" element={<Navigate to="/#providers" replace />} />
+              <Route path="/connectors" element={<Navigate to="/providers" replace />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
