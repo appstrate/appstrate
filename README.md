@@ -10,7 +10,7 @@ An open-source platform for executing one-shot AI flows in ephemeral Docker cont
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule flows with cron expressions, distributed lock prevents duplicates
 - **Marketplace** — Browse and install packages from the Appstrate [registry]
-- **Package import** — Import flows, skills, and extensions from ZIP files
+- **Package import** — Import flows, skills, extensions, and providers from ZIP files
 - **Skills & extensions** — Extend agent capabilities with SKILL.md instructions and TypeScript tool extensions
 - **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
@@ -70,9 +70,11 @@ appstrate/
 │
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
-│   ├── providers.json        # Service provider definitions
+│   ├── proxies.json          # Built-in proxy definitions
 │   ├── skills/{id}/SKILL.md  # Agent skill instructions
 │   └── extensions/{id}.ts    # Agent tool extensions
+│
+├── apps/api/providers/       # System provider ZIP packages (loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → JSON lines on stdout
@@ -81,7 +83,7 @@ appstrate/
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint)
 ```
 
-**External dependency**: `@appstrate/validation` (npm) — manifest schemas, naming helpers, dependency extraction, ZIP parsing.
+**External dependency**: `@appstrate/core` (npm) — manifest schemas, naming helpers, dependency extraction, ZIP parsing, semver, integrity.
 
 ## API Overview
 
@@ -96,8 +98,7 @@ The API is organized into 23 route domains with 110 documented endpoints:
 | **Schedules**           | Cron-based flow scheduling                                |
 | **Connections**         | OAuth2/API key service connections                        |
 | **Connection Profiles** | Shared connection sets across flows                       |
-| **Providers**           | Service provider configuration                            |
-| **Provider Templates**  | Built-in provider templates                               |
+| **Providers**           | Provider package configuration (OAuth2, API key, custom)  |
 | **Proxies**             | Org-level and flow-level HTTP proxy config                |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                      |
 | **Packages**            | Organization skills/extensions CRUD, import, publish      |
@@ -190,7 +191,7 @@ Tests use `bun:test` (built-in). Mocking pattern: `mock.module()` before dynamic
 - **i18n**: i18next (fr default, en)
 - **Docker**: fetch() + unix socket (not dockerode)
 - **Scheduling**: croner (in-memory cron with distributed lock)
-- **Validation**: AJV (config/input/output), Zod (env), `@appstrate/validation` (manifests)
+- **Validation**: AJV (config/input/output), Zod (env), `@appstrate/core` (manifests)
 - **Build**: Turborepo + Bun workspaces
 - **Code quality**: ESLint + Prettier + OpenAPI lint (`@redocly/openapi-core`)
 

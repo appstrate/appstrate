@@ -68,12 +68,12 @@ The manifest defines everything about the flow. Follow this structure exactly:
 ```json
 {
   "id": "gmail",
-  "provider": "google-mail",
+  "provider": "@appstrate/gmail",
   "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
 }
 ```
 - `id`: Short name used in env vars. The token is injected as `TOKEN_{ID_UPPERCASED}` (hyphens become underscores: `brevo-api-key` → `TOKEN_BREVO_API_KEY`)
-- `provider`: Must match a configured provider ID. Known providers: `google-mail`, `google-calendar`, `clickup`, `brevo-api-key`
+- `provider`: Must match a configured provider package ID (scoped name). See Available Providers below.
 - `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
 - `connectionMode` (optional): `"user"` (default) or `"admin"`. Admin mode means an admin binds their connection for all users.
 
@@ -234,7 +234,7 @@ Return a JSON object in a ```json code block with the following structure:
      "https://api.clickup.com/api/v2/team"
    ```
 
-2. **Token variable naming**: Service ID hyphens become underscores. `google-mail` with id `gmail` → `$TOKEN_GMAIL`. `brevo-api-key` with id `brevo-api-key` → `$TOKEN_BREVO_API_KEY`.
+2. **Token variable naming**: Service ID hyphens become underscores. `@appstrate/gmail` with id `gmail` → `$TOKEN_GMAIL`. `brevo-api-key` with id `brevo-api-key` → `$TOKEN_BREVO_API_KEY`.
 
 3. **Read-only by default**: Always state explicitly that the agent must not modify source data (no archiving emails, no deleting tasks, no sending messages) unless the flow's purpose requires writes.
 
@@ -385,18 +385,25 @@ After creating the flow files (before packaging):
 
 ## Available Providers
 
-These providers are bootstrapped by default (via `SYSTEM_PROVIDERS` env var):
+These providers are loaded as system packages (ZIPs in `apps/api/providers/`) at boot:
 
 | Provider Key | Type | Description |
 |---|---|---|
-| `google-mail` | OAuth2 | Gmail read access |
-| `google-calendar` | OAuth2 | Google Calendar read access |
-| `clickup` | OAuth2 | ClickUp task management |
-| `brevo-api-key` | API_KEY | Brevo email marketing API |
+| `@appstrate/gmail` | OAuth2 | Gmail API |
+| `@appstrate/google-drive` | OAuth2 | Google Drive |
+| `@appstrate/google-sheets` | OAuth2 | Google Sheets |
+| `@appstrate/slack` | OAuth2 | Slack |
+| `@appstrate/github` | OAuth2 | GitHub |
+| `@appstrate/clickup` | OAuth2 | ClickUp |
+| `@appstrate/notion` | OAuth2 | Notion |
+| `@appstrate/hubspot` | OAuth2 | HubSpot |
+| `@appstrate/stripe` | OAuth2 | Stripe |
+| `@appstrate/trello` | OAuth2 | Trello |
+| `@appstrate/brevo` | API Key | Brevo |
 
 If the flow needs a service not in this list, tell the user they need to:
-1. Add a provider config via the Org Settings page or API (`POST /api/providers`)
-2. Reference the correct `provider` key in the manifest
+1. Add a custom provider via the Org Settings page or API (`POST /api/providers`)
+2. Reference the correct scoped `provider` key in the manifest
 
 ## Reference: Complete Manifest Example
 
@@ -418,12 +425,12 @@ If the flow needs a service not in this list, tell the user they need to:
     "services": [
       {
         "id": "gmail",
-        "provider": "google-mail",
+        "provider": "@appstrate/gmail",
         "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
       },
       {
         "id": "clickup",
-        "provider": "clickup",
+        "provider": "@appstrate/clickup",
         "scopes": ["task:write"]
       }
     ],

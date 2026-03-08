@@ -277,32 +277,6 @@ export interface Integration {
   connectedAt?: string;
 }
 
-// --- Provider Template Types ---
-
-export interface ProviderTemplateStep {
-  title: string;
-  description: string;
-  link?: string;
-  linkLabel?: string;
-}
-
-export interface ProviderTemplateSetupGuide {
-  steps: ProviderTemplateStep[];
-  callbackUrlHint?: string;
-}
-
-export interface ProviderTemplate {
-  templateId: string;
-  displayName: string;
-  description: string;
-  authMode: AuthMode;
-  iconUrl?: string;
-  categories?: string[];
-  docsUrl?: string;
-  providerDefaults: Record<string, unknown>;
-  setupGuide: ProviderTemplateSetupGuide;
-}
-
 // --- Available Scope Types ---
 
 export interface AvailableScope {

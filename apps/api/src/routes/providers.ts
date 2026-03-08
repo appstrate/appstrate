@@ -15,36 +15,10 @@ import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
-import { isSystemPackage } from "../services/builtin-packages.ts";
 import { resolveManifestServices } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
-
-/** Generate default admin credential schema per auth mode. */
-function getDefaultAdminCredentialSchema(authMode: string): JSONSchemaObject | null {
-  switch (authMode) {
-    case "oauth2":
-      return {
-        type: "object",
-        properties: {
-          clientId: { type: "string", description: "Client ID" },
-          clientSecret: { type: "string", description: "Client Secret" },
-        },
-        required: ["clientId", "clientSecret"],
-      };
-    case "oauth1":
-      return {
-        type: "object",
-        properties: {
-          consumerKey: { type: "string", description: "Consumer Key" },
-          consumerSecret: { type: "string", description: "Consumer Secret" },
-        },
-        required: ["consumerKey", "consumerSecret"],
-      };
-    default:
-      return null;
-  }
-}
+import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
@@ -53,7 +27,7 @@ async function isSystemProviderInDb(providerId: string): Promise<boolean> {
     .from(packages)
     .where(eq(packages.id, providerId))
     .limit(1);
-  return pkg?.source === "system";
+  return pkg?.source === "system" || pkg?.source === "built-in";
 }
 
 function packageToProviderConfig(
@@ -66,7 +40,7 @@ function packageToProviderConfig(
 ): ProviderConfig {
   const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
-  const isSystem = pkg.source === "system" || pkg.source === "built-in" || isSystemPackage(pkg.id);
+  const isSystem = pkg.source === "system" || pkg.source === "built-in";
   const authMode = (def.authMode as ProviderConfig["authMode"]) ?? "oauth2";
   const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
   const adminCredentialSchema =
@@ -221,7 +195,7 @@ export function createProvidersRouter() {
     const data = parsed.data;
 
     // Block creation if ID matches a system provider
-    if (isSystemPackage(data.id) || (await isSystemProviderInDb(data.id))) {
+    if (await isSystemProviderInDb(data.id)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",

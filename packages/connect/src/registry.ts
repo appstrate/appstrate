@@ -3,6 +3,7 @@ import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition } from "./types.ts";
 import { decryptCredentials } from "./encryption.ts";
+import { extractProviderDefinition } from "@appstrate/core/validation";
 
 export type { Db };
 
@@ -15,14 +16,14 @@ function manifestToDefinition(
   id: string,
   manifest: Record<string, unknown>,
 ): ProviderDefinition {
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const def = extractProviderDefinition(manifest);
   return {
     id,
     displayName: (manifest.displayName as string) ?? id,
     authMode: (def.authMode as ProviderDefinition["authMode"]) ?? "oauth2",
-    authorizationUrl: (def.authorizationUrl as string) ?? undefined,
-    tokenUrl: (def.tokenUrl as string) ?? undefined,
-    refreshUrl: (def.refreshUrl as string) ?? undefined,
+    authorizationUrl: def.authorizationUrl ?? undefined,
+    tokenUrl: def.tokenUrl ?? undefined,
+    refreshUrl: def.refreshUrl ?? undefined,
     defaultScopes: (def.defaultScopes as string[]) ?? [],
     scopeSeparator: (def.scopeSeparator as string) ?? " ",
     pkceEnabled: (def.pkceEnabled as boolean) ?? true,
@@ -30,9 +31,9 @@ function manifestToDefinition(
     authorizationParams: (def.authorizationParams as Record<string, string>) ?? {},
     tokenParams: (def.tokenParams as Record<string, string>) ?? {},
     credentialSchema: (def.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,
-    credentialFieldName: (def.credentialFieldName as string) ?? undefined,
-    credentialHeaderName: (def.credentialHeaderName as string) ?? undefined,
-    credentialHeaderPrefix: (def.credentialHeaderPrefix as string) ?? undefined,
+    credentialFieldName: def.credentialFieldName ?? undefined,
+    credentialHeaderName: def.credentialHeaderName ?? undefined,
+    credentialHeaderPrefix: def.credentialHeaderPrefix ?? undefined,
     iconUrl: (manifest.iconUrl as string) ?? undefined,
     categories: (manifest.categories as string[]) ?? [],
     docsUrl: (manifest.docsUrl as string) ?? undefined,
@@ -41,8 +42,8 @@ function manifestToDefinition(
     availableScopes: (def.availableScopes as ProviderDefinition["availableScopes"])?.length
       ? (def.availableScopes as ProviderDefinition["availableScopes"])
       : undefined,
-    requestTokenUrl: (def.requestTokenUrl as string) ?? undefined,
-    accessTokenUrl: (def.accessTokenUrl as string) ?? undefined,
+    requestTokenUrl: def.requestTokenUrl ?? undefined,
+    accessTokenUrl: def.accessTokenUrl ?? undefined,
   };
 }
 

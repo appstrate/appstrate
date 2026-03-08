@@ -11,15 +11,6 @@ export const executionStatusEnum = pgEnum("execution_status", [
   "cancelled",
 ]);
 
-export const authModeEnum = pgEnum("auth_mode", [
-  "oauth2",
-  "oauth1",
-  "api_key",
-  "basic",
-  "custom",
-  "proxy",
-]);
-
 export const invitationStatusEnum = pgEnum("invitation_status", [
   "pending",
   "accepted",
