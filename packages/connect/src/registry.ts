@@ -3,49 +3,9 @@ import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition } from "./types.ts";
 import { decryptCredentials } from "./encryption.ts";
-import { extractProviderDefinition } from "@appstrate/core/validation";
+import { buildProviderDefinitionFromManifest } from "@appstrate/core/validation";
 
 export type { Db };
-
-// ─── Helpers ──────────────────────────────────────────────────
-
-/**
- * Build a ProviderDefinition from a packages row with manifest.definition.
- */
-function manifestToDefinition(
-  id: string,
-  manifest: Record<string, unknown>,
-): ProviderDefinition {
-  const def = extractProviderDefinition(manifest);
-  return {
-    id,
-    displayName: (manifest.displayName as string) ?? id,
-    authMode: (def.authMode as ProviderDefinition["authMode"]) ?? "oauth2",
-    authorizationUrl: def.authorizationUrl ?? undefined,
-    tokenUrl: def.tokenUrl ?? undefined,
-    refreshUrl: def.refreshUrl ?? undefined,
-    defaultScopes: (def.defaultScopes as string[]) ?? [],
-    scopeSeparator: (def.scopeSeparator as string) ?? " ",
-    pkceEnabled: (def.pkceEnabled as boolean) ?? true,
-    tokenAuthMethod: (def.tokenAuthMethod as ProviderDefinition["tokenAuthMethod"]) ?? undefined,
-    authorizationParams: (def.authorizationParams as Record<string, string>) ?? {},
-    tokenParams: (def.tokenParams as Record<string, string>) ?? {},
-    credentialSchema: (def.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,
-    credentialFieldName: def.credentialFieldName ?? undefined,
-    credentialHeaderName: def.credentialHeaderName ?? undefined,
-    credentialHeaderPrefix: def.credentialHeaderPrefix ?? undefined,
-    iconUrl: (manifest.iconUrl as string) ?? undefined,
-    categories: (manifest.categories as string[]) ?? [],
-    docsUrl: (manifest.docsUrl as string) ?? undefined,
-    authorizedUris: (def.authorizedUris as string[])?.length ? (def.authorizedUris as string[]) : undefined,
-    allowAllUris: (def.allowAllUris as boolean) ?? false,
-    availableScopes: (def.availableScopes as ProviderDefinition["availableScopes"])?.length
-      ? (def.availableScopes as ProviderDefinition["availableScopes"])
-      : undefined,
-    requestTokenUrl: def.requestTokenUrl ?? undefined,
-    accessTokenUrl: def.accessTokenUrl ?? undefined,
-  };
-}
 
 /**
  * Get a provider definition by ID.
@@ -64,7 +24,7 @@ export async function getProvider(
 
   if (rows.length === 0) return null;
   const pkg = rows[0]!;
-  return manifestToDefinition(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>);
+  return buildProviderDefinitionFromManifest(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>);
 }
 
 /**
@@ -175,7 +135,7 @@ export async function listProviders(db: Db, orgId: string): Promise<ProviderDefi
     .where(and(eq(packages.type, "provider"), or(eq(packages.orgId, orgId), isNull(packages.orgId))));
 
   return rows.map((pkg) =>
-    manifestToDefinition(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>),
+    buildProviderDefinitionFromManifest(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>),
   );
 }
 

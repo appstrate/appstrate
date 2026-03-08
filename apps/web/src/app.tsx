@@ -356,7 +356,6 @@ export function App() {
               <Route path="/marketplace/connection" element={<MarketplaceConnectionPage />} />
               <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
-              <Route path="/connectors" element={<Navigate to="/providers" replace />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

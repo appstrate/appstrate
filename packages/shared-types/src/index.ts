@@ -1,4 +1,10 @@
 export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
+export type {
+  AuthMode,
+  AvailableScope,
+  ProviderSetupGuide,
+  ResolvedProviderDefinition,
+} from "@appstrate/core/validation";
 
 import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
@@ -6,10 +12,6 @@ export type Execution = _Execution & { packageVersion?: string | null };
 // --- Package Types ---
 
 type PackageType = "flow" | "skill" | "extension" | "provider";
-
-// --- Auth Mode ---
-
-export type AuthMode = "oauth2" | "oauth1" | "api_key" | "basic" | "custom" | "proxy";
 
 // --- Execution Types ---
 
@@ -277,56 +279,30 @@ export interface Integration {
   connectedAt?: string;
 }
 
-// --- Available Scope Types ---
-
-export interface AvailableScope {
-  value: string;
-  label: string;
-}
-
 // --- Provider Config Types ---
 
-export interface ProviderSetupGuide {
-  callbackUrlHint?: string;
-  steps?: Array<{
-    label: string;
-    url?: string;
-  }>;
-}
+import type {
+  AuthMode as _AuthMode,
+  AvailableScope as _AvailableScope,
+  ProviderSetupGuide as _ProviderSetupGuide,
+  ResolvedProviderDefinition,
+} from "@appstrate/core/validation";
 
-export interface ProviderConfig {
-  id: string;
-  displayName: string;
+/** Provider config returned by the API — extends core's resolved definition with UI state. */
+export interface ProviderConfig
+  extends Omit<ResolvedProviderDefinition, "authorizationParams" | "tokenParams"> {
   version?: string;
   description?: string;
   author?: string;
   tags?: string[];
-  authMode: AuthMode;
   source: "built-in" | "custom";
   hasCredentials: boolean;
   enabled: boolean;
   adminCredentialSchema?: JSONSchemaObject;
-  setupGuide?: ProviderSetupGuide;
-  authorizationUrl?: string;
-  tokenUrl?: string;
-  refreshUrl?: string;
-  requestTokenUrl?: string;
-  accessTokenUrl?: string;
-  defaultScopes?: string[];
-  scopeSeparator?: string;
-  pkceEnabled?: boolean;
+  setupGuide?: _ProviderSetupGuide;
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
   authorizationParams?: Record<string, string>;
   tokenParams?: Record<string, string>;
   credentialSchema?: Record<string, unknown>;
-  credentialFieldName?: string;
-  credentialHeaderName?: string;
-  credentialHeaderPrefix?: string;
-  iconUrl?: string;
-  categories?: string[];
-  docsUrl?: string;
-  authorizedUris?: string[];
-  allowAllUris?: boolean;
-  availableScopes?: AvailableScope[];
   usedByFlows?: number;
 }

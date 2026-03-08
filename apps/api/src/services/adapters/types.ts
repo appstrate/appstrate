@@ -54,7 +54,7 @@ export interface PromptContext {
     id: string;
     displayName: string;
     authMode: string;
-    credentialSchema?: import("@appstrate/shared-types").JSONSchemaObject;
+    credentialSchema?: Record<string, unknown>;
     credentialFieldName?: string;
     credentialHeaderName?: string;
     credentialHeaderPrefix?: string;
