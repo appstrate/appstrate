@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePackageVersions, type VersionListItem } from "../hooks/use-packages";
+import { packageDetailPath } from "../lib/package-paths";
 import {
   Select,
   SelectContent,
@@ -27,7 +28,7 @@ export function VersionSelector({
   const { t } = useTranslation("flows");
   const navigate = useNavigate();
   const { data: versions } = usePackageVersions(type, packageId);
-  const detailPath = type === "flow" ? `/flows/${packageId}` : `/${type}s/${packageId}`;
+  const detailPath = packageDetailPath(type, packageId);
 
   if (!versions || versions.length === 0) return null;
 

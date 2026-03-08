@@ -45,6 +45,7 @@ import {
   createVersionAndUpload,
   deletePackageVersion,
 } from "../services/package-versions.ts";
+import { flowDetailHandler } from "./flow-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireOwnedPackage } from "../middleware/guards.ts";
 import { getRunningExecutionsForPackage } from "../services/state.ts";
@@ -290,6 +291,8 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
+  /** Custom GET detail handler, replaces makeGetHandler when provided. */
+  getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
 const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
@@ -313,6 +316,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
     requireMutableForVersionOps: true,
+    getHandler: flowDetailHandler,
     afterCreate: async ({ packageId, orgId, manifest }) => {
       const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
         manifest as Partial<Manifest>,
@@ -535,7 +539,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 }
 
 /** Extract item ID from either `:id` (unscoped) or `:scope/:name` (scoped) route params. */
-function getItemId(c: Context<AppEnv>): string {
+export function getItemId(c: Context<AppEnv>): string {
   const scope = c.req.param("scope");
   const name = c.req.param("name");
   if (scope && name) return `${scope}/${name}`;
@@ -1066,7 +1070,7 @@ export function createPackagesRouter() {
     );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
-    router.get(`/${path}/:scope{@[^/]+}/:name`, makeGetHandler(rcfg));
+    router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(
       `/${path}/:scope{@[^/]+}/:name`,
       requireAdmin(),
@@ -1080,7 +1084,7 @@ export function createPackagesRouter() {
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
-    router.get(`/${path}/:id`, makeGetHandler(rcfg));
+    router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeUpdateHandler(rcfg));
     router.delete(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeDeleteHandler(rcfg));
   }

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useFlowDetail } from "../../hooks/use-packages";
+import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
 import {
@@ -33,7 +33,7 @@ export function FlowActions({
   onFork?: () => void;
 }) {
   const { t } = useTranslation(["flows", "common"]);
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const { data: executions } = useExecutions(packageId);
   const { data: memories } = useFlowMemories(packageId);
   const deleteFlow = useDeleteFlow();

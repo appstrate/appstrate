@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useFlowDetail } from "../hooks/use-packages";
+import { usePackageDetail } from "../hooks/use-packages";
 import { useExecutionRealtime } from "../hooks/use-realtime";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
 import { InputFields } from "../components/input-fields";
@@ -19,7 +19,7 @@ export function ShareableRunPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = `${scope}/${name}`;
-  const { data: flow, isLoading, error } = useFlowDetail(packageId);
+  const { data: flow, isLoading, error } = usePackageDetail("flow", packageId);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
 

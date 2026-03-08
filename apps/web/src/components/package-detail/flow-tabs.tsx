@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { useFlowDetail } from "../../hooks/use-packages";
+import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
 import { useSchedules } from "../../hooks/use-schedules";
@@ -23,7 +23,7 @@ export function FlowExecutionsTab({
   resolvedVersion: string | undefined;
 }) {
   const { t } = useTranslation(["flows", "common"]);
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const { data: executions } = useExecutions(packageId);
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
@@ -65,7 +65,7 @@ export function FlowExecutionsTab({
 
 export function FlowSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
-  const { data: detail } = useFlowDetail(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const { data: schedules } = useSchedules(packageId);
   const setEditingSchedule = useFlowDetailUI((s) => s.setEditingSchedule);
   const setScheduleOpen = useFlowDetailUI((s) => s.setScheduleOpen);

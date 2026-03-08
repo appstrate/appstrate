@@ -4,15 +4,12 @@ import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useFlowDetail, usePackageDetail } from "../hooks/use-packages";
-import {
-  useCreateFlow,
-  useUpdateFlow,
-  useCreatePackage,
-  useUpdatePackage,
-} from "../hooks/use-mutations";
+import { usePackageDetail } from "../hooks/use-packages";
+import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
+import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
+import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 // Flow editor components
 import { MetadataSection } from "../components/flow-editor/metadata-section";
@@ -63,8 +60,8 @@ function FlowEditorInner({
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
-  const createFlow = useCreateFlow();
-  const updateFlow = useUpdateFlow(packageId || "");
+  const createFlow = useCreatePackage("flow");
+  const updateFlow = useUpdatePackage("flow", packageId || "");
 
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
@@ -106,14 +103,15 @@ function FlowEditorInner({
       setActiveTab("prompt");
       return;
     }
-    const payload = flowAssemblePayload(form);
+    const { prompt, ...payload } = flowAssemblePayload(form);
+    const body = { ...payload, content: prompt };
     if (isEdit && detail) {
       updateFlow.mutate(
-        { ...payload, lockVersion: detail.lockVersion! },
+        { ...body, lockVersion: detail.lockVersion! },
         { onError: (err) => setError(err.message) },
       );
     } else {
-      createFlow.mutate(payload, { onError: (err) => setError(err.message) });
+      createFlow.mutate(body, { onError: (err) => setError(err.message) });
     }
   };
 
@@ -320,20 +318,19 @@ function PackageEditorInner({
     { id: "json", label: t("editor.tabJson") },
   ];
 
-  const typePath = `${type}s`;
   const language = type === "skill" ? "markdown" : "typescript";
 
   return (
     <div className="space-y-4">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to={`/${typePath}`} className="text-muted-foreground hover:text-foreground">
-          {t(`packages.type.${typePath}`, { ns: "settings" })}
+        <Link to={packageListPath(type)} className="text-muted-foreground hover:text-foreground">
+          {t(`packages.type.${type}s`, { ns: "settings" })}
         </Link>
         <span className="opacity-50">/</span>
         {isEdit && packageId ? (
           <>
             <Link
-              to={`/${typePath}/${packageId}`}
+              to={packageDetailPath(type, packageId)}
               className="text-muted-foreground hover:text-foreground"
             >
               {form.metadata.displayName || packageId}
@@ -395,7 +392,9 @@ function PackageEditorInner({
           <Button
             variant="outline"
             type="button"
-            onClick={() => navigate(isEdit ? `/${typePath}/${packageId}` : `/${typePath}`)}
+            onClick={() =>
+              navigate(isEdit ? packageDetailPath(type, packageId!) : packageListPath(type))
+            }
           >
             {t("btn.cancel")}
           </Button>
@@ -421,9 +420,9 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
   const isEdit = !!scope;
 
   // Load detail for editing
-  const flowQuery = useFlowDetail(type === "flow" && isEdit ? packageId : undefined);
+  const flowQuery = usePackageDetail("flow", type === "flow" && isEdit ? packageId : undefined);
   const pkgQuery = usePackageDetail(
-    type === "flow" || type === "provider" ? "skill" : type,
+    type,
     type !== "flow" && type !== "provider" && isEdit ? packageId : undefined,
   );
   const providersQuery = useProviders();
@@ -464,12 +463,12 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
   }
 
   if (isEdit && detail && (detail as { source?: string }).source === "system") {
-    navigate(`/${type === "flow" ? "flows" : `${type}s`}/${packageId}`, { replace: true });
+    navigate(packageDetailPath(type, packageId!), { replace: true });
     return null;
   }
 
   if (isEdit && !isOwned) {
-    navigate(`/${type === "flow" ? "flows" : `${type}s`}/${packageId}`, { replace: true });
+    navigate(packageDetailPath(type, packageId!), { replace: true });
     return null;
   }
 
@@ -509,9 +508,9 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
     );
   }
 
-  // Skill/Extension editor
+  // Skill/Extension editor (flow/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
   const module = getPackageTypeModule(type);
-  const pkgDetail = pkgQuery.data;
+  const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
   const initialState: PackageFormState =
     isEdit && pkgDetail

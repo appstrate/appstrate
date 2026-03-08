@@ -10,6 +10,7 @@ import { Spinner } from "./spinner";
 import { useForkPackage } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { ApiError } from "../api";
+import { packageDetailPath } from "../lib/package-paths";
 
 interface Props {
   open: boolean;
@@ -47,7 +48,7 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
       {
         onSuccess: (data) => {
           handleClose();
-          navigate(`/${type === "flow" ? "flows" : `${type}s`}/${data.packageId}`);
+          navigate(packageDetailPath(type, data.packageId));
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : "";

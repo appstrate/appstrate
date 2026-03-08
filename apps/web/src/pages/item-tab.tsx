@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { type CardItem, PackageTab } from "./package-list";
 import type { ItemTabConfig } from "./item-tab-configs";
+import { packageNewPath } from "../lib/package-paths";
 
 export function ItemTab({
   config,
@@ -57,7 +58,7 @@ export function ItemTab({
         isOrgAdmin ? (
           <>
             {externalActions}
-            <Link to={`/${config.type}s/new`}>
+            <Link to={packageNewPath(config.type)}>
               <Button>{t("list.createItem", { ns: "flows" })}</Button>
             </Link>
           </>

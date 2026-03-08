@@ -10,16 +10,23 @@ import type {
   FlowDetail,
 } from "@appstrate/shared-types";
 
-// --- Packages (skills / extensions) — config-driven factory ---
+// --- Packages — config-driven factory ---
 
-type PackageType = "skill" | "extension" | "provider";
-type VersionableType = "flow" | "skill" | "extension" | "provider";
+type PackageType = "flow" | "skill" | "extension" | "provider";
 
 const PACKAGE_CONFIG = {
+  flow: { path: "flows", listKey: "flows", detailKey: "flow" },
   skill: { path: "skills", listKey: "skills", detailKey: "skill" },
   extension: { path: "extensions", listKey: "extensions", detailKey: "extension" },
   provider: { path: "providers", listKey: "providers", detailKey: "provider" },
 } as const;
+
+type PackageDetailMap = {
+  flow: FlowDetail;
+  skill: OrgPackageItemDetail;
+  extension: OrgPackageItemDetail;
+  provider: OrgPackageItemDetail;
+};
 
 function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
@@ -33,14 +40,22 @@ function usePackageList(type: PackageType) {
   });
 }
 
-function usePackageDetail(type: PackageType, id: string | undefined) {
+function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
   const orgId = useCurrentOrgId();
+  const profileId = useCurrentProfileId();
   const cfg = PACKAGE_CONFIG[type];
+
+  // Flows support profileId for per-user service status resolution
+  const qs = type === "flow" && profileId ? `?profileId=${profileId}` : "";
+  // Include profileId in key for flows (different profiles = different results)
+  const queryKey: unknown[] = ["packages", cfg.detailKey, orgId, id];
+  if (type === "flow") queryKey.push(profileId);
+
   return useQuery({
-    queryKey: ["packages", cfg.detailKey, orgId, id],
+    queryKey,
     queryFn: async () => {
-      const data = await api<Record<string, OrgPackageItemDetail>>(`/packages/${cfg.path}/${id}`);
-      return data[cfg.detailKey] as OrgPackageItemDetail;
+      const data = await api<Record<string, unknown>>(`/packages/${cfg.path}/${id}${qs}`);
+      return data[cfg.detailKey] as PackageDetailMap[T];
     },
     enabled: !!id,
   });
@@ -84,7 +99,6 @@ export {
   useUploadPackage,
   useDeletePackage,
   type PackageType,
-  type VersionableType,
   PACKAGE_CONFIG,
 };
 
@@ -98,20 +112,6 @@ export function useFlows() {
       const data = await api<{ flows: FlowListItem[] }>("/flows");
       return data.flows;
     },
-  });
-}
-
-export function useFlowDetail(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const profileId = useCurrentProfileId();
-  return useQuery({
-    queryKey: ["flow", orgId, packageId, profileId],
-    queryFn: async () => {
-      const qs = profileId ? `?profileId=${profileId}` : "";
-      const data = await api<FlowDetail>(`/flows/${packageId}${qs}`);
-      return data;
-    },
-    enabled: !!packageId,
   });
 }
 
@@ -164,12 +164,12 @@ export interface VersionListItem {
   createdAt: string | null;
 }
 
-function packageBasePath(type: VersionableType, packageId: string | undefined) {
-  return `/packages/${type}s/${packageId}`;
+function packageBasePath(type: PackageType, packageId: string | undefined) {
+  return `/packages/${PACKAGE_CONFIG[type].path}/${packageId}`;
 }
 
 export function useVersionDetail(
-  type: VersionableType,
+  type: PackageType,
   packageId: string | undefined,
   version: string | undefined,
 ) {
@@ -182,7 +182,7 @@ export function useVersionDetail(
   });
 }
 
-export function usePackageVersions(type: VersionableType, packageId: string | undefined) {
+export function usePackageVersions(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["package-versions", orgId, type, packageId],
@@ -198,7 +198,7 @@ export function usePackageVersions(type: VersionableType, packageId: string | un
 
 // --- Version management mutations ---
 
-export function useCreateVersion(type: VersionableType, packageId: string) {
+export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
@@ -211,14 +211,13 @@ export function useCreateVersion(type: VersionableType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
 }
 
-export function useDeleteVersion(type: VersionableType, packageId: string) {
+export function useDeleteVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
@@ -227,14 +226,13 @@ export function useDeleteVersion(type: VersionableType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
 }
 
-export function useRestoreVersion(type: VersionableType, packageId: string) {
+export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
@@ -243,14 +241,13 @@ export function useRestoreVersion(type: VersionableType, packageId: string) {
         { method: "POST" },
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
 }
 
-export function useVersionInfo(type: VersionableType, packageId: string | undefined) {
+export function useVersionInfo(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["version-info", orgId, type, packageId],

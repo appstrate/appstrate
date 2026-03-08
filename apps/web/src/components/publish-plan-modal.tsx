@@ -94,7 +94,6 @@ export function PublishPlanModal({
 
     // All succeeded
     setPublishing(false);
-    qc.invalidateQueries({ queryKey: ["flow"] });
     qc.invalidateQueries({ queryKey: ["flows"] });
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["registry"] });

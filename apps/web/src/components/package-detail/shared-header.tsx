@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { VersionSelector } from "../version-selector";
+import { packageListPath } from "../../lib/package-paths";
 
 interface SharedHeaderDetail {
   id: string;
@@ -32,7 +33,7 @@ export function SharedHeader({
 }) {
   const { t } = useTranslation(["flows", "settings", "common"]);
 
-  const breadcrumbPath = detail.type === "flow" ? "/" : `/${detail.type}s`;
+  const breadcrumbPath = packageListPath(detail.type);
   const breadcrumbLabel =
     detail.type === "flow"
       ? t("detail.breadcrumb")

@@ -202,6 +202,10 @@ export const schemas = {
         description: "Number of published versions (0 for built-in flows)",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      hasUnpublishedChanges: {
+        type: "boolean",
+        description: "Whether the flow has local changes not yet published as a version",
+      },
     },
   },
   FlowVersion: {

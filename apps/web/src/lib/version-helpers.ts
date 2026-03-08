@@ -1,3 +1,5 @@
+import { packageDetailPath } from "./package-paths";
+
 export function getVersionRedirect(params: {
   type: string;
   packageId: string;
@@ -7,7 +9,7 @@ export function getVersionRedirect(params: {
   hasDraftChanges: boolean;
 }): { redirect: string } | { isHistoricalVersion: boolean } {
   const { type, packageId, versionParam, versionDetail, liveVersion, hasDraftChanges } = params;
-  const basePath = type === "flow" ? `/flows/${packageId}` : `/${type}s/${packageId}`;
+  const basePath = packageDetailPath(type, packageId);
 
   if (versionParam && !versionDetail) {
     return { redirect: basePath };

@@ -32,37 +32,6 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{packageId}": {
-    get: {
-      operationId: "getFlow",
-      tags: ["Flows"],
-      summary: "Get flow detail",
-      description: "Returns flow detail including services, config, state, skills, and extensions.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
-        {
-          name: "profileId",
-          in: "query",
-          required: false,
-          description:
-            "Connection profile ID to use for resolving service statuses. Defaults to user's effective profile.",
-          schema: { type: "string" },
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Flow detail",
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/FlowDetail" },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
   "/api/flows/{packageId}/config": {
     put: {
       operationId: "saveFlowConfig",

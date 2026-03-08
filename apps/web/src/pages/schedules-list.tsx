@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useFlows, useFlowDetail } from "../hooks/use-packages";
+import { useFlows, usePackageDetail } from "../hooks/use-packages";
 import {
   useAllSchedules,
   useCreateSchedule,
@@ -36,8 +36,11 @@ export function SchedulesListPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
-  const { data: createFlowDetail } = useFlowDetail(createFlowId || undefined);
-  const { data: editFlowDetail } = useFlowDetail(editingSchedule?.packageId || undefined);
+  const { data: createFlowDetail } = usePackageDetail("flow", createFlowId || undefined);
+  const { data: editFlowDetail } = usePackageDetail(
+    "flow",
+    editingSchedule?.packageId || undefined,
+  );
   const createMutation = useCreateSchedule(createFlowId);
 
   if (isLoading) return <LoadingState />;
