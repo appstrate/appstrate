@@ -145,6 +145,7 @@ export function createFlowsRouter() {
           }
         : null,
       versionCount,
+      forkedFrom: userFlowRow?.forkedFrom ?? null,
       ...(flow.source !== "system" && userFlowRow
         ? {
             manifest: flow.manifest,

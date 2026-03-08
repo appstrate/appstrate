@@ -119,6 +119,7 @@ async function forkPackage(
   orgSlug: string,
   sourcePackageId: string,
   userId?: string,
+  customName?: string,
 ): Promise<ForkResult | ForkError> {
   if (isOwnedByOrg(sourcePackageId, orgSlug)) {
     return { code: "ALREADY_OWNED" };
@@ -150,7 +151,8 @@ async function forkPackage(
   if (!source) return { code: "NOT_FOUND" };
 
   // Build target packageId
-  const targetId = `@${orgSlug}/${parsed.name}`;
+  const forkName = customName ?? parsed.name;
+  const targetId = `@${orgSlug}/${forkName}`;
 
   // Check for collision
   const existing = await getPackageById(targetId);
@@ -165,7 +167,7 @@ async function forkPackage(
     orgId,
     orgSlug,
     {
-      id: parsed.name,
+      id: forkName,
       name: (source.name as string) ?? undefined,
       description: (source.description as string) ?? undefined,
       content: (source.content as string) ?? "",
@@ -368,5 +370,62 @@ describe("forkPackage", () => {
     expect(args[1]).toBe("org-1");
     expect(args[2]).toBe("@acme/cool-flow");
     expect(args[3]).toEqual({ "flow.md": "content" });
+  });
+
+  test("fork with custom name uses custom name instead of source name", async () => {
+    mockOrgItems["@other/cool-flow"] = {
+      id: "@other/cool-flow",
+      orgId: "org-1",
+      name: "Cool Flow",
+      description: "A cool flow",
+      content: "# prompt",
+      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
+      source: "local",
+    };
+
+    const result = await forkPackage(
+      "org-1",
+      "acme",
+      "@other/cool-flow",
+      "user-1",
+      "my-custom-name",
+    );
+
+    expect("code" in result).toBe(false);
+    if (!("code" in result)) {
+      expect(result.packageId).toBe("@acme/my-custom-name");
+      expect(result.forkedFrom).toBe("@other/cool-flow");
+      expect(result.type).toBe("flow");
+    }
+
+    expect(mockCreatedItems.length).toBe(1);
+    const created = mockCreatedItems[0] as { id: string; manifest: { name: string } };
+    expect(created.id).toBe("@acme/my-custom-name");
+    expect(created.manifest.name).toBe("@acme/my-custom-name");
+  });
+
+  test("fork with custom name checks collision against custom name", async () => {
+    mockOrgItems["@other/cool-flow"] = {
+      id: "@other/cool-flow",
+      orgId: "org-1",
+      name: "Cool Flow",
+      content: "# prompt",
+      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
+      source: "local",
+    };
+    mockPackageById["@acme/my-custom-name"] = { id: "@acme/my-custom-name", orgId: "org-1" };
+
+    const result = await forkPackage(
+      "org-1",
+      "acme",
+      "@other/cool-flow",
+      "user-1",
+      "my-custom-name",
+    );
+
+    expect("code" in result).toBe(true);
+    if ("code" in result) {
+      expect(result.code).toBe("NAME_COLLISION");
+    }
   });
 });

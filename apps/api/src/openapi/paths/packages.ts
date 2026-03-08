@@ -1321,6 +1321,24 @@ export const packagesPaths = {
           description: "Package name",
         },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+                  description:
+                    "Custom name for the forked package (slug format). Defaults to the source package name.",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "201": {
           description: "Package forked successfully",
@@ -1342,13 +1360,16 @@ export const packagesPaths = {
           },
         },
         "400": {
-          description: "Already owned or name collision",
+          description: "Already owned, name collision, or invalid name",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  error: { type: "string", enum: ["ALREADY_OWNED", "NAME_COLLISION"] },
+                  error: {
+                    type: "string",
+                    enum: ["ALREADY_OWNED", "NAME_COLLISION", "INVALID_NAME"],
+                  },
                   message: { type: "string" },
                 },
               },

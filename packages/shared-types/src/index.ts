@@ -180,6 +180,7 @@ export interface FlowDetail {
   distTags?: DistTagInfo[];
   versionCount?: number;
   hasUnpublishedChanges?: boolean;
+  forkedFrom?: string | null;
 }
 
 // --- Organization Package Types ---
