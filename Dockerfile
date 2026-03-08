@@ -74,6 +74,7 @@ RUN mkdir -p data storage
 
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
+COPY --from=build /app/system-packages ./system-packages
 
 EXPOSE 3000
 
