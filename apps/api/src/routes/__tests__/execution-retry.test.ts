@@ -6,6 +6,7 @@ import type {
 } from "../../services/adapters/types.ts";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { LoadedFlow } from "../../types/index.ts";
+import { packageVersionsStub } from "../../services/__tests__/_db-mock.ts";
 
 // --- Mocks ---
 
@@ -71,6 +72,7 @@ mock.module("../../services/env-builder.ts", () => ({
 }));
 
 mock.module("../../services/package-versions.ts", () => ({
+  ...packageVersionsStub,
   getLatestVersionId: mock(async () => null),
   getVersionDetail: mock(async () => null),
 }));

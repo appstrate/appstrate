@@ -62,6 +62,7 @@ function makeDbProxy(): Record<string, unknown> {
           return { then: (resolve: (v: unknown) => void) => resolve(r) };
         },
         onConflictDoUpdate: () => obj,
+        onConflictDoNothing: () => obj,
         then: (resolve: (v: unknown) => void) => resolve(undefined),
       };
       return obj;
