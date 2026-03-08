@@ -51,14 +51,13 @@ export function PackageTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const header = (isOrgAdmin && extraActions) || headerContent ? (
-    <div className="flex items-center justify-between gap-2 mb-4">
-      <div>{headerContent}</div>
-      <div className="flex items-center gap-2">
-        {isOrgAdmin && extraActions}
+  const header =
+    (isOrgAdmin && extraActions) || headerContent ? (
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div>{headerContent}</div>
+        <div className="flex items-center gap-2">{isOrgAdmin && extraActions}</div>
       </div>
-    </div>
-  ) : null;
+    ) : null;
 
   const emptyActions = emptyExtraActions !== undefined ? emptyExtraActions : extraActions;
 
