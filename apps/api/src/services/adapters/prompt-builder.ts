@@ -138,7 +138,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
       // For providers with credentialSchema, show all credential variables
       if (provider && provider.credentialSchema) {
-        const props = provider.credentialSchema.properties ?? {};
+        const props =
+          (provider.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
           const desc = props[name]?.description ?? name;

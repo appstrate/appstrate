@@ -1,41 +1,12 @@
-import type { JSONSchemaObject, AvailableScope, AuthMode } from "@appstrate/shared-types";
-import type { ProviderDefinitionFields } from "@appstrate/core/validation";
+import type {
+  AuthMode,
+  ResolvedProviderDefinition,
+} from "@appstrate/core/validation";
 
 export type { AuthMode };
 
-/** Strip the `[x: string]: unknown` index signature that z.looseObject() adds. */
-type KnownKeys<T> = {
-  [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
-};
-
-/** Fields overridden with stricter types for consumer usage. */
-type StricterFields =
-  | "authMode"
-  | "authorizationParams"
-  | "tokenParams"
-  | "tokenAuthMethod"
-  | "credentialSchema"
-  | "availableScopes";
-
-/**
- * Full provider definition including identity + meta fields.
- * Technical fields derive from core's ProviderDefinitionFields.
- */
-export interface ProviderDefinition
-  extends Omit<KnownKeys<ProviderDefinitionFields>, StricterFields> {
-  id: string;
-  displayName: string;
-  authMode: AuthMode;
-  authorizationParams?: Record<string, string>;
-  tokenParams?: Record<string, string>;
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
-  credentialSchema?: JSONSchemaObject;
-  availableScopes?: AvailableScope[];
-  // Meta
-  iconUrl?: string;
-  categories?: string[];
-  docsUrl?: string;
-}
+/** Provider definition used by the connect package — alias for core's resolved type. */
+export type ProviderDefinition = ResolvedProviderDefinition;
 
 export interface ConnectionRecord {
   id: string;

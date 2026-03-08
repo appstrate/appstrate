@@ -4,12 +4,8 @@ import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
-import type {
-  ProviderConfig,
-  ProviderSetupGuide,
-  AvailableScope,
-  JSONSchemaObject,
-} from "@appstrate/shared-types";
+import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
+import type { ProviderSetupGuide } from "@appstrate/core/validation";
 import { getEnv } from "@appstrate/env";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
@@ -18,7 +14,10 @@ import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestServices } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
-import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
+import {
+  getDefaultAdminCredentialSchema,
+  buildProviderDefinitionFromManifest,
+} from "@appstrate/core/validation";
 
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
@@ -28,6 +27,24 @@ async function isSystemProviderInDb(providerId: string): Promise<boolean> {
     .where(eq(packages.id, providerId))
     .limit(1);
   return pkg?.source === "system" || pkg?.source === "built-in";
+}
+
+/** Apply default fields forced on proxy-type providers. */
+function applyProxyProviderDefaults(data: { authMode?: string } & Record<string, unknown>): void {
+  if (data.authMode !== "proxy") return;
+  data.allowAllUris = true;
+  data.credentialFieldName = "url";
+  data.credentialSchema = data.credentialSchema ?? {
+    type: "object",
+    properties: {
+      url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
+    },
+    required: ["url"],
+  };
+  const cats = (data.categories as string[]) ?? [];
+  if (!cats.includes("proxy")) {
+    data.categories = [...cats, "proxy"];
+  }
 }
 
 function packageToProviderConfig(
@@ -40,51 +57,26 @@ function packageToProviderConfig(
 ): ProviderConfig {
   const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const resolved = buildProviderDefinitionFromManifest(pkg.id, manifest);
   const isSystem = pkg.source === "system" || pkg.source === "built-in";
-  const authMode = (def.authMode as ProviderConfig["authMode"]) ?? "oauth2";
   const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
   const adminCredentialSchema =
     explicitSchema ??
-    (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | undefined) ??
+    (getDefaultAdminCredentialSchema(resolved.authMode) as JSONSchemaObject | undefined) ??
     undefined;
   return {
-    id: pkg.id,
-    displayName: (manifest.displayName as string) ?? pkg.id,
+    ...resolved,
     version: (manifest.version as string) ?? undefined,
     description: (manifest.description as string) ?? undefined,
     author: (manifest.author as string) ?? undefined,
     tags: (manifest.tags as string[]) ?? undefined,
-    authMode,
     source: isSystem ? "built-in" : "custom",
     hasCredentials: !!credRow?.credentialsEncrypted,
     enabled: !!credRow?.enabled,
     adminCredentialSchema,
     setupGuide: (manifest.setupGuide as ProviderSetupGuide) ?? undefined,
-    authorizationUrl: (def.authorizationUrl as string) ?? undefined,
-    tokenUrl: (def.tokenUrl as string) ?? undefined,
-    refreshUrl: (def.refreshUrl as string) ?? undefined,
-    requestTokenUrl: (def.requestTokenUrl as string) ?? undefined,
-    accessTokenUrl: (def.accessTokenUrl as string) ?? undefined,
-    defaultScopes: (def.defaultScopes as string[]) ?? undefined,
-    scopeSeparator: (def.scopeSeparator as string) ?? undefined,
-    pkceEnabled: (def.pkceEnabled as boolean) ?? undefined,
-    tokenAuthMethod: (def.tokenAuthMethod as ProviderConfig["tokenAuthMethod"]) ?? undefined,
-    authorizationParams: (def.authorizationParams as Record<string, string>) ?? undefined,
-    tokenParams: (def.tokenParams as Record<string, string>) ?? undefined,
-    credentialSchema: (def.credentialSchema as unknown as Record<string, unknown>) ?? undefined,
-    credentialFieldName: (def.credentialFieldName as string) ?? undefined,
-    credentialHeaderName: (def.credentialHeaderName as string) ?? undefined,
-    credentialHeaderPrefix: (def.credentialHeaderPrefix as string) ?? undefined,
-    iconUrl: (manifest.iconUrl as string) ?? undefined,
-    categories: (manifest.categories as string[]) ?? undefined,
-    docsUrl: (manifest.docsUrl as string) ?? undefined,
-    authorizedUris: (def.authorizedUris as string[])?.length
-      ? (def.authorizedUris as string[])
-      : undefined,
-    allowAllUris: (def.allowAllUris as boolean) ?? undefined,
-    availableScopes: (def.availableScopes as unknown as AvailableScope[])?.length
-      ? (def.availableScopes as unknown as AvailableScope[])
-      : undefined,
+    tokenAuthMethod: resolved.tokenAuthMethod as ProviderConfig["tokenAuthMethod"],
+    credentialSchema: (def.credentialSchema as Record<string, unknown>) ?? undefined,
   };
 }
 
@@ -221,21 +213,7 @@ export function createProvidersRouter() {
       );
     }
 
-    // Force defaults for proxy providers
-    if (data.authMode === "proxy") {
-      data.allowAllUris = true;
-      data.credentialFieldName = "url";
-      data.credentialSchema = {
-        type: "object",
-        properties: {
-          url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
-        },
-        required: ["url"],
-      };
-      if (!data.categories?.includes("proxy")) {
-        data.categories = [...(data.categories ?? []), "proxy"];
-      }
-    }
+    applyProxyProviderDefaults(data);
 
     // Build the definition object for manifest.definition
     const definition: Record<string, unknown> = {
@@ -400,18 +378,10 @@ export function createProvidersRouter() {
     const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
     const authMode = data.authMode ?? (oldDef.authMode as string);
 
-    // Force defaults for proxy providers
-    if (authMode === "proxy") {
-      data.allowAllUris = true;
-      data.credentialFieldName = "url";
-      data.credentialSchema = data.credentialSchema ?? {
-        type: "object",
-        properties: {
-          url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
-        },
-        required: ["url"],
-      };
-    }
+    // Temporarily set authMode so applyProxyProviderDefaults can check it
+    const effectiveData = data as Record<string, unknown>;
+    effectiveData.authMode = authMode;
+    applyProxyProviderDefaults(effectiveData as typeof data & { authMode: string });
 
     // Merge definition
     const newDef: Record<string, unknown> = {

@@ -399,31 +399,16 @@ export async function installFromMarketplace(
 
 // --- Installed version resolution ---
 
-/** Resolve installed version: dist-tag → version row → manifest fallback. */
-async function resolveInstalledVersion(
-  packageId: string,
-  orgId: string,
-  cachedManifest?: Record<string, unknown> | null,
-): Promise<string | null> {
+/** Resolve installed version via dist-tag → version row. */
+async function resolveInstalledVersion(packageId: string): Promise<string | null> {
   const latestVersionId = await getLatestVersionId(packageId);
-  if (latestVersionId) {
-    const [ver] = await db
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.id, latestVersionId))
-      .limit(1);
-    if (ver?.version) return ver.version;
-  }
-  // Fallback to manifest if no version row exists (pre-migration packages)
-  if (cachedManifest !== undefined) {
-    return (((cachedManifest ?? {}) as Partial<Manifest>).version as string) ?? null;
-  }
-  const [row] = await db
-    .select({ manifest: packages.manifest })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
+  if (!latestVersionId) return null;
+  const [ver] = await db
+    .select({ version: packageVersions.version })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, latestVersionId))
     .limit(1);
-  return (((row?.manifest ?? {}) as Partial<Manifest>).version as string) ?? null;
+  return ver?.version ?? null;
 }
 
 // --- Installed integrity ---
@@ -488,7 +473,7 @@ export async function getMarketplacePackageWithInstallStatus(
       if (hasIntegrityConflict(localVersions, pkg.versions)) {
         integrityConflict = true;
       } else {
-        installedVersion = await resolveInstalledVersion(packageId, orgId);
+        installedVersion = await resolveInstalledVersion(packageId);
       }
 
       // Check if local version is ahead of registry latest
@@ -503,9 +488,6 @@ export async function getMarketplacePackageWithInstallStatus(
       if (registryLatest && versionGt(maxLocalVersion, registryLatest)) {
         localVersionAhead = maxLocalVersion;
       }
-    } else {
-      // No local versions (pre-migration package) — fall back to old behavior
-      installedVersion = await resolveInstalledVersion(packageId, orgId);
     }
   }
 
@@ -588,12 +570,8 @@ export async function checkRegistryUpdates(
         }
       }
 
-      // Read installed version from packageVersions via dist-tag, fallback to manifest
-      const installedVersion = await resolveInstalledVersion(
-        pkg.id,
-        orgId,
-        pkg.manifest as Record<string, unknown> | null,
-      );
+      // Read installed version from packageVersions via dist-tag
+      const installedVersion = await resolveInstalledVersion(pkg.id);
 
       // Use shared update check logic — fixes the bug of using !== instead of semver comparison
       const { latestVersion, updateAvailable } = checkUpdateAvailable({
