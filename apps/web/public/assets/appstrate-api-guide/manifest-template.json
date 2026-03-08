@@ -8,16 +8,15 @@
     "tags": ["category1", "category2"]
   },
   "requires": {
-    "services": [
-      {
-        "id": "my-service",
-        "provider": "provider-id",
-        "scopes": [],
-        "connectionMode": "user"
-      }
-    ],
+    "services": { "@scope/my-service": "1.0.0" },
     "skills": {},
     "extensions": {}
+  },
+  "servicesConfiguration": {
+    "@scope/my-service": {
+      "scopes": [],
+      "connectionMode": "user"
+    }
   },
   "input": {
     "schema": {

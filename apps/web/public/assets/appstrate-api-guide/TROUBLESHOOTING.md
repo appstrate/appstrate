@@ -84,7 +84,7 @@ Chercher le flow existant avec cet ID dans la réponse.
 |--------|-------|----------|
 | `metadata.id: Required` | Champ `id` manquant dans metadata | Ajouter `"id": "mon-flow"` dans metadata |
 | `metadata.displayName: Required` | Pas de nom d'affichage | Ajouter `"displayName": "Mon Flow"` |
-| `requires.services: Required` | Section services manquante | Ajouter `"services": []` même si vide |
+| `requires.services: Required` | Section services manquante | Ajouter `"services": {}` même si vide |
 | `input.schema.required: Expected array` | `required: true` sur une propriété | Corriger : utiliser `"required": ["field1"]` au niveau de l'objet schema |
 
 **Action de l'agent :** Corriger le manifest automatiquement et réessayer. Utiliser le fichier `manifest-template.json` comme référence.
@@ -199,7 +199,7 @@ Trouver l'exécution en cours (`status: "running"` ou `"pending"`).
 ```
 GET {BASE_URL}/api/flows
 ```
-Chercher dans les manifests les services qui référencent ce provider (champ `requires.services[].provider`).
+Chercher dans les manifests les services qui référencent ce provider (clés dans `requires.services`).
 
 **Actions de l'agent :**
 1. Lister les flows qui utilisent ce provider

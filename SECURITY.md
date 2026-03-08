@@ -150,7 +150,7 @@ The sidecar:
 The platform API (`/internal/credentials/:serviceId`) enforces additional controls:
 
 - **Execution must be running** — tokens for completed/failed executions are rejected (`internal.ts`)
-- **Service must be declared** — the requested `serviceId` must appear in the flow's `manifest.requires.services[]`. An agent cannot request credentials for services it hasn't declared.
+- **Service must be declared** — the requested `serviceId` must appear as a key in the flow's `manifest.requires.services` object. An agent cannot request credentials for services it hasn't declared.
 - **Access is logged** — every credential fetch is recorded with execution ID, service ID, and flow ID
 
 ### Why not pass credentials as environment variables?
@@ -585,7 +585,7 @@ This paper demonstrates that alignment training alone is insufficient to secure 
 
 ### "Securing AI Agent Execution" (Buhler, Biagiola et al., 2025)
 
-Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's flow manifest (`requires.services[]` with `authorized_uris`) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
+Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's flow manifest (`requires.services` object with `authorized_uris` in provider definitions) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
 
 **Reference:** arXiv:2510.21236
 

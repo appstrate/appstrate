@@ -51,7 +51,7 @@ The manifest defines everything about the flow. Follow this structure exactly:
   },
 
   "requires": {
-    "services": []
+    "services": {}
   },
 
   "execution": {
@@ -64,17 +64,24 @@ The manifest defines everything about the flow. Follow this structure exactly:
 
 **metadata.id**: Kebab-case slug, unique across all flows. This becomes the flow ID. Examples: `email-summary`, `slack-digest`, `invoice-processor`.
 
-**requires.services[]**: Each service the agent needs OAuth/API tokens for:
+**requires.services**: Record mapping provider package IDs (scoped names) to version strings. Each entry represents a service the agent needs OAuth/API tokens for:
 ```json
-{
-  "id": "gmail",
-  "provider": "@appstrate/gmail",
-  "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+"services": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" }
+```
+- The key is the provider package ID (scoped name). Must match a configured provider. See Available Providers below.
+- The value is a version string (e.g., `"1.0.0"`, `"*"`).
+- The token is injected as `TOKEN_{KEY_UPPERCASED}` (hyphens/slashes become underscores, `@` removed).
+
+**servicesConfiguration** (optional, top-level): Per-service configuration (scopes, connection mode):
+```json
+"servicesConfiguration": {
+  "@appstrate/gmail": {
+    "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+    "connectionMode": "admin"
+  }
 }
 ```
-- `id`: Short name used in env vars. The token is injected as `TOKEN_{ID_UPPERCASED}` (hyphens become underscores: `brevo-api-key` → `TOKEN_BREVO_API_KEY`)
-- `provider`: Must match a configured provider package ID (scoped name). See Available Providers below.
-- `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo)
+- `scopes` (optional): OAuth scopes needed. Omit for API key integrations (e.g., Brevo).
 - `connectionMode` (optional): `"user"` (default) or `"admin"`. Admin mode means an admin binds their connection for all users.
 
 **requires.skills** (optional): Record of scoped skill IDs to static versions. Example: `{"@org/greeting-style": "1.0.0", "@org/web-research": "2.0.0"}`. Skills must exist in the org packages or as built-in skills. Scope prefix (`@scope/`) is mandatory.
@@ -422,20 +429,18 @@ If the flow needs a service not in this list, tell the user they need to:
   },
 
   "requires": {
-    "services": [
-      {
-        "id": "gmail",
-        "provider": "@appstrate/gmail",
-        "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
-      },
-      {
-        "id": "clickup",
-        "provider": "@appstrate/clickup",
-        "scopes": ["task:write"]
-      }
-    ],
+    "services": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" },
     "skills": {},
     "extensions": { "@appstrate/web-search": "1.0.0" }
+  },
+
+  "servicesConfiguration": {
+    "@appstrate/gmail": {
+      "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    },
+    "@appstrate/clickup": {
+      "scopes": ["task:write"]
+    }
   },
 
   "input": {
