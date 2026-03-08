@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -10,10 +11,14 @@ import {
   Plug,
   Settings,
   Plus,
+  Upload,
+  Wrench,
+  Puzzle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { Spinner } from "./spinner";
+import { ImportModal } from "./import-modal";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,6 +30,7 @@ import {
 export function OrgSwitcher() {
   const { t } = useTranslation();
   const { currentOrg, orgs, switchOrg, loading, isOrgAdmin } = useOrg();
+  const [importOpen, setImportOpen] = useState(false);
 
   if (loading) {
     return <Spinner />;
@@ -35,6 +41,7 @@ export function OrgSwitcher() {
   }
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
@@ -86,10 +93,26 @@ export function OrgSwitcher() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="/#providers" className="flex items-center gap-2">
+          <Link to="/skills" className="flex items-center gap-2">
+            <Wrench size={14} />
+            {t("orgSwitcher.skills")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/extensions" className="flex items-center gap-2">
+            <Puzzle size={14} />
+            {t("orgSwitcher.extensions")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/providers" className="flex items-center gap-2">
             <Plug size={14} />
             {t("orgSwitcher.connectors")}
           </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setImportOpen(true)} className="flex items-center gap-2">
+          <Upload size={14} />
+          {t("orgSwitcher.import")}
         </DropdownMenuItem>
         {isOrgAdmin && (
           <DropdownMenuItem asChild>
@@ -107,5 +130,7 @@ export function OrgSwitcher() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+    </>
   );
 }

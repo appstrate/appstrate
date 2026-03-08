@@ -303,7 +303,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
         <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
           {t("editor.noIntegration")}
           <div className="mt-3">
-            <Link to="/#providers">
+            <Link to="/providers">
               <Button variant="outline" size="sm">
                 {t("editor.goToConnectors")}
               </Button>
@@ -339,7 +339,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
           })}
           {isOrgAdmin && (
             <Link
-              to="/#providers"
+              to="/providers"
               className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground no-underline"
             >
               <span className="text-2xl leading-none">+</span>
