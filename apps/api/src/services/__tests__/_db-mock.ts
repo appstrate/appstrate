@@ -151,17 +151,9 @@ export const schemaStubs = {
   },
 };
 
-export const builtinPackagesStub = {
+export const systemPackagesStub = {
   BUILTIN_SCOPE: "appstrate",
-  getBuiltInSkills: () => new Map(),
-  getBuiltInExtensions: () => new Map(),
-  isBuiltInSkill: () => false,
-  isBuiltInExtension: () => false,
-  resolveBuiltInSkill: () => undefined,
-  resolveBuiltInExtension: () => undefined,
-  getBuiltInSkillFiles: async () => null,
-  getBuiltInExtensionFile: async () => null,
-  initBuiltInPackages: async () => {},
+  initSystemPackages: async () => {},
   getSystemPackages: () => new Map(),
   isSystemPackage: () => false,
   getSystemPackageEntry: () => undefined,

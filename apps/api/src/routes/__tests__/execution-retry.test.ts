@@ -166,7 +166,7 @@ function makeFlow(overrides: {
     prompt: "test prompt",
     skills: [],
     extensions: [],
-    source: "built-in",
+    source: "system",
     manifest: {
       schemaVersion: "1.0.0",
       name: "test-flow",

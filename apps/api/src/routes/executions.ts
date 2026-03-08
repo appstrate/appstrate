@@ -379,7 +379,7 @@ export function createExecutionsRouter() {
     // If a specific version is requested, resolve and override flow data
     let effectiveFlow = flow;
     let overrideVersionId: number | undefined;
-    if (versionOverride && flow.source !== "built-in") {
+    if (versionOverride && flow.source !== "system") {
       const versionDetail = await getVersionDetail(flow.id, versionOverride);
       if (!versionDetail) {
         return c.json(
@@ -388,14 +388,14 @@ export function createExecutionsRouter() {
         );
       }
       overrideVersionId = versionDetail.id;
-      // Override manifest and prompt on the flow object for this execution
+      // Override manifest and content on the flow object for this execution
       effectiveFlow = {
         ...flow,
         manifest: {
           ...flow.manifest,
           ...(versionDetail.manifest as typeof flow.manifest),
         },
-        prompt: versionDetail.prompt ?? flow.prompt,
+        prompt: versionDetail.textContent ?? flow.prompt,
       };
     }
 

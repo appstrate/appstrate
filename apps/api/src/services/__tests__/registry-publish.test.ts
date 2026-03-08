@@ -4,7 +4,7 @@ import {
   resetQueues,
   db,
   schemaStubs,
-  builtinPackagesStub,
+  systemPackagesStub,
   packageStorageStub,
   registryClientStub,
 } from "./_db-mock.ts";
@@ -22,7 +22,7 @@ mock.module("../../lib/logger.ts", () => ({
 
 mock.module("../../lib/db.ts", () => ({ db }));
 mock.module("@appstrate/db/schema", () => schemaStubs);
-mock.module("../builtin-packages.ts", () => builtinPackagesStub);
+mock.module("../system-packages.ts", () => systemPackagesStub);
 const mockDownloadVersionZip = mock(async () => null as Buffer | null);
 mock.module("../package-storage.ts", () => ({
   ...packageStorageStub,
@@ -54,7 +54,6 @@ mock.module("../package-items/index.ts", () => ({
 
 mock.module("../flow-service.ts", () => ({
   getPackage: async () => ({ prompt: "test", skills: [], extensions: [] }),
-  isBuiltInFlow: () => false,
   getAllPackageIds: async () => [],
 }));
 
@@ -132,10 +131,10 @@ describe("publishPackage", () => {
     expect(publishPackage("pkg-1", "org-1", "user-1")).rejects.toThrow("not found");
   });
 
-  test("throws when package is built-in", async () => {
-    queues.select = [[makePackageRow({ source: "built-in" })]];
+  test("throws when package is system", async () => {
+    queues.select = [[makePackageRow({ source: "system" })]];
     expect(publishPackage("@acme/my-flow", "org-1", "user-1")).rejects.toThrow(
-      "Cannot publish built-in",
+      "Cannot publish system",
     );
   });
 

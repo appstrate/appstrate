@@ -140,7 +140,7 @@ export interface FlowListItem {
     extensions: Record<string, string>;
   };
   runningExecutions: number;
-  source: "built-in" | "local";
+  source: "system" | "local";
   scope?: string | null;
   version?: string | null;
   type: PackageType;
@@ -150,7 +150,7 @@ export interface FlowDetail {
   id: string;
   displayName: string;
   description: string;
-  source: "built-in" | "local";
+  source: "system" | "local";
   requires: {
     services: ServiceStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
@@ -187,7 +187,7 @@ export interface OrgPackageItem {
   id: string;
   name?: string | null;
   description?: string | null;
-  source?: "built-in" | "local";
+  source?: "system" | "local";
   createdBy?: string | null;
   createdByName?: string;
   createdAt: string;

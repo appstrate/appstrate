@@ -19,4 +19,4 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
 ]);
 
 export const packageTypeEnum = pgEnum("package_type", ["flow", "skill", "extension", "provider"]);
-export const packageSourceEnum = pgEnum("package_source", ["built-in", "local", "system"]);
+export const packageSourceEnum = pgEnum("package_source", ["local", "system"]);

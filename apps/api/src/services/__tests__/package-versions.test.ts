@@ -548,7 +548,7 @@ describe("getVersionDetail", () => {
     // downloadVersionZip returns null (default mock)
     const result = await getVersionDetail("pkg-1", "1.0.0");
     expect(result).not.toBeNull();
-    expect(result!.prompt).toBeNull();
+    expect(result!.textContent).toBeNull();
     expect(result!.version).toBe("1.0.0");
     expect(result!.createdAt).toBe("2025-01-01T00:00:00.000Z");
   });

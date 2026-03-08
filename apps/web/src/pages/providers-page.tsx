@@ -16,7 +16,8 @@ import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { Modal } from "../components/modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
-import { ItemTab, providerTabConfig } from "./package-list";
+import { ItemTab } from "./item-tab";
+import { providerTabConfig } from "./item-tab-configs";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 
 function ProviderConnectButton({

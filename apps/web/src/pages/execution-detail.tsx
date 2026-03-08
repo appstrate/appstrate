@@ -218,13 +218,6 @@ export function ExecutionDetailPage() {
 
       <div className="flex items-center gap-2 flex-wrap mb-4">
         <Badge status={displayStatus} />
-        {userName && (
-          <span className="text-sm text-muted-foreground">
-            {t("exec.user", { name: userName })}
-          </span>
-        )}
-        <span className="text-xs text-muted-foreground">{date}</span>
-        {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
         <span
           className={cn(
             "text-xs text-muted-foreground font-mono rounded bg-muted px-1.5 py-0.5",
@@ -233,34 +226,17 @@ export function ExecutionDetailPage() {
         >
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </span>
+        {userName && (
+          <span className="text-sm text-muted-foreground">
+            {t("exec.user", { name: userName })}
+          </span>
+        )}
+        <span className="text-xs text-muted-foreground">{date}</span>
+        {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
         {!isRunning && execution.tokensUsed != null && (
           <span className="text-xs text-muted-foreground">
             {execution.tokensUsed.toLocaleString()} tokens
           </span>
-        )}
-        {isRunning && (
-          <Button
-            variant="destructive"
-            onClick={() => cancelExecution.mutate(execId!)}
-            disabled={cancelExecution.isPending}
-          >
-            {cancelExecution.isPending && <Spinner />} {t("btn.cancel")}
-          </Button>
-        )}
-        {!isRunning && flow && (
-          <Button
-            onClick={() => {
-              const hasInput = flow.input?.schema && Object.keys(flow.input.schema).length > 0;
-              if (hasInput) {
-                setInputOpen(true);
-              } else {
-                runFlow.mutate(undefined);
-              }
-            }}
-            disabled={runFlow.isPending}
-          >
-            {t("exec.rerun")}
-          </Button>
         )}
       </div>
 
@@ -283,27 +259,54 @@ export function ExecutionDetailPage() {
         </div>
       )}
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => {
-          hasUserSelected.current = true;
-          setActiveTab(v as "logs" | "result" | "state");
-        }}
-        className="mb-4"
-      >
-        <TabsList>
-          <TabsTrigger value="logs">
-            {t("exec.tabLogs")}
-            {allLogs.length > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-                {allLogs.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
-          <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            hasUserSelected.current = true;
+            setActiveTab(v as "logs" | "result" | "state");
+          }}
+        >
+          <TabsList>
+            <TabsTrigger value="logs">
+              {t("exec.tabLogs")}
+              {allLogs.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                  {allLogs.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
+            <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex items-center gap-2">
+          {isRunning && (
+            <Button
+              variant="destructive"
+              onClick={() => cancelExecution.mutate(execId!)}
+              disabled={cancelExecution.isPending}
+            >
+              {cancelExecution.isPending && <Spinner />} {t("btn.cancel")}
+            </Button>
+          )}
+          {!isRunning && flow && (
+            <Button
+              onClick={() => {
+                const hasInput = flow.input?.schema && Object.keys(flow.input.schema).length > 0;
+                if (hasInput) {
+                  setInputOpen(true);
+                } else {
+                  runFlow.mutate(undefined);
+                }
+              }}
+              disabled={runFlow.isPending}
+            >
+              {t("exec.rerun")}
+            </Button>
+          )}
+        </div>
+      </div>
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 

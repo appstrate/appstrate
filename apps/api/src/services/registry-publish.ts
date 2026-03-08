@@ -45,8 +45,8 @@ export async function publishPackage(
     throw new Error(`Package '${packageId}' not found`);
   }
 
-  if (pkg.source === "built-in" || pkg.source === "system") {
-    throw new Error("Cannot publish built-in packages");
+  if (pkg.source === "system") {
+    throw new Error("Cannot publish system packages");
   }
 
   // 3. A version is required — draft publish is no longer supported

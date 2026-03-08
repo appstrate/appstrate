@@ -92,9 +92,9 @@ export function createFlowsRouter() {
         getPackageConfig(orgId, flow.id),
         getLastExecution(flow.id, user.id, orgId),
         getRunningExecutionsForPackage(flow.id, user.id),
-        flow.source !== "built-in" ? getPackageById(flow.id) : Promise.resolve(null),
-        flow.source !== "built-in" ? getVersionCount(flow.id) : Promise.resolve(0),
-        flow.source !== "built-in" ? getLatestVersionCreatedAt(flow.id) : Promise.resolve(null),
+        flow.source !== "system" ? getPackageById(flow.id) : Promise.resolve(null),
+        flow.source !== "system" ? getVersionCount(flow.id) : Promise.resolve(0),
+        flow.source !== "system" ? getLatestVersionCreatedAt(flow.id) : Promise.resolve(null),
       ]);
 
     // Merge defaults with current config
@@ -145,7 +145,7 @@ export function createFlowsRouter() {
           }
         : null,
       versionCount,
-      ...(flow.source !== "built-in" && userFlowRow
+      ...(flow.source !== "system" && userFlowRow
         ? {
             manifest: flow.manifest,
             updatedAt: userFlowRow.updatedAt,

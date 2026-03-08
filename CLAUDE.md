@@ -70,13 +70,7 @@ appstrate/
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 ├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
-├── apps/api/providers/        # System provider ZIP packages (loaded at boot)
-│
-├── data/                     # Built-in resources (loaded at boot)
-│   ├── flows/{name}/         # manifest.json + prompt.md
-│   ├── proxies.json          # Merged with SYSTEM_PROXIES env var
-│   ├── skills/{id}/SKILL.md  # YAML frontmatter (name, description)
-│   └── extensions/{id}.ts    # Pi agent tools (ExtensionFactory pattern)
+├── system-packages/           # System package ZIPs (providers, skills, extensions, flows — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → JSON lines on stdout
@@ -170,14 +164,14 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, admin connections). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `flow` (set by `requireFlow()`).
-- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not built-in + no running executions.
+- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not system package + no running executions.
 - **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` uses a 3-phase pattern: `collectPackages()` (network + DB reads, no writes) → `commitPackages()` (single DB transaction with `pg_advisory_xact_lock` per package) → post-install (storage/versions). Auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set and diamond dedup via `collected` array. Max 10 packages per install (root + deps). Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Packages installed from the marketplace are stored with `source: "local"` — the registry is a distribution channel, not a permanent status. Provenance is traceable via `packageVersions` entries (integrity, manifest snapshot). Uses `@appstrate/core/dependencies` for extraction and `@appstrate/core/naming` for packageId conversion.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/extension deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). Migration path: migration 0011 adds schema columns, seed script backfills existing packages, migration 0012 finalizes.
-- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and extensions. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `apps/api/providers/` at boot via `builtin-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
-- **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
+- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and extensions. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
+- **FlowService**: All flows (system + local) stored in DB. System flows loaded from ZIPs at boot and synced to DB with `orgId: null`.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
@@ -217,9 +211,8 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                                                           |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                                                 |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                                                  |
-| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled                                                    |
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`)                             |
-| `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array, merged with `data/proxies.json`                                                                                            |
+| `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array of system proxy definitions                                                                                                 |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                                               |
 | `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                                             |
 | `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Passed to agent containers                                                                                                             |
@@ -235,14 +228,14 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 
 ## Flow & Extension Gotchas
 
-- **Reference manifest**: `data/flows/pdf-explainer/manifest.json`. Validation: `services/schema.ts`.
+- **Reference manifest**: See system package ZIPs in `system-packages/`. Validation: `services/schema.ts`.
 - **JSON Schema `required`**: Use top-level `required: ["field1"]` array — NOT `required: true` on individual properties.
 - **Extension import**: `@mariozechner/pi-coding-agent` (NOT `pi-agent`).
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** argument. Using `execute(args)` receives the toolCallId string.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
 - **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `oauth1` (OAuth 1.0a with HMAC-SHA1 — uses `requestTokenUrl`/`accessTokenUrl`; `clientId`/`clientSecret` map to consumer key/secret), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), `proxy` (outbound HTTP proxy — auto-sets `allowAllUris: true` and `credentialSchema` with URL field). Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
-- **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). Built-in proxies loaded from `data/proxies.json` + `SYSTEM_PROXIES` env var at boot. Flow-level override via `GET/PUT /api/flows/:id/proxy`. Cascade: flow override → org default → `PROXY_URL` env var.
+- **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). System proxies loaded from `SYSTEM_PROXIES` env var at boot. Flow-level override via `GET/PUT /api/flows/:id/proxy`. Cascade: flow override → org default → `PROXY_URL` env var.
 - **Execution lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
 
 ## Known Issues & Technical Debt

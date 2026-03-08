@@ -30,13 +30,13 @@ export function requireFlow() {
   };
 }
 
-/** Middleware: reject if flow is built-in (403) or has running executions (409). */
+/** Middleware: reject if flow is system (403) or has running executions (409). */
 export function requireMutableFlow() {
   return async (c: Context<AppEnv>, next: Next) => {
     const flow = c.get("flow");
-    if (flow.source === "built-in") {
+    if (flow.source === "system") {
       return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Cannot modify a built-in flow" },
+        { error: "OPERATION_NOT_ALLOWED", message: "Cannot modify a system flow" },
         403,
       );
     }

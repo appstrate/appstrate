@@ -4,7 +4,7 @@ import {
   resetQueues,
   db,
   schemaStubs,
-  builtinPackagesStub,
+  systemPackagesStub,
   packageStorageStub,
   tracking,
 } from "./_db-mock.ts";
@@ -26,8 +26,6 @@ mock.module("@appstrate/db/schema", () => schemaStubs);
 mock.module("../package-storage.ts", () => packageStorageStub);
 
 mock.module("../flow-service.ts", () => ({
-  getPackagesDir: () => "/tmp",
-  isBuiltInFlow: () => false,
   getAllPackageIds: async () => [],
   getPackage: async () => null,
 }));
@@ -39,7 +37,7 @@ mock.module("@appstrate/db/storage", () => ({
   deleteFile: async () => {},
 }));
 
-mock.module("../builtin-packages.ts", () => builtinPackagesStub);
+mock.module("../system-packages.ts", () => systemPackagesStub);
 
 // --- Import after mocks ---
 
@@ -60,7 +58,7 @@ describe("listOrgItems — autoInstalled filter", () => {
     // listOrgItems issues 3 selects:
     // 1. packages (filtered by orgId, type, autoInstalled=false)
     // 2. packageDependencies (for usedByFlows count)
-    // 3. flow manifests (for built-in counts)
+    // 3. flow manifests (for system usage counts)
     const orgItem = {
       id: "my-skill",
       orgId: "org-1",
@@ -77,7 +75,7 @@ describe("listOrgItems — autoInstalled filter", () => {
     queues.select = [
       [orgItem], // packages query (autoInstalled=false filter is in the SQL where clause)
       [], // packageDependencies
-      [], // flow manifests for built-in counts
+      [], // flow manifests for system usage counts
     ];
 
     const result = await listOrgItems("org-1", SKILL_CONFIG);

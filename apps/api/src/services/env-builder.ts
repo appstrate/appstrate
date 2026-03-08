@@ -137,7 +137,7 @@ export async function buildExecutionContext(params: {
     getPackageZip(flow, orgId),
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)
-      : flow.source !== "built-in"
+      : flow.source !== "system"
         ? getLatestVersionWithManifest(flow.id).catch(() => null)
         : null,
     resolveProxyUrl(orgId, flow.id, params.config),

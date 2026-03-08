@@ -23,7 +23,7 @@
     "verify:openapi": "bun scripts/verify-openapi.ts"
   },
   "dependencies": {
-    "@appstrate/core": "^2.3.2"
+    "@appstrate/core": "^2.3.3"
   },
   "devDependencies": {
     "@readme/openapi-parser": "^5.5.0",

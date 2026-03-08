@@ -169,6 +169,13 @@
       "when": 1773619200000,
       "tag": "0023_drop_auth_mode_enum",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1773705600000,
+      "tag": "0024_remove_builtin_source",
+      "breakpoints": true
     }
   ]
 }

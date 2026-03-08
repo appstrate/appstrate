@@ -53,7 +53,7 @@ export function FlowActions({
       packageId={packageId}
       type="flow"
       isOrgAdmin={isOrgAdmin}
-      isBuiltIn={detail.source === "built-in"}
+      isBuiltIn={detail.source === "system"}
       isHistoricalVersion={isHistoricalVersion}
       hasDraftChanges={hasDraftChanges}
       downloadVersion={downloadVersion}

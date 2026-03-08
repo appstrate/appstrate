@@ -68,13 +68,7 @@ appstrate/
 │   ├── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 │   └── registry-client/      # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
-├── data/                     # Built-in resources (loaded at boot)
-│   ├── flows/{name}/         # manifest.json + prompt.md
-│   ├── proxies.json          # Built-in proxy definitions
-│   ├── skills/{id}/SKILL.md  # Agent skill instructions
-│   └── extensions/{id}.ts    # Agent tool extensions
-│
-├── apps/api/providers/       # System provider ZIP packages (loaded at boot)
+├── system-packages/           # System package ZIPs (providers, skills, extensions, flows — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → JSON lines on stdout
@@ -146,7 +140,6 @@ Key variables (see `.env.example` for full list):
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                           |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                 |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials           |
-| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir (built-in flows/skills/extensions) |
 | `LLM_PROVIDER`              | No       | `anthropic`                                   | LLM provider for agent containers                      |
 | `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Model ID for agent containers                          |
 | `ANTHROPIC_API_KEY`         | No       | —                                             | Passed to agent containers                             |

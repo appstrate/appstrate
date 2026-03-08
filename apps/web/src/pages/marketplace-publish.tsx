@@ -108,12 +108,12 @@ export function MarketplacePublishPage() {
 
   const isLoading = statusLoading || flowsLoading || skillsLoading || extensionsLoading;
 
-  // Build publishable items list (exclude built-in)
+  // Build publishable items list (exclude system packages)
   const publishableItems: PublishableItem[] = [];
 
   if (flows) {
     for (const f of flows) {
-      if (f.source !== "built-in") {
+      if (f.source !== "system") {
         publishableItems.push({
           id: f.id,
           type: "flow",
@@ -126,7 +126,7 @@ export function MarketplacePublishPage() {
 
   if (skills) {
     for (const s of skills) {
-      if (s.source !== "built-in") {
+      if (s.source !== "system") {
         publishableItems.push({
           id: s.id,
           type: "skill",
@@ -138,7 +138,7 @@ export function MarketplacePublishPage() {
 
   if (extensions) {
     for (const e of extensions) {
-      if (e.source !== "built-in") {
+      if (e.source !== "system") {
         publishableItems.push({
           id: e.id,
           type: "extension",

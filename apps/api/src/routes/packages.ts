@@ -7,8 +7,8 @@ import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { isBuiltInFlow, getAllPackageIds } from "../services/flow-service.ts";
-import { isBuiltInSkill, isBuiltInExtension } from "../services/builtin-packages.ts";
+import { getAllPackageIds } from "../services/flow-service.ts";
+import { isSystemPackage } from "../services/system-packages.ts";
 import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
 import { getPublishPlan } from "../services/dependency-graph.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
@@ -356,12 +356,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.jsonBodyCreate) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
-        prompt?: string;
         content?: string;
       }>();
 
       const manifest = body.manifest;
-      const content = body.content ?? body.prompt ?? "";
+      const content = body.content ?? "";
 
       // Validate manifest
       const manifestResult = validateManifest(manifest);
@@ -437,11 +436,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
     if (parsed instanceof Response) return parsed;
 
-    if (rcfg.cfg.isBuiltIn(parsed.id)) {
+    if (isSystemPackage(parsed.id)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is built-in and cannot be modified`,
+          message: `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is a system package and cannot be modified`,
         },
         403,
       );
@@ -588,11 +587,11 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
-    if (rcfg.cfg.isBuiltIn(itemId)) {
+    if (isSystemPackage(itemId)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `${label} '${itemId}' is built-in and cannot be modified`,
+          message: `${label} '${itemId}' is a system package and cannot be modified`,
         },
         403,
       );
@@ -606,7 +605,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const body = await c.req.json<{
       manifest?: Record<string, unknown>;
       content?: string;
-      prompt?: string; // alias for content (flow backward compat)
       lockVersion?: number;
     }>();
 
@@ -622,7 +620,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     const manifest =
       body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
-    const content = body.content ?? body.prompt ?? existing.content ?? "";
+    const content = body.content ?? existing.content ?? "";
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
@@ -714,11 +712,11 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
-    if (rcfg.cfg.isBuiltIn(itemId)) {
+    if (isSystemPackage(itemId)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `${label} '${itemId}' is built-in and cannot be deleted`,
+          message: `${label} '${itemId}' is a system package and cannot be deleted`,
         },
         403,
       );
@@ -819,8 +817,6 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
-      // For flows, also return as `prompt` for backward compat
-      ...(rcfg.cfg.type === "flow" ? { prompt: content ?? detail.prompt } : {}),
       yanked: detail.yanked,
       yankedReason: detail.yankedReason,
       integrity: detail.integrity,
@@ -854,9 +850,9 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
-    if (rcfg.cfg.isBuiltIn(itemId)) {
+    if (isSystemPackage(itemId)) {
       return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
         403,
       );
     }
@@ -906,9 +902,9 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
-    if (rcfg.cfg.isBuiltIn(itemId)) {
+    if (isSystemPackage(itemId)) {
       return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
         403,
       );
     }
@@ -942,7 +938,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     // Extract content from version ZIP
-    let content = detail.prompt ?? "";
+    let content = detail.textContent ?? "";
     if (detail.content) {
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];
@@ -1002,9 +998,9 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
-    if (rcfg.cfg.isBuiltIn(itemId)) {
+    if (isSystemPackage(itemId)) {
       return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is built-in` },
+        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
         403,
       );
     }
@@ -1114,14 +1110,12 @@ export function createPackagesRouter() {
     const { manifest, content, files, type: packageType } = parsed;
     const packageId = manifest.name as string;
 
-    // Built-in packages are immutable
-    const isBuiltIn =
-      isBuiltInFlow(packageId) || isBuiltInSkill(packageId) || isBuiltInExtension(packageId);
-    if (isBuiltIn) {
+    // System packages are immutable
+    if (isSystemPackage(packageId)) {
       return c.json(
         {
           error: "NAME_COLLISION",
-          message: `'${packageId}' is a built-in package and cannot be overwritten`,
+          message: `'${packageId}' is a system package and cannot be overwritten`,
         },
         400,
       );

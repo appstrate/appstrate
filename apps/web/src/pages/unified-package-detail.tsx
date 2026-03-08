@@ -154,7 +154,7 @@ export function UnifiedPackageDetailPage({
     versionParam,
   );
 
-  const hasDraftChanges = source !== "built-in" && !!hasUnpublishedChanges;
+  const hasDraftChanges = source !== "system" && !!hasUnpublishedChanges;
   const { data: latestVersionForDiff } = useVersionDetail(
     type,
     packageId,
@@ -187,7 +187,7 @@ export function UnifiedPackageDetailPage({
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
     if (tab === "changes" && (!hasDraftChanges || isVersionView)) setTab(defaultTab);
-    if (tab === "versions" && source === "built-in") setTab(defaultTab);
+    if (tab === "versions" && source === "system") setTab(defaultTab);
   }, [tab, hasDraftChanges, isVersionView, source, defaultTab, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
@@ -231,7 +231,7 @@ export function UnifiedPackageDetailPage({
   // ── Diff tab logic ──
   const currentManifest = type === "flow" ? flowDetail?.manifest : pkgDetail?.manifest;
 
-  const hasPromptChanges = type === "flow" && flowDetail?.prompt !== latestVersionForDiff?.prompt;
+  const hasPromptChanges = type === "flow" && flowDetail?.prompt !== latestVersionForDiff?.content;
   const hasManifestChanges =
     JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
   const hasContentChanges =
@@ -255,7 +255,7 @@ export function UnifiedPackageDetailPage({
   })();
 
   // ── Render ──
-  const isBuiltIn = source === "built-in";
+  const isBuiltIn = source === "system";
 
   // Determine available tabs based on type
   const servicesSummary =
@@ -515,9 +515,9 @@ export function UnifiedPackageDetailPage({
               {diffTab === "prompt" &&
                 hasPromptChanges &&
                 flowDetail?.prompt != null &&
-                latestVersionForDiff.prompt != null && (
+                latestVersionForDiff.content != null && (
                   <DraftDiffView
-                    original={latestVersionForDiff.prompt}
+                    original={latestVersionForDiff.content}
                     modified={flowDetail.prompt}
                     language="markdown"
                   />

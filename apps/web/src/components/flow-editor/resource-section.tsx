@@ -154,7 +154,7 @@ export function ResourceSection({
           <div className="flex flex-col gap-1">
             {items.map((item) => {
               const isSelected = selectedMap.has(item.id);
-              const isBuiltIn = item.source === "built-in";
+              const isBuiltIn = item.source === "system";
               const entry = selectedMap.get(item.id);
 
               return (

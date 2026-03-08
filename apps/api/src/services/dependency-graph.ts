@@ -47,7 +47,7 @@ export interface PublishPlan {
 // --- Pure functions ---
 
 export function computePublishStatus(node: GraphNode): PublishStatus {
-  if (node.source === "system" || node.source === "built-in") return "system";
+  if (node.source === "system") return "system";
   const { version, registryVersion } = node;
   if (!version || !isValidVersion(version)) return "no_version";
   if (!registryVersion) return "unpublished";
@@ -213,7 +213,7 @@ export async function getPublishPlan(
 
   // Query registry for actual published versions (source of truth)
   const nonSystemIds = [...graph.nodes.values()]
-    .filter((n) => n.source !== "system" && n.source !== "built-in")
+    .filter((n) => n.source !== "system")
     .map((n) => n.packageId);
 
   const registryVersions = await fetchRegistryVersions(nonSystemIds).catch((err) => {

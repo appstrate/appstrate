@@ -7,7 +7,7 @@ import {
   schemaStubs,
   tracking,
   packageVersionsStub,
-  builtinPackagesStub,
+  systemPackagesStub,
 } from "../../services/__tests__/_db-mock.ts";
 
 // --- Configurable mock state ---
@@ -71,18 +71,14 @@ mock.module("@appstrate/connect", () => ({
 }));
 
 mock.module("../../services/flow-service.ts", () => ({
-  getPackagesDir: () => null,
-  initPackageService: async () => {},
   getPackage: async () => null,
   listPackages: async () => mockFlows,
   getAllPackageIds: async () => [],
   packageExists: async () => false,
-  isBuiltInFlow: () => false,
-  getBuiltInPackageCount: () => 0,
 }));
 
-mock.module("../../services/builtin-packages.ts", () => ({
-  ...builtinPackagesStub,
+mock.module("../../services/system-packages.ts", () => ({
+  ...systemPackagesStub,
 }));
 
 // manifest-utils.ts is NOT mocked — pure functions, no side effects.
@@ -264,8 +260,8 @@ describe("POST /api/providers", () => {
     expect(json.error).toBe("OPERATION_NOT_ALLOWED");
   });
 
-  test("returns 403 when ID conflicts with system provider (source: built-in)", async () => {
-    queues.select.push([{ source: "built-in" }]); // isSystemProviderInDb → built-in
+  test("returns 403 when ID conflicts with system provider (source: system)", async () => {
+    queues.select.push([{ source: "system" }]); // isSystemProviderInDb → system
 
     const res = await jsonRequest("/api/providers", "POST", validCreateBody());
     expect(res.status).toBe(403);
