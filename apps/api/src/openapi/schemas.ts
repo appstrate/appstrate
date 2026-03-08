@@ -201,6 +201,7 @@ export const schemas = {
         type: "integer",
         description: "Number of published versions (0 for built-in flows)",
       },
+      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
     },
   },
   FlowVersion: {

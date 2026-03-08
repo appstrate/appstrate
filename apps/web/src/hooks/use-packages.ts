@@ -267,10 +267,14 @@ export function useVersionInfo(type: VersionableType, packageId: string | undefi
 export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (packageId: string) => {
+    mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
       return api<{ packageId: string; type: string; forkedFrom: string }>(
         `/packages/${packageId}/fork`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(name ? { name } : {}),
+        },
       );
     },
     onSuccess: () => {

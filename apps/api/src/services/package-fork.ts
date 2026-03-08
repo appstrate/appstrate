@@ -39,6 +39,7 @@ export async function forkPackage(
   orgSlug: string,
   sourcePackageId: string,
   userId?: string,
+  customName?: string,
 ): Promise<ForkResult | ForkError> {
   if (isOwnedByOrg(sourcePackageId, orgSlug)) {
     return { code: "ALREADY_OWNED" };
@@ -54,10 +55,17 @@ export async function forkPackage(
     if (!raw) return { code: "NOT_FOUND" };
     const typeCfg = TYPE_TO_CONFIG[raw.type];
     if (!typeCfg) return { code: "UNKNOWN_TYPE", type: raw.type };
-    return forkWithConfig(orgId, orgSlug, sourcePackageId, parsed.name, typeCfg, userId);
+    return forkWithConfig(
+      orgId,
+      orgSlug,
+      sourcePackageId,
+      customName ?? parsed.name,
+      typeCfg,
+      userId,
+    );
   }
 
-  return forkWithConfig(orgId, orgSlug, sourcePackageId, parsed.name, cfg, userId);
+  return forkWithConfig(orgId, orgSlug, sourcePackageId, customName ?? parsed.name, cfg, userId);
 }
 
 async function getPackageType(orgId: string, packageId: string): Promise<string> {

@@ -1092,8 +1092,18 @@ export function createPackagesRouter() {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+    const customName = typeof body.name === "string" ? body.name : undefined;
+
+    if (customName !== undefined) {
+      const { SLUG_REGEX } = await import("@appstrate/core/naming");
+      if (!SLUG_REGEX.test(customName)) {
+        return c.json({ error: "INVALID_NAME", message: "Name must match slug format" }, 400);
+      }
+    }
+
     const { forkPackage } = await import("../services/package-fork.ts");
-    const result = await forkPackage(orgId, orgSlug, packageId, user.id);
+    const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
 
     if ("code" in result) {
       switch (result.code) {
