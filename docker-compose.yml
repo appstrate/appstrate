@@ -15,5 +15,14 @@ services:
     ports:
       - "5432:5432"
 
+  migrate:
+    build: .
+    command: bun packages/db/src/migrate.ts
+    environment:
+      DATABASE_URL: postgresql://appstrate:appstrate@postgres:5432/appstrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
