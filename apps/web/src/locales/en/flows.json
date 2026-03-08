@@ -105,6 +105,8 @@
   "share.cantShareNotConnected": "All admin connectors must be bound",
   "share.generatePublicLink": "Generate a one-time public link",
   "share.errorGenerate": "Error generating link",
+  "share.linkModalTitle": "Share link",
+  "share.copyToClipboard": "Copy",
   "result.title": "Result",
   "result.formatted": "Formatted",
   "result.json": "JSON",

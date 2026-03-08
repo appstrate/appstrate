@@ -8,6 +8,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { ShareLinkModal } from "./share-link-modal";
 
 interface ServiceStatus {
   id: string;
@@ -24,15 +25,11 @@ interface ShareDropdownProps {
 
 export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownProps) {
   const { t } = useTranslation(["flows", "common"]);
-  const [copied, setCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
   const copyLink = () => {
-    const url = `${window.location.origin}/flows/${packageId}/run`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    setShareUrl(`${window.location.origin}/flows/${packageId}/run`);
   };
 
   // Check if the flow can be shared publicly:
@@ -52,10 +49,7 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
       const data = await api<{ token: string }>(`/flows/${packageId}/share-token`, {
         method: "POST",
       });
-      const url = `${window.location.origin}/share/${data.token}`;
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setShareUrl(`${window.location.origin}/share/${data.token}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : t("share.errorGenerate"));
     } finally {
@@ -66,36 +60,42 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
   // Non-admin: simple button
   if (!isAdmin) {
     return (
-      <Button variant="outline" onClick={copyLink} title={t("share.copyLinkTitle")}>
-        {copied ? t("share.copied") : t("share.share")}
-      </Button>
+      <>
+        <Button variant="outline" onClick={copyLink} title={t("share.copyLinkTitle")}>
+          {t("share.share")}
+        </Button>
+        <ShareLinkModal open={!!shareUrl} onClose={() => setShareUrl(null)} url={shareUrl ?? ""} />
+      </>
     );
   }
 
   // Admin: dropdown with two options
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" title={t("share.optionsTitle")}>
-          {copied ? t("share.copied") : t("share.share")}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={copyLink}>{t("share.copyLink")}</DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={generateShareLink}
-          disabled={!canSharePublic || generating}
-          title={
-            hasUserModeServices
-              ? t("share.cantShareUserMode")
-              : !canSharePublic
-                ? t("share.cantShareNotConnected")
-                : t("share.generatePublicLink")
-          }
-        >
-          {generating ? t("share.generating") : t("share.publicLink")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" title={t("share.optionsTitle")}>
+            {t("share.share")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={copyLink}>{t("share.copyLink")}</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={generateShareLink}
+            disabled={!canSharePublic || generating}
+            title={
+              hasUserModeServices
+                ? t("share.cantShareUserMode")
+                : !canSharePublic
+                  ? t("share.cantShareNotConnected")
+                  : t("share.generatePublicLink")
+            }
+          >
+            {generating ? t("share.generating") : t("share.publicLink")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ShareLinkModal open={!!shareUrl} onClose={() => setShareUrl(null)} url={shareUrl ?? ""} />
+    </>
   );
 }
