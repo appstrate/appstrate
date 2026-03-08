@@ -1,14 +1,20 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
-import { extractSkillMeta } from "@appstrate/core/validation";
+import { extractSkillMeta, type PackageType } from "@appstrate/core/validation";
 import { parseScopedName } from "@appstrate/core/naming";
+import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/system-packages";
+
+export type { SystemPackageEntry };
 
 export const BUILTIN_SCOPE = "appstrate";
 
 // Module-level directories, initialized by initBuiltInPackages()
 let skillsDir: string | null = null;
 let extensionsDir: string | null = null;
+
+/** System packages dir: provider ZIPs live alongside the API source. */
+const SYSTEM_PACKAGES_DIR = join(import.meta.dir, "../../../../system-packages");
 
 interface BuiltInPackageItem {
   id: string;
@@ -19,6 +25,7 @@ interface BuiltInPackageItem {
 
 let builtInSkills: ReadonlyMap<string, BuiltInPackageItem> = new Map();
 let builtInExtensions: ReadonlyMap<string, BuiltInPackageItem> = new Map();
+let systemPackages: ReadonlyMap<string, SystemPackageEntry> = new Map();
 
 // --- Generic loader ---
 
@@ -77,43 +84,63 @@ async function loadBuiltInType(cfg: BuiltInLoadConfig): Promise<Map<string, Buil
   return result;
 }
 
-/** Load built-in skills and extensions from dataDir. Call once at boot. */
+/** Load built-in skills/extensions from dataDir + system providers from source dir. */
 export async function initBuiltInPackages(dataDir?: string): Promise<void> {
-  if (!dataDir) {
-    logger.info("Built-in packages disabled (no dataDir)");
-    return;
+  // Skills and extensions still load from DATA_DIR (user-facing, optional)
+  if (dataDir) {
+    skillsDir = join(dataDir, "skills");
+    extensionsDir = join(dataDir, "extensions");
+
+    const [skills, extensions] = await Promise.all([
+      loadBuiltInType({
+        dir: skillsDir,
+        entryFilter: (_entry, info) => info.isDirectory(),
+        idFromEntry: (entry) => entry,
+        contentPath: (baseDir, entry) => join(baseDir, entry, "SKILL.md"),
+        manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
+        extractMeta: true,
+        typeLabel: "skill",
+      }),
+      loadBuiltInType({
+        dir: extensionsDir,
+        entryFilter: (_entry, info) => info.isDirectory(),
+        idFromEntry: (entry) => entry,
+        contentPath: (baseDir, entry) => join(baseDir, entry, "extension.ts"),
+        manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
+        extractMeta: false,
+        typeLabel: "extension",
+      }),
+    ]);
+
+    builtInSkills = skills;
+    builtInExtensions = extensions;
+  } else {
+    logger.info("DATA_DIR not set — built-in skills/extensions disabled");
   }
 
-  skillsDir = join(dataDir, "skills");
-  extensionsDir = join(dataDir, "extensions");
+  // System packages load from API source dir (always available, decoupled from DATA_DIR)
+  const result = await loadSystemPackages(SYSTEM_PACKAGES_DIR);
 
-  const [skills, extensions] = await Promise.all([
-    loadBuiltInType({
-      dir: skillsDir,
-      entryFilter: (_entry, info) => info.isDirectory(),
-      idFromEntry: (entry) => entry,
-      contentPath: (baseDir, entry) => join(baseDir, entry, "SKILL.md"),
-      manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
-      extractMeta: true,
-      typeLabel: "skill",
-    }),
-    loadBuiltInType({
-      dir: extensionsDir,
-      entryFilter: (_entry, info) => info.isDirectory(),
-      idFromEntry: (entry) => entry,
-      contentPath: (baseDir, entry) => join(baseDir, entry, "extension.ts"),
-      manifestPath: (baseDir, entry) => join(baseDir, entry, "manifest.json"),
-      extractMeta: false,
-      typeLabel: "extension",
-    }),
-  ]);
+  for (const w of result.warnings) {
+    logger.warn("System package ZIP invalid — skipping", { file: w.file, error: w.error });
+  }
 
-  builtInSkills = skills;
-  builtInExtensions = extensions;
+  const pkgMap = new Map<string, SystemPackageEntry>();
+  for (const entry of result.packages) {
+    pkgMap.set(entry.packageId, entry);
+    logger.debug("System package loaded from ZIP", {
+      id: entry.packageId,
+      type: entry.type,
+      version: entry.version,
+    });
+  }
+  systemPackages = pkgMap;
 
   logger.info("Built-in packages loaded", {
-    skills: skills.size,
-    extensions: extensions.size,
+    skills: builtInSkills.size,
+    extensions: builtInExtensions.size,
+    systemPackages: pkgMap.size,
+    packageIds: [...pkgMap.keys()],
   });
 }
 
@@ -141,6 +168,24 @@ export function resolveBuiltInSkill(id: string): BuiltInPackageItem | undefined 
 /** Resolve a built-in extension by scoped ID (@scope/name). */
 export function resolveBuiltInExtension(id: string): BuiltInPackageItem | undefined {
   return builtInExtensions.get(id);
+}
+
+// ─── Generic system package accessors ───
+
+export function getSystemPackages(): ReadonlyMap<string, SystemPackageEntry> {
+  return systemPackages;
+}
+
+export function isSystemPackage(id: string): boolean {
+  return systemPackages.has(id);
+}
+
+export function getSystemPackageEntry(id: string): SystemPackageEntry | undefined {
+  return systemPackages.get(id);
+}
+
+export function getSystemPackagesByType(type: PackageType): SystemPackageEntry[] {
+  return [...systemPackages.values()].filter((e) => e.type === type);
 }
 
 /** Get all files for a built-in skill (for ZIP packaging). */

@@ -108,7 +108,6 @@ export const schemaStubs = {
     type: "type",
     name: "name",
     manifest: "manifest",
-    lastPublishedVersion: "last_published_version",
     source: "source",
     content: "content",
     autoInstalled: "auto_installed",
@@ -162,12 +161,17 @@ export const builtinPackagesStub = {
   getBuiltInSkillFiles: async () => null,
   getBuiltInExtensionFile: async () => null,
   initBuiltInPackages: async () => {},
+  getSystemPackages: () => new Map(),
+  isSystemPackage: () => false,
+  getSystemPackageEntry: () => undefined,
+  getSystemPackagesByType: () => [],
 };
 
 export const packageStorageStub = {
   getPackageZip: async () => null,
   uploadPackageZip: async () => {},
   downloadVersionZip: async () => null,
+  deleteVersionZip: async () => {},
   unzipAndNormalize: () => ({}),
   ensureStorageBucket: () => {},
   buildMinimalZip: () => Buffer.from([]),
@@ -187,6 +191,13 @@ class RegistryClientErrorStub extends Error {
 export const registryClientStub = {
   RegistryClient: class {},
   RegistryClientError: RegistryClientErrorStub,
+};
+
+export const registryProviderStub = {
+  getRegistryClient: () => null,
+  isRegistryConfigured: () => false,
+  getRegistryDiscovery: () => null,
+  initRegistryProvider: async () => {},
 };
 
 /**

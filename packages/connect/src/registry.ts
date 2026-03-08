@@ -1,140 +1,73 @@
-import { eq, and } from "drizzle-orm";
-import { providerConfigs } from "@appstrate/db/schema";
-import type { ProviderConfig } from "@appstrate/db/schema";
+import { eq, and, or, isNull } from "drizzle-orm";
+import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition } from "./types.ts";
-import { decrypt } from "./encryption.ts";
-import { getEnv } from "@appstrate/env";
+import { decryptCredentials } from "./encryption.ts";
 
 export type { Db };
-
-/**
- * Built-in provider definitions.
- * Merged from two sources: file-based (data/providers.json) and env var (SYSTEM_PROVIDERS).
- * Env var entries override file entries with the same ID.
- * Inline clientId/clientSecret are used directly without DB lookup.
- */
-let BUILT_IN_PROVIDERS: Map<string, ProviderDefinition> | null = null;
-
-function isValidProvider(p: ProviderDefinition): boolean {
-  return !!(p.id && p.displayName && p.authMode);
-}
-
-function addProviders(
-  map: Map<string, ProviderDefinition>,
-  providers: ProviderDefinition[],
-  source: string,
-  warnOverride = false,
-): void {
-  for (const p of providers) {
-    if (!isValidProvider(p)) {
-      console.error(
-        `[connect] ${source}: skipping invalid entry (missing id/displayName/authMode)`,
-        p,
-      );
-      continue;
-    }
-    if (warnOverride && map.has(p.id)) {
-      console.warn(`[connect] ${source} overrides file provider '${p.id}'`);
-    }
-    map.set(p.id, p);
-  }
-}
-
-function parseEnvProviders(): ProviderDefinition[] {
-  const raw = getEnv().SYSTEM_PROVIDERS;
-  return raw as ProviderDefinition[];
-}
-
-/**
- * Initialize built-in providers from file-based definitions + env var.
- * File providers are loaded first, then env var entries override (with a warning).
- * Call once at boot before any provider lookups.
- */
-export function initBuiltInProviders(fileProviders?: ProviderDefinition[]): void {
-  const map = new Map<string, ProviderDefinition>();
-
-  if (fileProviders) {
-    addProviders(map, fileProviders, "providers.json");
-  }
-  addProviders(map, parseEnvProviders(), "SYSTEM_PROVIDERS", true);
-
-  BUILT_IN_PROVIDERS = map;
-}
-
-/** Ensure providers are initialized (auto-init from env var if initBuiltInProviders was never called). */
-function ensureInit(): Map<string, ProviderDefinition> {
-  if (!BUILT_IN_PROVIDERS) {
-    initBuiltInProviders();
-  }
-  return BUILT_IN_PROVIDERS!;
-}
 
 // ─── Helpers ──────────────────────────────────────────────────
 
 /**
- * Convert a Drizzle DB row to a ProviderDefinition.
+ * Build a ProviderDefinition from a packages row with manifest.definition.
  */
-function rowToDefinition(row: ProviderConfig): ProviderDefinition {
+function manifestToDefinition(
+  id: string,
+  manifest: Record<string, unknown>,
+): ProviderDefinition {
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
   return {
-    id: row.id,
-    displayName: row.displayName,
-    authMode: row.authMode,
-    authorizationUrl: row.authorizationUrl ?? undefined,
-    tokenUrl: row.tokenUrl ?? undefined,
-    refreshUrl: row.refreshUrl ?? undefined,
-    defaultScopes: row.defaultScopes ?? [],
-    scopeSeparator: row.scopeSeparator ?? " ",
-    pkceEnabled: row.pkceEnabled ?? true,
-    tokenAuthMethod: (row.tokenAuthMethod as ProviderDefinition["tokenAuthMethod"]) ?? undefined,
-    authorizationParams: (row.authorizationParams as Record<string, string>) ?? {},
-    tokenParams: (row.tokenParams as Record<string, string>) ?? {},
-    credentialSchema: (row.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,
-    credentialFieldName: row.credentialFieldName ?? undefined,
-    credentialHeaderName: row.credentialHeaderName ?? undefined,
-    credentialHeaderPrefix: row.credentialHeaderPrefix ?? undefined,
-    iconUrl: row.iconUrl ?? undefined,
-    categories: row.categories ?? [],
-    docsUrl: row.docsUrl ?? undefined,
-    authorizedUris: row.authorizedUris?.length ? row.authorizedUris : undefined,
-    allowAllUris: row.allowAllUris ?? false,
-    availableScopes: (row.availableScopes as ProviderDefinition["availableScopes"])?.length
-      ? (row.availableScopes as ProviderDefinition["availableScopes"])
+    id,
+    displayName: (manifest.displayName as string) ?? id,
+    authMode: (def.authMode as ProviderDefinition["authMode"]) ?? "oauth2",
+    authorizationUrl: (def.authorizationUrl as string) ?? undefined,
+    tokenUrl: (def.tokenUrl as string) ?? undefined,
+    refreshUrl: (def.refreshUrl as string) ?? undefined,
+    defaultScopes: (def.defaultScopes as string[]) ?? [],
+    scopeSeparator: (def.scopeSeparator as string) ?? " ",
+    pkceEnabled: (def.pkceEnabled as boolean) ?? true,
+    tokenAuthMethod: (def.tokenAuthMethod as ProviderDefinition["tokenAuthMethod"]) ?? undefined,
+    authorizationParams: (def.authorizationParams as Record<string, string>) ?? {},
+    tokenParams: (def.tokenParams as Record<string, string>) ?? {},
+    credentialSchema: (def.credentialSchema as ProviderDefinition["credentialSchema"]) ?? undefined,
+    credentialFieldName: (def.credentialFieldName as string) ?? undefined,
+    credentialHeaderName: (def.credentialHeaderName as string) ?? undefined,
+    credentialHeaderPrefix: (def.credentialHeaderPrefix as string) ?? undefined,
+    iconUrl: (manifest.iconUrl as string) ?? undefined,
+    categories: (manifest.categories as string[]) ?? [],
+    docsUrl: (manifest.docsUrl as string) ?? undefined,
+    authorizedUris: (def.authorizedUris as string[])?.length ? (def.authorizedUris as string[]) : undefined,
+    allowAllUris: (def.allowAllUris as boolean) ?? false,
+    availableScopes: (def.availableScopes as ProviderDefinition["availableScopes"])?.length
+      ? (def.availableScopes as ProviderDefinition["availableScopes"])
       : undefined,
-    requestTokenUrl: row.requestTokenUrl ?? undefined,
-    accessTokenUrl: row.accessTokenUrl ?? undefined,
+    requestTokenUrl: (def.requestTokenUrl as string) ?? undefined,
+    accessTokenUrl: (def.accessTokenUrl as string) ?? undefined,
   };
 }
 
 /**
  * Get a provider definition by ID.
- * Built-in providers are immutable — DB rows with the same ID do NOT override them.
- * DB rows are exclusively custom providers (IDs different from built-in).
+ * Queries packages where type="provider".
  */
 export async function getProvider(
   db: Db,
   orgId: string,
   providerId: string,
 ): Promise<ProviderDefinition | null> {
-  // Built-in providers always win
-  const builtIn = ensureInit().get(providerId);
-  if (builtIn) return builtIn;
-
-  // Check DB for custom providers
   const rows = await db
-    .select()
-    .from(providerConfigs)
-    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+    .select({ id: packages.id, manifest: packages.manifest })
+    .from(packages)
+    .where(and(eq(packages.id, providerId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
     .limit(1);
 
-  if (rows.length > 0) return rowToDefinition(rows[0]!);
-
-  return null;
+  if (rows.length === 0) return null;
+  const pkg = rows[0]!;
+  return manifestToDefinition(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>);
 }
 
 /**
  * Get a provider definition or throw if not found.
- * Optionally validates the auth mode.
  */
 export async function getProviderOrThrow(
   db: Db,
@@ -153,6 +86,49 @@ export async function getProviderOrThrow(
 }
 
 /**
+ * Get OAuth client credentials for a provider.
+ * Reads from providerCredentials (keyed by providerId + orgId).
+ */
+/**
+ * Get raw decrypted admin credentials for a provider.
+ */
+async function getProviderAdminCredentials(
+  db: Db,
+  orgId: string,
+  providerId: string,
+): Promise<Record<string, string> | null> {
+  const credRows = await db
+    .select({
+      credentialsEncrypted: providerCredentials.credentialsEncrypted,
+    })
+    .from(providerCredentials)
+    .where(
+      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+    )
+    .limit(1);
+
+  if (credRows.length === 0) return null;
+  const row = credRows[0]!;
+  if (!row.credentialsEncrypted) return null;
+
+  return decryptCredentials<Record<string, string>>(row.credentialsEncrypted);
+}
+
+export async function getProviderOAuthCredentials(
+  db: Db,
+  orgId: string,
+  providerId: string,
+): Promise<{ clientId: string; clientSecret: string } | null> {
+  const creds = await getProviderAdminCredentials(db, orgId, providerId);
+  if (!creds?.clientId || !creds?.clientSecret) return null;
+
+  return {
+    clientId: creds.clientId,
+    clientSecret: creds.clientSecret,
+  };
+}
+
+/**
  * Get OAuth client credentials for a provider or throw if not configured.
  */
 export async function getProviderOAuthCredentialsOrThrow(
@@ -163,111 +139,43 @@ export async function getProviderOAuthCredentialsOrThrow(
   const creds = await getProviderOAuthCredentials(db, orgId, providerId);
   if (!creds) {
     throw new Error(
-      `No OAuth credentials configured for provider '${providerId}'. Set SYSTEM_PROVIDERS env var or configure via admin.`,
+      `No OAuth credentials configured for provider '${providerId}'. Configure via admin settings.`,
     );
   }
   return creds;
 }
 
 /**
- * Get OAuth client credentials for a provider.
- * 1. Check built-in provider's inline credentials (from SYSTEM_PROVIDERS)
- * 2. Fall back to DB config
- */
-export async function getProviderOAuthCredentials(
-  db: Db,
-  orgId: string,
-  providerId: string,
-): Promise<{ clientId: string; clientSecret: string } | null> {
-  // 1. Check built-in provider's inline credentials
-  const builtIn = ensureInit().get(providerId);
-  if (builtIn?.clientId && builtIn?.clientSecret) {
-    return { clientId: builtIn.clientId, clientSecret: builtIn.clientSecret };
-  }
-
-  // 2. Check DB config
-  const rows = await db
-    .select({
-      clientIdEncrypted: providerConfigs.clientIdEncrypted,
-      clientSecretEncrypted: providerConfigs.clientSecretEncrypted,
-    })
-    .from(providerConfigs)
-    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
-    .limit(1);
-
-  if (rows.length === 0) return null;
-  const row = rows[0]!;
-  if (!row.clientIdEncrypted || !row.clientSecretEncrypted) return null;
-
-  return {
-    clientId: decrypt(row.clientIdEncrypted),
-    clientSecret: decrypt(row.clientSecretEncrypted),
-  };
-}
-
-/**
  * Get OAuth1 consumer credentials for a provider or throw if not configured.
- * Checks inline credentials (consumerKey/consumerSecret) first, then falls back
- * to the DB config columns (clientIdEncrypted/clientSecretEncrypted reused).
+ * Reads consumerKey/consumerSecret directly from the credentials JSON blob.
  */
 export async function getProviderOAuth1CredentialsOrThrow(
   db: Db,
   orgId: string,
   providerId: string,
 ): Promise<{ consumerKey: string; consumerSecret: string }> {
-  // 1. Check built-in provider's inline credentials
-  const builtIn = ensureInit().get(providerId);
-  if (builtIn?.consumerKey && builtIn?.consumerSecret) {
-    return { consumerKey: builtIn.consumerKey, consumerSecret: builtIn.consumerSecret };
+  const creds = await getProviderAdminCredentials(db, orgId, providerId);
+  if (!creds?.consumerKey || !creds?.consumerSecret) {
+    throw new Error(
+      `No OAuth1 consumer credentials configured for provider '${providerId}'. Configure via admin settings.`,
+    );
   }
-
-  // 2. Fall back to DB config (reuses clientId/clientSecret columns)
-  const rows = await db
-    .select({
-      clientIdEncrypted: providerConfigs.clientIdEncrypted,
-      clientSecretEncrypted: providerConfigs.clientSecretEncrypted,
-    })
-    .from(providerConfigs)
-    .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
-    .limit(1);
-
-  if (rows.length > 0) {
-    const row = rows[0]!;
-    if (row.clientIdEncrypted && row.clientSecretEncrypted) {
-      return {
-        consumerKey: decrypt(row.clientIdEncrypted),
-        consumerSecret: decrypt(row.clientSecretEncrypted),
-      };
-    }
-  }
-
-  throw new Error(
-    `No OAuth1 consumer credentials configured for provider '${providerId}'. Set SYSTEM_PROVIDERS env var or configure via admin.`,
-  );
+  return { consumerKey: creds.consumerKey, consumerSecret: creds.consumerSecret };
 }
 
 /**
- * List all available providers (built-in + DB custom).
- * Built-in providers are immutable — DB rows with the same ID are skipped.
+ * List all available providers for an org.
+ * Queries packages where type="provider".
  */
 export async function listProviders(db: Db, orgId: string): Promise<ProviderDefinition[]> {
-  const result = new Map<string, ProviderDefinition>();
+  const rows = await db
+    .select({ id: packages.id, manifest: packages.manifest })
+    .from(packages)
+    .where(and(eq(packages.type, "provider"), or(eq(packages.orgId, orgId), isNull(packages.orgId))));
 
-  // Start with built-in providers (immutable)
-  for (const [id, def] of ensureInit()) {
-    result.set(id, def);
-  }
-
-  // Add custom providers from DB (skip if ID conflicts with built-in)
-  const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
-
-  for (const row of rows) {
-    if (!result.has(row.id)) {
-      result.set(row.id, rowToDefinition(row));
-    }
-  }
-
-  return Array.from(result.values());
+  return rows.map((pkg) =>
+    manifestToDefinition(pkg.id, (pkg.manifest ?? {}) as Record<string, unknown>),
+  );
 }
 
 /**
@@ -291,7 +199,6 @@ export function getDefaultAuthorizedUris(provider: ProviderDefinition): string[]
 
 /**
  * Get the credential field name for a provider.
- * Used to return credentials in the correct format to the sidecar.
  */
 export function getCredentialFieldName(provider: ProviderDefinition): string {
   return (
@@ -301,15 +208,40 @@ export function getCredentialFieldName(provider: ProviderDefinition): string {
 }
 
 /**
- * Get the built-in providers map (for routes and prompt building).
+ * Check if a provider is enabled for an org.
  */
-export function getBuiltInProviders(): ReadonlyMap<string, ProviderDefinition> {
-  return ensureInit();
+export async function isProviderEnabled(
+  db: Db,
+  orgId: string,
+  providerId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ enabled: providerCredentials.enabled })
+    .from(providerCredentials)
+    .where(
+      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+    )
+    .limit(1);
+  return rows.length > 0 && !!rows[0]!.enabled;
 }
 
 /**
- * Check if a provider ID is a built-in provider.
+ * Check if credentials are configured for a provider.
  */
-export function isBuiltInProvider(providerId: string): boolean {
-  return ensureInit().has(providerId);
+export async function hasCredentialsConfigured(
+  db: Db,
+  orgId: string,
+  providerId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({
+      credentialsEncrypted: providerCredentials.credentialsEncrypted,
+    })
+    .from(providerCredentials)
+    .where(
+      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+    )
+    .limit(1);
+
+  return rows.length > 0 && !!rows[0]!.credentialsEncrypted;
 }

@@ -93,14 +93,14 @@ export type PublishStatus =
   | "outdated"
   | "published"
   | "no_version"
-  | "version_behind";
+  | "version_behind"
+  | "system";
 
 export interface PublishPlanItem {
   packageId: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   displayName: string;
   version: string | null;
-  lastPublishedVersion: string | null;
   status: PublishStatus;
 }
 

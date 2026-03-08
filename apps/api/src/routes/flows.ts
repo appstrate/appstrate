@@ -26,6 +26,7 @@ import {
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -48,7 +49,7 @@ export function createFlowsRouter() {
         author: f.manifest.author,
         tags: f.manifest.tags ?? [],
         requires: {
-          services: f.manifest.requires.services.map((s) => s.id),
+          services: resolveManifestServices(f.manifest).map((s) => s.id),
           skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),
           extensions: Object.fromEntries(f.extensions.map((e) => [e.id, e.version ?? "*"])),
         },
@@ -78,7 +79,7 @@ export function createFlowsRouter() {
     ]);
 
     const serviceStatuses = await resolveServiceStatuses(
-      m.requires.services,
+      resolveManifestServices(m),
       adminConns,
       orgId,
       userProfileId,
@@ -150,8 +151,6 @@ export function createFlowsRouter() {
             updatedAt: userFlowRow.updatedAt,
             lockVersion: userFlowRow.version,
             prompt: flow.prompt,
-            lastPublishedVersion: userFlowRow.lastPublishedVersion ?? null,
-            lastPublishedAt: userFlowRow.lastPublishedAt ?? null,
             hasUnpublishedChanges:
               versionCount > 0 && latestVersionDate
                 ? (userFlowRow.updatedAt ?? new Date()) > latestVersionDate
@@ -196,18 +195,18 @@ export function createFlowsRouter() {
     });
   });
 
-  // POST /api/flows/:scope/:name/services/:serviceId/bind — bind a profile's connection to a service
+  // POST /api/flows/:scope/:name/services/:svcScope/:svcName/bind — bind a profile's connection to a service
   router.post(
-    "/:scope{@[^/]+}/:name/services/:serviceId/bind",
+    "/:scope{@[^/]+}/:name/services/:svcScope{@[^/]+}/:svcName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
       const user = c.get("user");
-      const serviceId = c.req.param("serviceId")!;
+      const serviceId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
 
       // Verify the service exists and is in admin mode
-      const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+      const svc = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
       if (!svc) {
         return c.json(
           { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
@@ -236,7 +235,7 @@ export function createFlowsRouter() {
 
       // Verify the profile has a connection for this provider
       const orgId = c.get("orgId");
-      const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
+      const conn = await getConnectionStatus(svc.provider, effectiveProfileId);
       if (conn.status !== "connected") {
         return c.json(
           {
@@ -252,16 +251,16 @@ export function createFlowsRouter() {
     },
   );
 
-  // DELETE /api/flows/:scope/:name/services/:serviceId/bind — unbind admin's connection from a service
+  // DELETE /api/flows/:scope/:name/services/:svcScope/:svcName/bind — unbind admin's connection from a service
   router.delete(
-    "/:scope{@[^/]+}/:name/services/:serviceId/bind",
+    "/:scope{@[^/]+}/:name/services/:svcScope{@[^/]+}/:svcName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
-      const serviceId = c.req.param("serviceId")!;
+      const serviceId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
 
-      const svc = flow.manifest.requires.services.find((s) => s.id === serviceId);
+      const svc = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
       if (!svc) {
         return c.json(
           { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
@@ -371,7 +370,7 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const services = flow.manifest.requires.services;
+    const services = resolveManifestServices(flow.manifest);
 
     // Verify the flow is shareable publicly
     if (services.length > 0) {

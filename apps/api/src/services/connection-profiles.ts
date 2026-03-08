@@ -2,12 +2,10 @@
  * Connection Profiles — manages user connection profiles and profile resolution.
  */
 
-import { createHash } from "node:crypto";
 import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { connectionProfiles, userPackageProfiles, serviceConnections } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
-import { encrypt, type ProviderDefinition, type ProviderSnapshot } from "@appstrate/connect";
 import { getAdminConnections } from "./state.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 
@@ -169,50 +167,6 @@ export async function removePackageProfileOverride(
     .where(
       and(eq(userPackageProfiles.userId, userId), eq(userPackageProfiles.packageId, packageId)),
     );
-}
-
-// ─── Config Hash & Provider Snapshot ────────────────────────
-
-/**
- * Compute a unified config hash for a provider definition.
- * Used to detect when provider config changes (requiring reconnection).
- */
-export function computeConfigHash(provider: ProviderDefinition): string {
-  const data = JSON.stringify({
-    authMode: provider.authMode,
-    clientId: provider.clientId ?? null,
-    consumerKey: provider.consumerKey ?? null,
-    credentialSchema: provider.credentialSchema ?? null,
-    credentialHeaderName: provider.credentialHeaderName ?? null,
-    credentialHeaderPrefix: provider.credentialHeaderPrefix ?? null,
-  });
-  return createHash("sha256").update(data).digest("hex");
-}
-
-/**
- * Build a provider snapshot for storage alongside the connection.
- * Sensitive fields (clientId/Secret, consumerKey/Secret) are stored encrypted.
- */
-export function buildProviderSnapshot(provider: ProviderDefinition): ProviderSnapshot {
-  return {
-    authMode: provider.authMode,
-    tokenUrl: provider.tokenUrl,
-    refreshUrl: provider.refreshUrl,
-    clientIdEncrypted: provider.clientId ? encrypt(provider.clientId) : undefined,
-    clientSecretEncrypted: provider.clientSecret ? encrypt(provider.clientSecret) : undefined,
-    tokenAuthMethod: provider.tokenAuthMethod,
-    scopeSeparator: provider.scopeSeparator,
-    credentialFieldName: provider.credentialFieldName,
-    credentialHeaderName: provider.credentialHeaderName,
-    credentialHeaderPrefix: provider.credentialHeaderPrefix,
-    authorizedUris: provider.authorizedUris,
-    allowAllUris: provider.allowAllUris,
-    // OAuth1
-    requestTokenUrl: provider.requestTokenUrl,
-    accessTokenUrl: provider.accessTokenUrl,
-    consumerKeyEncrypted: provider.consumerKey ? encrypt(provider.consumerKey) : undefined,
-    consumerSecretEncrypted: provider.consumerSecret ? encrypt(provider.consumerSecret) : undefined,
-  };
 }
 
 // ─── Service Profile Resolution ─────────────────────────────

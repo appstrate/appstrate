@@ -22,10 +22,11 @@ import {
   updateOrgItem,
   deleteOrgItem,
   uploadPackageFiles,
-  setFlowItems,
+  syncFlowDepsJunctionTable,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
   FLOW_CONFIG,
+  PROVIDER_CONFIG,
   type PackageTypeConfig,
 } from "../services/package-items.ts";
 import { validateExtensionSource, validateManifest } from "@appstrate/core/validation";
@@ -227,17 +228,6 @@ async function parsePackageUpload(
   };
 }
 
-// --- Synchronise the junction table after save (flows only). ---
-async function syncFlowDepsJunctionTable(
-  packageId: string,
-  orgId: string,
-  skillIds: string[],
-  extensionIds: string[],
-) {
-  await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
-  await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
-}
-
 /** Create a version snapshot from files + manifest (non-fatal on error).
  *  Builds the ZIP from normalizedFiles + manifest.json, then uploads. */
 async function createVersionSafe(params: {
@@ -324,13 +314,24 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     jsonBodyCreate: true,
     requireMutableForVersionOps: true,
     afterCreate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, extensionIds } = extractDepsFromManifest(manifest as Partial<Manifest>);
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
+      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+        manifest as Partial<Manifest>,
+      );
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
     },
     afterUpdate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, extensionIds } = extractDepsFromManifest(manifest as Partial<Manifest>);
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds);
+      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+        manifest as Partial<Manifest>,
+      );
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
     },
+  },
+  providers: {
+    cfg: PROVIDER_CONFIG,
+    parseOpts: { requiredFile: null, contentFileExt: null },
+    responseKey: "provider",
+    storageFileName: () => "definition.json",
+    jsonBodyCreate: true,
   },
 };
 
@@ -563,8 +564,12 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     }
 
     const hasUnpublishedChanges =
-      item.source !== "built-in" && versionCount > 0 && latestVersionDate
-        ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
+      item.source === "local"
+        ? versionCount === 0
+          ? true // No versions yet — entire package is unpublished
+          : latestVersionDate
+            ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
+            : false
         : false;
 
     return c.json({
@@ -1071,6 +1076,13 @@ export function createPackagesRouter() {
     router.delete(`/${path}/:id`, requireAdmin(), makeDeleteHandler(rcfg));
   }
 
+  // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
+  router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const versions = await listPackageVersions(packageId);
+    return c.json({ versions });
+  });
+
   // --- Package import/download/publish routes ---
 
   // POST /api/packages/import — import any package type from ZIP
@@ -1145,7 +1157,9 @@ export function createPackagesRouter() {
           getLatestVersionCreatedAt(packageId),
         ]);
         const hasUnpublishedChanges =
-          vCount > 0 && latestDate ? (existing.updatedAt ?? new Date()) > latestDate : false;
+          existing.source === "local" && vCount > 0 && latestDate
+            ? (existing.updatedAt ?? new Date()) > latestDate
+            : false;
         if (hasUnpublishedChanges) {
           return c.json(
             {
@@ -1220,6 +1234,14 @@ export function createPackagesRouter() {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
       return c.json({ error: "POST_INSTALL_FAILED", message }, 400);
+    }
+
+    // Sync flow dependency junction table after import (providers included)
+    if (packageType === "flow") {
+      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+        manifest as Partial<Manifest>,
+      );
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
     }
 
     // Force import: replace existing version content if integrity differs

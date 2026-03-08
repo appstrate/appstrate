@@ -99,7 +99,7 @@ describe("assemblePayload", () => {
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",
-        requires: { skills: {}, services: [] },
+        requires: { skills: {}, services: {} },
       },
     });
 
@@ -145,35 +145,55 @@ describe("assemblePayload", () => {
     expect(result.prompt).toBe("My custom prompt");
   });
 
-  test("includes services in manifest.requires", () => {
+  test("includes services in manifest.requires as record", () => {
     const state = makeState({
-      services: [{ id: "gmail", provider: "google-mail", scopes: [], connectionMode: "user" }],
+      services: [{ id: "@my-org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" }],
     });
 
     const result = assemblePayload(state);
     const requires = result.manifest.requires as Record<string, unknown>;
-    const services = requires.services as Array<Record<string, unknown>>;
+    const services = requires.services as Record<string, string>;
 
-    expect(services).toHaveLength(1);
-    expect(services[0]!.id).toBe("gmail");
-    expect(services[0]!.provider).toBe("google-mail");
+    expect(services).toEqual({ "@my-org/gmail": "1.0.0" });
   });
 
-  test("filters out services without id or provider", () => {
+  test("filters out services without id", () => {
     const state = makeState({
       services: [
-        { id: "gmail", provider: "google-mail", scopes: [], connectionMode: "user" },
-        { id: "", provider: "something", scopes: [], connectionMode: "user" },
-        { id: "slack", provider: "", scopes: [], connectionMode: "user" },
+        { id: "@my-org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" },
+        { id: "", version: "*", scopes: [], connectionMode: "user" },
       ],
     });
 
     const result = assemblePayload(state);
     const requires = result.manifest.requires as Record<string, unknown>;
-    const services = requires.services as Array<Record<string, unknown>>;
+    const services = requires.services as Record<string, string>;
 
-    expect(services).toHaveLength(1);
-    expect(services[0]!.id).toBe("gmail");
+    expect(Object.keys(services)).toHaveLength(1);
+    expect(services["@my-org/gmail"]).toBe("1.0.0");
+  });
+
+  test("writes servicesConfiguration for non-default config", () => {
+    const state = makeState({
+      services: [
+        {
+          id: "@my-org/gmail",
+          version: "1.0.0",
+          scopes: ["gmail.readonly"],
+          connectionMode: "admin",
+        },
+        { id: "@my-org/slack", version: "2.0.0", scopes: [], connectionMode: "user" },
+      ],
+    });
+
+    const result = assemblePayload(state);
+    const svcCfg = result.manifest.servicesConfiguration as Record<string, Record<string, unknown>>;
+
+    expect(svcCfg["@my-org/gmail"]).toEqual({
+      scopes: ["gmail.readonly"],
+      connectionMode: "admin",
+    });
+    expect(svcCfg["@my-org/slack"]).toBeUndefined(); // default values, no config needed
   });
 
   test("omits execution when defaults and not in base", () => {

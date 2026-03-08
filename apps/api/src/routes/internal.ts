@@ -6,8 +6,9 @@ import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getPackage } from "../services/flow-service.ts";
-import { resolveCredentialsForProxy, getProvider } from "@appstrate/connect";
-import { getEffectiveProfileId, computeConfigHash } from "../services/connection-profiles.ts";
+import { resolveCredentialsForProxy } from "@appstrate/connect";
+import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -131,15 +132,15 @@ export function createInternalRouter() {
     }
   });
 
-  // GET /internal/credentials/:serviceId — called from inside containers
+  // GET /internal/credentials/:scope/:name — called from inside containers
   // Auth: Bearer <executionId> (same mechanism as execution-history)
   // Returns unified format: { credentials: Record<string, string>, authorizedUris: string[] | null }
-  router.get("/credentials/:serviceId", async (c) => {
+  router.get("/credentials/:scope{@[^/]+}/:name", async (c) => {
     const auth = await verifyExecutionToken(c);
     if (!auth.ok) return auth.response;
 
     const { executionId, execution } = auth;
-    const serviceId = c.req.param("serviceId");
+    const serviceId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
     // Load the flow to validate the requested service
     const flow = await getPackage(execution.packageId, execution.orgId);
@@ -147,7 +148,7 @@ export function createInternalRouter() {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
     }
 
-    const service = flow.manifest.requires.services.find((s) => s.id === serviceId);
+    const service = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
     if (!service) {
       logger.warn("Credential request for unknown service", {
         executionId,
@@ -188,12 +189,13 @@ export function createInternalRouter() {
           (await getEffectiveProfileId(execution.userId, execution.packageId));
       }
 
-      // Resolve configHash for the org's provider config
-      const providerDef = await getProvider(db, execution.orgId, service.provider);
-      const configHash = providerDef ? computeConfigHash(providerDef) : undefined;
-
-      // Unified credential resolution with configHash disambiguation
-      const result = await resolveCredentialsForProxy(db, profileId, service.provider, configHash);
+      // Unified credential resolution
+      const result = await resolveCredentialsForProxy(
+        db,
+        profileId,
+        service.provider,
+        execution.orgId,
+      );
 
       if (!result) {
         return c.json(

@@ -12,7 +12,7 @@ export type EditorTab =
 
 export interface ServiceEntry {
   id: string;
-  provider: string;
+  version: string;
   scopes: string[];
   connectionMode: "user" | "admin";
 }

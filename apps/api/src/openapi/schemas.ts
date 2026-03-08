@@ -126,7 +126,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["flow", "skill", "extension"],
+        enum: ["flow", "skill", "extension", "provider"],
       },
       runningExecutions: { type: "integer" },
       requires: {
@@ -158,15 +158,6 @@ export const schemas = {
       lockVersion: {
         type: "integer",
         description: "Optimistic lock version (user flows only)",
-      },
-      lastPublishedVersion: {
-        type: ["string", "null"],
-        description: "Last published version (user flows only)",
-      },
-      lastPublishedAt: {
-        type: ["string", "null"],
-        format: "date-time",
-        description: "Last published timestamp (user flows only)",
       },
       config: {
         type: "object",
@@ -315,8 +306,19 @@ export const schemas = {
         enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"],
       },
       source: { type: "string", enum: ["built-in", "custom"] },
-      hasClientId: { type: "boolean" },
-      hasClientSecret: { type: "boolean" },
+      hasCredentials: {
+        type: "boolean",
+        description: "Whether admin credentials are currently configured for this provider",
+      },
+      enabled: {
+        type: "boolean",
+        description: "Whether this provider is enabled for use in the organization",
+      },
+      adminCredentialSchema: {
+        type: "object",
+        description:
+          "JSON Schema describing admin credential fields. Undefined means no admin credentials needed.",
+      },
       authorizationUrl: { type: "string" },
       tokenUrl: { type: "string" },
       refreshUrl: { type: "string" },
@@ -423,8 +425,8 @@ export const schemas = {
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
-      lastPublishedVersion: { type: ["string", "null"] },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
+      autoInstalled: { type: "boolean" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -441,8 +443,6 @@ export const schemas = {
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
       autoInstalled: { type: "boolean" },
-      lastPublishedVersion: { type: ["string", "null"] },
-      lastPublishedAt: { type: ["string", "null"], format: "date-time" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", description: "Full manifest object" },
       manifestName: {

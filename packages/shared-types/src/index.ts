@@ -5,7 +5,7 @@ export type Execution = _Execution & { packageVersion?: string | null };
 
 // --- Package Types ---
 
-type PackageType = "flow" | "skill" | "extension";
+type PackageType = "flow" | "skill" | "extension" | "provider";
 
 // --- Auth Mode ---
 
@@ -173,9 +173,6 @@ export interface FlowDetail {
   version?: string | null;
   manifest?: Record<string, unknown>;  // Raw manifest from DB (user flows only)
 
-  lastPublishedVersion?: string | null;
-  lastPublishedAt?: string | null;
-
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
@@ -194,16 +191,14 @@ export interface OrgPackageItem {
   createdAt: string;
   updatedAt: string;
   usedByFlows?: number;
-  lastPublishedVersion?: string | null;
   version?: string | null;
+  autoInstalled?: boolean;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   flows: { id: string; displayName: string }[];
   autoInstalled?: boolean;
-  lastPublishedVersion?: string | null;
-  lastPublishedAt?: string | null;
   version?: string | null;
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
@@ -317,13 +312,27 @@ export interface AvailableScope {
 
 // --- Provider Config Types ---
 
+export interface ProviderSetupGuide {
+  callbackUrlHint?: string;
+  steps?: Array<{
+    label: string;
+    url?: string;
+  }>;
+}
+
 export interface ProviderConfig {
   id: string;
   displayName: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  tags?: string[];
   authMode: AuthMode;
   source: "built-in" | "custom";
-  hasClientId: boolean;
-  hasClientSecret: boolean;
+  hasCredentials: boolean;
+  enabled: boolean;
+  adminCredentialSchema?: JSONSchemaObject;
+  setupGuide?: ProviderSetupGuide;
   authorizationUrl?: string;
   tokenUrl?: string;
   refreshUrl?: string;

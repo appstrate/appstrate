@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useFlowDetail, usePackageDetail, type PackageType } from "../hooks/use-packages";
+import { useFlowDetail, usePackageDetail } from "../hooks/use-packages";
 import {
   useCreateFlow,
   useUpdateFlow,
@@ -23,8 +23,10 @@ import { PromptEditor } from "../components/flow-editor/prompt-editor";
 import { ServicePicker } from "../components/flow-editor/service-picker";
 import { JsonEditor } from "../components/flow-editor/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
+import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
 import { EmptyState } from "../components/page-states";
+import { useProviders } from "../hooks/use-providers";
 
 import type { FlowFormState } from "../components/flow-editor/types";
 import {
@@ -408,7 +410,7 @@ function PackageEditorInner({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extension" }) {
+export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extension" | "provider" }) {
   const { t } = useTranslation(["flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;
@@ -420,12 +422,23 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
   // Load detail for editing
   const flowQuery = useFlowDetail(type === "flow" && isEdit ? packageId : undefined);
   const pkgQuery = usePackageDetail(
-    type === "flow" ? "skill" : (type as PackageType),
-    type !== "flow" && isEdit ? packageId : undefined,
+    type === "flow" || type === "provider" ? "skill" : type,
+    type !== "flow" && type !== "provider" && isEdit ? packageId : undefined,
   );
+  const providersQuery = useProviders();
 
-  const isLoading = type === "flow" ? flowQuery.isLoading : pkgQuery.isLoading;
-  const detail = type === "flow" ? flowQuery.data : pkgQuery.data;
+  const isLoading =
+    type === "flow"
+      ? flowQuery.isLoading
+      : type === "provider"
+        ? providersQuery.isLoading
+        : pkgQuery.isLoading;
+  const detail =
+    type === "flow"
+      ? flowQuery.data
+      : type === "provider"
+        ? providersQuery.data?.providers.find((p) => p.id === packageId)
+        : pkgQuery.data;
 
   if (!isOrgAdmin) {
     return (
@@ -469,6 +482,23 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
         detail={flowDetail ?? null}
         packageId={packageId}
         isEdit={isEdit}
+      />
+    );
+  }
+
+  // Provider editor — uses dedicated provider API
+  if (type === "provider") {
+    const editProvider = isEdit
+      ? (providersQuery.data?.providers.find((p) => p.id === packageId) ?? null)
+      : null;
+
+    return (
+      <ProviderEditorInner
+        key={packageId ?? "new"}
+        provider={editProvider}
+        isEdit={isEdit}
+        packageId={packageId}
+        orgSlug={currentOrg?.slug}
       />
     );
   }

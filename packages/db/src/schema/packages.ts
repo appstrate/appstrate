@@ -39,7 +39,6 @@ export const packages = pgTable(
   {
     id: text("id").primaryKey(),
     orgId: uuid("org_id")
-      .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     type: packageTypeEnum("type").notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
@@ -47,8 +46,6 @@ export const packages = pgTable(
     manifest: jsonb("manifest"),
     content: text("content"),
     autoInstalled: boolean("auto_installed").notNull().default(false),
-    lastPublishedVersion: text("last_published_version"),
-    lastPublishedAt: timestamp("last_published_at"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
@@ -73,7 +70,6 @@ export const packageVersions = pgTable(
     artifactSize: integer("artifact_size").notNull(),
     manifest: jsonb("manifest").notNull(),
     orgId: uuid("org_id")
-      .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),

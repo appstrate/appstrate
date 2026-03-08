@@ -10,7 +10,6 @@ import {
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { authModeEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
@@ -75,56 +74,24 @@ export const packageAdminConnections = pgTable(
   ],
 );
 
-export const providerConfigs = pgTable(
-  "provider_configs",
+// ─── Provider credentials (per-org secrets, keyed by providerId) ────
+export const providerCredentials = pgTable(
+  "provider_credentials",
   {
-    id: text("id").notNull(),
+    providerId: text("provider_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    authMode: authModeEnum("auth_mode").notNull(),
-    displayName: text("display_name").notNull(),
-    // OAuth2 fields (encrypted)
-    clientIdEncrypted: text("client_id_encrypted"),
-    clientSecretEncrypted: text("client_secret_encrypted"),
-    authorizationUrl: text("authorization_url"),
-    tokenUrl: text("token_url"),
-    refreshUrl: text("refresh_url"),
-    defaultScopes: text("default_scopes")
-      .array()
-      .default(sql`'{}'::text[]`),
-    scopeSeparator: text("scope_separator").default(" "),
-    pkceEnabled: boolean("pkce_enabled").default(true),
-    tokenAuthMethod: text("token_auth_method"),
-    authorizationParams: jsonb("authorization_params").default({}),
-    tokenParams: jsonb("token_params").default({}),
-    // Credential fields
-    credentialSchema: jsonb("credential_schema"),
-    credentialFieldName: text("credential_field_name"),
-    credentialHeaderName: text("credential_header_name"),
-    credentialHeaderPrefix: text("credential_header_prefix"),
-    // Available scopes
-    availableScopes: jsonb("available_scopes").default([]),
-    // URI restrictions
-    authorizedUris: text("authorized_uris")
-      .array()
-      .default(sql`'{}'::text[]`),
-    allowAllUris: boolean("allow_all_uris").default(false),
-    // OAuth1 fields
-    requestTokenUrl: text("request_token_url"),
-    accessTokenUrl: text("access_token_url"),
-    // Common
-    iconUrl: text("icon_url"),
-    categories: text("categories")
-      .array()
-      .default(sql`'{}'::text[]`),
-    docsUrl: text("docs_url"),
-    createdAt: timestamp("created_at").defaultNow(),
+    credentialsEncrypted: text("credentials_encrypted"),
+    enabled: boolean("enabled").notNull().default(false),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.orgId, table.id] })],
+  (table) => [primaryKey({ columns: [table.providerId, table.orgId] })],
 );
 
+// ─── Service connections (user-level OAuth/API tokens) ──────────────
 export const serviceConnections = pgTable(
   "service_connections",
   {
@@ -133,21 +100,18 @@ export const serviceConnections = pgTable(
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
-    authMode: authModeEnum("auth_mode").notNull(),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     scopesGranted: text("scopes_granted")
       .array()
       .default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at"),
     rawTokenResponse: jsonb("raw_token_response"),
-    providerSnapshot: jsonb("provider_snapshot").notNull(),
-    configHash: text("config_hash").notNull(),
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId, table.configHash),
+    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId),
     index("idx_service_connections_profile").on(table.profileId),
   ],
 );

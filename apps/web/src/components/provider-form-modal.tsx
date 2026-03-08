@@ -413,7 +413,7 @@ function ProviderFormBody({
                 value={form.clientId}
                 onChange={(e) => setField("clientId", e.target.value)}
                 placeholder={
-                  isEdit && provider?.hasClientId ? t("providers.form.secretUnchanged") : ""
+                  isEdit && provider?.hasCredentials ? t("providers.form.secretUnchanged") : ""
                 }
               />
             </div>
@@ -426,7 +426,7 @@ function ProviderFormBody({
                 value={form.clientSecret}
                 onChange={(e) => setField("clientSecret", e.target.value)}
                 placeholder={
-                  isEdit && provider?.hasClientSecret ? t("providers.form.secretUnchanged") : ""
+                  isEdit && provider?.hasCredentials ? t("providers.form.secretUnchanged") : ""
                 }
               />
             </div>
@@ -630,7 +630,7 @@ function ProviderFormBody({
                 value={form.clientId}
                 onChange={(e) => setField("clientId", e.target.value)}
                 placeholder={
-                  isEdit && provider?.hasClientId ? t("providers.form.secretUnchanged") : ""
+                  isEdit && provider?.hasCredentials ? t("providers.form.secretUnchanged") : ""
                 }
               />
             </div>
@@ -643,7 +643,7 @@ function ProviderFormBody({
                 value={form.clientSecret}
                 onChange={(e) => setField("clientSecret", e.target.value)}
                 placeholder={
-                  isEdit && provider?.hasClientSecret ? t("providers.form.secretUnchanged") : ""
+                  isEdit && provider?.hasCredentials ? t("providers.form.secretUnchanged") : ""
                 }
               />
             </div>

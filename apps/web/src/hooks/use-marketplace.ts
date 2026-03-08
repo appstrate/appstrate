@@ -13,7 +13,7 @@ interface MarketplacePackage {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   description: string;
   keywords: string[];
   downloads: number;
@@ -33,7 +33,7 @@ interface MarketplacePackageDetail {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   description: string;
   keywords: string[];
   readme: string | null;
@@ -72,7 +72,7 @@ interface InstallResult {
 
 interface PackageUpdateStatus {
   id: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   scope: string;
   name: string;
   displayName: string | null;
@@ -124,6 +124,7 @@ export function useInstallPackage() {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["providers"] });
     },
   });
 }
@@ -146,6 +147,7 @@ export function useUpdatePackage() {
       qc.invalidateQueries({ queryKey: ["marketplace"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["providers"] });
     },
   });
 }

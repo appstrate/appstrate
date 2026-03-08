@@ -7,6 +7,7 @@ import {
   builtinPackagesStub,
   packageStorageStub,
   registryClientStub,
+  registryProviderStub,
 } from "./_db-mock.ts";
 
 // --- Mocks ---
@@ -22,6 +23,7 @@ mock.module("@appstrate/db/schema", () => schemaStubs);
 mock.module("../builtin-packages.ts", () => builtinPackagesStub);
 mock.module("../package-storage.ts", () => packageStorageStub);
 mock.module("@appstrate/registry-client", () => registryClientStub);
+mock.module("../registry-provider.ts", () => registryProviderStub);
 
 // --- Import after mocks ---
 
@@ -37,7 +39,7 @@ function makeNode(overrides: Partial<GraphNode> = {}): GraphNode {
     type: "skill",
     displayName: "Test Pkg",
     version: "1.0.0",
-    lastPublishedVersion: null,
+    lastPublishedVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
     source: "local",
     ...overrides,
   };
@@ -196,7 +198,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "My Flow",
           manifest: { displayName: "My Flow", version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -210,7 +211,7 @@ describe("buildGraph", () => {
     expect(graph.edges.get("@test/flow")?.size).toBe(0);
   });
 
-  test("excludes built-in packages", async () => {
+  test("includes built-in packages in graph with system status", async () => {
     queues.select = [
       // Root package
       [
@@ -219,7 +220,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "Flow",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -232,15 +232,18 @@ describe("buildGraph", () => {
           type: "skill",
           name: "Built-in",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "built-in",
         },
       ],
+      // Built-in skill deps
+      [],
     ];
 
     const graph = await buildGraph("@test/flow", "org-1");
-    expect(graph.nodes.size).toBe(1);
-    expect(graph.nodes.has("@test/builtin-skill")).toBe(false);
+    expect(graph.nodes.size).toBe(2);
+    expect(graph.nodes.has("@test/builtin-skill")).toBe(true);
+    expect(graph.nodes.get("@test/builtin-skill")?.source).toBe("built-in");
+    expect(computePublishStatus(graph.nodes.get("@test/builtin-skill")!)).toBe("system");
   });
 
   test("displayName falls back to manifest.name when displayName absent", async () => {
@@ -251,7 +254,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "db-name",
           manifest: { name: "Manifest Name", version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -269,7 +271,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "DB Column Name",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -287,7 +288,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -306,7 +306,6 @@ describe("buildGraph", () => {
           type: "flow",
           name: "Flow",
           manifest: { displayName: "Test Flow", version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -319,7 +318,6 @@ describe("buildGraph", () => {
           type: "skill",
           name: "Skill A",
           manifest: { displayName: "Skill A", version: "0.1.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -354,7 +352,6 @@ describe("getPublishPlan", () => {
           type: "flow",
           name: "Flow",
           manifest: { displayName: "Test Flow", version: "2.0.0" },
-          lastPublishedVersion: "1.0.0",
           source: "local",
         },
       ],
@@ -367,7 +364,6 @@ describe("getPublishPlan", () => {
           type: "skill",
           name: "Skill",
           manifest: { displayName: "Test Skill", version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -383,7 +379,8 @@ describe("getPublishPlan", () => {
     expect(plan.items[0]!.packageId).toBe("@test/skill");
     expect(plan.items[0]!.status).toBe("unpublished");
     expect(plan.items[1]!.packageId).toBe("@test/flow");
-    expect(plan.items[1]!.status).toBe("outdated");
+    // Registry is not configured in test mock, so lastPublishedVersion stays null → unpublished
+    expect(plan.items[1]!.status).toBe("unpublished");
   });
 
   test("targetVersion overrides root version", async () => {
@@ -394,7 +391,6 @@ describe("getPublishPlan", () => {
           type: "flow",
           name: "Flow",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -414,7 +410,6 @@ describe("getPublishPlan", () => {
           type: "flow",
           name: "Flow",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -425,7 +420,6 @@ describe("getPublishPlan", () => {
           type: "skill",
           name: "Skill",
           manifest: { version: "0.5.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -445,7 +439,6 @@ describe("getPublishPlan", () => {
           type: "flow",
           name: "Flow",
           manifest: { version: "0.1.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -471,7 +464,6 @@ describe("getPublishPlan", () => {
           type: "flow",
           name: "A",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],
@@ -484,7 +476,6 @@ describe("getPublishPlan", () => {
           type: "skill",
           name: "B",
           manifest: { version: "1.0.0" },
-          lastPublishedVersion: null,
           source: "local",
         },
       ],

@@ -70,9 +70,10 @@ appstrate/
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 ├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
+├── apps/api/providers/        # System provider ZIP packages (loaded at boot)
+│
 ├── data/                     # Built-in resources (loaded at boot)
 │   ├── flows/{name}/         # manifest.json + prompt.md
-│   ├── providers.json        # Merged with SYSTEM_PROVIDERS env var
 │   ├── proxies.json          # Merged with SYSTEM_PROXIES env var
 │   ├── skills/{id}/SKILL.md  # YAML frontmatter (name, description)
 │   └── extensions/{id}.ts    # Pi agent tools (ExtensionFactory pattern)
@@ -175,6 +176,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` uses a 3-phase pattern: `collectPackages()` (network + DB reads, no writes) → `commitPackages()` (single DB transaction with `pg_advisory_xact_lock` per package) → post-install (storage/versions). Auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set and diamond dedup via `collected` array. Max 10 packages per install (root + deps). Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Packages installed from the marketplace are stored with `source: "local"` — the registry is a distribution channel, not a permanent status. Provenance is traceable via `packageVersions` entries (integrity, manifest snapshot). Uses `@appstrate/core/dependencies` for extraction and `@appstrate/core/naming` for packageId conversion.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/extension deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). Migration path: migration 0011 adds schema columns, seed script backfills existing packages, migration 0012 finalizes.
+- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and extensions. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `apps/api/providers/` at boot via `builtin-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
 - **FlowService**: Built-in flows = immutable `ReadonlyMap` from `data/flows/`. User flows = DB reads on demand.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
@@ -200,7 +202,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-templates`, `proxies`, `api-keys`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
 
 ## Database
 
@@ -215,9 +217,8 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                                                           |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                                                 |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                                                  |
-| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled (providers still load from `SYSTEM_PROVIDERS` env) |
+| `DATA_DIR`                  | No       | unset                                         | Path to `data/` dir — if unset, file-based flows/skills/extensions/proxies disabled                                                    |
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`)                             |
-| `SYSTEM_PROVIDERS`          | No       | `"[]"`                                        | JSON array, merged with `data/providers.json`                                                                                          |
 | `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array, merged with `data/proxies.json`                                                                                            |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                                               |
 | `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                                             |

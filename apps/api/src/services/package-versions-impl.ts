@@ -33,8 +33,8 @@ interface CreateVersionParams {
   integrity: string;
   artifactSize: number;
   manifest: Record<string, unknown>;
-  orgId: string;
-  createdBy: string;
+  orgId: string | null;
+  createdBy: string | null;
 }
 
 /** Create a new version with semver, integrity, manifest snapshot. Auto-manages "latest" dist-tag. */
@@ -538,6 +538,7 @@ export async function createVersionFromDraft(params: {
 
   // Enrich manifest with registryDependencies so the version ZIP
   // matches what would be published to the registry (same integrity).
+  // Now that providers are in packageDependencies, the join query picks them up automatically.
   const registryDeps = await buildRegistryDependencies(packageId, orgId);
   const parsed = parseScopedName(baseManifest.name as string);
   const finalManifest = parsed
@@ -546,7 +547,14 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
-  if (pkg.type === "flow") {
+  if (pkg.type === "provider") {
+    // Providers store everything in manifest — ZIP contains only manifest.json
+    const { zipArtifact } = await import("@appstrate/core/zip");
+    const entries: Record<string, Uint8Array> = {
+      "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
+    };
+    zipBuffer = Buffer.from(zipArtifact(entries, 6));
+  } else if (pkg.type === "flow") {
     const { buildMinimalZip } = await import("./package-storage.ts");
     zipBuffer = buildMinimalZip(finalManifest, content);
   } else {
@@ -628,8 +636,8 @@ export async function replaceVersionContent(params: {
 export async function createVersionAndUpload(params: {
   packageId: string;
   version: string;
-  orgId: string;
-  createdBy: string;
+  orgId: string | null;
+  createdBy: string | null;
   zipBuffer: Buffer;
   manifest: Record<string, unknown>;
 }): Promise<{ id: number; version: string } | null> {

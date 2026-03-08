@@ -16,10 +16,6 @@ const envSchema = z.object({
     .refine((val) => Buffer.from(val, "base64").length === 32, {
       message: "CONNECTION_ENCRYPTION_KEY must be 32 bytes (256-bit) base64-encoded",
     }),
-  SYSTEM_PROVIDERS: z
-    .string()
-    .default("[]")
-    .transform((s) => JSON.parse(s) as unknown[]),
   SYSTEM_PROXIES: z
     .string()
     .default("[]")

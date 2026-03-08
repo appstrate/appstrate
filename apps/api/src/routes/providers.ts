@@ -1,21 +1,126 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { providerConfigs } from "@appstrate/db/schema";
+import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
-import type { ProviderConfig, AvailableScope } from "@appstrate/shared-types";
+import type {
+  ProviderConfig,
+  ProviderSetupGuide,
+  AvailableScope,
+  JSONSchemaObject,
+} from "@appstrate/shared-types";
+import { getEnv } from "@appstrate/env";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
-import { getBuiltInProviders, isBuiltInProvider, encrypt } from "@appstrate/connect";
-import type { AuthMode } from "@appstrate/connect";
+import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
+import { isSystemPackage } from "../services/builtin-packages.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { createVersionAndUpload } from "../services/package-versions.ts";
+import { isValidVersion } from "@appstrate/core/semver";
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+/** Generate default admin credential schema per auth mode. */
+function getDefaultAdminCredentialSchema(authMode: string): JSONSchemaObject | null {
+  switch (authMode) {
+    case "oauth2":
+      return {
+        type: "object",
+        properties: {
+          clientId: { type: "string", description: "Client ID" },
+          clientSecret: { type: "string", description: "Client Secret" },
+        },
+        required: ["clientId", "clientSecret"],
+      };
+    case "oauth1":
+      return {
+        type: "object",
+        properties: {
+          consumerKey: { type: "string", description: "Consumer Key" },
+          consumerSecret: { type: "string", description: "Consumer Secret" },
+        },
+        required: ["consumerKey", "consumerSecret"],
+      };
+    default:
+      return null;
+  }
+}
+
+/** Check if a provider is a system provider via the DB source column. */
+async function isSystemProviderInDb(providerId: string): Promise<boolean> {
+  const [pkg] = await db
+    .select({ source: packages.source })
+    .from(packages)
+    .where(eq(packages.id, providerId))
+    .limit(1);
+  return pkg?.source === "system";
+}
+
+function packageToProviderConfig(
+  pkg: {
+    id: string;
+    manifest: unknown;
+    source: string | null;
+  },
+  credRow?: { credentialsEncrypted: string | null; enabled: boolean } | null,
+): ProviderConfig {
+  const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const isSystem = pkg.source === "system" || pkg.source === "built-in" || isSystemPackage(pkg.id);
+  const authMode = (def.authMode as ProviderConfig["authMode"]) ?? "oauth2";
+  const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
+  const adminCredentialSchema =
+    explicitSchema ??
+    (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | undefined) ??
+    undefined;
+  return {
+    id: pkg.id,
+    displayName: (manifest.displayName as string) ?? pkg.id,
+    version: (manifest.version as string) ?? undefined,
+    description: (manifest.description as string) ?? undefined,
+    author: (manifest.author as string) ?? undefined,
+    tags: (manifest.tags as string[]) ?? undefined,
+    authMode,
+    source: isSystem ? "built-in" : "custom",
+    hasCredentials: !!credRow?.credentialsEncrypted,
+    enabled: !!credRow?.enabled,
+    adminCredentialSchema,
+    setupGuide: (manifest.setupGuide as ProviderSetupGuide) ?? undefined,
+    authorizationUrl: (def.authorizationUrl as string) ?? undefined,
+    tokenUrl: (def.tokenUrl as string) ?? undefined,
+    refreshUrl: (def.refreshUrl as string) ?? undefined,
+    requestTokenUrl: (def.requestTokenUrl as string) ?? undefined,
+    accessTokenUrl: (def.accessTokenUrl as string) ?? undefined,
+    defaultScopes: (def.defaultScopes as string[]) ?? undefined,
+    scopeSeparator: (def.scopeSeparator as string) ?? undefined,
+    pkceEnabled: (def.pkceEnabled as boolean) ?? undefined,
+    tokenAuthMethod: (def.tokenAuthMethod as ProviderConfig["tokenAuthMethod"]) ?? undefined,
+    authorizationParams: (def.authorizationParams as Record<string, string>) ?? undefined,
+    tokenParams: (def.tokenParams as Record<string, string>) ?? undefined,
+    credentialSchema: (def.credentialSchema as unknown as Record<string, unknown>) ?? undefined,
+    credentialFieldName: (def.credentialFieldName as string) ?? undefined,
+    credentialHeaderName: (def.credentialHeaderName as string) ?? undefined,
+    credentialHeaderPrefix: (def.credentialHeaderPrefix as string) ?? undefined,
+    iconUrl: (manifest.iconUrl as string) ?? undefined,
+    categories: (manifest.categories as string[]) ?? undefined,
+    docsUrl: (manifest.docsUrl as string) ?? undefined,
+    authorizedUris: (def.authorizedUris as string[])?.length
+      ? (def.authorizedUris as string[])
+      : undefined,
+    allowAllUris: (def.allowAllUris as boolean) ?? undefined,
+    availableScopes: (def.availableScopes as unknown as AvailableScope[])?.length
+      ? (def.availableScopes as unknown as AvailableScope[])
+      : undefined,
+  };
+}
 
 const createProviderSchema = z.object({
-  id: z.string().regex(SLUG_RE, "id must be lowercase alphanumeric with hyphens"),
+  id: z.string().min(1, "id is required"),
   displayName: z.string().min(1, "displayName is required"),
+  version: z.string().optional(),
+  description: z.string().optional(),
+  author: z.string().optional(),
+  tags: z.array(z.string()).optional(),
   authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"]),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
@@ -51,112 +156,56 @@ const createProviderSchema = z.object({
 
 const updateProviderSchema = createProviderSchema.omit({ id: true }).partial();
 
-function rowToProviderConfig(
-  row: typeof providerConfigs.$inferSelect,
-  source: ProviderConfig["source"],
-): ProviderConfig {
-  return {
-    id: row.id,
-    displayName: row.displayName,
-    authMode: row.authMode,
-    source,
-    hasClientId: !!row.clientIdEncrypted,
-    hasClientSecret: !!row.clientSecretEncrypted,
-    authorizationUrl: row.authorizationUrl ?? undefined,
-    tokenUrl: row.tokenUrl ?? undefined,
-    refreshUrl: row.refreshUrl ?? undefined,
-    requestTokenUrl: row.requestTokenUrl ?? undefined,
-    accessTokenUrl: row.accessTokenUrl ?? undefined,
-    defaultScopes: row.defaultScopes ?? undefined,
-    scopeSeparator: row.scopeSeparator ?? undefined,
-    pkceEnabled: row.pkceEnabled ?? undefined,
-    tokenAuthMethod: (row.tokenAuthMethod as ProviderConfig["tokenAuthMethod"]) ?? undefined,
-    authorizationParams: (row.authorizationParams as Record<string, string>) ?? undefined,
-    tokenParams: (row.tokenParams as Record<string, string>) ?? undefined,
-    credentialSchema: (row.credentialSchema as unknown as Record<string, unknown>) ?? undefined,
-    credentialFieldName: row.credentialFieldName ?? undefined,
-    credentialHeaderName: row.credentialHeaderName ?? undefined,
-    credentialHeaderPrefix: row.credentialHeaderPrefix ?? undefined,
-    iconUrl: row.iconUrl ?? undefined,
-    categories: row.categories ?? undefined,
-    docsUrl: row.docsUrl ?? undefined,
-    authorizedUris: row.authorizedUris?.length ? row.authorizedUris : undefined,
-    allowAllUris: row.allowAllUris ?? undefined,
-    availableScopes: (row.availableScopes as unknown as AvailableScope[])?.length
-      ? (row.availableScopes as unknown as AvailableScope[])
-      : undefined,
-  };
-}
-
 export function createProvidersRouter() {
   const router = new Hono<AppEnv>();
 
   // All endpoints are admin-only
   router.use("*", requireAdmin());
 
-  // GET /api/providers — list all providers (built-in + DB custom)
+  // GET /api/providers — list all providers
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
-    const builtIn = getBuiltInProviders();
 
-    // Fetch all DB configs for this org
-    const rows = await db.select().from(providerConfigs).where(eq(providerConfigs.orgId, orgId));
+    // Query all provider packages
+    const rows = await db
+      .select({
+        pkg: { id: packages.id, manifest: packages.manifest, source: packages.source },
+      })
+      .from(packages)
+      .where(
+        and(or(eq(packages.orgId, orgId), isNull(packages.orgId)), eq(packages.type, "provider")),
+      );
 
-    // Count provider usage across all flows (built-in + user)
+    // Count provider usage across all flows
     const allFlows = await listPackages(orgId);
     const providerUsage = new Map<string, number>();
     for (const flow of allFlows) {
-      for (const svc of flow.manifest.requires?.services ?? []) {
-        providerUsage.set(svc.provider, (providerUsage.get(svc.provider) ?? 0) + 1);
+      for (const svc of resolveManifestServices(flow.manifest)) {
+        providerUsage.set(svc.id, (providerUsage.get(svc.id) ?? 0) + 1);
       }
     }
 
-    const providers: ProviderConfig[] = [];
+    // Direct Drizzle query on providerCredentials (bypass LEFT JOIN issue)
+    const allCreds = await db
+      .select({
+        providerId: providerCredentials.providerId,
+        credentialsEncrypted: providerCredentials.credentialsEncrypted,
+        enabled: providerCredentials.enabled,
+      })
+      .from(providerCredentials)
+      .where(eq(providerCredentials.orgId, orgId));
 
-    // Built-in providers — always source "built-in"
-    for (const [id, def] of builtIn) {
-      providers.push({
-        id,
-        displayName: def.displayName,
-        authMode: def.authMode,
-        source: "built-in",
-        hasClientId: !!def.clientId,
-        hasClientSecret: !!def.clientSecret,
-        authorizationUrl: def.authorizationUrl,
-        tokenUrl: def.tokenUrl,
-        refreshUrl: def.refreshUrl,
-        requestTokenUrl: def.requestTokenUrl,
-        accessTokenUrl: def.accessTokenUrl,
-        defaultScopes: def.defaultScopes,
-        scopeSeparator: def.scopeSeparator,
-        pkceEnabled: def.pkceEnabled,
-        tokenAuthMethod: def.tokenAuthMethod,
-        authorizationParams: def.authorizationParams,
-        tokenParams: def.tokenParams,
-        credentialSchema: def.credentialSchema as Record<string, unknown> | undefined,
-        credentialFieldName: def.credentialFieldName,
-        credentialHeaderName: def.credentialHeaderName,
-        credentialHeaderPrefix: def.credentialHeaderPrefix,
-        iconUrl: def.iconUrl,
-        categories: def.categories,
-        docsUrl: def.docsUrl,
-        authorizedUris: def.authorizedUris,
-        allowAllUris: def.allowAllUris,
-        availableScopes: def.availableScopes,
-        usedByFlows: providerUsage.get(id) ?? 0,
-      });
-    }
+    const credMap = new Map(allCreds.map((r) => [r.providerId, r]));
 
-    // Custom providers (DB only, IDs different from built-in)
-    for (const row of rows) {
-      if (!builtIn.has(row.id)) {
-        const cfg = rowToProviderConfig(row, "custom");
-        cfg.usedByFlows = providerUsage.get(row.id) ?? 0;
-        providers.push(cfg);
-      }
-    }
+    const providers: ProviderConfig[] = rows.map(({ pkg }) => {
+      const cred = credMap.get(pkg.id) ?? null;
+      const cfg = packageToProviderConfig(pkg, cred);
+      cfg.usedByFlows = providerUsage.get(pkg.id) ?? 0;
+      return cfg;
+    });
 
-    return c.json({ providers });
+    const callbackUrl = `${getEnv().APP_URL}/api/auth/callback`;
+    return c.json({ providers, callbackUrl });
   });
 
   // POST /api/providers — create a custom provider
@@ -171,22 +220,24 @@ export function createProvidersRouter() {
 
     const data = parsed.data;
 
-    // Block creation if ID matches a built-in provider
-    if (isBuiltInProvider(data.id)) {
+    // Block creation if ID matches a system provider
+    if (isSystemPackage(data.id) || (await isSystemProviderInDb(data.id))) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot create provider '${data.id}': conflicts with a built-in provider`,
+          message: `Cannot create provider '${data.id}': conflicts with a system provider`,
         },
         403,
       );
     }
 
-    // Check ID doesn't already exist in DB for this org
+    // Check ID doesn't already exist for this org
     const existing = await db
-      .select({ id: providerConfigs.id })
-      .from(providerConfigs)
-      .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, data.id)))
+      .select({ id: packages.id })
+      .from(packages)
+      .where(
+        and(eq(packages.orgId, orgId), eq(packages.id, data.id), eq(packages.type, "provider")),
+      )
       .limit(1);
 
     if (existing.length > 0) {
@@ -212,35 +263,79 @@ export function createProvidersRouter() {
       }
     }
 
+    // Build the definition object for manifest.definition
+    const definition: Record<string, unknown> = {
+      authMode: data.authMode,
+      authorizationUrl: data.authorizationUrl,
+      tokenUrl: data.tokenUrl,
+      refreshUrl: data.refreshUrl,
+      requestTokenUrl: data.requestTokenUrl,
+      accessTokenUrl: data.accessTokenUrl,
+      defaultScopes: data.defaultScopes ?? [],
+      scopeSeparator: data.scopeSeparator ?? " ",
+      pkceEnabled: data.pkceEnabled ?? true,
+      tokenAuthMethod: data.tokenAuthMethod,
+      authorizationParams: data.authorizationParams ?? {},
+      tokenParams: data.tokenParams ?? {},
+      credentialSchema: data.credentialSchema,
+      credentialFieldName: data.credentialFieldName,
+      credentialHeaderName: data.credentialHeaderName,
+      credentialHeaderPrefix: data.credentialHeaderPrefix,
+      authorizedUris: data.authorizedUris ?? [],
+      allowAllUris: data.allowAllUris ?? false,
+      availableScopes: data.availableScopes ?? [],
+    };
+
     try {
-      await db.insert(providerConfigs).values({
-        id: data.id,
-        orgId,
-        displayName: data.displayName,
-        authMode: data.authMode as AuthMode,
-        authorizationUrl: data.authorizationUrl ?? null,
-        tokenUrl: data.tokenUrl ?? null,
-        refreshUrl: data.refreshUrl ?? null,
-        requestTokenUrl: data.requestTokenUrl ?? null,
-        accessTokenUrl: data.accessTokenUrl ?? null,
-        defaultScopes: data.defaultScopes ?? [],
-        scopeSeparator: data.scopeSeparator ?? " ",
-        pkceEnabled: data.pkceEnabled ?? true,
-        tokenAuthMethod: data.tokenAuthMethod ?? null,
-        authorizationParams: data.authorizationParams ?? {},
-        tokenParams: data.tokenParams ?? {},
-        credentialSchema: data.credentialSchema ?? null,
-        credentialFieldName: data.credentialFieldName ?? null,
-        credentialHeaderName: data.credentialHeaderName ?? null,
-        credentialHeaderPrefix: data.credentialHeaderPrefix ?? null,
-        iconUrl: data.iconUrl ?? null,
-        categories: data.categories ?? [],
-        docsUrl: data.docsUrl ?? null,
-        clientIdEncrypted: data.clientId ? encrypt(data.clientId) : null,
-        clientSecretEncrypted: data.clientSecret ? encrypt(data.clientSecret) : null,
-        authorizedUris: data.authorizedUris ?? [],
-        allowAllUris: data.allowAllUris ?? false,
-        availableScopes: data.availableScopes ?? [],
+      await db.transaction(async (tx) => {
+        // 1. INSERT packages row (type: "provider") with definition in manifest
+        await tx
+          .insert(packages)
+          .values({
+            id: data.id,
+            orgId,
+            type: "provider",
+            source: "local",
+            name: data.id,
+            manifest: {
+              name: data.id,
+              type: "provider",
+              version: data.version ?? "1.0.0",
+              displayName: data.displayName,
+              description: data.description,
+              author: data.author,
+              tags: data.tags,
+              iconUrl: data.iconUrl,
+              categories: data.categories,
+              docsUrl: data.docsUrl,
+              definition,
+            },
+            content: "",
+            createdBy: c.get("user").id,
+          })
+          .onConflictDoNothing();
+
+        // 2. UPSERT providerCredentials (providerId, orgId) with credentials if provided
+        const adminCreds: Record<string, string> = {};
+        if (data.clientId) adminCreds.clientId = data.clientId;
+        if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
+        const hasAdminCreds = Object.keys(adminCreds).length > 0;
+        await tx
+          .insert(providerCredentials)
+          .values({
+            providerId: data.id,
+            orgId,
+            credentialsEncrypted: hasAdminCreds ? encryptCredentials(adminCreds) : null,
+            enabled: true,
+          })
+          .onConflictDoUpdate({
+            target: [providerCredentials.providerId, providerCredentials.orgId],
+            set: {
+              ...(hasAdminCreds ? { credentialsEncrypted: encryptCredentials(adminCreds) } : {}),
+              enabled: true,
+              updatedAt: new Date(),
+            },
+          });
       });
     } catch (err) {
       logger.error("Provider create failed", {
@@ -249,13 +344,48 @@ export function createProvidersRouter() {
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to create provider" }, 500);
     }
 
+    // Create initial version (non-fatal)
+    const manifest = {
+      name: data.id,
+      type: "provider" as const,
+      version: data.version ?? "1.0.0",
+      displayName: data.displayName,
+      description: data.description,
+      author: data.author,
+      tags: data.tags,
+      definition,
+    };
+    const versionStr = manifest.version;
+    if (versionStr && isValidVersion(versionStr)) {
+      try {
+        const { zipArtifact } = await import("@appstrate/core/zip");
+        const entries: Record<string, Uint8Array> = {
+          "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
+        };
+        const zipBuffer = Buffer.from(zipArtifact(entries, 6));
+        await createVersionAndUpload({
+          packageId: data.id,
+          version: versionStr,
+          orgId,
+          createdBy: c.get("user").id,
+          zipBuffer,
+          manifest,
+        });
+      } catch (error) {
+        logger.warn("Provider initial version creation failed (non-fatal)", {
+          packageId: data.id,
+          error,
+        });
+      }
+    }
+
     return c.json({ id: data.id }, 201);
   });
 
-  // PUT /api/providers/:id — update a provider (custom only)
-  router.put("/:id", async (c) => {
+  // PUT /api/providers/:scope/:name — update a provider (custom only)
+  router.put("/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
-    const providerId = c.req.param("id");
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
     const parsed = updateProviderSchema.safeParse(body);
 
@@ -263,33 +393,38 @@ export function createProvidersRouter() {
       return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
     }
 
-    // Block editing built-in providers
-    if (isBuiltInProvider(providerId)) {
+    // Block editing system providers (DB-based guard)
+    if (await isSystemProviderInDb(providerId)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot modify built-in provider '${providerId}'`,
+          message: `Cannot modify system provider '${providerId}'`,
         },
         403,
       );
     }
 
-    const data = parsed.data;
-
-    // Fetch existing row
-    const existingRows = await db
-      .select()
-      .from(providerConfigs)
-      .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)))
+    // Fetch existing package
+    const [existingPkg] = await db
+      .select({ manifest: packages.manifest })
+      .from(packages)
+      .where(
+        and(
+          or(eq(packages.orgId, orgId), isNull(packages.orgId)),
+          eq(packages.id, providerId),
+          eq(packages.type, "provider"),
+        ),
+      )
       .limit(1);
 
-    const existing = existingRows[0];
-    if (!existing) {
+    if (!existingPkg) {
       return c.json({ error: "NOT_FOUND", message: `Provider '${providerId}' not found` }, 404);
     }
 
-    const displayName = data.displayName ?? existing.displayName;
-    const authMode = (data.authMode as AuthMode) ?? existing.authMode;
+    const data = parsed.data;
+    const oldManifest = (existingPkg.manifest ?? {}) as Record<string, unknown>;
+    const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
+    const authMode = data.authMode ?? (oldDef.authMode as string);
 
     // Force defaults for proxy providers
     if (authMode === "proxy") {
@@ -302,55 +437,81 @@ export function createProvidersRouter() {
         },
         required: ["url"],
       };
-      if (!(data.categories ?? existing.categories ?? []).includes("proxy")) {
-        data.categories = [...(data.categories ?? existing.categories ?? []), "proxy"];
-      }
     }
 
-    // Handle secrets: encrypt if provided, preserve existing if omitted/empty
-    let clientIdEncrypted: string | null = existing.clientIdEncrypted ?? null;
-    let clientSecretEncrypted: string | null = existing.clientSecretEncrypted ?? null;
-
-    if (data.clientId && data.clientId.length > 0) {
-      clientIdEncrypted = encrypt(data.clientId);
-    }
-    if (data.clientSecret && data.clientSecret.length > 0) {
-      clientSecretEncrypted = encrypt(data.clientSecret);
-    }
+    // Merge definition
+    const newDef: Record<string, unknown> = {
+      ...oldDef,
+      ...(data.authMode !== undefined ? { authMode: data.authMode } : {}),
+      ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
+      ...(data.tokenUrl !== undefined ? { tokenUrl: data.tokenUrl } : {}),
+      ...(data.refreshUrl !== undefined ? { refreshUrl: data.refreshUrl } : {}),
+      ...(data.requestTokenUrl !== undefined ? { requestTokenUrl: data.requestTokenUrl } : {}),
+      ...(data.accessTokenUrl !== undefined ? { accessTokenUrl: data.accessTokenUrl } : {}),
+      ...(data.defaultScopes !== undefined ? { defaultScopes: data.defaultScopes } : {}),
+      ...(data.scopeSeparator !== undefined ? { scopeSeparator: data.scopeSeparator } : {}),
+      ...(data.pkceEnabled !== undefined ? { pkceEnabled: data.pkceEnabled } : {}),
+      ...(data.tokenAuthMethod !== undefined ? { tokenAuthMethod: data.tokenAuthMethod } : {}),
+      ...(data.authorizationParams !== undefined
+        ? { authorizationParams: data.authorizationParams }
+        : {}),
+      ...(data.tokenParams !== undefined ? { tokenParams: data.tokenParams } : {}),
+      ...(data.credentialSchema !== undefined ? { credentialSchema: data.credentialSchema } : {}),
+      ...(data.credentialFieldName !== undefined
+        ? { credentialFieldName: data.credentialFieldName }
+        : {}),
+      ...(data.credentialHeaderName !== undefined
+        ? { credentialHeaderName: data.credentialHeaderName }
+        : {}),
+      ...(data.credentialHeaderPrefix !== undefined
+        ? { credentialHeaderPrefix: data.credentialHeaderPrefix }
+        : {}),
+      ...(data.authorizedUris !== undefined ? { authorizedUris: data.authorizedUris } : {}),
+      ...(data.allowAllUris !== undefined ? { allowAllUris: data.allowAllUris } : {}),
+      ...(data.availableScopes !== undefined ? { availableScopes: data.availableScopes } : {}),
+    };
 
     try {
-      await db
-        .update(providerConfigs)
-        .set({
-          displayName,
-          authMode,
-          authorizationUrl: data.authorizationUrl ?? existing.authorizationUrl ?? null,
-          tokenUrl: data.tokenUrl ?? existing.tokenUrl ?? null,
-          refreshUrl: data.refreshUrl ?? existing.refreshUrl ?? null,
-          requestTokenUrl: data.requestTokenUrl ?? existing.requestTokenUrl ?? null,
-          accessTokenUrl: data.accessTokenUrl ?? existing.accessTokenUrl ?? null,
-          defaultScopes: data.defaultScopes ?? existing.defaultScopes ?? [],
-          scopeSeparator: data.scopeSeparator ?? existing.scopeSeparator ?? " ",
-          pkceEnabled: data.pkceEnabled ?? existing.pkceEnabled ?? true,
-          tokenAuthMethod: data.tokenAuthMethod ?? existing.tokenAuthMethod ?? null,
-          authorizationParams: data.authorizationParams ?? existing.authorizationParams ?? {},
-          tokenParams: data.tokenParams ?? existing.tokenParams ?? {},
-          credentialSchema: data.credentialSchema ?? existing.credentialSchema ?? null,
-          credentialFieldName: data.credentialFieldName ?? existing.credentialFieldName ?? null,
-          credentialHeaderName: data.credentialHeaderName ?? existing.credentialHeaderName ?? null,
-          credentialHeaderPrefix:
-            data.credentialHeaderPrefix ?? existing.credentialHeaderPrefix ?? null,
-          iconUrl: data.iconUrl ?? existing.iconUrl ?? null,
-          categories: data.categories ?? existing.categories ?? [],
-          docsUrl: data.docsUrl ?? existing.docsUrl ?? null,
-          clientIdEncrypted,
-          clientSecretEncrypted,
-          authorizedUris: data.authorizedUris ?? existing.authorizedUris ?? [],
-          allowAllUris: data.allowAllUris ?? existing.allowAllUris ?? false,
-          availableScopes: data.availableScopes ?? existing.availableScopes ?? [],
-          updatedAt: new Date(),
-        })
-        .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)));
+      await db.transaction(async (tx) => {
+        // 1. Update packages manifest
+        await tx
+          .update(packages)
+          .set({
+            manifest: {
+              ...oldManifest,
+              ...(data.displayName ? { displayName: data.displayName } : {}),
+              ...(data.version !== undefined ? { version: data.version } : {}),
+              ...(data.description !== undefined ? { description: data.description } : {}),
+              ...(data.author !== undefined ? { author: data.author } : {}),
+              ...(data.tags !== undefined ? { tags: data.tags } : {}),
+              ...(data.iconUrl !== undefined ? { iconUrl: data.iconUrl } : {}),
+              ...(data.categories ? { categories: data.categories } : {}),
+              ...(data.docsUrl !== undefined ? { docsUrl: data.docsUrl } : {}),
+              definition: newDef,
+            },
+            updatedAt: new Date(),
+          })
+          .where(and(eq(packages.id, providerId), eq(packages.orgId, orgId)));
+
+        // 2. Handle credentials: update with new values if provided
+        if (data.clientId || data.clientSecret) {
+          const adminCreds: Record<string, string> = {};
+          if (data.clientId) adminCreds.clientId = data.clientId;
+          if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
+
+          await tx
+            .insert(providerCredentials)
+            .values({
+              providerId,
+              orgId,
+              credentialsEncrypted: encryptCredentials(adminCreds),
+            })
+            .onConflictDoUpdate({
+              target: [providerCredentials.providerId, providerCredentials.orgId],
+              set: { credentialsEncrypted: encryptCredentials(adminCreds), updatedAt: new Date() },
+            });
+        }
+      });
     } catch (err) {
       logger.error("Provider update failed", {
         providerId,
@@ -362,17 +523,107 @@ export function createProvidersRouter() {
     return c.json({ id: providerId });
   });
 
-  // DELETE /api/providers/:id — delete provider DB config (custom only)
-  router.delete("/:id", async (c) => {
+  // PUT /api/providers/credentials/:scope/:name — configure credentials for a provider
+  router.put("/credentials/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
-    const providerId = c.req.param("id");
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const body = await c.req.json();
 
-    // Block deleting built-in providers
-    if (isBuiltInProvider(providerId)) {
+    const credSchema = z.object({
+      credentials: z.record(z.string(), z.string().min(1)).optional(),
+      enabled: z.boolean().optional(),
+    });
+    const parsed = credSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+    }
+
+    // Verify the provider exists and get its admin credential schema
+    const [pkg] = await db
+      .select({ id: packages.id, manifest: packages.manifest })
+      .from(packages)
+      .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
+      .limit(1);
+
+    if (!pkg) {
+      return c.json({ error: "NOT_FOUND", message: "Provider not found" }, 404);
+    }
+
+    const hasCredentials =
+      parsed.data.credentials && Object.keys(parsed.data.credentials).length > 0;
+
+    // Validate required fields against admin credential schema only when credentials are provided
+    if (hasCredentials) {
+      const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
+      const def = (manifest.definition ?? {}) as Record<string, unknown>;
+      const authMode = (def.authMode as string) ?? "oauth2";
+      const adminSchema =
+        (def.adminCredentialSchema as JSONSchemaObject) ??
+        (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | null);
+      if (adminSchema?.required) {
+        const missing = adminSchema.required.filter((k) => !parsed.data.credentials![k]);
+        if (missing.length > 0) {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message: `Missing required fields: ${missing.join(", ")}`,
+            },
+            400,
+          );
+        }
+      }
+    }
+
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    if (hasCredentials) {
+      setClause.credentialsEncrypted = encryptCredentials(parsed.data.credentials!);
+    }
+    if (parsed.data.enabled !== undefined) {
+      setClause.enabled = parsed.data.enabled;
+    }
+
+    await db
+      .insert(providerCredentials)
+      .values({
+        providerId,
+        orgId,
+        credentialsEncrypted: hasCredentials ? encryptCredentials(parsed.data.credentials!) : null,
+        enabled: parsed.data.enabled ?? false,
+      })
+      .onConflictDoUpdate({
+        target: [providerCredentials.providerId, providerCredentials.orgId],
+        set: setClause,
+      });
+
+    return c.json({ configured: true });
+  });
+
+  // DELETE /api/providers/credentials/:scope/:name — delete credentials for a provider
+  router.delete("/credentials/:scope{@[^/]+}/:name", async (c) => {
+    const orgId = c.get("orgId");
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+
+    await db
+      .update(providerCredentials)
+      .set({ credentialsEncrypted: null, enabled: false, updatedAt: new Date() })
+      .where(
+        and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+      );
+
+    return c.json({ configured: false });
+  });
+
+  // DELETE /api/providers/:scope/:name — delete provider (custom only)
+  router.delete("/:scope{@[^/]+}/:name", async (c) => {
+    const orgId = c.get("orgId");
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+
+    // Block deleting system providers (DB-based guard)
+    if (await isSystemProviderInDb(providerId)) {
       return c.json(
         {
           error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot delete built-in provider '${providerId}'`,
+          message: `Cannot delete system provider '${providerId}'`,
         },
         403,
       );
@@ -382,8 +633,8 @@ export function createProvidersRouter() {
     const allFlows = await listPackages(orgId);
     let usageCount = 0;
     for (const flow of allFlows) {
-      for (const svc of flow.manifest.requires?.services ?? []) {
-        if (svc.provider === providerId) {
+      for (const svc of resolveManifestServices(flow.manifest)) {
+        if (svc.id === providerId) {
           usageCount++;
           break;
         }
@@ -400,9 +651,8 @@ export function createProvidersRouter() {
     }
 
     try {
-      await db
-        .delete(providerConfigs)
-        .where(and(eq(providerConfigs.orgId, orgId), eq(providerConfigs.id, providerId)));
+      // Delete packages row (providerCredentials will cascade)
+      await db.delete(packages).where(and(eq(packages.orgId, orgId), eq(packages.id, providerId)));
     } catch (err) {
       logger.error("Provider delete failed", {
         providerId,

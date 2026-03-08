@@ -86,7 +86,7 @@ export function OrgSwitcher() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="/connectors" className="flex items-center gap-2">
+          <Link to="/#providers" className="flex items-center gap-2">
             <Plug size={14} />
             {t("orgSwitcher.connectors")}
           </Link>

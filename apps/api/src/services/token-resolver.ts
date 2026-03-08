@@ -3,16 +3,14 @@
  * Shared by executions.ts, scheduler.ts, and share.ts.
  */
 
-import { getCredentials, getProvider } from "@appstrate/connect";
+import { getCredentials } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 import { logger } from "../lib/logger.ts";
-import { computeConfigHash } from "./connection-profiles.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 
 /**
  * Build a map of service tokens for all required services.
  * serviceProfiles maps serviceId → profileId.
- * Uses orgId to resolve the correct configHash per provider.
  */
 export async function buildServiceTokens(
   services: FlowServiceRequirement[],
@@ -24,10 +22,8 @@ export async function buildServiceTokens(
       .filter((svc) => serviceProfiles[svc.id])
       .map(async (svc) => {
         const profileId = serviceProfiles[svc.id]!;
-        const providerDef = await getProvider(db, orgId, svc.provider);
-        const configHash = providerDef ? computeConfigHash(providerDef) : undefined;
 
-        const result = await getCredentials(db, profileId, svc.provider, configHash);
+        const result = await getCredentials(db, profileId, svc.provider, orgId);
         let token = result
           ? (result.credentials.access_token ?? result.credentials.api_key ?? null)
           : null;

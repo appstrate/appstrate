@@ -4,6 +4,8 @@
  */
 
 import { getConnectionStatus, validateScopes } from "./connection-manager.ts";
+import { isProviderEnabled } from "@appstrate/connect";
+import { db } from "../lib/db.ts";
 import type { FlowServiceRequirement } from "../types/index.ts";
 
 export interface DependencyError {
@@ -24,6 +26,19 @@ export async function validateFlowDependencies(
   serviceProfiles: Record<string, string>,
   orgId: string,
 ): Promise<DependencyError | null> {
+  // Check provider enabled status
+  const uniqueProviders = [...new Set(services.map((s) => s.provider))];
+  for (const providerId of uniqueProviders) {
+    const enabled = await isProviderEnabled(db, orgId, providerId);
+    if (!enabled) {
+      return {
+        error: "PROVIDER_NOT_ENABLED",
+        message: `Provider '${providerId}' is not configured`,
+        serviceId: services.find((s) => s.provider === providerId)!.id,
+      };
+    }
+  }
+
   // Check for missing profiles first (no async needed)
   for (const svc of services) {
     const profileId = serviceProfiles[svc.id];
@@ -47,7 +62,7 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all services have profiles at this point)
   const statuses = await Promise.all(
-    services.map((svc) => getConnectionStatus(svc.provider, serviceProfiles[svc.id]!, orgId)),
+    services.map((svc) => getConnectionStatus(svc.provider, serviceProfiles[svc.id]!)),
   );
 
   for (let i = 0; i < services.length; i++) {

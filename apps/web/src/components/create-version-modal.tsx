@@ -20,7 +20,7 @@ function semverGt(a: string, b: string): boolean {
 interface CreateVersionModalProps {
   open: boolean;
   onClose: () => void;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   packageId: string;
 }
 

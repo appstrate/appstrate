@@ -7,10 +7,12 @@ import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
 import { createExecution } from "./state.ts";
 import { getConnectionStatus } from "./connection-manager.ts";
+import { isProviderEnabled } from "@appstrate/connect";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext } from "./env-builder.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -250,15 +252,28 @@ async function triggerScheduledExecution(
     }
 
     // Resolve service profiles for this user + package
+    const manifestServices = resolveManifestServices(flow.manifest);
     const serviceProfiles = await resolveServiceProfiles(
-      flow.manifest.requires.services,
+      manifestServices,
       userId,
       packageId,
       orgId,
     );
 
+    // Validate provider enabled status
+    for (const svc of manifestServices) {
+      const enabled = await isProviderEnabled(db, orgId, svc.provider);
+      if (!enabled) {
+        logger.warn("Provider not enabled, skipping schedule", {
+          providerId: svc.provider,
+          scheduleId,
+        });
+        return;
+      }
+    }
+
     // Validate service dependencies — skip if not connected
-    for (const svc of flow.manifest.requires.services) {
+    for (const svc of manifestServices) {
       const profileId = serviceProfiles[svc.id];
       if (!profileId) {
         logger.warn("Service profile not resolved, skipping schedule", {
@@ -269,7 +284,7 @@ async function triggerScheduledExecution(
         return;
       }
 
-      const conn = await getConnectionStatus(svc.provider, profileId, orgId);
+      const conn = await getConnectionStatus(svc.provider, profileId);
       if (conn.status !== "connected") {
         logger.warn("Service not connected, skipping schedule", {
           serviceId: svc.id,

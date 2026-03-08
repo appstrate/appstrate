@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   useFlowDetail,
@@ -9,12 +10,14 @@ import {
   useVersionDetail,
   usePackageDownload,
   useDeletePackage,
-  type PackageType,
 } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
+import { useProviders } from "../hooks/use-providers";
+import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
+import { Settings, CheckCircle } from "lucide-react";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
@@ -23,6 +26,7 @@ import { VersionBanners } from "../components/version-banners";
 import { VersionHistory } from "../components/version-history";
 import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
+import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
 import { ProfileSelector } from "../components/profile-selector";
 
 // Flow-specific components
@@ -94,7 +98,11 @@ function FlowRunButtonInline({
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
-export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "extension" }) {
+export function UnifiedPackageDetailPage({
+  type,
+}: {
+  type: "flow" | "skill" | "extension" | "provider";
+}) {
   const { t } = useTranslation(["flows", "settings", "common"]);
   const {
     scope,
@@ -114,11 +122,19 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   // ── Data loading (type-specific) ──
   const flowQuery = useFlowDetail(type === "flow" ? packageId : undefined);
   const pkgQuery = usePackageDetail(
-    type === "flow" ? "skill" : (type as PackageType),
+    type === "flow" ? "skill" : type,
     type !== "flow" ? packageId : undefined,
   );
   const isLoading = type === "flow" ? flowQuery.isLoading : pkgQuery.isLoading;
   const error = type === "flow" ? flowQuery.error : pkgQuery.error;
+
+  // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
+  const providersQuery = useProviders();
+  const providerConfig =
+    type === "provider"
+      ? providersQuery.data?.providers.find((p) => p.id === packageId)
+      : undefined;
+  const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
 
   // Unified detail values
   const flowDetail = flowQuery.data;
@@ -146,7 +162,8 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   );
 
   const downloadPackage = usePackageDownload(scope, name);
-  const deletePkgMutation = useDeletePackage(type === "flow" ? "skill" : (type as PackageType));
+  const deletePkgMutation = useDeletePackage(type === "flow" ? "skill" : type);
+  const deleteCredentialsMutation = useDeleteProviderCredentials();
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
@@ -174,6 +191,7 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   }, [tab, hasDraftChanges, isVersionView, source, defaultTab, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [diffTabOverride, setDiffTab] = useState<"prompt" | "manifest" | "content" | null>(null);
 
   // ── Loading / Error ──
@@ -261,7 +279,11 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
-    { id: "content", label: t("packages.content") },
+    {
+      id: "content",
+      label:
+        type === "provider" ? t("providers.configure", { ns: "settings" }) : t("packages.content"),
+    },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -297,41 +319,58 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
               />
             </>
           ) : isOrgAdmin ? (
-            <PackageActionsDropdown
-              packageId={packageId}
-              type={type}
-              isOrgAdmin={isOrgAdmin}
-              isBuiltIn={isBuiltIn}
-              isHistoricalVersion={isHistoricalVersion}
-              hasDraftChanges={hasDraftChanges}
-              downloadVersion={downloadVersion ?? undefined}
-              onDownload={downloadPackage}
-              onCreateVersion={() => setCreateVersionOpen(true)}
-              canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
-              onDeletePackage={() => {
-                if (!pkgDetail) return;
-                const nameStr = pkgDetail.name || pkgDetail.id;
-                const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                if (
-                  !confirm(
-                    t("packages.deleteConfirm", {
-                      type: typeLabel,
-                      name: nameStr,
-                      ns: "settings",
-                    }),
+            <>
+              {type === "provider" && providerConfig && (
+                <Button variant="outline" size="sm" onClick={() => setCredentialsOpen(true)}>
+                  {providerConfig.enabled ? (
+                    <CheckCircle size={14} className="text-emerald-500" />
+                  ) : (
+                    <Settings size={14} />
+                  )}
+                  {t("providers.configure", { ns: "settings" })}
+                </Button>
+              )}
+              <PackageActionsDropdown
+                packageId={packageId}
+                type={type}
+                isOrgAdmin={isOrgAdmin}
+                isBuiltIn={isBuiltIn}
+                isHistoricalVersion={isHistoricalVersion}
+                hasDraftChanges={hasDraftChanges}
+                downloadVersion={downloadVersion ?? undefined}
+                onDownload={downloadPackage}
+                onCreateVersion={() => setCreateVersionOpen(true)}
+                hasCredentials={providerConfig?.hasCredentials}
+                onDeleteCredentials={() => {
+                  if (!confirm(t("providers.deleteCredentialsConfirm", { ns: "settings" }))) return;
+                  deleteCredentialsMutation.mutate(packageId);
+                }}
+                canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
+                onDeletePackage={() => {
+                  if (!pkgDetail) return;
+                  const nameStr = pkgDetail.name || pkgDetail.id;
+                  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+                  if (
+                    !confirm(
+                      t("packages.deleteConfirm", {
+                        type: typeLabel,
+                        name: nameStr,
+                        ns: "settings",
+                      }),
+                    )
                   )
-                )
-                  return;
-                deletePkgMutation.mutate(packageId, {
-                  onError: (err) =>
-                    alert(
-                      err instanceof Error
-                        ? err.message
-                        : t("packages.deleteDependedOn", { ns: "settings" }),
-                    ),
-                });
-              }}
-            />
+                    return;
+                  deletePkgMutation.mutate(packageId, {
+                    onError: (err) =>
+                      alert(
+                        err instanceof Error
+                          ? err.message
+                          : t("packages.deleteDependedOn", { ns: "settings" }),
+                      ),
+                  });
+                }}
+              />
+            </>
           ) : undefined
         }
       />
@@ -390,10 +429,34 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
       {type !== "flow" && tab === "content" && pkgDetail && (
         <div className="rounded-lg border border-border bg-card p-4">
+          {type === "provider" && providerConfig && (
+            <div className="flex items-center gap-2 mb-4 pb-4 border-b border-border">
+              <span className="text-sm text-muted-foreground">
+                {t("providers.credentials", { ns: "settings" })}:
+              </span>
+              {providerConfig.enabled ? (
+                <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
+                  {t("providers.configured", { ns: "settings" })}
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
+                  {t("providers.notConfigured", { ns: "settings" })}
+                </span>
+              )}
+            </div>
+          )}
           <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
-            {isHistoricalVersion && versionDetail?.content != null
-              ? versionDetail.content
-              : pkgDetail.content}
+            {type === "provider"
+              ? JSON.stringify(
+                  (isHistoricalVersion && versionDetail?.manifest
+                    ? versionDetail.manifest
+                    : pkgDetail.manifest) ?? {},
+                  null,
+                  2,
+                )
+              : isHistoricalVersion && versionDetail?.content != null
+                ? versionDetail.content
+                : pkgDetail.content}
           </pre>
         </div>
       )}
@@ -497,6 +560,11 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
               )}
             </>
           )}
+          {!latestVersionForDiff && (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              {t("version.noVersionYet")}
+            </p>
+          )}
         </>
       )}
 
@@ -509,6 +577,15 @@ export function UnifiedPackageDetailPage({ type }: { type: "flow" | "skill" | "e
 
       {/* Flow modals */}
       {type === "flow" && <FlowModals packageId={packageId} />}
+
+      {/* Provider credentials modal */}
+      {type === "provider" && providerConfig && credentialsOpen && (
+        <ProviderCredentialsModal
+          provider={providerConfig}
+          callbackUrl={callbackUrl}
+          onClose={() => setCredentialsOpen(false)}
+        />
+      )}
     </>
   );
 }

@@ -9,7 +9,7 @@ import { PACKAGE_ITEMS_BUCKET } from "./config.ts";
 
 /** Upload a package item's full normalized files to Storage. */
 export async function uploadPackageFiles(
-  type: "flows" | "skills" | "extensions",
+  type: "flows" | "skills" | "extensions" | "providers",
   orgId: string,
   itemId: string,
   normalizedFiles: Record<string, Uint8Array>,
@@ -27,7 +27,7 @@ export async function uploadPackageFiles(
 
 /** Download a package item's full files from Storage. Returns normalized file map or null. */
 export async function downloadPackageFiles(
-  type: "flows" | "skills" | "extensions",
+  type: "flows" | "skills" | "extensions" | "providers",
   orgId: string,
   itemId: string,
 ): Promise<Record<string, Uint8Array> | null> {
@@ -42,7 +42,7 @@ export async function downloadPackageFiles(
 
 /** Delete a package item's files from Storage. */
 export async function deletePackageFiles(
-  type: "flows" | "skills" | "extensions",
+  type: "flows" | "skills" | "extensions" | "providers",
   orgId: string,
   itemId: string,
 ): Promise<void> {

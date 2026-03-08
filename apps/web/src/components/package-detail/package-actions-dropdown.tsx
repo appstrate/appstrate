@@ -24,7 +24,7 @@ import { api } from "../../api";
 
 interface PackageActionsDropdownProps {
   packageId: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   isOrgAdmin: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
@@ -43,6 +43,9 @@ interface PackageActionsDropdownProps {
   onDeleteExecutions?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
+  // Provider-specific
+  hasCredentials?: boolean;
+  onDeleteCredentials?: () => void;
   // Skill/Extension-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
@@ -75,6 +78,8 @@ export function PackageActionsDropdown({
   onDeleteExecutions,
   onAddSchedule,
   onDeleteMemories,
+  hasCredentials,
+  onDeleteCredentials,
   canDeletePackage,
   onDeletePackage,
   shareServices,
@@ -213,6 +218,20 @@ export function PackageActionsDropdown({
                 {t("detail.clearMemories")}
               </DropdownMenuItem>
             )}
+          </>
+        )}
+
+        {/* ── Delete credentials (provider-only) ── */}
+        {type === "provider" && isOrgAdmin && hasCredentials && onDeleteCredentials && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={onDeleteCredentials}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 size={14} />
+              {t("providers.deleteCredentials", { ns: "settings" })}
+            </DropdownMenuItem>
           </>
         )}
 

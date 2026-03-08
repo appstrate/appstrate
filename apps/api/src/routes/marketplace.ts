@@ -38,7 +38,7 @@ export function createMarketplaceRouter() {
     try {
       const results = await searchMarketplace({
         q,
-        type: type as "flow" | "skill" | "extension" | undefined,
+        type: type as "flow" | "skill" | "extension" | "provider" | undefined,
         sort: sort as "relevance" | "downloads" | "recent" | undefined,
         page,
         perPage,

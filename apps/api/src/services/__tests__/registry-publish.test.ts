@@ -7,8 +7,10 @@ import {
   builtinPackagesStub,
   packageStorageStub,
   registryClientStub,
-  tracking,
 } from "./_db-mock.ts";
+
+// Registry provider mock — controls forward-only version check via getPackage
+let mockRegistryProviderClient: { getPackage: ReturnType<typeof mock> } | null = null;
 
 // --- Mocks ---
 
@@ -27,6 +29,12 @@ mock.module("../package-storage.ts", () => ({
   downloadVersionZip: mockDownloadVersionZip,
 }));
 mock.module("@appstrate/registry-client", () => registryClientStub);
+mock.module("../registry-provider.ts", () => ({
+  getRegistryClient: () => mockRegistryProviderClient,
+  isRegistryConfigured: () => !!mockRegistryProviderClient,
+  getRegistryDiscovery: () => null,
+  initRegistryProvider: async () => {},
+}));
 
 // --- Service mocks ---
 
@@ -72,7 +80,6 @@ function makePackageRow(overrides: Record<string, unknown> = {}) {
     name: "My Flow",
     orgId: "org-1",
     manifest: { name: "@acme/my-flow", version: "1.0.0" },
-    lastPublishedVersion: null,
     source: "local",
     content: null,
     ...overrides,
@@ -106,6 +113,12 @@ describe("publishPackage", () => {
   beforeEach(() => {
     resetQueues();
     mockRegistryClient = { publish: mock(async () => publishResult) };
+    // Default: no versions published on registry (first publish)
+    mockRegistryProviderClient = {
+      getPackage: mock(async () => {
+        throw new Error("Not found");
+      }),
+    };
     mockDownloadVersionZip.mockImplementation(async () => fakeZip);
   });
 
@@ -207,9 +220,13 @@ describe("publishPackage", () => {
 
   test("throws VERSION_NOT_HIGHER when version not greater", async () => {
     queues.select = [
-      [makePackageRow({ lastPublishedVersion: "2.0.0" })],
+      [makePackageRow()],
       [makeVersionRow({ manifest: { name: "@acme/my-flow", version: "1.0.0" } })],
     ];
+    // Registry already has version 2.0.0 published
+    mockRegistryProviderClient = {
+      getPackage: mock(async () => ({ versions: [{ version: "2.0.0", yanked: false }] })),
+    };
     const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
       (e: unknown) => e,
     );
@@ -219,9 +236,13 @@ describe("publishPackage", () => {
 
   test("throws VERSION_EXISTS when version already published", async () => {
     queues.select = [
-      [makePackageRow({ lastPublishedVersion: "1.0.0" })],
+      [makePackageRow()],
       [makeVersionRow({ manifest: { name: "@acme/my-flow", version: "1.0.0" } })],
     ];
+    // Registry already has version 1.0.0 published
+    mockRegistryProviderClient = {
+      getPackage: mock(async () => ({ versions: [{ version: "1.0.0", yanked: false }] })),
+    };
     const err = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0").catch(
       (e: unknown) => e,
     );
@@ -229,11 +250,10 @@ describe("publishPackage", () => {
     expect((err as InstanceType<typeof PublishValidationError>).code).toBe("VERSION_EXISTS");
   });
 
-  test("successful publish updates lastPublishedVersion", async () => {
+  test("successful publish completes without DB update", async () => {
     queues.select = [[makePackageRow()], [makeVersionRow()]];
     const result = await publishPackage("@acme/my-flow", "org-1", "user-1", "1.0.0");
     expect(result).toEqual(publishResult);
-    expect(tracking.updateCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   test("publishes skill type", async () => {

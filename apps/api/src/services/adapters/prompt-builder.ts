@@ -1,7 +1,6 @@
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { PromptContext } from "./types.ts";
 import {
-  getBuiltInProviders,
   getCredentialFieldName,
   getDefaultAuthorizedUris,
   type ProviderDefinition,
@@ -11,18 +10,14 @@ import { sanitizeStorageKey } from "../file-storage.ts";
 type ProviderLike = NonNullable<PromptContext["providers"]>[number];
 
 /**
- * Get provider definition for prompt building.
- * Prefers ctx.providers (includes custom DB providers) over built-in registry.
+ * Get provider definition for prompt building from the execution context.
+ * All providers are resolved from the DB and passed via ctx.providers.
  */
-function getProviderDef(
-  providerId: string,
-  ctx?: PromptContext,
-): ProviderLike | ProviderDefinition | null {
+function getProviderDef(providerId: string, ctx?: PromptContext): ProviderLike | null {
   if (ctx?.providers) {
-    const found = ctx.providers.find((p) => p.id === providerId);
-    if (found) return found;
+    return ctx.providers.find((p) => p.id === providerId) ?? null;
   }
-  return getBuiltInProviders().get(providerId) ?? null;
+  return null;
 }
 
 function formatFileSize(bytes: number): string {

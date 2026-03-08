@@ -4,6 +4,7 @@ import {
   getBuiltInExtensions,
   isBuiltInSkill,
   isBuiltInExtension,
+  isSystemPackage,
   resolveBuiltInSkill,
   resolveBuiltInExtension,
 } from "../builtin-packages.ts";
@@ -21,8 +22,8 @@ interface BuiltInItem {
 }
 
 export interface PackageTypeConfig {
-  type: "flow" | "skill" | "extension";
-  storageFolder: "flows" | "skills" | "extensions";
+  type: "flow" | "skill" | "extension" | "provider";
+  storageFolder: "flows" | "skills" | "extensions" | "providers";
   getBuiltIns: () => ReadonlyMap<string, BuiltInItem>;
   isBuiltIn: (id: string) => boolean;
   resolveBuiltIn: (id: string) => BuiltInItem | undefined;
@@ -59,6 +60,15 @@ export const FLOW_CONFIG: PackageTypeConfig = {
   isBuiltIn: isBuiltInFlow,
   resolveBuiltIn: () => undefined,
   label: "Flows",
+};
+
+export const PROVIDER_CONFIG: PackageTypeConfig = {
+  type: "provider",
+  storageFolder: "providers",
+  getBuiltIns: () => EMPTY_MAP,
+  isBuiltIn: isSystemPackage,
+  resolveBuiltIn: () => undefined,
+  label: "Providers",
 };
 
 // ─────────────────────────────────────────────

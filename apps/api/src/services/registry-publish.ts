@@ -4,6 +4,7 @@ import { db } from "../lib/db.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import { getAuthenticatedRegistryClient } from "./registry-auth.ts";
+import { getRegistryClient } from "./registry-provider.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { isValidVersion } from "@appstrate/core/semver";
 import { validateForwardVersion } from "@appstrate/core/version-policy";
@@ -44,7 +45,7 @@ export async function publishPackage(
     throw new Error(`Package '${packageId}' not found`);
   }
 
-  if (pkg.source === "built-in") {
+  if (pkg.source === "built-in" || pkg.source === "system") {
     throw new Error("Cannot publish built-in packages");
   }
 
@@ -107,13 +108,24 @@ export async function publishPackage(
     throw new PublishValidationError("VERSION_INVALID", `"${version}" is not valid semver (X.Y.Z)`);
   }
 
-  // Forward-only enforcement using core helper
-  const publishedVersions = pkg.lastPublishedVersion ? [pkg.lastPublishedVersion] : [];
+  // Forward-only enforcement — query registry for published versions (source of truth)
+  let publishedVersions: string[] = [];
+  try {
+    const registryClient = getRegistryClient();
+    if (registryClient) {
+      const detail = await registryClient.getPackage(`@${scope}`, name);
+      publishedVersions = detail.versions
+        .filter((v: { yanked?: boolean }) => !v.yanked)
+        .map((v: { version: string }) => v.version);
+    }
+  } catch {
+    // Package not on registry yet — no published versions
+  }
   const forwardCheck = validateForwardVersion(version, publishedVersions);
   if (!forwardCheck.ok) {
     throw new PublishValidationError(
       forwardCheck.error === "VERSION_EXISTS" ? "VERSION_EXISTS" : "VERSION_NOT_HIGHER",
-      `Version "${version}" must be greater than last published "${forwardCheck.highest ?? pkg.lastPublishedVersion}"`,
+      `Version "${version}" must be greater than last published "${forwardCheck.highest ?? ""}"`,
     );
   }
 
@@ -134,15 +146,6 @@ export async function publishPackage(
     }
     throw err;
   }
-
-  // 9. Update local package with registry tracking — local manifest stays intact
-  await db
-    .update(packages)
-    .set({
-      lastPublishedVersion: version,
-      lastPublishedAt: new Date(),
-    })
-    .where(eq(packages.id, packageId));
 
   logger.info("Package published to registry", {
     packageId,

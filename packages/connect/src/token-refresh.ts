@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { serviceConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { DecryptedCredentials, ProviderSnapshot } from "./types.ts";
-import { encryptCredentials, decryptCredentials, decrypt } from "./encryption.ts";
+import type { DecryptedCredentials } from "./types.ts";
+import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
@@ -11,10 +11,19 @@ const inflightRefreshes = new Map<string, Promise<DecryptedCredentials>>();
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
 
+export interface RefreshContext {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  tokenAuthMethod?: string;
+  scopeSeparator?: string;
+}
+
 /**
  * Refresh an OAuth2 token if it's about to expire.
  * Returns the (possibly refreshed) decrypted credentials.
- * Uses providerSnapshot for all OAuth config (tokenUrl, clientId/Secret).
+ * Requires a RefreshContext with OAuth config (tokenUrl, clientId/Secret).
+ * If refreshContext is not provided, refresh is skipped.
  */
 export async function refreshIfNeeded(
   db: Db,
@@ -22,7 +31,7 @@ export async function refreshIfNeeded(
   providerId: string,
   credentialsEncrypted: string,
   expiresAt: string | null,
-  providerSnapshot: ProviderSnapshot,
+  refreshContext?: RefreshContext,
 ): Promise<DecryptedCredentials> {
   // If not expired (or no expiry set), return current credentials
   if (!expiresAt) {
@@ -30,6 +39,11 @@ export async function refreshIfNeeded(
   }
   const expiresMs = new Date(expiresAt).getTime();
   if (!Number.isNaN(expiresMs) && expiresMs > Date.now() + REFRESH_BUFFER_MS) {
+    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
+  }
+
+  // If no refresh context available, return current credentials (can't refresh)
+  if (!refreshContext) {
     return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
   }
 
@@ -43,7 +57,7 @@ export async function refreshIfNeeded(
     connectionId,
     providerId,
     credentialsEncrypted,
-    providerSnapshot,
+    refreshContext,
   );
 
   inflightRefreshes.set(connectionId, refreshPromise);
@@ -60,7 +74,7 @@ async function doRefresh(
   connectionId: string,
   providerId: string,
   credentialsEncrypted: string,
-  providerSnapshot: ProviderSnapshot,
+  ctx: RefreshContext,
 ): Promise<DecryptedCredentials> {
   const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
 
@@ -68,32 +82,20 @@ async function doRefresh(
     return creds;
   }
 
-  const tokenUrl = providerSnapshot.refreshUrl ?? providerSnapshot.tokenUrl;
-  if (!tokenUrl) {
-    throw new Error(`Provider '${providerId}' has no token URL for refresh (from snapshot)`);
-  }
-
-  // Decrypt clientId/Secret from the snapshot
-  if (!providerSnapshot.clientIdEncrypted || !providerSnapshot.clientSecretEncrypted) {
-    throw new Error(`Provider '${providerId}' has no OAuth credentials in snapshot`);
-  }
-  const clientId = decrypt(providerSnapshot.clientIdEncrypted);
-  const clientSecret = decrypt(providerSnapshot.clientSecretEncrypted);
-
   // Perform token refresh
-  const useBasicAuth = providerSnapshot.tokenAuthMethod === "client_secret_basic";
+  const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: creds.refresh_token,
-    ...(useBasicAuth ? {} : { client_id: clientId, client_secret: clientSecret }),
+    ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
   });
 
   let response: Response;
   try {
-    response = await fetch(tokenUrl, {
+    response = await fetch(ctx.tokenUrl, {
       method: "POST",
-      headers: buildTokenHeaders(providerSnapshot.tokenAuthMethod, clientId, clientSecret),
+      headers: buildTokenHeaders(ctx.tokenAuthMethod, ctx.clientId, ctx.clientSecret),
       body: body.toString(),
       signal: AbortSignal.timeout(30_000),
     });
@@ -115,7 +117,7 @@ async function doRefresh(
 
   const parsed = parseTokenResponse(
     { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
-    providerSnapshot.scopeSeparator ?? " ",
+    ctx.scopeSeparator ?? " ",
     undefined,
     creds.refresh_token,
   );

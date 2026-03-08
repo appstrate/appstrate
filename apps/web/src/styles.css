@@ -116,6 +116,12 @@
     @apply w-auto;
   }
 
+  /* Radix Checkbox/Switch renders as <button> — reset global button padding */
+  button[role="checkbox"],
+  button[role="switch"] {
+    @apply p-0;
+  }
+
   /* Links */
   a {
     @apply text-inherit no-underline;

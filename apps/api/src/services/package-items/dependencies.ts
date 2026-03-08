@@ -1,4 +1,4 @@
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -6,21 +6,28 @@ import {
   buildRegistryDepsFromRows,
   type RegistryDependencies,
 } from "@appstrate/core/registry-deps";
-import { type PackageTypeConfig } from "./config.ts";
+import {
+  type PackageTypeConfig,
+  SKILL_CONFIG,
+  EXTENSION_CONFIG,
+  PROVIDER_CONFIG,
+} from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 
 // ─────────────────────────────────────────────
 // Flow ↔ package item dependency management
 // ─────────────────────────────────────────────
 
-/** Replace all references of a type for a flow. Only org IDs are stored (built-in tracked via manifest). */
+/** Replace all references of a type for a flow. */
 export async function setFlowItems(
   packageId: string,
   orgId: string,
   itemIds: string[],
   cfg: PackageTypeConfig,
 ): Promise<void> {
-  const orgItemIds = itemIds.filter((id) => !cfg.isBuiltIn(id));
+  // System providers have DB rows with orgId: null — don't filter them out.
+  // Built-in skills/extensions (loaded from DATA_DIR, no DB rows) must still be filtered.
+  const orgItemIds = cfg.type === "provider" ? itemIds : itemIds.filter((id) => !cfg.isBuiltIn(id));
 
   // Validate existence outside transaction (read-only)
   if (orgItemIds.length > 0) {
@@ -29,7 +36,10 @@ export async function setFlowItems(
       .from(packages)
       .where(
         and(
-          eq(packages.orgId, orgId),
+          // System providers have orgId: null, so include them
+          cfg.type === "provider"
+            ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
+            : eq(packages.orgId, orgId),
           eq(packages.type, cfg.type),
           inArray(packages.id, orgItemIds),
         ),
@@ -81,7 +91,21 @@ export async function setFlowItems(
   });
 }
 
-/** Build registryDependencies object from a flow's current dependency links. */
+/** Synchronise the junction table after save (flows only). */
+export async function syncFlowDepsJunctionTable(
+  packageId: string,
+  orgId: string,
+  skillIds: string[],
+  extensionIds: string[],
+  providerIds: string[],
+): Promise<void> {
+  await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
+  await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+  await setFlowItems(packageId, orgId, providerIds, PROVIDER_CONFIG);
+}
+
+/** Build registryDependencies object from a flow's current dependency links.
+ *  Now that providers are in packageDependencies, the join query picks them up automatically. */
 export async function buildRegistryDependencies(
   packageId: string,
   orgId: string,
@@ -90,7 +114,7 @@ export async function buildRegistryDependencies(
     .select({
       dependencyId: packageDependencies.dependencyId,
       type: packages.type,
-      lastPublishedVersion: packages.lastPublishedVersion,
+      manifest: packages.manifest,
     })
     .from(packageDependencies)
     .innerJoin(packages, eq(packages.id, packageDependencies.dependencyId))
@@ -98,11 +122,12 @@ export async function buildRegistryDependencies(
 
   const rows = deps.map((dep) => {
     const parsed = parseScopedName(dep.dependencyId);
+    const m = (dep.manifest ?? {}) as Record<string, unknown>;
     return {
       type: dep.type,
       registryScope: parsed?.scope ?? null,
       registryName: parsed?.name ?? null,
-      lastPublishedVersion: dep.lastPublishedVersion,
+      version: (m.version as string) ?? null,
     };
   });
 

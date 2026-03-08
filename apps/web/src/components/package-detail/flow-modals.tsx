@@ -16,7 +16,8 @@ import { CustomCredentialsModal } from "../custom-credentials-modal";
 
 export function FlowModals({ packageId }: { packageId: string }) {
   const { data: detail } = useFlowDetail(packageId);
-  const { data: providers } = useProviders();
+  const { data: providersData } = useProviders();
+  const providers = providersData?.providers;
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
 
