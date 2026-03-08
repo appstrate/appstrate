@@ -13,7 +13,6 @@ import {
 // --- Configurable mock state ---
 
 let mockFlows: { manifest: Record<string, unknown> }[] = [];
-let systemPackageIds = new Set<string>();
 const encryptCalls: Record<string, string>[] = [];
 const versionUploadCalls: unknown[] = [];
 
@@ -84,7 +83,6 @@ mock.module("../../services/flow-service.ts", () => ({
 
 mock.module("../../services/builtin-packages.ts", () => ({
   ...builtinPackagesStub,
-  isSystemPackage: (id: string) => systemPackageIds.has(id),
 }));
 
 // manifest-utils.ts is NOT mocked — pure functions, no side effects.
@@ -177,7 +175,6 @@ beforeEach(() => {
   encryptCalls.length = 0;
   versionUploadCalls.length = 0;
   mockFlows = [];
-  systemPackageIds = new Set();
 });
 
 // ==================== GET /api/providers ====================
@@ -258,21 +255,17 @@ describe("POST /api/providers", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
-  test("returns 403 when ID conflicts with system provider (in-memory)", async () => {
-    systemPackageIds.add("@system/provider");
+  test("returns 403 when ID conflicts with system provider (source: system)", async () => {
+    queues.select.push([{ source: "system" }]); // isSystemProviderInDb → system
 
-    const res = await jsonRequest(
-      "/api/providers",
-      "POST",
-      validCreateBody({ id: "@system/provider" }),
-    );
+    const res = await jsonRequest("/api/providers", "POST", validCreateBody());
     expect(res.status).toBe(403);
     const json = (await res.json()) as { error: string };
     expect(json.error).toBe("OPERATION_NOT_ALLOWED");
   });
 
-  test("returns 403 when ID conflicts with system provider (DB check)", async () => {
-    queues.select.push([{ source: "system" }]); // isSystemProviderInDb → system
+  test("returns 403 when ID conflicts with system provider (source: built-in)", async () => {
+    queues.select.push([{ source: "built-in" }]); // isSystemProviderInDb → built-in
 
     const res = await jsonRequest("/api/providers", "POST", validCreateBody());
     expect(res.status).toBe(403);

@@ -16,7 +16,7 @@ const VALID_MANIFEST = {
   author: "test",
   tags: ["test"],
   requires: {
-    services: { "@appstrate/google-mail": "1.0.0" },
+    services: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
     extensions: { "@appstrate/web-search": "*" },
   },
