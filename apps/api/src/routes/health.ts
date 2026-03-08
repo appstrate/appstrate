@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { getBuiltInPackageCount } from "../services/flow-service.ts";
+import { getSystemPackagesByType } from "../services/system-packages.ts";
 
 const startedAt = Date.now();
 
@@ -22,9 +22,10 @@ healthRouter.get("/health", async (c) => {
     checks.database = { status: "unhealthy", latency_ms: Date.now() - dbStart };
   }
 
-  // Flows check
+  // System packages check
+  const systemFlowCount = getSystemPackagesByType("flow").length;
   checks.flows = {
-    status: getBuiltInPackageCount() > 0 ? "healthy" : "degraded",
+    status: systemFlowCount > 0 ? "healthy" : "degraded",
   };
 
   const hasUnhealthy = Object.values(checks).some((c) => c.status === "unhealthy");

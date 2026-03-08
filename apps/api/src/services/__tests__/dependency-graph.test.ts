@@ -4,7 +4,7 @@ import {
   resetQueues,
   db,
   schemaStubs,
-  builtinPackagesStub,
+  systemPackagesStub,
   packageStorageStub,
   registryClientStub,
   registryProviderStub,
@@ -20,7 +20,7 @@ mock.module("../../lib/logger.ts", () => ({
 
 mock.module("../../lib/db.ts", () => ({ db }));
 mock.module("@appstrate/db/schema", () => schemaStubs);
-mock.module("../builtin-packages.ts", () => builtinPackagesStub);
+mock.module("../system-packages.ts", () => systemPackagesStub);
 mock.module("../package-storage.ts", () => packageStorageStub);
 mock.module("@appstrate/registry-client", () => registryClientStub);
 mock.module("../registry-provider.ts", () => registryProviderStub);
@@ -211,7 +211,7 @@ describe("buildGraph", () => {
     expect(graph.edges.get("@test/flow")?.size).toBe(0);
   });
 
-  test("includes built-in packages in graph with system status", async () => {
+  test("includes system packages in graph with system status", async () => {
     queues.select = [
       // Root package
       [
@@ -224,26 +224,26 @@ describe("buildGraph", () => {
         },
       ],
       // Dependencies: one dep
-      [{ dependencyId: "@test/builtin-skill" }],
-      // Built-in skill lookup
+      [{ dependencyId: "@test/system-skill" }],
+      // System skill lookup
       [
         {
-          id: "@test/builtin-skill",
+          id: "@test/system-skill",
           type: "skill",
-          name: "Built-in",
+          name: "System",
           manifest: { version: "1.0.0" },
-          source: "built-in",
+          source: "system",
         },
       ],
-      // Built-in skill deps
+      // System skill deps
       [],
     ];
 
     const graph = await buildGraph("@test/flow", "org-1");
     expect(graph.nodes.size).toBe(2);
-    expect(graph.nodes.has("@test/builtin-skill")).toBe(true);
-    expect(graph.nodes.get("@test/builtin-skill")?.source).toBe("built-in");
-    expect(computePublishStatus(graph.nodes.get("@test/builtin-skill")!)).toBe("system");
+    expect(graph.nodes.has("@test/system-skill")).toBe(true);
+    expect(graph.nodes.get("@test/system-skill")?.source).toBe("system");
+    expect(computePublishStatus(graph.nodes.get("@test/system-skill")!)).toBe("system");
   });
 
   test("displayName falls back to manifest.name when displayName absent", async () => {

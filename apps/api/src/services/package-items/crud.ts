@@ -22,30 +22,6 @@ export async function getPackageById(id: string): Promise<Package | null> {
 // Helpers (private)
 // ─────────────────────────────────────────────
 
-/** Count built-in skill/extension usage from flow manifests (since built-in IDs can't be in junction tables). */
-async function countBuiltInUsageFromManifests(
-  orgId: string,
-  cfg: PackageTypeConfig,
-): Promise<Map<string, number>> {
-  const flowRows = await db
-    .select({ manifest: packages.manifest })
-    .from(packages)
-    .where(and(eq(packages.orgId, orgId), eq(packages.type, "flow")));
-
-  const countMap = new Map<string, number>();
-
-  for (const flow of flowRows) {
-    const manifest = flow.manifest as { requires?: Record<string, Record<string, string>> };
-    const itemsMap = manifest?.requires?.[cfg.storageFolder] ?? {};
-    for (const id of Object.keys(itemsMap)) {
-      if (cfg.isBuiltIn(id)) {
-        countMap.set(id, (countMap.get(id) ?? 0) + 1);
-      }
-    }
-  }
-  return countMap;
-}
-
 /** Fetch package display names from a list of package IDs. */
 async function getPackageDisplayNames(
   packageIds: string[],
@@ -165,12 +141,9 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List all items of a type in the org with usedByFlows count (built-in + org). */
+/** List all items of a type in the org with usedByFlows count. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
-  const orgFilter =
-    cfg.type === "provider"
-      ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
-      : eq(packages.orgId, orgId);
+  const orgFilter = or(eq(packages.orgId, orgId), isNull(packages.orgId));
 
   const data = await db
     .select()
@@ -188,28 +161,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
     countMap.set(row.dependencyId, (countMap.get(row.dependencyId) ?? 0) + 1);
   }
 
-  const builtInCounts =
-    cfg.type === "provider"
-      ? new Map<string, number>()
-      : await countBuiltInUsageFromManifests(orgId, cfg);
-
-  const orgItemIds = new Set(data.map((row) => row.id));
-
-  const builtInItems = [...cfg.getBuiltIns().values()]
-    .filter((item) => !orgItemIds.has(item.id))
-    .map((item) => ({
-      id: item.id,
-      orgId: null as string | null,
-      name: item.name,
-      description: item.description,
-      source: "built-in" as const,
-      createdBy: null as string | null,
-      createdAt: "",
-      updatedAt: "",
-      usedByFlows: builtInCounts.get(item.id) ?? 0,
-    }));
-
-  const orgItems = data.map((row) => {
+  return data.map((row) => {
     const m = (row.manifest ?? {}) as Partial<Manifest>;
     return {
       id: row.id,
@@ -225,32 +177,11 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       autoInstalled: row.autoInstalled,
     };
   });
-
-  return [...builtInItems, ...orgItems];
 }
 
 /** Get a single item with content and list of flows referencing it. */
 export async function getOrgItem(orgId: string, itemId: string, cfg: PackageTypeConfig) {
-  const builtIn = cfg.resolveBuiltIn(itemId);
-  if (builtIn) {
-    return {
-      id: builtIn.id,
-      orgId: null as string | null,
-      name: builtIn.name,
-      description: builtIn.description,
-      content: builtIn.content,
-      source: "built-in" as const,
-      createdBy: null as string | null,
-      createdAt: "",
-      updatedAt: "",
-      flows: [],
-    };
-  }
-
-  const orgFilter =
-    cfg.type === "provider"
-      ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
-      : eq(packages.orgId, orgId);
+  const orgFilter = or(eq(packages.orgId, orgId), isNull(packages.orgId));
 
   const [data] = await db
     .select()

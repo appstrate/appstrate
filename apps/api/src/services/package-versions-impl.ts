@@ -238,7 +238,7 @@ export interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  prompt: string | null;
+  textContent: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -248,7 +248,7 @@ export interface VersionDetail {
 }
 
 /**
- * Resolve a version query and return full version data including prompt extracted from ZIP.
+ * Resolve a version query and return full version data including text content extracted from ZIP.
  * Returns null if the version cannot be resolved.
  */
 export async function getVersionDetail(
@@ -276,7 +276,7 @@ export async function getVersionDetail(
   if (!row) return null;
 
   // Try to download and extract ZIP content
-  let prompt: string | null = null;
+  let textContent: string | null = null;
   let content: Record<string, Uint8Array> | null = null;
 
   try {
@@ -287,7 +287,7 @@ export async function getVersionDetail(
       // Extract prompt.md from ZIP
       const promptData = files["prompt.md"];
       if (promptData) {
-        prompt = new TextDecoder().decode(promptData);
+        textContent = new TextDecoder().decode(promptData);
       }
     }
   } catch (err) {
@@ -302,7 +302,7 @@ export async function getVersionDetail(
     id: row.id,
     version: row.version,
     manifest: row.manifest as Record<string, unknown>,
-    prompt,
+    textContent,
     content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,

@@ -83,13 +83,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
       - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL}
-      - DATA_DIR=${DATA_DIR:-./data}
       - STORAGE_DIR=${STORAGE_DIR:-./storage}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - appstrate-data:/app/data
       - appstrate-storage:/app/storage
     depends_on:
       appstrate-migrate:
@@ -101,5 +99,4 @@ services:
 
 volumes:
   pgdata:
-  appstrate-data:
   appstrate-storage:

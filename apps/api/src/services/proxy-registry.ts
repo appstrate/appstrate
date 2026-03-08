@@ -9,30 +9,10 @@ export interface ProxyDefinition {
   enabled?: boolean;
 }
 
-let BUILT_IN_PROXIES: Map<string, ProxyDefinition> | null = null;
+let systemProxies: Map<string, ProxyDefinition> | null = null;
 
 function isValidProxy(p: ProxyDefinition): boolean {
   return !!(p.id && p.label && p.url);
-}
-
-function addProxies(
-  map: Map<string, ProxyDefinition>,
-  proxies: ProxyDefinition[],
-  source: string,
-  warnOverride = false,
-): void {
-  for (const p of proxies) {
-    if (!isValidProxy(p)) {
-      logger.error(`[proxy-registry] ${source}: skipping invalid entry (missing id/label/url)`, {
-        proxy: p,
-      });
-      continue;
-    }
-    if (warnOverride && map.has(p.id)) {
-      logger.warn(`[proxy-registry] ${source} overrides file proxy '${p.id}'`);
-    }
-    map.set(p.id, p);
-  }
 }
 
 function parseEnvProxies(): ProxyDefinition[] {
@@ -41,30 +21,38 @@ function parseEnvProxies(): ProxyDefinition[] {
 }
 
 /**
- * Initialize built-in proxies from file-based definitions + env var.
- * File proxies are loaded first, then env var entries override (with a warning).
+ * Initialize system proxies from the SYSTEM_PROXIES env var.
  * Call once at boot before any proxy lookups.
  */
-export function initBuiltInProxies(fileProxies?: ProxyDefinition[]): void {
+export function initSystemProxies(): void {
   const map = new Map<string, ProxyDefinition>();
+  const proxies = parseEnvProxies();
 
-  if (fileProxies) {
-    addProxies(map, fileProxies, "proxies.json");
+  for (const p of proxies) {
+    if (!isValidProxy(p)) {
+      logger.error(
+        "[proxy-registry] SYSTEM_PROXIES: skipping invalid entry (missing id/label/url)",
+        {
+          proxy: p,
+        },
+      );
+      continue;
+    }
+    map.set(p.id, p);
   }
-  addProxies(map, parseEnvProxies(), "SYSTEM_PROXIES", true);
 
-  BUILT_IN_PROXIES = map;
+  systemProxies = map;
 }
 
-export function getBuiltInProxies(): ReadonlyMap<string, ProxyDefinition> {
-  if (!BUILT_IN_PROXIES) {
+export function getSystemProxies(): ReadonlyMap<string, ProxyDefinition> {
+  if (!systemProxies) {
     throw new Error(
-      "[proxy-registry] Built-in proxies not initialized. Call initBuiltInProxies() at boot.",
+      "[proxy-registry] System proxies not initialized. Call initSystemProxies() at boot.",
     );
   }
-  return BUILT_IN_PROXIES;
+  return systemProxies;
 }
 
-export function isBuiltInProxy(proxyId: string): boolean {
-  return BUILT_IN_PROXIES?.has(proxyId) ?? false;
+export function isSystemProxy(proxyId: string): boolean {
+  return systemProxies?.has(proxyId) ?? false;
 }

@@ -25,9 +25,7 @@ export async function setFlowItems(
   itemIds: string[],
   cfg: PackageTypeConfig,
 ): Promise<void> {
-  // System providers have DB rows with orgId: null — don't filter them out.
-  // Built-in skills/extensions (loaded from DATA_DIR, no DB rows) must still be filtered.
-  const orgItemIds = cfg.type === "provider" ? itemIds : itemIds.filter((id) => !cfg.isBuiltIn(id));
+  const orgItemIds = itemIds;
 
   // Validate existence outside transaction (read-only)
   if (orgItemIds.length > 0) {
@@ -36,10 +34,7 @@ export async function setFlowItems(
       .from(packages)
       .where(
         and(
-          // System providers have orgId: null, so include them
-          cfg.type === "provider"
-            ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
-            : eq(packages.orgId, orgId),
+          or(eq(packages.orgId, orgId), isNull(packages.orgId)),
           eq(packages.type, cfg.type),
           inArray(packages.id, orgItemIds),
         ),

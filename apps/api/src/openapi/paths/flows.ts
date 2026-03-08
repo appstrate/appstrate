@@ -9,7 +9,7 @@ export const flowsPaths = {
       tags: ["Flows"],
       summary: "List all flows",
       description:
-        "Returns all flows (built-in + user-imported) with running execution counts. Requires `X-Org-Id` header for cookie auth.",
+        "Returns all flows (system + user-imported) with running execution counts. Requires `X-Org-Id` header for cookie auth.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

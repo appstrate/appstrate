@@ -462,7 +462,7 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
     return <Navigate to="/" replace />;
   }
 
-  if (isEdit && detail && (detail as { source?: string }).source === "built-in") {
+  if (isEdit && detail && (detail as { source?: string }).source === "system") {
     navigate(`/${type === "flow" ? "flows" : `${type}s`}/${packageId}`, { replace: true });
     return null;
   }

@@ -1,7 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { and, eq, lt } from "drizzle-orm";
-import { getEnv } from "@appstrate/env";
 import { db } from "./db.ts";
 import {
   oauthStates,
@@ -16,9 +13,8 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { initRealtime } from "../services/realtime.ts";
-import { initBuiltInProxies } from "../services/proxy-registry.ts";
-import { initPackageService, getBuiltInPackageCount } from "../services/flow-service.ts";
-import { initBuiltInPackages, getSystemPackages } from "../services/builtin-packages.ts";
+import { initSystemProxies } from "../services/proxy-registry.ts";
+import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
@@ -32,30 +28,12 @@ import { ensurePackageItemsBucket } from "../services/package-items.ts";
 import { initRegistryProvider } from "../services/registry-provider.ts";
 
 export async function boot(): Promise<void> {
-  const env = getEnv();
-  const dataDir = env.DATA_DIR;
+  // Load system proxies from SYSTEM_PROXIES env var
+  initSystemProxies();
+  logger.info("System proxies loaded");
 
-  if (dataDir) {
-    // Load built-in proxies from {dataDir}/proxies.json + SYSTEM_PROXIES env var
-    const proxiesPath = join(dataDir, "proxies.json");
-    try {
-      const fileProxies = JSON.parse(readFileSync(proxiesPath, "utf-8"));
-      initBuiltInProxies(fileProxies);
-      logger.info("Built-in proxies loaded", { count: fileProxies.length });
-    } catch {
-      initBuiltInProxies();
-      logger.info("Built-in proxies loaded (env var only)");
-    }
-
-    await initPackageService(dataDir);
-    logger.info("Built-in flows loaded", { count: getBuiltInPackageCount() });
-  } else {
-    initBuiltInProxies(); // SYSTEM_PROXIES env var still loaded
-    logger.info("DATA_DIR not set — built-in resources disabled");
-  }
-
-  // initBuiltInPackages loads skills/extensions from DATA_DIR + system providers from source dir
-  await initBuiltInPackages(dataDir);
+  // Load all system packages (providers + skills + extensions + flows) from ZIPs
+  await initSystemPackages();
 
   // Sync system packages to DB for all orgs (with registry-grade versioning)
   await syncSystemPackages().catch((err) => {
@@ -215,12 +193,13 @@ async function syncSystemPackages(): Promise<void> {
         source: "system",
         name: manifest.name as string,
         manifest: manifest as unknown as Record<string, unknown>,
-        content: "",
+        content: entry.content,
       })
       .onConflictDoUpdate({
         target: packages.id,
         set: {
           manifest: manifest as unknown as Record<string, unknown>,
+          content: entry.content,
           source: "system",
           orgId: null,
           ...(isNewVersion ? { updatedAt: new Date() } : {}),

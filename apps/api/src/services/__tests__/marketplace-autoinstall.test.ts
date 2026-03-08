@@ -4,7 +4,7 @@ import {
   resetQueues,
   db,
   schemaStubs,
-  builtinPackagesStub,
+  systemPackagesStub,
   packageVersionsStub,
   tracking,
 } from "./_db-mock.ts";
@@ -27,7 +27,7 @@ mock.module("../../lib/logger.ts", () => ({
 
 mock.module("../../lib/db.ts", () => ({ db }));
 mock.module("@appstrate/db/schema", () => schemaStubs);
-mock.module("../builtin-packages.ts", () => builtinPackagesStub);
+mock.module("../system-packages.ts", () => systemPackagesStub);
 
 mock.module("@appstrate/env", () => ({
   getEnv: () => ({ REGISTRY_URL: "http://test-registry" }),

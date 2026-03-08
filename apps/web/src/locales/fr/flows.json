@@ -4,7 +4,7 @@
   "list.import": "Importer un package (.zip)",
   "list.empty": "Aucun flow disponible.",
   "list.emptyHint": "Ajoutez un flow dans le répertoire <1>flows/</1> ou importez un ZIP",
-  "list.badgeBuiltIn": "Intégré",
+  "list.badgeBuiltIn": "Système",
   "list.badgeAutoInstalled": "Auto",
   "list.running": "{{count}} en cours",
   "detail.breadcrumb": "Flows",

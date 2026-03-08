@@ -150,7 +150,7 @@ app.use("*", async (c, next) => {
   return requireOrgContext()(c, next);
 });
 
-// Boot: load built-in resources, init services, clean up orphans
+// Boot: load system resources, init services, clean up orphans
 await boot();
 
 // Graceful shutdown

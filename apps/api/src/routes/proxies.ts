@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
-import { isBuiltInProxy } from "../services/proxy-registry.ts";
+import { isSystemProxy } from "../services/proxy-registry.ts";
 import {
   listOrgProxies,
   createOrgProxy,
@@ -33,7 +33,7 @@ export function createProxiesRouter() {
   // All endpoints are admin-only
   router.use("*", requireAdmin());
 
-  // GET /api/proxies — list all proxies (built-in + DB)
+  // GET /api/proxies — list all proxies (system + DB)
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const proxies = await listOrgProxies(orgId);
@@ -95,7 +95,7 @@ export function createProxiesRouter() {
       return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
     }
 
-    if (isBuiltInProxy(proxyId)) {
+    if (isSystemProxy(proxyId)) {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: `Cannot modify built-in proxy '${proxyId}'` },
         403,
@@ -119,7 +119,7 @@ export function createProxiesRouter() {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id");
 
-    if (isBuiltInProxy(proxyId)) {
+    if (isSystemProxy(proxyId)) {
       return c.json(
         { error: "OPERATION_NOT_ALLOWED", message: `Cannot delete built-in proxy '${proxyId}'` },
         403,

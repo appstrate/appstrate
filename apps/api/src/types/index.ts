@@ -39,7 +39,7 @@ export interface LoadedFlow {
   prompt: string;
   skills: SkillMeta[];
   extensions: ExtensionMeta[];
-  source: "built-in" | "local";
+  source: "system" | "local";
 }
 
 // Hono context env — shared across all routers

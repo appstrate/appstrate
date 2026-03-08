@@ -26,7 +26,7 @@ async function isSystemProviderInDb(providerId: string): Promise<boolean> {
     .from(packages)
     .where(eq(packages.id, providerId))
     .limit(1);
-  return pkg?.source === "system" || pkg?.source === "built-in";
+  return pkg?.source === "system";
 }
 
 /** Apply default fields forced on proxy-type providers. */
@@ -58,7 +58,7 @@ function packageToProviderConfig(
   const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
   const resolved = buildProviderDefinitionFromManifest(pkg.id, manifest);
-  const isSystem = pkg.source === "system" || pkg.source === "built-in";
+  const isSystem = pkg.source === "system";
   const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
   const adminCredentialSchema =
     explicitSchema ??

@@ -145,7 +145,6 @@ export interface VersionDetailResponse {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  prompt?: string | null;
   content?: string | null;
   yanked: boolean;
   yankedReason: string | null;

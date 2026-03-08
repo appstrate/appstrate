@@ -8,7 +8,7 @@ interface PackageCardProps {
   displayName: string;
   description?: string | null;
   type: "flow" | "skill" | "extension" | "provider";
-  source?: "built-in" | "local";
+  source?: "system" | "local";
   runningExecutions?: number;
   tags?: string[];
   usedByFlows?: number;
@@ -54,7 +54,7 @@ export function PackageCard({
           <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {source === "built-in" && (
+          {source === "system" && (
             <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
               {t("list.badgeBuiltIn")}
             </span>

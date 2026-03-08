@@ -1,6 +1,6 @@
 import { db } from "../lib/db.ts";
 import { providerCredentials } from "@appstrate/db/schema";
-import { getSystemPackagesByType } from "./builtin-packages.ts";
+import { getSystemPackagesByType } from "./system-packages.ts";
 import { logger } from "../lib/logger.ts";
 
 /**

@@ -3,7 +3,7 @@ import { db } from "../lib/db.ts";
 import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import { getBuiltInProxies, isBuiltInProxy } from "./proxy-registry.ts";
+import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgProxyInfo } from "@appstrate/shared-types";
@@ -24,10 +24,10 @@ function maskProxyUrl(rawUrl: string): string {
   }
 }
 
-// --- List (built-in + DB) ---
+// --- List (system + DB) ---
 
 export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
-  const builtIn = getBuiltInProxies();
+  const system = getSystemProxies();
   const result: OrgProxyInfo[] = [];
 
   // DB proxies for this org
@@ -36,9 +36,9 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
   // Check if org has its own default set
   const orgHasDefault = rows.some((r) => r.isDefault);
 
-  // Built-in proxies first
+  // System proxies first
   const now = new Date().toISOString();
-  for (const [id, def] of builtIn) {
+  for (const [id, def] of system) {
     result.push({
       id,
       label: def.label,
@@ -52,9 +52,9 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
     });
   }
 
-  // DB proxies (skip if ID conflicts with built-in)
+  // DB proxies (skip if ID conflicts with system proxy)
   for (const row of rows) {
-    if (builtIn.has(row.id)) continue;
+    if (system.has(row.id)) continue;
     let urlPrefix: string;
     try {
       urlPrefix = maskProxyUrl(decrypt(row.urlEncrypted));
@@ -104,7 +104,7 @@ export async function updateOrgProxy(
   proxyId: string,
   data: { label?: string; url?: string; enabled?: boolean },
 ): Promise<void> {
-  if (isBuiltInProxy(proxyId)) {
+  if (isSystemProxy(proxyId)) {
     throw new Error("Cannot modify built-in proxy");
   }
 
@@ -120,7 +120,7 @@ export async function updateOrgProxy(
 }
 
 export async function deleteOrgProxy(orgId: string, proxyId: string): Promise<void> {
-  if (isBuiltInProxy(proxyId)) {
+  if (isSystemProxy(proxyId)) {
     throw new Error("Cannot delete built-in proxy");
   }
   await db.delete(orgProxies).where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)));
@@ -135,8 +135,8 @@ export async function setDefaultProxy(orgId: string, proxyId: string | null): Pr
 
   if (proxyId === null) return;
 
-  // Only DB proxies can be flagged — built-in defaults are handled by the resolution cascade
-  if (!isBuiltInProxy(proxyId)) {
+  // Only DB proxies can be flagged — system defaults are handled by the resolution cascade
+  if (!isSystemProxy(proxyId)) {
     await db
       .update(orgProxies)
       .set({ isDefault: true, updatedAt: new Date() })
@@ -188,9 +188,9 @@ export async function resolveProxyUrl(
     }
   }
 
-  // 3. Check built-in proxies for a default
-  const builtIn = getBuiltInProxies();
-  for (const [, def] of builtIn) {
+  // 3. Check system proxies for a default
+  const system = getSystemProxies();
+  for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
       return def.url;
     }
@@ -201,10 +201,10 @@ export async function resolveProxyUrl(
 }
 
 async function loadProxyUrl(orgId: string, proxyId: string): Promise<string | null> {
-  // Check built-in first
-  const builtIn = getBuiltInProxies();
-  const builtInDef = builtIn.get(proxyId);
-  if (builtInDef) return builtInDef.url;
+  // Check system proxies first
+  const system = getSystemProxies();
+  const systemDef = system.get(proxyId);
+  if (systemDef) return systemDef.url;
 
   // Check DB
   const [row] = await db

@@ -158,7 +158,7 @@ export const packagesPaths = {
       operationId: "listSkills",
       tags: ["Packages"],
       summary: "List skills",
-      description: "List all skills (built-in + org) in the organization.",
+      description: "List all skills (system + org) in the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -568,7 +568,7 @@ export const packagesPaths = {
       operationId: "listExtensions",
       tags: ["Packages"],
       summary: "List extensions",
-      description: "List all extensions (built-in + org) in the organization.",
+      description: "List all extensions (system + org) in the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -1251,7 +1251,6 @@ export const packagesPaths = {
                   version: { type: "string" },
                   manifest: { type: "object" },
                   content: { type: ["string", "null"] },
-                  prompt: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
                   integrity: { type: "string" },
