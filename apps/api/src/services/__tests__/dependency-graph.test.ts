@@ -39,7 +39,7 @@ function makeNode(overrides: Partial<GraphNode> = {}): GraphNode {
     type: "skill",
     displayName: "Test Pkg",
     version: "1.0.0",
-    lastPublishedVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
+    registryVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
     source: "local",
     ...overrides,
   };
@@ -71,28 +71,28 @@ describe("computePublishStatus", () => {
     expect(computePublishStatus(makeNode({ version: "not-semver" }))).toBe("no_version");
   });
 
-  test("returns unpublished when lastPublishedVersion is null", () => {
-    expect(computePublishStatus(makeNode({ version: "1.0.0", lastPublishedVersion: null }))).toBe(
+  test("returns unpublished when registryVersion is null", () => {
+    expect(computePublishStatus(makeNode({ version: "1.0.0", registryVersion: null }))).toBe(
       "unpublished",
     );
   });
 
-  test("returns outdated when version is ahead of lastPublishedVersion", () => {
-    expect(
-      computePublishStatus(makeNode({ version: "2.0.0", lastPublishedVersion: "1.0.0" })),
-    ).toBe("outdated");
+  test("returns outdated when version is ahead of registryVersion", () => {
+    expect(computePublishStatus(makeNode({ version: "2.0.0", registryVersion: "1.0.0" }))).toBe(
+      "outdated",
+    );
   });
 
-  test("returns version_behind when version is behind lastPublishedVersion", () => {
-    expect(
-      computePublishStatus(makeNode({ version: "1.0.0", lastPublishedVersion: "1.0.1" })),
-    ).toBe("version_behind");
+  test("returns version_behind when version is behind registryVersion", () => {
+    expect(computePublishStatus(makeNode({ version: "1.0.0", registryVersion: "1.0.1" }))).toBe(
+      "version_behind",
+    );
   });
 
   test("returns published when versions match", () => {
-    expect(
-      computePublishStatus(makeNode({ version: "1.0.0", lastPublishedVersion: "1.0.0" })),
-    ).toBe("published");
+    expect(computePublishStatus(makeNode({ version: "1.0.0", registryVersion: "1.0.0" }))).toBe(
+      "published",
+    );
   });
 });
 
@@ -379,7 +379,7 @@ describe("getPublishPlan", () => {
     expect(plan.items[0]!.packageId).toBe("@test/skill");
     expect(plan.items[0]!.status).toBe("unpublished");
     expect(plan.items[1]!.packageId).toBe("@test/flow");
-    // Registry is not configured in test mock, so lastPublishedVersion stays null → unpublished
+    // Registry is not configured in test mock, so registryVersion stays null → unpublished
     expect(plan.items[1]!.status).toBe("unpublished");
   });
 

@@ -13,7 +13,7 @@ export interface GraphNode {
   type: "flow" | "skill" | "extension" | "provider";
   displayName: string;
   version: string | null;
-  lastPublishedVersion: string | null;
+  registryVersion: string | null;
   source: string;
 }
 
@@ -35,7 +35,7 @@ export interface PublishPlanItem {
   type: "flow" | "skill" | "extension" | "provider";
   displayName: string;
   version: string | null;
-  lastPublishedVersion: string | null;
+  registryVersion: string | null;
   status: PublishStatus;
 }
 
@@ -48,11 +48,11 @@ export interface PublishPlan {
 
 export function computePublishStatus(node: GraphNode): PublishStatus {
   if (node.source === "system" || node.source === "built-in") return "system";
-  const { version, lastPublishedVersion } = node;
+  const { version, registryVersion } = node;
   if (!version || !isValidVersion(version)) return "no_version";
-  if (!lastPublishedVersion) return "unpublished";
-  if (version === lastPublishedVersion) return "published";
-  if (versionGt(version, lastPublishedVersion)) return "outdated";
+  if (!registryVersion) return "unpublished";
+  if (version === registryVersion) return "published";
+  if (versionGt(version, registryVersion)) return "outdated";
   return "version_behind";
 }
 
@@ -131,7 +131,7 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
       type: pkg.type,
       displayName,
       version,
-      lastPublishedVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
+      registryVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
       source: pkg.source,
     });
 
@@ -227,7 +227,7 @@ export async function getPublishPlan(
   for (const [id, registryVersion] of registryVersions) {
     const node = graph.nodes.get(id);
     if (node) {
-      graph.nodes.set(id, { ...node, lastPublishedVersion: registryVersion });
+      graph.nodes.set(id, { ...node, registryVersion: registryVersion });
     }
   }
 
@@ -244,7 +244,7 @@ export async function getPublishPlan(
       type: node.type,
       displayName: node.displayName,
       version: node.version,
-      lastPublishedVersion: node.lastPublishedVersion,
+      registryVersion: node.registryVersion,
       status: computePublishStatus(node),
     };
   });
