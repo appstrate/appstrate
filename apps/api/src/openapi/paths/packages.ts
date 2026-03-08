@@ -1297,4 +1297,93 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/fork": {
+    post: {
+      operationId: "forkPackage",
+      tags: ["Packages"],
+      summary: "Fork a package to your organization",
+      description:
+        "Create an editable copy of a non-owned package under the current organization's scope. The fork preserves the source content and manifest but updates the package name to use the org scope. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+          description: "Package scope (e.g. @other-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
+          description: "Package name",
+        },
+      ],
+      responses: {
+        "201": {
+          description: "Package forked successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["packageId", "type", "forkedFrom"],
+                properties: {
+                  packageId: { type: "string", description: "New package ID under org scope" },
+                  type: {
+                    type: "string",
+                    enum: ["flow", "skill", "extension", "provider"],
+                  },
+                  forkedFrom: { type: "string", description: "Source package ID" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Already owned or name collision",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string", enum: ["ALREADY_OWNED", "NAME_COLLISION"] },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "403": {
+          description: "Not an admin",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "404": {
+          description: "Package not found",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
 } as const;

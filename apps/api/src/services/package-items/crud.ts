@@ -85,6 +85,7 @@ export async function createOrgItem(
   item: CreateItemInput,
   cfg: PackageTypeConfig,
   manifest?: Record<string, unknown>,
+  forkedFrom?: string,
 ): Promise<Package> {
   const now = new Date();
   const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
@@ -111,6 +112,7 @@ export async function createOrgItem(
       createdBy: item.createdBy ?? null,
       createdAt: now,
       updatedAt: now,
+      forkedFrom: forkedFrom ?? null,
     })
     .returning();
 
@@ -149,7 +151,10 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
     .select()
     .from(packages)
     .where(and(orgFilter, eq(packages.type, cfg.type)))
-    .orderBy(desc(packages.createdAt));
+    .orderBy(
+      sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
+      desc(packages.createdAt),
+    );
 
   // Count usage via packageDependencies junction table (unified for all types)
   const countMap = new Map<string, number>();
@@ -175,6 +180,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       usedByFlows: countMap.get(row.id) ?? 0,
       version: (m.version as string) ?? null,
       autoInstalled: row.autoInstalled,
+      forkedFrom: row.forkedFrom ?? null,
     };
   });
 }
@@ -214,6 +220,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     manifestName: (m.name as string) ?? null,
     manifest: (data.manifest ?? {}) as Record<string, unknown>,
     lockVersion: data.version,
+    forkedFrom: data.forkedFrom ?? null,
     flows: await getPackageDisplayNames(packageIds),
   };
 }

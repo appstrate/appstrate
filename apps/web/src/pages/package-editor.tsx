@@ -12,7 +12,7 @@ import {
   useUpdatePackage,
 } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
-import { useOrg } from "../hooks/use-org";
+import { useOrg, usePackageOwnership } from "../hooks/use-org";
 
 // Flow editor components
 import { MetadataSection } from "../components/flow-editor/metadata-section";
@@ -326,7 +326,7 @@ function PackageEditorInner({
   return (
     <div className="space-y-4">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to={`/#${typePath}`} className="text-muted-foreground hover:text-foreground">
+        <Link to={`/${typePath}`} className="text-muted-foreground hover:text-foreground">
           {t(`packages.type.${typePath}`, { ns: "settings" })}
         </Link>
         <span className="opacity-50">/</span>
@@ -395,7 +395,7 @@ function PackageEditorInner({
           <Button
             variant="outline"
             type="button"
-            onClick={() => navigate(isEdit ? `/${typePath}/${packageId}` : `/#${typePath}`)}
+            onClick={() => navigate(isEdit ? `/${typePath}/${packageId}` : `/${typePath}`)}
           >
             {t("btn.cancel")}
           </Button>
@@ -417,6 +417,7 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isOrgAdmin, currentOrg } = useOrg();
+  const { isOwned } = usePackageOwnership(packageId);
   const isEdit = !!scope;
 
   // Load detail for editing
@@ -463,6 +464,11 @@ export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extensio
   }
 
   if (isEdit && detail && (detail as { source?: string }).source === "system") {
+    navigate(`/${type === "flow" ? "flows" : `${type}s`}/${packageId}`, { replace: true });
+    return null;
+  }
+
+  if (isEdit && !isOwned) {
     navigate(`/${type === "flow" ? "flows" : `${type}s`}/${packageId}`, { replace: true });
     return null;
   }

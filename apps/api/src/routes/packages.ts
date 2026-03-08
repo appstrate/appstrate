@@ -46,7 +46,7 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAdmin } from "../middleware/guards.ts";
+import { requireAdmin, requireOwnedPackage } from "../middleware/guards.ts";
 import { getRunningExecutionsForPackage } from "../services/state.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
@@ -1049,28 +1049,76 @@ export function createPackagesRouter() {
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions`,
       requireAdmin(),
+      requireOwnedPackage(),
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
       requireAdmin(),
+      requireOwnedPackage(),
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name/versions/:version`,
       requireAdmin(),
+      requireOwnedPackage(),
       makeDeleteVersionHandler(rcfg),
     );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(`/${path}/:scope{@[^/]+}/:name`, makeGetHandler(rcfg));
-    router.put(`/${path}/:scope{@[^/]+}/:name`, requireAdmin(), makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:scope{@[^/]+}/:name`, requireAdmin(), makeDeleteHandler(rcfg));
+    router.put(
+      `/${path}/:scope{@[^/]+}/:name`,
+      requireAdmin(),
+      requireOwnedPackage(),
+      makeUpdateHandler(rcfg),
+    );
+    router.delete(
+      `/${path}/:scope{@[^/]+}/:name`,
+      requireAdmin(),
+      requireOwnedPackage(),
+      makeDeleteHandler(rcfg),
+    );
     // Unscoped IDs
     router.get(`/${path}/:id`, makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requireAdmin(), makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireAdmin(), makeDeleteHandler(rcfg));
+    router.put(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeDeleteHandler(rcfg));
   }
+
+  // --- Fork route ---
+  router.post("/:scope{@[^/]+}/:name/fork", requireAdmin(), async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const orgId = c.get("orgId");
+    const orgSlug = c.get("orgSlug");
+    const user = c.get("user");
+
+    const { forkPackage } = await import("../services/package-fork.ts");
+    const result = await forkPackage(orgId, orgSlug, packageId, user.id);
+
+    if ("code" in result) {
+      switch (result.code) {
+        case "ALREADY_OWNED":
+          return c.json({ error: "ALREADY_OWNED", message: "You already own this package" }, 400);
+        case "NOT_FOUND":
+          return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
+        case "NAME_COLLISION":
+          return c.json(
+            {
+              error: "NAME_COLLISION",
+              message: "A package with this name already exists in your organization",
+            },
+            400,
+          );
+        case "UNKNOWN_TYPE":
+          return c.json(
+            { error: "UNKNOWN_TYPE", message: `Unsupported package type: ${result.type}` },
+            400,
+          );
+      }
+    }
+
+    return c.json(result, 201);
+  });
 
   // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
   router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
@@ -1302,7 +1350,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/:scope/:name/publish — publish a package to registry
-  router.post("/:scope{@[^/]+}/:name/publish", requireAdmin(), async (c) => {
+  router.post("/:scope{@[^/]+}/:name/publish", requireAdmin(), requireOwnedPackage(), async (c) => {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;

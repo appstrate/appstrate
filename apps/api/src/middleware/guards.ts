@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/flow-service.ts";
 import { getRunningExecutionsForPackage } from "../services/state.ts";
 
@@ -26,6 +27,30 @@ export function requireFlow() {
       return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${packageId}' not found` }, 404);
     }
     c.set("flow", flow);
+    return next();
+  };
+}
+
+/** Middleware: reject with 403 if the package is not owned by the current org. */
+export function requireOwnedPackage() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const scope = c.req.param("scope");
+    const name = c.req.param("name");
+    const id = c.req.param("id");
+    // Route pattern `:scope{@[^/]+}` includes the @ prefix
+    const packageId = scope && name ? `${scope}/${name}` : id;
+    if (!packageId) return next();
+
+    const orgSlug = c.get("orgSlug");
+    if (!isOwnedByOrg(packageId, orgSlug)) {
+      return c.json(
+        {
+          error: "NOT_OWNED",
+          message: "Cannot modify a package not owned by your organization. Fork it instead.",
+        },
+        403,
+      );
+    }
     return next();
   };
 }

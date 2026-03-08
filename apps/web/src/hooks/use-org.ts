@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isOwnedByOrg } from "@appstrate/core/naming";
 import { api } from "../api";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
 import type { OrganizationWithRole } from "@appstrate/shared-types";
@@ -58,4 +59,11 @@ export function useOrg() {
     isOrgAdmin: currentOrg?.role === "owner" || currentOrg?.role === "admin",
     isOrgOwner: currentOrg?.role === "owner",
   };
+}
+
+/** Check if a package is owned by the current org (scope matches org slug). */
+export function usePackageOwnership(packageId: string | undefined) {
+  const { currentOrg } = useOrg();
+  if (!packageId || !currentOrg) return { isOwned: false };
+  return { isOwned: isOwnedByOrg(packageId, currentOrg.slug) };
 }

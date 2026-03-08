@@ -203,6 +203,7 @@ const expectedEndpoints = [
   "GET /api/packages/{packageId}/{version}/download",
   "GET /api/packages/{scope}/{name}/publish-plan",
   "POST /api/packages/{scope}/{name}/publish",
+  "POST /api/packages/{scope}/{name}/fork",
 
   // Registry
   "POST /api/registry/connect",

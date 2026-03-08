@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, or, isNull } from "drizzle-orm";
+import { eq, and, or, isNull, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
@@ -140,7 +140,8 @@ export function createProvidersRouter() {
       .from(packages)
       .where(
         and(or(eq(packages.orgId, orgId), isNull(packages.orgId)), eq(packages.type, "provider")),
-      );
+      )
+      .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
     // Count provider usage across all flows
     const allFlows = await listPackages(orgId);
