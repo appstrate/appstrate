@@ -14,19 +14,23 @@ import { PackageActionsDropdown } from "./package-actions-dropdown";
 export function FlowActions({
   packageId,
   isOrgAdmin,
+  isOwned,
   isHistoricalVersion,
   hasDraftChanges,
   downloadVersion,
   downloadPackage,
   onCreateVersion,
+  onFork,
 }: {
   packageId: string;
   isOrgAdmin: boolean;
+  isOwned: boolean;
   isHistoricalVersion: boolean;
   hasDraftChanges: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
   onCreateVersion: () => void;
+  onFork?: () => void;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = useFlowDetail(packageId);
@@ -53,12 +57,14 @@ export function FlowActions({
       packageId={packageId}
       type="flow"
       isOrgAdmin={isOrgAdmin}
+      isOwned={isOwned}
       isBuiltIn={detail.source === "system"}
       isHistoricalVersion={isHistoricalVersion}
       hasDraftChanges={hasDraftChanges}
       downloadVersion={downloadVersion}
       onDownload={downloadPackage}
       onCreateVersion={onCreateVersion}
+      onFork={onFork}
       hasConfigSchema={hasConfigSchema}
       onConfigure={() => setConfigOpen(true)}
       runningExecutions={detail.runningExecutions}

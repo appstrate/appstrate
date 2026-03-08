@@ -144,6 +144,7 @@ export interface FlowListItem {
   scope?: string | null;
   version?: string | null;
   type: PackageType;
+  forkedFrom?: string | null;
 }
 
 export interface FlowDetail {
@@ -195,6 +196,7 @@ export interface OrgPackageItem {
   usedByFlows?: number;
   version?: string | null;
   autoInstalled?: boolean;
+  forkedFrom?: string | null;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {

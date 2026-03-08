@@ -1,4 +1,4 @@
-import { eq, and, or, isNull, count } from "drizzle-orm";
+import { eq, and, or, isNull, count, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
@@ -122,7 +122,8 @@ export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
       source: packages.source,
     })
     .from(packages)
-    .where(and(...conditions));
+    .where(and(...conditions))
+    .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
   return rows.map((row) =>
     dbRowToLoadedFlow({

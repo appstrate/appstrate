@@ -6,6 +6,7 @@ import {
   Download,
   Settings,
   GitBranchPlus,
+  GitFork,
   Pencil,
   CalendarPlus,
   Trash2,
@@ -26,12 +27,14 @@ interface PackageActionsDropdownProps {
   packageId: string;
   type: "flow" | "skill" | "extension" | "provider";
   isOrgAdmin: boolean;
+  isOwned: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
   hasDraftChanges: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   onCreateVersion?: () => void;
+  onFork?: () => void;
   // Flow-specific
   hasConfigSchema?: boolean;
   onConfigure?: () => void;
@@ -62,12 +65,14 @@ export function PackageActionsDropdown({
   packageId,
   type,
   isOrgAdmin,
+  isOwned,
   isBuiltIn,
   isHistoricalVersion,
   hasDraftChanges,
   downloadVersion,
   onDownload,
   onCreateVersion,
+  onFork,
   hasConfigSchema,
   onConfigure,
   runningExecutions = 0,
@@ -90,7 +95,7 @@ export function PackageActionsDropdown({
   const [shareGenerating, setShareGenerating] = useState(false);
 
   const isFlow = type === "flow";
-  const isMutable = !isBuiltIn && !isHistoricalVersion;
+  const isMutable = !isBuiltIn && !isHistoricalVersion && isOwned;
 
   // Share logic (flow-only)
   const copyShareLink = () => {
@@ -189,6 +194,14 @@ export function PackageActionsDropdown({
           </DropdownMenuItem>
         )}
 
+        {/* ── Fork (non-owned packages, including system) ── */}
+        {isOrgAdmin && !isOwned && onFork && (
+          <DropdownMenuItem onSelect={onFork}>
+            <GitFork size={14} />
+            {t("fork.button")}
+          </DropdownMenuItem>
+        )}
+
         {/* ── Flow secondary actions ── */}
         {isFlow && isOrgAdmin && (
           <>
@@ -236,7 +249,7 @@ export function PackageActionsDropdown({
         )}
 
         {/* ── Delete ── */}
-        {isOrgAdmin && !isBuiltIn && (
+        {isOrgAdmin && !isBuiltIn && isOwned && (
           <>
             <DropdownMenuSeparator />
             {isFlow && onDeleteFlow && (

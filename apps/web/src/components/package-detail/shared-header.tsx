@@ -32,7 +32,7 @@ export function SharedHeader({
 }) {
   const { t } = useTranslation(["flows", "settings", "common"]);
 
-  const breadcrumbPath = detail.type === "flow" ? "/" : `/#${detail.type}s`;
+  const breadcrumbPath = detail.type === "flow" ? "/" : `/${detail.type}s`;
   const breadcrumbLabel =
     detail.type === "flow"
       ? t("detail.breadcrumb")

@@ -10,9 +10,10 @@ interface VersionHistoryProps {
   packageId: string;
   type: "flow" | "skill" | "extension" | "provider";
   isAdmin: boolean;
+  isOwned: boolean;
 }
 
-export function VersionHistory({ packageId, type, isAdmin }: VersionHistoryProps) {
+export function VersionHistory({ packageId, type, isAdmin, isOwned }: VersionHistoryProps) {
   const { t } = useTranslation("flows");
   const { data: versions } = usePackageVersions(type, packageId);
   const restoreVersion = useRestoreVersion(type, packageId);
@@ -31,7 +32,7 @@ export function VersionHistory({ packageId, type, isAdmin }: VersionHistoryProps
             {v.createdAt ? formatDateField(v.createdAt) : ""}
           </span>
           {v.yanked && <Badge variant="warning">{t("version.yanked")}</Badge>}
-          {isAdmin && (
+          {isAdmin && isOwned && (
             <>
               <Button
                 variant="ghost"

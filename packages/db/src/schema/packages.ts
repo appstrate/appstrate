@@ -50,6 +50,7 @@ export const packages = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
     version: integer("version").notNull().default(1),
+    forkedFrom: text("forked_from"),
   },
   (table) => [
     index("idx_packages_org_id").on(table.orgId),

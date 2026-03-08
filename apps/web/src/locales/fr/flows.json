@@ -277,5 +277,10 @@
   "version.history": "Historique",
   "editor.errorContent": "Le contenu est requis.",
   "editor.breadcrumbNewSkill": "Nouveau skill",
-  "editor.breadcrumbNewExtension": "Nouvelle extension"
+  "editor.breadcrumbNewExtension": "Nouvelle extension",
+  "fork.button": "Dupliquer",
+  "fork.errorOwned": "Vous possédez déjà ce package",
+  "fork.errorCollision": "Un package avec ce nom existe déjà",
+  "ownership.readOnly": "Ce package appartient à une autre organisation (lecture seule)",
+  "ownership.forkedFrom": "Dupliqué depuis "
 }

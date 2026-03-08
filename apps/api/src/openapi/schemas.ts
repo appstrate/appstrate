@@ -427,6 +427,7 @@ export const schemas = {
       usedByFlows: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       autoInstalled: { type: "boolean" },
+      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -449,6 +450,7 @@ export const schemas = {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
       },
+      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       flows: {
         type: "array",
         items: {

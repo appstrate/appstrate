@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useParams, Link, Navigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useParams, Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -10,13 +10,15 @@ import {
   useVersionDetail,
   usePackageDownload,
   useDeletePackage,
+  useForkPackage,
 } from "../hooks/use-packages";
-import { useOrg } from "../hooks/use-org";
+import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
+import { ApiError } from "../api";
 import { Settings, CheckCircle } from "lucide-react";
 
 // Shared components
@@ -111,6 +113,7 @@ export function UnifiedPackageDetailPage({
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
   const { isOrgAdmin } = useOrg();
+  const { isOwned } = usePackageOwnership(packageId);
   const isVersionView = !!versionParam;
   const resetUI = useFlowDetailUI((s) => s.reset);
 
@@ -147,6 +150,7 @@ export function UnifiedPackageDetailPage({
   const versionCount = type === "flow" ? flowDetail?.versionCount : pkgDetail?.versionCount;
   const hasUnpublishedChanges =
     type === "flow" ? flowDetail?.hasUnpublishedChanges : pkgDetail?.hasUnpublishedChanges;
+  const forkedFrom = pkgDetail?.forkedFrom ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -161,9 +165,28 @@ export function UnifiedPackageDetailPage({
     hasDraftChanges ? "latest" : undefined,
   );
 
+  const navigate = useNavigate();
   const downloadPackage = usePackageDownload(scope, name);
   const deletePkgMutation = useDeletePackage(type === "flow" ? "skill" : type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
+  const forkMutation = useForkPackage();
+  const handleFork = useCallback(() => {
+    forkMutation.mutate(packageId, {
+      onSuccess: (data) => {
+        navigate(`/${type === "flow" ? "flows" : `${type}s`}/${data.packageId}`);
+      },
+      onError: (err) => {
+        const code = err instanceof ApiError ? err.code : "";
+        if (code === "ALREADY_OWNED") {
+          alert(t("fork.errorOwned"));
+        } else if (code === "NAME_COLLISION") {
+          alert(t("fork.errorCollision"));
+        } else {
+          alert(err instanceof Error ? err.message : t("fork.errorCollision"));
+        }
+      },
+    });
+  }, [forkMutation, packageId, navigate, type, t]);
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
@@ -311,11 +334,13 @@ export function UnifiedPackageDetailPage({
               <FlowActions
                 packageId={packageId}
                 isOrgAdmin={isOrgAdmin}
+                isOwned={isOwned}
                 isHistoricalVersion={isHistoricalVersion}
                 hasDraftChanges={hasDraftChanges}
                 downloadVersion={downloadVersion ?? undefined}
                 downloadPackage={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
+                onFork={handleFork}
               />
             </>
           ) : isOrgAdmin ? (
@@ -334,12 +359,14 @@ export function UnifiedPackageDetailPage({
                 packageId={packageId}
                 type={type}
                 isOrgAdmin={isOrgAdmin}
+                isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 hasDraftChanges={hasDraftChanges}
                 downloadVersion={downloadVersion ?? undefined}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
+                onFork={handleFork}
                 hasCredentials={providerConfig?.hasCredentials}
                 onDeleteCredentials={() => {
                   if (!confirm(t("providers.deleteCredentialsConfirm", { ns: "settings" }))) return;
@@ -382,6 +409,36 @@ export function UnifiedPackageDetailPage({
         latestUrl={type === "flow" ? `/flows/${packageId}` : `/${type}s/${packageId}`}
         latestVersion={version}
       />
+
+      {!isOwned && (
+        <div className="flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 mb-4 text-sm">
+          <span className="text-blue-400">{t("ownership.readOnly")}</span>
+          {forkedFrom && (
+            <span className="text-muted-foreground">
+              — {t("ownership.forkedFrom")}
+              <Link
+                to={`/${type === "flow" ? "flows" : `${type}s`}/${forkedFrom}`}
+                className="text-blue-400 hover:underline"
+              >
+                {forkedFrom}
+              </Link>
+            </span>
+          )}
+        </div>
+      )}
+      {isOwned && forkedFrom && (
+        <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-4 py-3 mb-4 text-sm">
+          <span className="text-muted-foreground">
+            {t("ownership.forkedFrom")}
+            <Link
+              to={`/${type === "flow" ? "flows" : `${type}s`}/${forkedFrom}`}
+              className="text-blue-400 hover:underline"
+            >
+              {forkedFrom}
+            </Link>
+          </span>
+        </div>
+      )}
 
       {type === "flow" && servicesSummary && servicesSummary.actionCount > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
@@ -484,7 +541,7 @@ export function UnifiedPackageDetailPage({
       )}
 
       {tab === "versions" && (
-        <VersionHistory packageId={packageId} type={type} isAdmin={isOrgAdmin} />
+        <VersionHistory packageId={packageId} type={type} isAdmin={isOrgAdmin} isOwned={isOwned} />
       )}
 
       {tab === "changes" && hasDraftChanges && !isVersionView && (

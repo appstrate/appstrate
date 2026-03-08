@@ -261,3 +261,21 @@ export function useVersionInfo(type: VersionableType, packageId: string | undefi
     enabled: !!packageId,
   });
 }
+
+// --- Fork ---
+
+export function useForkPackage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (packageId: string) => {
+      return api<{ packageId: string; type: string; forkedFrom: string }>(
+        `/packages/${packageId}/fork`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+    },
+  });
+}
