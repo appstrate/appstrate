@@ -8,7 +8,7 @@ import { Trash2 } from "lucide-react";
 
 interface VersionHistoryProps {
   packageId: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   isAdmin: boolean;
 }
 

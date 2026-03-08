@@ -17,6 +17,7 @@ import { buildExecutionContext } from "../services/env-builder.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 export function createShareRouter() {
   const router = new Hono();
@@ -39,7 +40,7 @@ export function createShareRouter() {
     // Resolve service statuses
     const adminConns = await getAdminConnections(orgId, flow.id);
     const serviceStatuses = await resolveServiceStatuses(
-      flow.manifest.requires.services,
+      resolveManifestServices(flow.manifest),
       adminConns,
       orgId,
       undefined,
@@ -120,19 +121,16 @@ export function createShareRouter() {
     }));
 
     // Resolve service profiles
+    const manifestServices = resolveManifestServices(flow.manifest);
     const serviceProfiles = await resolveServiceProfiles(
-      flow.manifest.requires.services,
+      manifestServices,
       userId,
       packageId,
       orgId,
     );
 
     // Validate service dependencies before execution
-    const depError = await validateFlowDependencies(
-      flow.manifest.requires.services,
-      serviceProfiles,
-      orgId,
-    );
+    const depError = await validateFlowDependencies(manifestServices, serviceProfiles, orgId);
     if (depError) {
       return c.json(depError, 400);
     }

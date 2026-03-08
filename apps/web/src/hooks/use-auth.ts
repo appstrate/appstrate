@@ -51,6 +51,11 @@ function initAuth() {
     .then(async (result) => {
       if (result.data?.user) {
         const profile = await fetchProfile();
+        if (!profile) {
+          await authClient.signOut();
+          clearAuth();
+          return;
+        }
         setAuthenticatedUser(result.data.user, profile);
       } else {
         clearAuth();
@@ -65,6 +70,11 @@ export async function refreshAuth() {
   const result = await authClient.getSession();
   if (result.data?.user) {
     const profile = await fetchProfile();
+    if (!profile) {
+      await authClient.signOut();
+      clearAuth();
+      return;
+    }
     setAuthenticatedUser(result.data.user, profile);
   } else {
     clearAuth();

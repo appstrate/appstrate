@@ -11,7 +11,6 @@ import {
   type OAuthCallbackResult,
   type OAuth1CallbackResult,
 } from "@appstrate/connect";
-import { getProviderSnapshot } from "./helpers.ts";
 
 export async function initiateConnection(
   provider: string,
@@ -35,19 +34,14 @@ export async function initiateConnection(
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
   const result = await handleOAuthCallback(db, code, state);
 
-  const { snapshot, configHash } = await getProviderSnapshot(result.orgId, result.providerId);
-
   await saveConnection(
     db,
     result.profileId,
     result.providerId,
-    "oauth2",
     {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
     },
-    snapshot,
-    configHash,
     {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
@@ -70,21 +64,11 @@ export async function handleOAuth1CallbackAndSave(
 ): Promise<OAuth1CallbackResult> {
   const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
 
-  const { snapshot, configHash } = await getProviderSnapshot(result.orgId, result.providerId);
-
-  await saveConnection(
-    db,
-    result.profileId,
-    result.providerId,
-    "oauth1",
-    {
-      consumer_key: result.consumerKey,
-      access_token: result.accessToken,
-      access_token_secret: result.accessTokenSecret,
-    },
-    snapshot,
-    configHash,
-  );
+  await saveConnection(db, result.profileId, result.providerId, {
+    consumer_key: result.consumerKey,
+    access_token: result.accessToken,
+    access_token_secret: result.accessTokenSecret,
+  });
 
   logger.info("OAuth1 connection established", {
     providerId: result.providerId,

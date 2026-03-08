@@ -57,7 +57,7 @@ export const providersPaths = {
       },
     },
   },
-  "/api/providers/{providerId}": {
+  "/api/providers/{scope}/{name}": {
     put: {
       operationId: "updateProvider",
       tags: ["Providers"],
@@ -66,7 +66,8 @@ export const providersPaths = {
         "Update a custom provider configuration. Admin only. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -90,12 +91,86 @@ export const providersPaths = {
         "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by flows.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Provider deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { description: "Provider in use by flows" },
+      },
+    },
+  },
+  "/api/providers/credentials/{scope}/{name}": {
+    delete: {
+      operationId: "deleteProviderCredentials",
+      tags: ["Providers"],
+      summary: "Delete provider credentials",
+      description: "Remove admin credentials for a provider. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Credentials deleted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { configured: { type: "boolean" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    put: {
+      operationId: "configureProviderCredentials",
+      tags: ["Providers"],
+      summary: "Configure provider credentials",
+      description: "Set OAuth client credentials for a provider. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                credentials: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "Key-value pairs matching the provider's adminCredentialSchema fields. Optional for non-OAuth providers.",
+                },
+                enabled: {
+                  type: "boolean",
+                  description: "Whether to enable this provider for use",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Credentials configured",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { configured: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

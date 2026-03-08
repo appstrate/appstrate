@@ -7,7 +7,7 @@ interface SharedHeaderDetail {
   displayName: string;
   description: string;
   source: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   version?: string | null;
   versionCount?: number;
   hasUnpublishedChanges?: boolean;

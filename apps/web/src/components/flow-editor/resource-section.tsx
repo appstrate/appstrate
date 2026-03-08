@@ -27,13 +27,13 @@ interface ResourceSectionProps {
   onChange: (entries: ResourceEntry[]) => void;
 }
 
-function VersionSelect({
+export function VersionSelect({
   type,
   packageId,
   value,
   onChange,
 }: {
-  type: PackageType;
+  type: PackageType | "flow" | "provider";
   packageId: string;
   value: string;
   onChange: (version: string) => void;
@@ -95,7 +95,7 @@ export function ResourceSection({
       onChange(selectedEntries.filter((e) => e.id !== id));
     } else {
       const item = items?.find((i) => i.id === id);
-      const version = item?.lastPublishedVersion ?? item?.version ?? "*";
+      const version = item?.version ?? "*";
       onChange([...selectedEntries, { id, version }]);
     }
   };

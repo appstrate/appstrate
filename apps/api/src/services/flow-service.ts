@@ -127,7 +127,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
     displayName: row.id,
     description: "",
     author: "",
-    requires: { services: [] },
+    requires: { services: {} },
   }) as FlowManifest;
 
   // Read version maps from the flow's manifest

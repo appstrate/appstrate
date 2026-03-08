@@ -361,10 +361,10 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/extension) create/update mutations ---
 
-export function useCreatePackage(type: "skill" | "extension") {
+export function useCreatePackage(type: "skill" | "extension" | "provider") {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const path = type === "skill" ? "skills" : "extensions";
+  const path = type === "skill" ? "skills" : type === "extension" ? "extensions" : "providers";
   return useMutation({
     mutationFn: async (body: {
       id: string;
@@ -390,11 +390,11 @@ export function useCreatePackage(type: "skill" | "extension") {
   });
 }
 
-export function useUpdatePackage(type: "skill" | "extension", packageId: string) {
+export function useUpdatePackage(type: "skill" | "extension" | "provider", packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const path = type === "skill" ? "skills" : "extensions";
-  const detailKey = type === "skill" ? "skill" : "extension";
+  const path = type === "skill" ? "skills" : type === "extension" ? "extensions" : "providers";
+  const detailKey = type;
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
@@ -420,8 +420,43 @@ export function useUpdatePackage(type: "skill" | "extension", packageId: string)
 
 function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["providers"] });
-  qc.invalidateQueries({ queryKey: ["provider-templates"] });
+  qc.invalidateQueries({ queryKey: ["packages", "providers"] });
+  qc.invalidateQueries({ queryKey: ["packages", "provider"] });
+  qc.invalidateQueries({ queryKey: ["version-info"] });
   qc.invalidateQueries({ queryKey: ["services"] });
+}
+
+export function useConfigureProviderCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      providerId,
+      credentials,
+      enabled,
+    }: {
+      providerId: string;
+      credentials?: Record<string, string>;
+      enabled?: boolean;
+    }) => {
+      return api(`/providers/credentials/${providerId}`, {
+        method: "PUT",
+        body: JSON.stringify({ credentials, enabled }),
+      });
+    },
+    onSuccess: () => invalidateProviderQueries(qc),
+    onError: onMutationError,
+  });
+}
+
+export function useDeleteProviderCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (providerId: string) => {
+      return api(`/providers/credentials/${providerId}`, { method: "DELETE" });
+    },
+    onSuccess: () => invalidateProviderQueries(qc),
+    onError: onMutationError,
+  });
 }
 
 export function useCreateProvider() {

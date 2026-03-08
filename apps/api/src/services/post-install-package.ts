@@ -1,4 +1,6 @@
 import { logger } from "../lib/logger.ts";
+import { db } from "../lib/db.ts";
+import { providerCredentials } from "@appstrate/db/schema";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
   createOrgItem,
@@ -58,7 +60,7 @@ async function upsertItem(
  * handles skill/extension upsert + storage.
  */
 export async function postInstallPackage(params: {
-  packageType: "flow" | "skill" | "extension";
+  packageType: "flow" | "skill" | "extension" | "provider";
   packageId: string;
   orgId: string;
   userId: string;
@@ -104,6 +106,14 @@ export async function postInstallPackage(params: {
     const item: CreateItemInput = { id: packageId, content, createdBy: userId };
     await upsertItem(orgId, packageId, item, cfg, manifest);
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
+  }
+
+  if (packageType === "provider") {
+    // UPSERT providerCredentials (providerId, orgId) — empty, admin configures later
+    await db
+      .insert(providerCredentials)
+      .values({ providerId: packageId, orgId })
+      .onConflictDoNothing();
   }
 
   await createVersion(manifest);

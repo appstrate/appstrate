@@ -1,4 +1,4 @@
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
@@ -167,29 +167,31 @@ export async function updateOrgItem(
 
 /** List all items of a type in the org with usedByFlows count (built-in + org). */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
+  const orgFilter =
+    cfg.type === "provider"
+      ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
+      : eq(packages.orgId, orgId);
+
   const data = await db
     .select()
     .from(packages)
-    .where(
-      and(
-        eq(packages.orgId, orgId),
-        eq(packages.type, cfg.type),
-        eq(packages.autoInstalled, false),
-      ),
-    )
+    .where(and(orgFilter, eq(packages.type, cfg.type)))
     .orderBy(desc(packages.createdAt));
 
+  // Count usage via packageDependencies junction table (unified for all types)
+  const countMap = new Map<string, number>();
   const depRows = await db
     .select({ dependencyId: packageDependencies.dependencyId })
     .from(packageDependencies)
     .where(eq(packageDependencies.orgId, orgId));
-
-  const countMap = new Map<string, number>();
   for (const row of depRows) {
     countMap.set(row.dependencyId, (countMap.get(row.dependencyId) ?? 0) + 1);
   }
 
-  const builtInCounts = await countBuiltInUsageFromManifests(orgId, cfg);
+  const builtInCounts =
+    cfg.type === "provider"
+      ? new Map<string, number>()
+      : await countBuiltInUsageFromManifests(orgId, cfg);
 
   const orgItemIds = new Set(data.map((row) => row.id));
 
@@ -214,13 +216,13 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       orgId: row.orgId,
       name: m.displayName ?? row.name,
       description: m.description ?? null,
-      source: "local" as const,
+      source: row.source ?? "local",
       createdBy: row.createdBy,
       createdAt: row.createdAt?.toISOString() ?? "",
       updatedAt: row.updatedAt?.toISOString() ?? "",
       usedByFlows: countMap.get(row.id) ?? 0,
-      lastPublishedVersion: row.lastPublishedVersion ?? null,
       version: (m.version as string) ?? null,
+      autoInstalled: row.autoInstalled,
     };
   });
 
@@ -245,10 +247,15 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     };
   }
 
+  const orgFilter =
+    cfg.type === "provider"
+      ? or(eq(packages.orgId, orgId), isNull(packages.orgId))
+      : eq(packages.orgId, orgId);
+
   const [data] = await db
     .select()
     .from(packages)
-    .where(and(eq(packages.orgId, orgId), eq(packages.id, itemId), eq(packages.type, cfg.type)))
+    .where(and(orgFilter, eq(packages.id, itemId), eq(packages.type, cfg.type)))
     .limit(1);
 
   if (!data) return null;
@@ -267,13 +274,11 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     name: m.displayName ?? data.name,
     description: m.description ?? null,
     content: data.content,
-    source: "local" as const,
+    source: data.source ?? "local",
     createdBy: data.createdBy,
     createdAt: data.createdAt?.toISOString() ?? "",
     updatedAt: data.updatedAt?.toISOString() ?? "",
     autoInstalled: data.autoInstalled,
-    lastPublishedVersion: data.lastPublishedVersion ?? null,
-    lastPublishedAt: data.lastPublishedAt?.toISOString() ?? null,
     version: (m.version as string) ?? null,
     manifestName: (m.name as string) ?? null,
     manifest: (data.manifest ?? {}) as Record<string, unknown>,

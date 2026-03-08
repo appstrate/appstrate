@@ -6,7 +6,7 @@ import {
 } from "./registry-provider.ts";
 import { db } from "../lib/db.ts";
 import { packages } from "@appstrate/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
@@ -16,6 +16,8 @@ import { resolveLatestVersion, versionGt, compareVersionsDesc } from "@appstrate
 import { checkUpdateAvailable } from "@appstrate/core/update-check";
 import { postInstallPackage } from "./post-install-package.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import { syncFlowDepsJunctionTable } from "./package-items/dependencies.ts";
+import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { packageVersions } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 
@@ -48,7 +50,7 @@ export function getMarketplaceStatus(): MarketplaceStatus {
 
 export interface MarketplaceSearchOpts {
   q?: string;
-  type?: "flow" | "skill" | "extension";
+  type?: "flow" | "skill" | "extension" | "provider";
   sort?: "relevance" | "downloads" | "recent";
   page?: number;
   perPage?: number;
@@ -87,17 +89,19 @@ export async function getMarketplacePackage(rawScope: string, name: string, acce
 
 async function findMissingDependencies(
   manifest: Partial<Manifest>,
-  orgId: string,
+  _orgId: string,
 ): Promise<{ scope: string; name: string; type: string; versionRange: string }[]> {
   const deps = extractDependencies(manifest);
   if (deps.length === 0) return [];
 
   const expectedIds = deps.map((d) => buildPackageId(d.depScope, d.depName));
 
+  // No orgId filter — packages.id is globally unique PK.
+  // System providers have orgId = first org but must be found by all orgs.
   const existing = await db
     .select({ id: packages.id })
     .from(packages)
-    .where(and(eq(packages.orgId, orgId), inArray(packages.id, expectedIds)));
+    .where(inArray(packages.id, expectedIds));
 
   const existingSet = new Set(existing.map((e) => e.id));
 
@@ -127,7 +131,7 @@ interface CollectedPackage {
   scope: string;
   name: string;
   version: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   manifest: Record<string, unknown>;
   content: string;
   files: Record<string, Uint8Array>;
@@ -362,6 +366,16 @@ export async function installFromMarketplace(
     });
   }
 
+  // Phase D — sync flow dependency junction table (providers included)
+  for (const pkg of ctx.collected) {
+    if (pkg.type === "flow") {
+      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+        pkg.manifest as Partial<Manifest>,
+      );
+      await syncFlowDepsJunctionTable(pkg.packageId, orgId, skillIds, extensionIds, providerIds);
+    }
+  }
+
   const root = ctx.collected[ctx.collected.length - 1]!;
   const deps = ctx.collected
     .filter((p) => p.autoInstalled)
@@ -407,7 +421,7 @@ async function resolveInstalledVersion(
   const [row] = await db
     .select({ manifest: packages.manifest })
     .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .where(and(eq(packages.id, packageId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
     .limit(1);
   return (((row?.manifest ?? {}) as Partial<Manifest>).version as string) ?? null;
 }
@@ -460,7 +474,7 @@ export async function getMarketplacePackageWithInstallStatus(
   const [installed] = await db
     .select({ id: packages.id })
     .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .where(and(eq(packages.id, packageId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
     .limit(1);
 
   let installedVersion: string | null = null;

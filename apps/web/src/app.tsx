@@ -17,7 +17,7 @@ import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OrgSettingsPage } from "./pages/org-settings";
-import { ConnectorsPage } from "./pages/connectors";
+// ConnectorsPage removed — providers now accessible via /#providers
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
@@ -331,6 +331,19 @@ export function App() {
                 path="/extensions/:scope/:name/:version"
                 element={<UnifiedPackageDetailPage type="extension" />}
               />
+              <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
+              <Route
+                path="/providers/:scope/:name/edit"
+                element={<PackageEditorPage type="provider" />}
+              />
+              <Route
+                path="/providers/:scope/:name"
+                element={<UnifiedPackageDetailPage type="provider" />}
+              />
+              <Route
+                path="/providers/:scope/:name/:version"
+                element={<UnifiedPackageDetailPage type="provider" />}
+              />
               <Route path="/library" element={<Navigate to="/#skills" replace />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
@@ -338,7 +351,7 @@ export function App() {
               <Route path="/marketplace/connection" element={<MarketplaceConnectionPage />} />
               <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
-              <Route path="/connectors" element={<ConnectorsPage />} />
+              <Route path="/connectors" element={<Navigate to="/#providers" replace />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

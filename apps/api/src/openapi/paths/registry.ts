@@ -222,23 +222,22 @@ export const registryPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: [
-                        "packageId",
-                        "type",
-                        "displayName",
-                        "version",
-                        "lastPublishedVersion",
-                        "status",
-                      ],
+                      required: ["packageId", "type", "displayName", "version", "status"],
                       properties: {
                         packageId: { type: "string" },
-                        type: { type: "string", enum: ["flow", "skill", "extension"] },
+                        type: { type: "string", enum: ["flow", "skill", "extension", "provider"] },
                         displayName: { type: "string" },
                         version: { type: ["string", "null"] },
-                        lastPublishedVersion: { type: ["string", "null"] },
                         status: {
                           type: "string",
-                          enum: ["unpublished", "outdated", "published", "no_version"],
+                          enum: [
+                            "unpublished",
+                            "outdated",
+                            "published",
+                            "no_version",
+                            "version_behind",
+                            "system",
+                          ],
                         },
                       },
                     },

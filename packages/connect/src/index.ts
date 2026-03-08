@@ -2,7 +2,6 @@
 export type {
   AuthMode,
   ProviderDefinition,
-  ProviderSnapshot,
   ConnectionRecord,
   ScopeValidationResult,
 } from "./types.ts";
@@ -14,15 +13,17 @@ export { validateScopes } from "./scopes.ts";
 
 // Registry
 export {
-  initBuiltInProviders,
   getProvider,
+  getProviderOrThrow,
+  getProviderOAuthCredentials,
   getProviderOAuthCredentialsOrThrow,
+  getProviderOAuth1CredentialsOrThrow,
   listProviders,
   getProviderAuthMode,
   getDefaultAuthorizedUris,
   getCredentialFieldName,
-  getBuiltInProviders,
-  isBuiltInProvider,
+  isProviderEnabled,
+  hasCredentialsConfigured,
 } from "./registry.ts";
 
 // OAuth2

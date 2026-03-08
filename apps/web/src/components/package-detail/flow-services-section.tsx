@@ -44,7 +44,8 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
   const unbindAdmin = useUnbindAdminService(packageId);
   const disconnectMutation = useDisconnect();
 
-  const { data: providers } = useProviders();
+  const { data: providersData } = useProviders();
+  const providers = providersData?.providers;
   const setApiKeyService = useFlowDetailUI((s) => s.setApiKeyService);
   const setCustomCredService = useFlowDetailUI((s) => s.setCustomCredService);
 

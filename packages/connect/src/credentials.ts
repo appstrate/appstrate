@@ -1,36 +1,27 @@
 import { eq, and } from "drizzle-orm";
-import { serviceConnections } from "@appstrate/db/schema";
+import { serviceConnections, providerCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type {
-  ConnectionRecord,
-  DecryptedCredentials,
-  AuthMode,
-  ProviderSnapshot,
-} from "./types.ts";
+import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { refreshIfNeeded } from "./token-refresh.ts";
 
 /**
- * Get a connection by profile + provider, optionally filtered by configHash.
+ * Get a connection by profile + provider.
  */
 export async function getConnection(
   db: Db,
   profileId: string,
   providerId: string,
-  configHash?: string,
 ): Promise<ConnectionRecord | null> {
-  const conditions = [
-    eq(serviceConnections.profileId, profileId),
-    eq(serviceConnections.providerId, providerId),
-  ];
-  if (configHash) {
-    conditions.push(eq(serviceConnections.configHash, configHash));
-  }
-
   const rows = await db
     .select()
     .from(serviceConnections)
-    .where(and(...conditions))
+    .where(
+      and(
+        eq(serviceConnections.profileId, profileId),
+        eq(serviceConnections.providerId, providerId),
+      ),
+    )
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -51,27 +42,71 @@ export async function listConnections(db: Db, profileId: string): Promise<Connec
 
 /**
  * Get decrypted credentials for a service.
- * Handles token refresh for OAuth2 connections using providerSnapshot.
+ * Handles token refresh for OAuth2 connections by looking up provider
+ * definition and credentials from the DB.
+ * Pass orgId to enable token refresh for OAuth2 connections.
  */
 export async function getCredentials(
   db: Db,
   profileId: string,
   providerId: string,
-  configHash?: string,
+  orgId?: string,
 ): Promise<{ credentials: Record<string, string>; connection: ConnectionRecord } | null> {
-  const connection = await getConnection(db, profileId, providerId, configHash);
+  const connection = await getConnection(db, profileId, providerId);
   if (!connection) return null;
 
   let decrypted: DecryptedCredentials;
 
-  if (connection.authMode === "oauth2") {
+  // Look up the provider definition from packages.manifest.definition
+  const [pkg] = await db
+    .select({ manifest: packages.manifest })
+    .from(packages)
+    .where(eq(packages.id, providerId))
+    .limit(1);
+
+  const manifest = (pkg?.manifest ?? {}) as Record<string, unknown>;
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const authMode = def.authMode as string | undefined;
+
+  if (authMode === "oauth2") {
+    // Build refresh context from manifest.definition + providerCredentials
+    let refreshContext;
+    const tokenUrl = (def.refreshUrl as string) ?? (def.tokenUrl as string);
+    if (tokenUrl && orgId) {
+      const [cred] = await db
+        .select({
+          credentialsEncrypted: providerCredentials.credentialsEncrypted,
+        })
+        .from(providerCredentials)
+        .where(
+          and(
+            eq(providerCredentials.providerId, providerId),
+            eq(providerCredentials.orgId, orgId),
+          ),
+        )
+        .limit(1);
+
+      if (cred?.credentialsEncrypted) {
+        const adminCreds = decryptCredentials<Record<string, string>>(cred.credentialsEncrypted);
+        if (adminCreds.clientId && adminCreds.clientSecret) {
+          refreshContext = {
+            tokenUrl,
+            clientId: adminCreds.clientId,
+            clientSecret: adminCreds.clientSecret,
+            tokenAuthMethod: (def.tokenAuthMethod as string) ?? undefined,
+            scopeSeparator: (def.scopeSeparator as string) ?? undefined,
+          };
+        }
+      }
+    }
+
     decrypted = await refreshIfNeeded(
       db,
       connection.id,
       connection.providerId,
       connection.credentialsEncrypted,
       connection.expiresAt,
-      connection.providerSnapshot,
+      refreshContext,
     );
   } else {
     decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
@@ -89,27 +124,36 @@ export async function getCredentials(
 
 /**
  * Resolve credentials for the sidecar proxy.
- * Reads authorizedUris and field names from providerSnapshot on the connection.
+ * Reads authorizedUris and field names from packages.manifest.definition.
  */
 export async function resolveCredentialsForProxy(
   db: Db,
   profileId: string,
   providerId: string,
-  configHash?: string,
+  orgId?: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, profileId, providerId, configHash);
+  const result = await getCredentials(db, profileId, providerId, orgId);
   if (!result) return null;
 
-  const snapshot = result.connection.providerSnapshot;
+  // Look up provider definition from packages.manifest.definition
+  const [pkg] = await db
+    .select({ manifest: packages.manifest })
+    .from(packages)
+    .where(eq(packages.id, providerId))
+    .limit(1);
+
+  const manifest = (pkg?.manifest ?? {}) as Record<string, unknown>;
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const authMode = def.authMode as string | undefined;
 
   let sidecarCredentials: Record<string, string>;
-  if (snapshot.authMode === "oauth2" || snapshot.authMode === "api_key") {
+  if (authMode === "oauth2" || authMode === "api_key") {
     const fieldName =
-      snapshot.credentialFieldName ?? (snapshot.authMode === "api_key" ? "api_key" : "token");
+      (def.credentialFieldName as string) ?? (authMode === "api_key" ? "api_key" : "token");
     const value = result.credentials.access_token ?? result.credentials.api_key;
     if (value) {
       sidecarCredentials = { [fieldName]: value };
@@ -120,8 +164,8 @@ export async function resolveCredentialsForProxy(
     sidecarCredentials = result.credentials;
   }
 
-  const authorizedUris = snapshot.authorizedUris?.length ? snapshot.authorizedUris : null;
-  const allowAllUris = snapshot.allowAllUris ?? false;
+  const authorizedUris = (def.authorizedUris as string[])?.length ? (def.authorizedUris as string[]) : null;
+  const allowAllUris = (def.allowAllUris as boolean) ?? false;
 
   return {
     credentials: sidecarCredentials,
@@ -131,18 +175,13 @@ export async function resolveCredentialsForProxy(
 }
 
 /**
- * Save a connection (upsert on profileId + providerId + configHash).
- * Same configHash → updates existing connection (reconnection with identical config).
- * Different configHash → inserts a new row (new provider config from another org).
+ * Save a connection (upsert on profileId + providerId).
  */
 export async function saveConnection(
   db: Db,
   profileId: string,
   providerId: string,
-  authMode: AuthMode,
   credentials: Record<string, unknown>,
-  providerSnapshot: ProviderSnapshot,
-  configHash: string,
   options?: {
     scopesGranted?: string[];
     expiresAt?: string | null;
@@ -156,24 +195,19 @@ export async function saveConnection(
     .values({
       profileId,
       providerId,
-      authMode,
       credentialsEncrypted: encrypted,
       scopesGranted: options?.scopesGranted ?? [],
       expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
       rawTokenResponse: options?.rawTokenResponse ?? null,
-      providerSnapshot,
-      configHash,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [serviceConnections.profileId, serviceConnections.providerId, serviceConnections.configHash],
+      target: [serviceConnections.profileId, serviceConnections.providerId],
       set: {
-        authMode,
         credentialsEncrypted: encrypted,
         scopesGranted: options?.scopesGranted ?? [],
         expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
         rawTokenResponse: options?.rawTokenResponse ?? null,
-        providerSnapshot,
         updatedAt: new Date(),
       },
     });
@@ -216,13 +250,10 @@ function rowToConnection(row: typeof serviceConnections.$inferSelect): Connectio
     id: row.id,
     profileId: row.profileId,
     providerId: row.providerId,
-    authMode: row.authMode as AuthMode,
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
     rawTokenResponse: (row.rawTokenResponse as Record<string, unknown>) ?? null,
-    providerSnapshot: row.providerSnapshot as ProviderSnapshot,
-    configHash: row.configHash,
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     createdAt: row.createdAt?.toISOString() ?? "",
     updatedAt: row.updatedAt?.toISOString() ?? "",

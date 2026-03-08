@@ -88,7 +88,7 @@ export interface RegistryPackageDetail {
 
 export interface RegistrySearchOptions {
   q?: string;
-  type?: "flow" | "skill" | "extension";
+  type?: "flow" | "skill" | "extension" | "provider";
   sort?: "relevance" | "downloads" | "recent";
   page?: number;
   perPage?: number;

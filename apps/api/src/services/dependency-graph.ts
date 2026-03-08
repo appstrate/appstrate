@@ -1,13 +1,16 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull } from "drizzle-orm";
 import { isValidVersion, versionGt } from "@appstrate/core/semver";
+import { parseScopedName } from "@appstrate/core/naming";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
+import { getRegistryClient } from "./registry-provider.ts";
+import { logger } from "../lib/logger.ts";
 
 // --- Types ---
 
 export interface GraphNode {
   packageId: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   displayName: string;
   version: string | null;
   lastPublishedVersion: string | null;
@@ -24,11 +27,12 @@ export type PublishStatus =
   | "outdated"
   | "published"
   | "no_version"
-  | "version_behind";
+  | "version_behind"
+  | "system";
 
 export interface PublishPlanItem {
   packageId: string;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   displayName: string;
   version: string | null;
   lastPublishedVersion: string | null;
@@ -43,6 +47,7 @@ export interface PublishPlan {
 // --- Pure functions ---
 
 export function computePublishStatus(node: GraphNode): PublishStatus {
+  if (node.source === "system" || node.source === "built-in") return "system";
   const { version, lastPublishedVersion } = node;
   if (!version || !isValidVersion(version)) return "no_version";
   if (!lastPublishedVersion) return "unpublished";
@@ -108,15 +113,13 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
         type: packages.type,
         name: packages.name,
         manifest: packages.manifest,
-        lastPublishedVersion: packages.lastPublishedVersion,
         source: packages.source,
       })
       .from(packages)
-      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+      .where(and(eq(packages.id, packageId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
       .limit(1);
 
     if (!pkg) continue;
-    if (pkg.source === "built-in") continue;
 
     const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
     const displayName =
@@ -128,7 +131,7 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
       type: pkg.type,
       displayName,
       version,
-      lastPublishedVersion: pkg.lastPublishedVersion,
+      lastPublishedVersion: null, // populated by fetchRegistryVersions() in getPublishPlan()
       source: pkg.source,
     });
 
@@ -152,6 +155,45 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
   return { nodes, edges };
 }
 
+/**
+ * Query the registry for the latest published version of each non-system package.
+ * Returns a map from packageId → latest version string (or null if not found).
+ * Gracefully falls back to empty map if the registry is unreachable.
+ */
+async function fetchRegistryVersions(packageIds: string[]): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  const client = getRegistryClient();
+  if (!client || packageIds.length === 0) return result;
+
+  const lookups = packageIds.map(async (id) => {
+    const parsed = parseScopedName(id);
+    if (!parsed) return;
+    try {
+      const detail = await client.getPackage(`@${parsed.scope}`, parsed.name);
+      // Find the "latest" dist-tag to get the current published version
+      const latestTag = detail.distTags?.find((t) => t.tag === "latest");
+      if (latestTag) {
+        const ver = detail.versions.find((v) => v.id === latestTag.versionId);
+        if (ver) {
+          result.set(id, ver.version);
+          return;
+        }
+      }
+      // Fallback: highest non-yanked version
+      const published = detail.versions.filter((v) => !v.yanked);
+      if (published.length > 0) {
+        const sorted = published.sort((a, b) => (versionGt(a.version, b.version) ? -1 : 1));
+        result.set(id, sorted[0]!.version);
+      }
+    } catch {
+      // Package not on registry or network error — leave unset
+    }
+  });
+
+  await Promise.all(lookups);
+  return result;
+}
+
 export async function getPublishPlan(
   rootId: string,
   orgId: string,
@@ -167,6 +209,26 @@ export async function getPublishPlan(
   if (targetVersion && graph.nodes.has(rootId)) {
     const rootNode = graph.nodes.get(rootId)!;
     graph.nodes.set(rootId, { ...rootNode, version: targetVersion });
+  }
+
+  // Query registry for actual published versions (source of truth)
+  const nonSystemIds = [...graph.nodes.values()]
+    .filter((n) => n.source !== "system" && n.source !== "built-in")
+    .map((n) => n.packageId);
+
+  const registryVersions = await fetchRegistryVersions(nonSystemIds).catch((err) => {
+    logger.warn("Could not fetch registry versions for publish plan", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return new Map<string, string | null>();
+  });
+
+  // Update graph nodes with registry data
+  for (const [id, registryVersion] of registryVersions) {
+    const node = graph.nodes.get(id);
+    if (node) {
+      graph.nodes.set(id, { ...node, lastPublishedVersion: registryVersion });
+    }
   }
 
   const { order, circular } = topoSort(graph);

@@ -17,6 +17,7 @@ import { useProviders } from "../../hooks/use-providers";
 import { useOrg } from "../../hooks/use-org";
 import type { ServiceEntry } from "./types";
 import type { AvailableScope, ProviderConfig } from "@appstrate/shared-types";
+import { VersionSelect } from "./resource-section";
 
 interface ServicePickerProps {
   value: ServiceEntry[];
@@ -179,7 +180,8 @@ function ScopeMultiSelect({
 
 export function ServicePicker({ value, onChange }: ServicePickerProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
-  const { data: providers, isLoading } = useProviders();
+  const { data: providersData, isLoading } = useProviders();
+  const providers = providersData?.providers;
   const { isOrgAdmin } = useOrg();
 
   const update = (index: number, patch: Partial<ServiceEntry>) => {
@@ -194,11 +196,12 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
   const addFromProvider = (providerId: string) => {
     const alreadySelected = value.some((s) => s.id === providerId);
     if (alreadySelected) return;
+    const provider = providers?.find((p) => p.id === providerId);
     onChange([
       ...value,
       {
         id: providerId,
-        provider: providerId,
+        version: provider?.version ?? "*",
         scopes: [],
         connectionMode: "user",
       },
@@ -216,7 +219,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
             {t("editor.selectedServices", { count: value.length })}
           </div>
           {value.map((svc, i) => {
-            const providerDef = providers?.find((p) => p.id === svc.provider) as
+            const providerDef = providers?.find((p) => p.id === svc.id) as
               | ProviderConfig
               | undefined;
             return (
@@ -231,8 +234,14 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
                   )}
                   <div className="flex flex-col min-w-0 flex-1">
                     <strong className="text-sm">{providerDef?.displayName ?? svc.id}</strong>
-                    <span className="text-xs text-muted-foreground">{svc.provider}</span>
+                    <span className="text-xs text-muted-foreground">{svc.id}</span>
                   </div>
+                  <VersionSelect
+                    type="provider"
+                    packageId={svc.id}
+                    value={svc.version}
+                    onChange={(v) => update(i, { version: v })}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
@@ -294,7 +303,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
         <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
           {t("editor.noIntegration")}
           <div className="mt-3">
-            <Link to="/connectors">
+            <Link to="/#providers">
               <Button variant="outline" size="sm">
                 {t("editor.goToConnectors")}
               </Button>
@@ -330,7 +339,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
           })}
           {isOrgAdmin && (
             <Link
-              to="/connectors"
+              to="/#providers"
               className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground no-underline"
             >
               <span className="text-2xl leading-none">+</span>

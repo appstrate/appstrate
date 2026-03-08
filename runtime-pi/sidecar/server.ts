@@ -9,7 +9,8 @@ const config = {
 };
 const MAX_RESPONSE_SIZE = 50_000;
 const OUTBOUND_TIMEOUT_MS = 30_000;
-const SERVICE_ID_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+// Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
+const SERVICE_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 // In-memory cookie jar keyed by serviceId. Ephemeral — lives only for this execution.
 const cookieJar = new Map<string, string[]>();

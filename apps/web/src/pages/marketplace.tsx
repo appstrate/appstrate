@@ -11,7 +11,7 @@ import { Spinner } from "../components/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 
-const TYPES = ["", "flow", "skill", "extension"] as const;
+const TYPES = ["", "flow", "skill", "extension", "provider"] as const;
 type MarketplaceTab = (typeof TYPES)[number];
 const PER_PAGE = 12;
 

@@ -7,9 +7,11 @@ Providers define how Appstrate connects to external services (Gmail, ClickUp, Br
 | Mode      | Description                                                       | Example                         |
 | --------- | ----------------------------------------------------------------- | ------------------------------- |
 | `oauth2`  | Full OAuth2 flow with authorization URL, token URL, optional PKCE | Gmail, Google Calendar, ClickUp |
+| `oauth1`  | OAuth 1.0a with HMAC-SHA1 (request token → authorize → access token) | Twitter/X, Tumblr               |
 | `api_key` | Simple API key stored encrypted                                   | Brevo, SendGrid                 |
 | `basic`   | Username + password                                               | SMTP servers                    |
 | `custom`  | Dynamic credential schema defined per provider                    | Any custom service              |
+| `proxy`   | Outbound HTTP proxy (auto-sets `allowAllUris: true`)              | SOCKS5/HTTP proxies             |
 
 ## Discovering Existing Providers
 
@@ -214,7 +216,7 @@ Full `POST /api/providers` field reference:
 **Common fields (all auth modes):**
 - `id` (string, required): kebab-case identifier
 - `displayName` (string, required): Human-readable name
-- `authMode` (string, required): `"oauth2"`, `"api_key"`, `"basic"`, or `"custom"`
+- `authMode` (string, required): `"oauth2"`, `"oauth1"`, `"api_key"`, `"basic"`, `"custom"`, or `"proxy"`
 - `authorizedUris` (string[], recommended): URL patterns the sidecar proxy allows
 - `allowAllUris` (boolean): Set to `true` to bypass URI restrictions (use with caution)
 - `iconUrl` (string, optional): URL to provider icon
@@ -236,8 +238,18 @@ Full `POST /api/providers` field reference:
 - `credentialHeaderName`: HTTP header name (e.g., `"Authorization"`, `"X-API-Key"`)
 - `credentialHeaderPrefix`: Prefix before the key value (e.g., `"Bearer"`, `""`)
 
+**OAuth1-specific fields:**
+- `clientId` and `clientSecret` (map to consumer key/secret, encrypted at rest)
+- `requestTokenUrl` (required — initiate OAuth 1.0a flow)
+- `accessTokenUrl` (required — exchange verifier for access token)
+- `authorizationUrl` (required — user authorization redirect)
+
 **Custom auth fields:**
 - `credentialSchema`: JSON Schema defining the credential fields
+
+**Proxy-specific fields:**
+- Auto-sets `allowAllUris: true` and `credentialSchema` with a URL field
+- No additional fields required beyond common fields
 
 ## Update a Provider
 
@@ -249,7 +261,7 @@ Content-Type: application/json
 { "displayName": "Updated Name", "authorizedUris": ["https://new-api.example.com/*"] }
 ```
 
-Note: Built-in providers (loaded from `data/providers.json` or `SYSTEM_PROVIDERS` env) cannot be modified via API.
+Note: System providers (with source "system", loaded from ZIP packages at boot) cannot be modified via API.
 
 ## Delete a Provider
 

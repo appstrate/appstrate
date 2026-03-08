@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
+import { escapeHtml } from "../lib/html.ts";
 import {
   listUserConnections,
   initiateConnection,
@@ -14,6 +15,8 @@ import {
   getProviderAuthMode,
 } from "../services/connection-manager.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { isProviderEnabled } from "@appstrate/connect";
+import { db } from "../lib/db.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -26,10 +29,17 @@ router.get("/connections", async (c) => {
 });
 
 // POST /auth/connect/:provider — initiate OAuth or return authUrl
-router.post("/connect/:provider", async (c) => {
-  const provider = c.req.param("provider");
+router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
+  const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const user = c.get("user");
   const orgId = c.get("orgId");
+
+  if (!(await isProviderEnabled(db, orgId, provider))) {
+    return c.json(
+      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
+      403,
+    );
+  }
 
   try {
     let scopes: string[] | undefined;
@@ -52,17 +62,25 @@ router.post("/connect/:provider", async (c) => {
 });
 
 // POST /auth/connect/:provider/api-key — create an API key connection
-router.post("/connect/:provider/api-key", async (c) => {
-  const provider = c.req.param("provider");
+router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
+  const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const user = c.get("user");
   const orgId = c.get("orgId");
+
+  if (!(await isProviderEnabled(db, orgId, provider))) {
+    return c.json(
+      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
+      403,
+    );
+  }
+
   try {
     const body = await c.req.json<{ apiKey?: string; profileId?: string }>();
     if (!body.apiKey || !body.apiKey.trim()) {
       return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
     }
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
-    await saveApiKeyConnection(provider, body.apiKey.trim(), profileId, orgId);
+    await saveApiKeyConnection(provider, body.apiKey.trim(), profileId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create API key connection";
@@ -71,10 +89,18 @@ router.post("/connect/:provider/api-key", async (c) => {
 });
 
 // POST /auth/connect/:provider/credentials — save generic credentials (basic/custom providers)
-router.post("/connect/:provider/credentials", async (c) => {
-  const provider = c.req.param("provider");
+router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
+  const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const user = c.get("user");
   const orgId = c.get("orgId");
+
+  if (!(await isProviderEnabled(db, orgId, provider))) {
+    return c.json(
+      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
+      403,
+    );
+  }
+
   try {
     const body = await c.req.json<{ credentials?: Record<string, string>; profileId?: string }>();
     if (!body.credentials || typeof body.credentials !== "object") {
@@ -86,7 +112,7 @@ router.post("/connect/:provider/credentials", async (c) => {
     const mode = authMode === "basic" ? "basic" : authMode === "proxy" ? "proxy" : "custom";
 
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
-    await saveCredentialsConnection(provider, mode, body.credentials, profileId, orgId);
+    await saveCredentialsConnection(provider, mode, body.credentials, profileId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to save credentials";
@@ -100,7 +126,7 @@ router.get("/callback", async (c) => {
   if (error) {
     logger.warn("OAuth callback received error", { error });
     return c.html(
-      `<html><body><p>OAuth error: ${error}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
+      `<html><body><p>OAuth error: ${escapeHtml(error)}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
     );
   }
 
@@ -116,7 +142,7 @@ router.get("/callback", async (c) => {
       const message = err instanceof Error ? err.message : "OAuth1 callback failed";
       logger.error("OAuth1 callback failed", { message });
       return c.html(
-        `<html><body><p style="color:red;font-family:monospace;">Error: ${message}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
+        `<html><body><p style="color:red;font-family:monospace;">Error: ${escapeHtml(message)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
       );
     }
   }
@@ -143,7 +169,7 @@ router.get("/callback", async (c) => {
     const message = err instanceof Error ? err.message : "OAuth callback failed";
     logger.error("OAuth callback failed", { message });
     return c.html(
-      `<html><body><p style="color:red;font-family:monospace;">Error: ${message}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
+      `<html><body><p style="color:red;font-family:monospace;">Error: ${escapeHtml(message)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
     );
   }
 });
@@ -160,8 +186,8 @@ router.get("/integrations", async (c) => {
 // DELETE /auth/connections/:provider — disconnect a service for current user
 // If ?connectionId is provided, deletes only that specific connection.
 // Otherwise, deletes ALL connections for the provider on the profile.
-router.delete("/connections/:provider", async (c) => {
-  const provider = c.req.param("provider");
+router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {
+  const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const user = c.get("user");
   const connectionId = c.req.query("connectionId");
   try {

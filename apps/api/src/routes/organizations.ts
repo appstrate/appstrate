@@ -21,6 +21,7 @@ import {
   cancelInvitation,
   updateInvitationRole,
 } from "../services/invitations.ts";
+import { provisionSystemProvidersForOrg } from "../services/system-providers.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -62,6 +63,9 @@ router.post("/", async (c) => {
   }
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
+
+  // Provision system providers for the new org (non-fatal)
+  await provisionSystemProvidersForOrg(org.id).catch(() => {});
 
   return c.json(
     {

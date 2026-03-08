@@ -12,11 +12,13 @@ import type {
 
 // --- Packages (skills / extensions) — config-driven factory ---
 
-type PackageType = "skill" | "extension";
+type PackageType = "skill" | "extension" | "provider";
+type VersionableType = "flow" | "skill" | "extension" | "provider";
 
 const PACKAGE_CONFIG = {
   skill: { path: "skills", listKey: "skills", detailKey: "skill" },
   extension: { path: "extensions", listKey: "extensions", detailKey: "extension" },
+  provider: { path: "providers", listKey: "providers", detailKey: "provider" },
 } as const;
 
 function usePackageList(type: PackageType) {
@@ -82,6 +84,7 @@ export {
   useUploadPackage,
   useDeletePackage,
   type PackageType,
+  type VersionableType,
   PACKAGE_CONFIG,
 };
 
@@ -162,12 +165,12 @@ export interface VersionListItem {
   createdAt: string | null;
 }
 
-function packageBasePath(type: "flow" | "skill" | "extension", packageId: string | undefined) {
+function packageBasePath(type: VersionableType, packageId: string | undefined) {
   return `/packages/${type}s/${packageId}`;
 }
 
 export function useVersionDetail(
-  type: "flow" | "skill" | "extension",
+  type: VersionableType,
   packageId: string | undefined,
   version: string | undefined,
 ) {
@@ -180,10 +183,7 @@ export function useVersionDetail(
   });
 }
 
-export function usePackageVersions(
-  type: "flow" | "skill" | "extension",
-  packageId: string | undefined,
-) {
+export function usePackageVersions(type: VersionableType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["package-versions", orgId, type, packageId],
@@ -199,7 +199,7 @@ export function usePackageVersions(
 
 // --- Version management mutations ---
 
-export function useCreateVersion(type: "flow" | "skill" | "extension", packageId: string) {
+export function useCreateVersion(type: VersionableType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
@@ -219,7 +219,7 @@ export function useCreateVersion(type: "flow" | "skill" | "extension", packageId
   });
 }
 
-export function useDeleteVersion(type: "flow" | "skill" | "extension", packageId: string) {
+export function useDeleteVersion(type: VersionableType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
@@ -235,7 +235,7 @@ export function useDeleteVersion(type: "flow" | "skill" | "extension", packageId
   });
 }
 
-export function useRestoreVersion(type: "flow" | "skill" | "extension", packageId: string) {
+export function useRestoreVersion(type: VersionableType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
@@ -251,10 +251,7 @@ export function useRestoreVersion(type: "flow" | "skill" | "extension", packageI
   });
 }
 
-export function useVersionInfo(
-  type: "flow" | "skill" | "extension",
-  packageId: string | undefined,
-) {
+export function useVersionInfo(type: VersionableType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["version-info", orgId, type, packageId],

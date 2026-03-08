@@ -12,7 +12,7 @@ import {
 interface VersionSelectorProps {
   packageId: string;
   currentVersion: string | undefined;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   hasDraftChanges?: boolean;
   currentIsDraft?: boolean;
 }

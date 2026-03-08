@@ -1,18 +1,28 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lt } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "./db.ts";
-import { oauthStates, scheduleRuns } from "@appstrate/db/schema";
+import {
+  oauthStates,
+  scheduleRuns,
+  organizations,
+  packages,
+  packageVersions,
+  providerCredentials,
+} from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { initRealtime } from "../services/realtime.ts";
-import { initBuiltInProviders } from "@appstrate/connect";
 import { initBuiltInProxies } from "../services/proxy-registry.ts";
 import { initPackageService, getBuiltInPackageCount } from "../services/flow-service.ts";
-import { initBuiltInPackages } from "../services/builtin-packages.ts";
+import { initBuiltInPackages, getSystemPackages } from "../services/builtin-packages.ts";
+import { createVersionAndUpload } from "../services/package-versions.ts";
+import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
+import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import type { Manifest } from "@appstrate/core/validation";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
 import { cleanupOrphanedContainers } from "../services/docker.ts";
 import { initScheduler } from "../services/scheduler.ts";
@@ -26,17 +36,6 @@ export async function boot(): Promise<void> {
   const dataDir = env.DATA_DIR;
 
   if (dataDir) {
-    // Load built-in providers from {dataDir}/providers.json + SYSTEM_PROVIDERS env var
-    const providersPath = join(dataDir, "providers.json");
-    try {
-      const fileProviders = JSON.parse(readFileSync(providersPath, "utf-8"));
-      initBuiltInProviders(fileProviders);
-      logger.info("Built-in providers loaded", { count: fileProviders.length });
-    } catch {
-      initBuiltInProviders();
-      logger.info("Built-in providers loaded (env var only)");
-    }
-
     // Load built-in proxies from {dataDir}/proxies.json + SYSTEM_PROXIES env var
     const proxiesPath = join(dataDir, "proxies.json");
     try {
@@ -50,13 +49,27 @@ export async function boot(): Promise<void> {
 
     await initPackageService(dataDir);
     logger.info("Built-in flows loaded", { count: getBuiltInPackageCount() });
-
-    await initBuiltInPackages(dataDir);
   } else {
-    initBuiltInProviders(); // SYSTEM_PROVIDERS env var still loaded
     initBuiltInProxies(); // SYSTEM_PROXIES env var still loaded
     logger.info("DATA_DIR not set — built-in resources disabled");
   }
+
+  // initBuiltInPackages loads skills/extensions from DATA_DIR + system providers from source dir
+  await initBuiltInPackages(dataDir);
+
+  // Sync system packages to DB for all orgs (with registry-grade versioning)
+  await syncSystemPackages().catch((err) => {
+    logger.warn("Could not sync system packages", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  // Backfill provider deps from manifest → packageDependencies for existing flows
+  await backfillFlowProviderDeps().catch((err) => {
+    logger.warn("Could not backfill flow provider deps", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   // Initialize registry provider (non-fatal)
   await initRegistryProvider().catch((err) => {
@@ -165,4 +178,103 @@ export async function boot(): Promise<void> {
         });
       }),
   ]);
+}
+
+/**
+ * Sync system packages to the DB for all existing orgs.
+ * Upserts packages rows (source: "system"), providerCredentials (per org, for providers only),
+ * and packageVersions with SHA256 SRI integrity.
+ */
+async function syncSystemPackages(): Promise<void> {
+  const allPackages = getSystemPackages();
+  if (allPackages.size === 0) return;
+
+  const orgs = await db.select({ id: organizations.id }).from(organizations);
+
+  let synced = 0;
+  for (const [id, entry] of allPackages) {
+    const { manifest, zipBuffer, type } = entry;
+    const version = manifest.version as string;
+
+    // Check if this exact version already exists (nothing changed since last boot)
+    const [existingVersion] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
+      .limit(1);
+
+    const isNewVersion = !existingVersion;
+
+    // 1. UPSERT packages row (source: "system", orgId: null — global)
+    await db
+      .insert(packages)
+      .values({
+        id,
+        orgId: null,
+        type,
+        source: "system",
+        name: manifest.name as string,
+        manifest: manifest as unknown as Record<string, unknown>,
+        content: "",
+      })
+      .onConflictDoUpdate({
+        target: packages.id,
+        set: {
+          manifest: manifest as unknown as Record<string, unknown>,
+          source: "system",
+          orgId: null,
+          ...(isNewVersion ? { updatedAt: new Date() } : {}),
+        },
+      });
+
+    // 2. UPSERT providerCredentials per org (only for providers)
+    if (type === "provider") {
+      for (const org of orgs) {
+        await db
+          .insert(providerCredentials)
+          .values({ providerId: id, orgId: org.id })
+          .onConflictDoNothing();
+      }
+    }
+
+    // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
+    await createVersionAndUpload({
+      packageId: id,
+      version,
+      orgId: null,
+      createdBy: null,
+      zipBuffer,
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+
+    synced++;
+  }
+
+  logger.info("System packages synced", { packages: synced, orgs: orgs.length });
+}
+
+/** Backfill provider deps from manifest → packageDependencies for existing flows.
+ *  Ensures flows created before provider unification get their provider deps populated. */
+async function backfillFlowProviderDeps(): Promise<void> {
+  const orgs = await db.select({ id: organizations.id }).from(organizations);
+
+  let total = 0;
+  for (const org of orgs) {
+    const orgFlows = await db
+      .select({ id: packages.id, manifest: packages.manifest })
+      .from(packages)
+      .where(and(eq(packages.orgId, org.id), eq(packages.type, "flow")));
+
+    for (const flow of orgFlows) {
+      const { providerIds } = extractDepsFromManifest(flow.manifest as Partial<Manifest>);
+      if (providerIds.length > 0) {
+        await setFlowItems(flow.id, org.id, providerIds, PROVIDER_CONFIG);
+        total++;
+      }
+    }
+  }
+
+  if (total > 0) {
+    logger.info("Backfilled provider deps for flows", { flows: total });
+  }
 }

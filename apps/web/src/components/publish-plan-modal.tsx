@@ -35,7 +35,8 @@ export function PublishPlanModal({
 
   const hasNoVersion = items.some((i) => i.status === "no_version");
   const hasVersionBehind = items.some((i) => i.status === "version_behind");
-  const isBlocked = !!circular || hasNoVersion || hasVersionBehind;
+  const allUpToDate = items.every((i) => i.status === "published" || i.status === "system");
+  const isBlocked = !!circular || hasNoVersion || hasVersionBehind || allUpToDate;
   const isSingleItem = items.length === 1;
 
   const handleClose = useCallback(() => {
@@ -49,7 +50,7 @@ export function PublishPlanModal({
     setPublishing(true);
     setErrorMessage(null);
 
-    const toPublish = items.filter((i) => i.status !== "published");
+    const toPublish = items.filter((i) => i.status !== "published" && i.status !== "system");
 
     // The root package is the last item (topological sort puts it last)
     const rootPackageId = items.length > 0 ? items[items.length - 1].packageId : null;
@@ -57,7 +58,10 @@ export function PublishPlanModal({
     // Initialize all as pending
     const initial = new Map<string, ItemStatus>();
     for (const item of items) {
-      initial.set(item.packageId, item.status === "published" ? "skipped" : "pending");
+      initial.set(
+        item.packageId,
+        item.status === "published" || item.status === "system" ? "skipped" : "pending",
+      );
     }
     setStatuses(new Map(initial));
 
@@ -121,6 +125,7 @@ export function PublishPlanModal({
     if (s === "done") return t("publishPlan.status.done");
     if (s === "failed") return t("publishPlan.status.failed");
     if (s === "skipped" || item.status === "published") return t("publishPlan.status.published");
+    if (item.status === "system") return t("publishPlan.status.system");
 
     // Pre-publish status labels
     switch (item.status) {
@@ -140,7 +145,7 @@ export function PublishPlanModal({
   const statusClassName = (item: PublishPlanItem) => {
     const base = "text-xs font-medium shrink-0";
     const s = statuses.get(item.packageId);
-    if (s === "done" || s === "skipped" || item.status === "published")
+    if (s === "done" || s === "skipped" || item.status === "published" || item.status === "system")
       return `${base} text-success`;
     if (s === "failed" || item.status === "no_version" || item.status === "version_behind")
       return `${base} text-destructive`;
@@ -196,6 +201,12 @@ export function PublishPlanModal({
         </div>
       )}
 
+      {allUpToDate && !circular && (
+        <div className="rounded-md bg-success/15 text-success text-sm px-3 py-2 mb-3">
+          {t("publishPlan.allUpToDate")}
+        </div>
+      )}
+
       <div className="space-y-1">
         {items.map((item) => (
           <div
@@ -214,11 +225,6 @@ export function PublishPlanModal({
               <span className="font-medium text-sm truncate">{item.displayName}</span>
               {item.version && (
                 <span className="text-xs text-muted-foreground">v{item.version}</span>
-              )}
-              {item.status === "version_behind" && item.lastPublishedVersion && (
-                <span className="text-xs text-warning">
-                  {t("publishPlan.lastPublished", { version: item.lastPublishedVersion })}
-                </span>
               )}
             </div>
             <span className={statusClassName(item)}>{statusLabel(item)}</span>

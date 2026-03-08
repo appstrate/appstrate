@@ -10,6 +10,7 @@ import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./s
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxyUrl } from "./org-proxies.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 /**
  * Resolve unique provider definitions for prompt context.
@@ -75,7 +76,7 @@ export function buildPromptContext(params: {
       config: params.flow.manifest.config?.schema,
       output: params.flow.manifest.output?.schema,
     },
-    services: params.flow.manifest.requires.services.map((s) => ({
+    services: resolveManifestServices(params.flow.manifest).map((s) => ({
       id: s.id,
       provider: s.provider,
     })),
@@ -118,6 +119,7 @@ export async function buildExecutionContext(params: {
 }> {
   const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
 
+  const manifestServices = resolveManifestServices(flow.manifest);
   const [
     tokens,
     config,
@@ -128,10 +130,10 @@ export async function buildExecutionContext(params: {
     proxyUrl,
     memories,
   ] = await Promise.all([
-    buildServiceTokens(flow.manifest.requires.services, serviceProfiles, orgId),
+    buildServiceTokens(manifestServices, serviceProfiles, orgId),
     params.config ?? getPackageConfig(orgId, flow.id),
     getLastExecutionState(flow.id, userId, orgId),
-    resolveProviderDefs(db, orgId, flow.manifest.requires.services),
+    resolveProviderDefs(db, orgId, manifestServices),
     getPackageZip(flow, orgId),
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)

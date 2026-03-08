@@ -1,8 +1,7 @@
 import { db } from "../../lib/db.ts";
 import type { FlowServiceRequirement } from "../../types/index.ts";
 import type { ServiceStatus } from "@appstrate/shared-types";
-import { getConnection, getProvider, validateScopes } from "@appstrate/connect";
-import { computeConfigHash } from "../connection-profiles.ts";
+import { getConnection, validateScopes } from "@appstrate/connect";
 import { getProviderAuthMode } from "./providers.ts";
 import { authModeLabel } from "./helpers.ts";
 
@@ -17,46 +16,16 @@ export interface ConnectionStatus {
 export async function getConnectionStatus(
   provider: string,
   profileId: string,
-  orgId?: string,
 ): Promise<ConnectionStatus> {
-  if (orgId) {
-    const providerDef = await getProvider(db, orgId, provider);
-    if (providerDef) {
-      const currentHash = computeConfigHash(providerDef);
-      // Try exact match on configHash first
-      const exactConn = await getConnection(db, profileId, provider, currentHash);
-      if (exactConn) {
-        return {
-          provider,
-          status: "connected",
-          connectionId: exactConn.id,
-          connectedAt: exactConn.createdAt,
-          scopesGranted: exactConn.scopesGranted,
-        };
-      }
-      // Fallback: any connection for this provider → needs reconnection
-      const anyConn = await getConnection(db, profileId, provider);
-      if (anyConn) {
-        return {
-          provider,
-          status: "needs_reconnection",
-          connectionId: anyConn.id,
-          connectedAt: anyConn.createdAt,
-          scopesGranted: anyConn.scopesGranted,
-        };
-      }
-    }
-  } else {
-    const conn = await getConnection(db, profileId, provider);
-    if (conn) {
-      return {
-        provider,
-        status: "connected",
-        connectionId: conn.id,
-        connectedAt: conn.createdAt,
-        scopesGranted: conn.scopesGranted,
-      };
-    }
+  const conn = await getConnection(db, profileId, provider);
+  if (conn) {
+    return {
+      provider,
+      status: "connected",
+      connectionId: conn.id,
+      connectedAt: conn.createdAt,
+      scopesGranted: conn.scopesGranted,
+    };
   }
   return { provider, status: "not_connected" };
 }
@@ -105,7 +74,7 @@ export async function resolveServiceStatuses(
       if (mode === "admin") {
         const adminProfileId = adminConns[svc.id];
         if (adminProfileId) {
-          const conn = await getConnectionStatus(svc.provider, adminProfileId, orgId);
+          const conn = await getConnectionStatus(svc.provider, adminProfileId);
           return {
             ...base,
             status: conn.status,
@@ -126,7 +95,7 @@ export async function resolveServiceStatuses(
       }
 
       const conn = userProfileId
-        ? await getConnectionStatus(svc.provider, userProfileId, orgId)
+        ? await getConnectionStatus(svc.provider, userProfileId)
         : { status: "not_connected" as const };
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {

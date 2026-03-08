@@ -3,11 +3,16 @@ import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { ProviderConfig } from "@appstrate/shared-types";
 
+interface ProvidersResponse {
+  providers: ProviderConfig[];
+  callbackUrl?: string;
+}
+
 export function useProviders() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["providers", orgId],
-    queryFn: () => api<{ providers: ProviderConfig[] }>("/providers").then((d) => d.providers),
+    queryFn: () => api<ProvidersResponse>("/providers"),
     enabled: !!orgId,
   });
 }

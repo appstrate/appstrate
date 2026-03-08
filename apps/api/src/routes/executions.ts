@@ -27,6 +27,7 @@ import { trackExecution, untrackExecution, abortExecution } from "../services/ex
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { stopContainer } from "../services/docker.ts";
+import { resolveManifestServices } from "../lib/manifest-utils.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -333,14 +334,9 @@ export function createExecutionsRouter() {
     const profileIdOverride = c.req.query("profileId");
 
     // Run independent pre-flight operations in parallel
+    const manifestServices = resolveManifestServices(flow.manifest);
     const [serviceProfiles, config, userProfileId, inputResult] = await Promise.all([
-      resolveServiceProfiles(
-        flow.manifest.requires.services,
-        user.id,
-        packageId,
-        orgId,
-        profileIdOverride,
-      ),
+      resolveServiceProfiles(manifestServices, user.id, packageId, orgId, profileIdOverride),
       getPackageConfig(orgId, packageId),
       profileIdOverride
         ? Promise.resolve(profileIdOverride)
@@ -349,11 +345,7 @@ export function createExecutionsRouter() {
     ]);
 
     // Validate service dependencies (needs serviceProfiles)
-    const depError = await validateFlowDependencies(
-      flow.manifest.requires.services,
-      serviceProfiles,
-      orgId,
-    );
+    const depError = await validateFlowDependencies(manifestServices, serviceProfiles, orgId);
     if (depError) {
       return c.json(depError, 400);
     }

@@ -9,6 +9,7 @@ import {
   getAuthenticatedRegistryClient,
 } from "../services/registry-auth.ts";
 import { logger } from "../lib/logger.ts";
+import { escapeHtml } from "../lib/html.ts";
 
 export function createRegistryAuthRouter() {
   const router = new Hono<AppEnv>();
@@ -31,7 +32,7 @@ export function createRegistryAuthRouter() {
     if (error) {
       logger.warn("Registry OAuth callback error", { error });
       return c.html(
-        `<html><body><p>OAuth error: ${error}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
+        `<html><body><p>OAuth error: ${escapeHtml(error)}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
       );
     }
 
@@ -50,7 +51,7 @@ export function createRegistryAuthRouter() {
       const message = err instanceof Error ? err.message : "Registry callback failed";
       logger.error("Registry callback failed", { message });
       return c.html(
-        `<html><body><p style="color:red;font-family:monospace;">Error: ${message}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
+        `<html><body><p style="color:red;font-family:monospace;">Error: ${escapeHtml(message)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
       );
     }
   });

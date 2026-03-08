@@ -7,11 +7,15 @@ interface PackageCardProps {
   id: string;
   displayName: string;
   description?: string | null;
-  type: "flow" | "skill" | "extension";
+  type: "flow" | "skill" | "extension" | "provider";
   source?: "built-in" | "local";
   runningExecutions?: number;
   tags?: string[];
   usedByFlows?: number;
+  statusBadge?: React.ReactNode;
+  actions?: React.ReactNode;
+  iconUrl?: string;
+  autoInstalled?: boolean;
 }
 
 export function PackageCard({
@@ -23,9 +27,18 @@ export function PackageCard({
   runningExecutions,
   tags,
   usedByFlows,
+  statusBadge,
+  actions,
+  iconUrl,
+  autoInstalled,
 }: PackageCardProps) {
   const { t } = useTranslation(["flows", "settings", "common"]);
-  const PREFIX = { flow: "flows", skill: "skills", extension: "extensions" } as const;
+  const PREFIX = {
+    flow: "flows",
+    skill: "skills",
+    extension: "extensions",
+    provider: "providers",
+  } as const;
   const href = `/${PREFIX[type]}/${id}`;
 
   return (
@@ -34,13 +47,24 @@ export function PackageCard({
       to={href}
     >
       <div className="flex items-start justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">{displayName}</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          {iconUrl && (
+            <img src={iconUrl} alt="" className="h-5 w-5 shrink-0 rounded object-contain" />
+          )}
+          <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {source === "built-in" && (
             <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
               {t("list.badgeBuiltIn")}
             </span>
           )}
+          {autoInstalled && (
+            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
+              {t("list.badgeAutoInstalled")}
+            </span>
+          )}
+          {statusBadge}
           {type === "flow" && !!runningExecutions && runningExecutions > 0 && (
             <span className="text-[0.7rem] px-2 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1.5">
               <Spinner /> {t("list.running", { count: runningExecutions })}
@@ -80,6 +104,17 @@ export function PackageCard({
           </span>
         )}
       </div>
+      {actions && (
+        <div
+          className="mt-3 pt-3 border-t border-border"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          {actions}
+        </div>
+      )}
     </Link>
   );
 }

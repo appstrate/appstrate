@@ -25,11 +25,6 @@ export interface ProviderDefinition {
   // OAuth1
   requestTokenUrl?: string;
   accessTokenUrl?: string;
-  consumerKey?: string;
-  consumerSecret?: string;
-  // Inline OAuth credentials (from SYSTEM_PROVIDERS env var)
-  clientId?: string;
-  clientSecret?: string;
   // URI restrictions (for sidecar proxy)
   authorizedUris?: string[];
   allowAllUris?: boolean;
@@ -41,37 +36,14 @@ export interface ProviderDefinition {
   docsUrl?: string;
 }
 
-export interface ProviderSnapshot {
-  authMode: AuthMode;
-  tokenUrl?: string;
-  refreshUrl?: string;
-  clientIdEncrypted?: string;
-  clientSecretEncrypted?: string;
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
-  scopeSeparator?: string;
-  credentialFieldName?: string;
-  credentialHeaderName?: string;
-  credentialHeaderPrefix?: string;
-  authorizedUris?: string[];
-  allowAllUris?: boolean;
-  // OAuth1
-  requestTokenUrl?: string;
-  accessTokenUrl?: string;
-  consumerKeyEncrypted?: string;
-  consumerSecretEncrypted?: string;
-}
-
 export interface ConnectionRecord {
   id: string;
   profileId: string;
   providerId: string;
-  authMode: AuthMode;
   credentialsEncrypted: string;
   scopesGranted: string[];
   expiresAt: string | null;
   rawTokenResponse: Record<string, unknown> | null;
-  providerSnapshot: ProviderSnapshot;
-  configHash: string;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

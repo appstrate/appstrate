@@ -24,7 +24,7 @@ function resolve(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || "dark";
+const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || "system";
 
 export const useThemeStore = create<ThemeState>()((set) => ({
   theme: stored,

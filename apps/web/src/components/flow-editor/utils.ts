@@ -143,15 +143,24 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       ? detail.id.split("--").slice(1).join("--")
       : detail.id;
 
-  // Services: read from raw manifest (has scopes, description, etc.)
+  // Services: read from requires.services Record + servicesConfiguration
   const rawRequires = (m.requires ?? {}) as Record<string, unknown>;
-  const rawServices = (rawRequires.services ?? []) as Array<Record<string, unknown>>;
-  const services: ServiceEntry[] = rawServices.map((s) => ({
-    id: (s.id as string) || "",
-    provider: (s.provider as string) || "",
-    scopes: Array.isArray(s.scopes) ? (s.scopes as string[]) : [],
-    connectionMode: (s.connectionMode as "user" | "admin") || "user",
-  }));
+  const rawServicesRecord = (rawRequires.services ?? {}) as Record<string, string>;
+  const rawServicesConfig = ((m as Record<string, unknown>).servicesConfiguration ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const services: ServiceEntry[] = Object.entries(rawServicesRecord).map(
+    ([providerId, version]) => {
+      const cfg = rawServicesConfig[providerId] ?? {};
+      return {
+        id: providerId,
+        version: (version as string) || "*",
+        scopes: Array.isArray(cfg.scopes) ? (cfg.scopes as string[]) : [],
+        connectionMode: (cfg.connectionMode as "user" | "admin") || "user",
+      };
+    },
+  );
 
   // Execution: read from raw manifest (preserves maxTokens, etc.)
   const rawExecution = (m.execution ?? {}) as Record<string, unknown>;
@@ -204,7 +213,6 @@ function mergeSchemaWithBase(
 
 export function assemblePayload(state: FlowFormState) {
   const baseRequires = (state._manifestBase.requires ?? {}) as Record<string, unknown>;
-  const baseServices = (baseRequires.services ?? []) as Array<Record<string, unknown>>;
 
   const filteredSkills: Record<string, string> = {};
   for (const s of state.skills) {
@@ -215,33 +223,22 @@ export function assemblePayload(state: FlowFormState) {
     if (e.id) filteredExtensions[e.id] = e.version;
   }
 
+  // Build services Record and servicesConfiguration
+  const filteredServices: Record<string, string> = {};
+  const servicesConfiguration: Record<string, Record<string, unknown>> = {};
+  for (const s of state.services) {
+    if (!s.id) continue;
+    filteredServices[s.id] = s.version;
+    const cfg: Record<string, unknown> = {};
+    const scopes = s.scopes.filter(Boolean);
+    if (scopes.length > 0) cfg.scopes = scopes;
+    if (s.connectionMode !== "user") cfg.connectionMode = s.connectionMode;
+    if (Object.keys(cfg).length > 0) servicesConfiguration[s.id] = cfg;
+  }
+
   const requires: Record<string, unknown> = {
     ...baseRequires, // Preserve unknown fields in requires
-    services: state.services
-      .filter((s) => s.id && s.provider)
-      .map((s) => {
-        // Find original service to preserve description, etc.
-        const original = baseServices.find((bs) => (bs.id as string) === s.id) ?? {};
-        const svc: Record<string, unknown> = {
-          ...original,
-          id: s.id,
-          provider: s.provider,
-        };
-        // connectionMode: write only if present in original or non-default
-        if ("connectionMode" in original || s.connectionMode !== "user") {
-          svc.connectionMode = s.connectionMode || "user";
-        } else {
-          delete svc.connectionMode;
-        }
-        // scopes: write only if present in original or non-empty
-        const scopes = s.scopes.filter(Boolean);
-        if ("scopes" in original || scopes.length > 0) {
-          svc.scopes = scopes;
-        } else {
-          delete svc.scopes;
-        }
-        return svc;
-      }),
+    services: filteredServices,
   };
   if ("skills" in baseRequires || Object.keys(filteredSkills).length > 0) {
     requires.skills = filteredSkills;
@@ -263,6 +260,13 @@ export function assemblePayload(state: FlowFormState) {
     author: state.metadata.author,
     requires,
   };
+
+  // servicesConfiguration: write only if non-empty
+  if (Object.keys(servicesConfiguration).length > 0) {
+    manifest.servicesConfiguration = servicesConfiguration;
+  } else {
+    delete manifest.servicesConfiguration;
+  }
 
   // tags: write only if present in original or non-empty
   if ("tags" in state._manifestBase || state.metadata.tags.length > 0) {
@@ -332,15 +336,22 @@ export function payloadToFormState(payload: {
 }): FlowFormState {
   const { manifest, prompt } = payload;
   const requires = (manifest.requires as Record<string, unknown>) || {};
-  const rawServices = (requires.services as Array<Record<string, unknown>>) || [];
+  const rawServicesRecord = (requires.services ?? {}) as Record<string, string>;
+  const rawServicesConfig = ((manifest as Record<string, unknown>).servicesConfiguration ??
+    {}) as Record<string, Record<string, unknown>>;
   const execution = (manifest.execution as Record<string, unknown>) || {};
 
-  const services: ServiceEntry[] = rawServices.map((s) => ({
-    id: (s.id as string) || "",
-    provider: (s.provider as string) || "",
-    scopes: Array.isArray(s.scopes) ? (s.scopes as string[]) : [],
-    connectionMode: (s.connectionMode as "user" | "admin") || "user",
-  }));
+  const services: ServiceEntry[] = Object.entries(rawServicesRecord).map(
+    ([providerId, version]) => {
+      const cfg = rawServicesConfig[providerId] ?? {};
+      return {
+        id: providerId,
+        version: (version as string) || "*",
+        scopes: Array.isArray(cfg.scopes) ? (cfg.scopes as string[]) : [],
+        connectionMode: (cfg.connectionMode as "user" | "admin") || "user",
+      };
+    },
+  );
 
   const rawSkills = (requires.skills ?? {}) as Record<string, string>;
   const skills = Object.entries(rawSkills).map(([id, version]) => toResourceEntry({ id, version }));
