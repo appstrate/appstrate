@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { ShareLinkModal } from "../share-link-modal";
 import { api } from "../../api";
 
 interface PackageActionsDropdownProps {
@@ -91,7 +92,7 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const navigate = useNavigate();
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareGenerating, setShareGenerating] = useState(false);
 
   const isFlow = type === "flow";
@@ -99,11 +100,7 @@ export function PackageActionsDropdown({
 
   // Share logic (flow-only)
   const copyShareLink = () => {
-    const url = `${window.location.origin}/flows/${packageId}/run`;
-    navigator.clipboard.writeText(url).then(() => {
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
-    });
+    setShareUrl(`${window.location.origin}/flows/${packageId}/run`);
   };
 
   const canSharePublic =
@@ -120,10 +117,7 @@ export function PackageActionsDropdown({
       const data = await api<{ token: string }>(`/flows/${packageId}/share-token`, {
         method: "POST",
       });
-      const url = `${window.location.origin}/share/${data.token}`;
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
+      setShareUrl(`${window.location.origin}/share/${data.token}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : t("share.errorGenerate"));
     } finally {
@@ -135,145 +129,150 @@ export function PackageActionsDropdown({
   if (!isOrgAdmin && !isFlow) return null;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon">
-          <MoreHorizontal size={16} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {/* ── Share (flow-only) ── */}
-        {isFlow && (
-          <>
-            <DropdownMenuItem onSelect={copyShareLink}>
-              <Link2 size={14} />
-              {shareCopied ? t("share.copied") : t("share.copyLink")}
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon">
+            <MoreHorizontal size={16} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {/* ── Share (flow-only) ── */}
+          {isFlow && (
+            <>
+              <DropdownMenuItem onSelect={copyShareLink}>
+                <Link2 size={14} />
+                {t("share.copyLink")}
+              </DropdownMenuItem>
+              {isOrgAdmin && (
+                <DropdownMenuItem
+                  onSelect={generatePublicLink}
+                  disabled={!canSharePublic || shareGenerating}
+                >
+                  <Globe size={14} />
+                  {shareGenerating ? t("share.generating") : t("share.publicLink")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+            </>
+          )}
+
+          {/* ── Configure (flow-only, if configSchema) ── */}
+          {isFlow && hasConfigSchema && onConfigure && (
+            <DropdownMenuItem onSelect={onConfigure}>
+              <Settings size={14} />
+              {t("detail.configure")}
             </DropdownMenuItem>
-            {isOrgAdmin && (
-              <DropdownMenuItem
-                onSelect={generatePublicLink}
-                disabled={!canSharePublic || shareGenerating}
-              >
-                <Globe size={14} />
-                {shareGenerating ? t("share.generating") : t("share.publicLink")}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-          </>
-        )}
+          )}
 
-        {/* ── Configure (flow-only, if configSchema) ── */}
-        {isFlow && hasConfigSchema && onConfigure && (
-          <DropdownMenuItem onSelect={onConfigure}>
-            <Settings size={14} />
-            {t("detail.configure")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Download ── */}
-        {isOrgAdmin && downloadVersion && onDownload && (
-          <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-            <Download size={14} />
-            {t("btn.download", { ns: "common" })}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Create version ── */}
-        {isOrgAdmin && isMutable && onCreateVersion && (
-          <DropdownMenuItem onSelect={onCreateVersion} disabled={!hasDraftChanges}>
-            <GitBranchPlus size={14} />
-            {t("version.createVersion")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Edit ── */}
-        {isOrgAdmin && isMutable && (
-          <DropdownMenuItem onSelect={() => navigate(`/${type}s/${packageId}/edit`)}>
-            <Pencil size={14} />
-            {t("btn.edit")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Fork (non-owned packages, including system) ── */}
-        {isOrgAdmin && !isOwned && onFork && (
-          <DropdownMenuItem onSelect={onFork}>
-            <GitFork size={14} />
-            {t("fork.button")}
-          </DropdownMenuItem>
-        )}
-
-        {/* ── Flow secondary actions ── */}
-        {isFlow && isOrgAdmin && (
-          <>
-            <DropdownMenuSeparator />
-            {!hasFileInput && onAddSchedule && (
-              <DropdownMenuItem onSelect={onAddSchedule}>
-                <CalendarPlus size={14} />
-                {t("schedule.titleNew")}
-              </DropdownMenuItem>
-            )}
-            {hasExecutions && onDeleteExecutions && (
-              <DropdownMenuItem
-                onSelect={onDeleteExecutions}
-                disabled={runningExecutions > 0}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("detail.clearExec")}
-              </DropdownMenuItem>
-            )}
-            {hasMemories && onDeleteMemories && (
-              <DropdownMenuItem
-                onSelect={onDeleteMemories}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("detail.clearMemories")}
-              </DropdownMenuItem>
-            )}
-          </>
-        )}
-
-        {/* ── Delete credentials (provider-only) ── */}
-        {type === "provider" && isOrgAdmin && hasCredentials && onDeleteCredentials && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={onDeleteCredentials}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 size={14} />
-              {t("providers.deleteCredentials", { ns: "settings" })}
+          {/* ── Download ── */}
+          {isOrgAdmin && downloadVersion && onDownload && (
+            <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+              <Download size={14} />
+              {t("btn.download", { ns: "common" })}
             </DropdownMenuItem>
-          </>
-        )}
+          )}
 
-        {/* ── Delete ── */}
-        {isOrgAdmin && !isBuiltIn && isOwned && (
-          <>
-            <DropdownMenuSeparator />
-            {isFlow && onDeleteFlow && (
+          {/* ── Create version ── */}
+          {isOrgAdmin && isMutable && onCreateVersion && (
+            <DropdownMenuItem onSelect={onCreateVersion} disabled={!hasDraftChanges}>
+              <GitBranchPlus size={14} />
+              {t("version.createVersion")}
+            </DropdownMenuItem>
+          )}
+
+          {/* ── Edit ── */}
+          {isOrgAdmin && isMutable && (
+            <DropdownMenuItem onSelect={() => navigate(`/${type}s/${packageId}/edit`)}>
+              <Pencil size={14} />
+              {t("btn.edit")}
+            </DropdownMenuItem>
+          )}
+
+          {/* ── Fork (non-owned packages, including system) ── */}
+          {isOrgAdmin && !isOwned && onFork && (
+            <DropdownMenuItem onSelect={onFork}>
+              <GitFork size={14} />
+              {t("fork.button")}
+            </DropdownMenuItem>
+          )}
+
+          {/* ── Flow secondary actions ── */}
+          {isFlow && isOrgAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              {!hasFileInput && onAddSchedule && (
+                <DropdownMenuItem onSelect={onAddSchedule}>
+                  <CalendarPlus size={14} />
+                  {t("schedule.titleNew")}
+                </DropdownMenuItem>
+              )}
+              {hasExecutions && onDeleteExecutions && (
+                <DropdownMenuItem
+                  onSelect={onDeleteExecutions}
+                  disabled={runningExecutions > 0}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("detail.clearExec")}
+                </DropdownMenuItem>
+              )}
+              {hasMemories && onDeleteMemories && (
+                <DropdownMenuItem
+                  onSelect={onDeleteMemories}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("detail.clearMemories")}
+                </DropdownMenuItem>
+              )}
+            </>
+          )}
+
+          {/* ── Delete credentials (provider-only) ── */}
+          {type === "provider" && isOrgAdmin && hasCredentials && onDeleteCredentials && (
+            <>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
-                onSelect={onDeleteFlow}
-                disabled={runningExecutions > 0}
+                onSelect={onDeleteCredentials}
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 size={14} />
-                {t("btn.delete")}
+                {t("providers.deleteCredentials", { ns: "settings" })}
               </DropdownMenuItem>
-            )}
-            {!isFlow && canDeletePackage && onDeletePackage && (
-              <DropdownMenuItem
-                onSelect={onDeletePackage}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("btn.delete")}
-              </DropdownMenuItem>
-            )}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+            </>
+          )}
+
+          {/* ── Delete ── */}
+          {isOrgAdmin && !isBuiltIn && isOwned && (
+            <>
+              <DropdownMenuSeparator />
+              {isFlow && onDeleteFlow && (
+                <DropdownMenuItem
+                  onSelect={onDeleteFlow}
+                  disabled={runningExecutions > 0}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("btn.delete")}
+                </DropdownMenuItem>
+              )}
+              {!isFlow && canDeletePackage && onDeletePackage && (
+                <DropdownMenuItem
+                  onSelect={onDeletePackage}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("btn.delete")}
+                </DropdownMenuItem>
+              )}
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {isFlow && (
+        <ShareLinkModal open={!!shareUrl} onClose={() => setShareUrl(null)} url={shareUrl ?? ""} />
+      )}
+    </>
   );
 }
