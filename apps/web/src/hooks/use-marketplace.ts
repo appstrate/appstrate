@@ -71,7 +71,7 @@ interface InstallResult {
   autoInstalledDeps?: { packageId: string; type: string; version: string | null }[];
 }
 
-interface PackageUpdateStatus {
+export interface PackageUpdateStatus {
   id: string;
   type: PackageType;
   scope: string;
