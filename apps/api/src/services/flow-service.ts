@@ -1,7 +1,7 @@
 import { eq, and, or, isNull, count, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/core/validation";
+import type { Manifest, PackageType } from "@appstrate/core/validation";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
 interface DbPackageRow {
@@ -142,7 +142,7 @@ export async function getAllPackageIds(orgId?: string, type?: string): Promise<s
     conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
   }
   if (type) {
-    conditions.push(eq(packages.type, type as "flow" | "skill" | "extension"));
+    conditions.push(eq(packages.type, type as PackageType));
   }
   const rows = await db
     .select({ id: packages.id })

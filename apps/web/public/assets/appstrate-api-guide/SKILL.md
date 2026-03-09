@@ -17,7 +17,7 @@ Before performing any action or asking any question, call the relevant GET endpo
 
 1. **Need to know what flows exist?** → Call `GET /api/flows` — don't ask the user
 2. **Need to know what providers are configured?** → Call `GET /api/providers` — don't ask the user
-3. **Need to know what services are connected?** → Call `GET /auth/integrations` — don't ask the user
+3. **Need to know what providers are connected?** → Call `GET /auth/integrations` — don't ask the user
 4. **Need to know what skills/extensions are available?** → Call `GET /api/packages/skills` and `GET /api/packages/extensions` — don't ask the user
 5. **Need to know the flow's requirements?** → Call `GET /api/flows/{packageId}` — don't ask the user
 6. **Need to know if config is set?** → The flow detail response includes current `config` values — don't ask the user
@@ -38,7 +38,7 @@ When starting any task involving Appstrate, run this sequence to build your unde
 ```
 1. GET /api/flows                    → What flows exist? What's their status?
 2. GET /api/providers                → What providers are configured?
-3. GET /auth/integrations            → What services are connected/disconnected?
+3. GET /auth/integrations            → What providers are connected/disconnected?
 4. GET /api/packages/skills           → What skills are available?
 5. GET /api/packages/extensions       → What extensions are available?
 ```
@@ -90,7 +90,7 @@ This skill is organized into focused reference files. **Read the file relevant t
 1. **Always discover before acting**: Call GET endpoints to understand the current state before creating, updating, or asking the user anything.
 2. **Validate your API key immediately**: The first thing you do with a new key is `GET /api/flows` to verify it works.
 3. **Check flow detail before running**: `GET /api/flows/{packageId}` tells you everything — services, config, input schema, running executions.
-4. **Resolve blockers autonomously**: If a service is disconnected, figure out the `authMode` and initiate the connection. Only ask the user for secrets.
+4. **Resolve blockers autonomously**: If a provider is disconnected, figure out the `authMode` and initiate the connection. Only ask the user for secrets.
 5. **Poll with backoff**: When waiting for execution completion, use 2-5 second intervals.
 6. **Use pagination for logs**: Pass `?after={lastId}` to `GET /api/executions/{executionId}/logs` for incremental log retrieval.
 7. **Handle optimistic locking**: Always fetch the current `updatedAt` before updating a flow.

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
-import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
@@ -409,7 +409,7 @@ function PackageEditorInner({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-export function PackageEditorPage({ type }: { type: "flow" | "skill" | "extension" | "provider" }) {
+export function PackageEditorPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;

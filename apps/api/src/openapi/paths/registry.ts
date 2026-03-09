@@ -261,7 +261,7 @@ export const registryPaths = {
       tags: ["Packages"],
       summary: "Publish a package to the registry",
       description:
-        "Publish a local package (flow, skill, or extension) to the Appstrate registry. Requires registry connection. Admin only.",
+        "Publish a local package (flow, skill, extension, or provider) to the Appstrate registry. Requires registry connection. Admin only.",
       parameters: [
         {
           name: "scope",

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { PackageType } from "@appstrate/shared-types";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/markdown";
 import { Spinner } from "./spinner";
@@ -8,7 +9,7 @@ import { Trash2 } from "lucide-react";
 
 interface VersionHistoryProps {
   packageId: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   isAdmin: boolean;
   isOwned: boolean;
 }

@@ -5,7 +5,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (flow, skill, or extension) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (flow, skill, extension, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -45,7 +45,10 @@ export const packagesPaths = {
                 required: ["packageId", "type"],
                 properties: {
                   packageId: { type: "string", description: "The imported package ID" },
-                  type: { type: "string", description: "Package type (flow/skill/extension)" },
+                  type: {
+                    type: "string",
+                    description: "Package type (flow/skill/extension/provider)",
+                  },
                 },
               },
             },
@@ -1017,7 +1020,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get flow detail",
       description:
-        "Returns flow detail including services, config, state, skills, and extensions. Supports profileId for per-user service status resolution.",
+        "Returns flow detail including providers, config, state, skills, and extensions. Supports profileId for per-user provider status resolution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
@@ -1026,7 +1029,7 @@ export const packagesPaths = {
           in: "query",
           required: false,
           description:
-            "Connection profile ID to use for resolving service statuses. Defaults to user's effective profile.",
+            "Connection profile ID to use for resolving provider statuses. Defaults to user's effective profile.",
           schema: { type: "string" },
         },
       ],

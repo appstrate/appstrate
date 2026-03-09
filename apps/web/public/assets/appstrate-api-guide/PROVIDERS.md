@@ -206,7 +206,7 @@ After user provides credentials:
 POST /api/providers → create notion provider
 POST /auth/connect/notion → get authUrl → user authorizes
 GET /auth/integrations → verify connected
-→ Now create the flow that uses this service
+→ Now create the flow that uses this provider
 ```
 
 ## Create a Provider (Reference)

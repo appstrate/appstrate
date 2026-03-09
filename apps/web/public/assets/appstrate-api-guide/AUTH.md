@@ -1,4 +1,4 @@
-# Authentication & Service Connections
+# Authentication & Provider Connections
 
 ## Authentication
 
@@ -44,7 +44,7 @@ Store the validated key and base URL for all subsequent calls.
 
 ---
 
-## Service Connections
+## Provider Connections
 
 Once a provider is configured, users connect their accounts to it. Connections are scoped per organization + user.
 
@@ -59,7 +59,7 @@ Authorization: Bearer ask_...
 
 Returns all providers with their connection status (`connected`, `disconnected`, `expired`) and `authMode`.
 
-If a service is already `connected`, you don't need to do anything. If it's `disconnected` or `expired`, proceed with the appropriate connection method based on the provider's `authMode`.
+If a provider is already `connected`, you don't need to do anything. If it's `disconnected` or `expired`, proceed with the appropriate connection method based on the provider's `authMode`.
 
 ### Connect via API Key
 
@@ -112,13 +112,13 @@ Authorization: Bearer ask_...
 
 ### Admin Connections (Flow-level)
 
-Flows can require services in `admin` connection mode. An admin binds their personal connection to the flow:
+Flows can require providers in `admin` connection mode. An admin binds their personal connection to the flow:
 
 ```
-POST /api/flows/{packageId}/services/{serviceId}/bind
+POST /api/flows/{packageId}/providers/{providerId}/bind
 Authorization: Bearer ask_...
 ```
 
 This makes the admin's credentials available to all executions of that flow, regardless of who runs it.
 
-**Check if a binding already exists**: The flow detail (`GET /api/flows/{packageId}`) shows `services[].adminConnection` — if it's already set, the binding is done.
+**Check if a binding already exists**: The flow detail (`GET /api/flows/{packageId}`) shows `providers[].adminConnection` — if it's already set, the binding is done.

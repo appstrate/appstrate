@@ -1,3 +1,4 @@
+import type { PackageType } from "@appstrate/core/validation";
 import * as storage from "@appstrate/db/storage";
 
 // ─────────────────────────────────────────────
@@ -5,7 +6,7 @@ import * as storage from "@appstrate/db/storage";
 // ─────────────────────────────────────────────
 
 export interface PackageTypeConfig {
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   storageFolder: "flows" | "skills" | "extensions" | "providers";
   label: string;
 }

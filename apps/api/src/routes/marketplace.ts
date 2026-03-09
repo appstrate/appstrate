@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 import {
   getMarketplaceStatus,
@@ -38,7 +39,7 @@ export function createMarketplaceRouter() {
     try {
       const results = await searchMarketplace({
         q,
-        type: type as "flow" | "skill" | "extension" | "provider" | undefined,
+        type: type as PackageType | undefined,
         sort: sort as "relevance" | "downloads" | "recent" | undefined,
         page,
         perPage,

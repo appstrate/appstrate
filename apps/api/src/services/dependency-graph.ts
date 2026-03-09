@@ -1,6 +1,7 @@
 import { eq, and, or, isNull } from "drizzle-orm";
 import { isValidVersion, versionGt } from "@appstrate/core/semver";
 import { parseScopedName } from "@appstrate/core/naming";
+import type { PackageType } from "@appstrate/core/validation";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { getRegistryClient } from "./registry-provider.ts";
@@ -10,7 +11,7 @@ import { logger } from "../lib/logger.ts";
 
 export interface GraphNode {
   packageId: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   displayName: string;
   version: string | null;
   registryVersion: string | null;
@@ -32,7 +33,7 @@ export type PublishStatus =
 
 export interface PublishPlanItem {
   packageId: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   displayName: string;
   version: string | null;
   registryVersion: string | null;

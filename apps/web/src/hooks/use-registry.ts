@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { PackageType } from "@appstrate/shared-types";
 import i18n from "../i18n";
 import { api } from "../api";
 
@@ -98,7 +99,7 @@ export type PublishStatus =
 
 export interface PublishPlanItem {
   packageId: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   displayName: string;
   version: string | null;
   status: PublishStatus;

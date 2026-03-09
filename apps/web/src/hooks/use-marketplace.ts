@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { PackageType } from "@appstrate/shared-types";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 
@@ -13,7 +14,7 @@ interface MarketplacePackage {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   description: string;
   keywords: string[];
   downloads: number;
@@ -33,7 +34,7 @@ interface MarketplacePackageDetail {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   description: string;
   keywords: string[];
   readme: string | null;
@@ -72,7 +73,7 @@ interface InstallResult {
 
 interface PackageUpdateStatus {
   id: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   scope: string;
   name: string;
   displayName: string | null;

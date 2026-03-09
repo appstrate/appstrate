@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { PackageType } from "@appstrate/shared-types";
 import { Spinner } from "./spinner";
 import { RunFlowButton } from "./run-flow-button";
 import { packageDetailPath } from "../lib/package-paths";
@@ -8,7 +9,7 @@ interface PackageCardProps {
   id: string;
   displayName: string;
   description?: string | null;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   source?: "system" | "local";
   runningExecutions?: number;
   tags?: string[];

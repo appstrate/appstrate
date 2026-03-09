@@ -21,13 +21,14 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import type { PackageType } from "@appstrate/shared-types";
 import { ShareLinkModal } from "../share-link-modal";
 import { api } from "../../api";
 import { packageEditPath } from "../../lib/package-paths";
 
 interface PackageActionsDropdownProps {
   packageId: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   isOrgAdmin: boolean;
   isOwned: boolean;
   isBuiltIn: boolean;

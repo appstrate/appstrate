@@ -99,18 +99,18 @@ Chercher le flow existant avec cet ID dans la réponse.
 
 ## Erreurs d'exécution
 
-### 400 DEPENDENCY_NOT_SATISFIED — "Required service not connected"
+### 400 DEPENDENCY_NOT_SATISFIED — "Required provider not connected"
 
 **Diagnostic autonome :**
 ```
 GET {BASE_URL}/api/flows/{packageId}
 ```
-Vérifier le champ `services` dans la réponse. Identifier les services avec `status: "disconnected"` ou `"expired"`.
+Vérifier le champ `providers` dans la réponse. Identifier les providers avec `status: "disconnected"` ou `"expired"`.
 
 ```
 GET {BASE_URL}/auth/integrations
 ```
-Vérifier le `authMode` du provider pour chaque service manquant.
+Vérifier le `authMode` du provider pour chaque provider manquant.
 
 **Actions de l'agent (selon authMode) :**
 
@@ -119,7 +119,7 @@ Vérifier le `authMode` du provider pour chaque service manquant.
 | `api_key` | Demander à l'utilisateur la clé API externe → `POST /auth/connect/{providerId}/api-key` |
 | `custom` | Lire le `credentialSchema` du provider → demander les valeurs à l'utilisateur → `POST /auth/connect/{providerId}/credentials` |
 | `oauth2` | `POST /auth/connect/{providerId}` → donner l'`authUrl` à l'utilisateur → vérifier via `GET /auth/integrations` après |
-| (admin mode) | Vérifier si l'admin a une connexion active → `POST /api/flows/{packageId}/services/{serviceId}/bind` |
+| (admin mode) | Vérifier si l'admin a une connexion active → `POST /api/flows/{packageId}/providers/{providerId}/bind` |
 
 ### 400 CONFIG_INCOMPLETE — "Required config fields missing"
 
@@ -274,8 +274,8 @@ GET /api/flows/{packageId}
 
 Puis vérifier dans la réponse :
 
-- [ ] `services[].status === "connected"` pour tous les services → sinon, résoudre (voir DEPENDENCY_NOT_SATISFIED)
-- [ ] `services[].adminConnection` est défini pour les services en mode admin → sinon, binder
+- [ ] `providers[].status === "connected"` pour tous les providers → sinon, résoudre (voir DEPENDENCY_NOT_SATISFIED)
+- [ ] `providers[].adminConnection` est défini pour les providers en mode admin → sinon, binder
 - [ ] `config` contient tous les champs `required` du `manifest.config.schema` → sinon, remplir via `PUT /api/flows/{packageId}/config`
 - [ ] L'input prévu respecte `manifest.input.schema` (champs required + types) → sinon, corriger
 - [ ] `runningExecutions === 0` → sinon, attendre ou annuler l'exécution en cours

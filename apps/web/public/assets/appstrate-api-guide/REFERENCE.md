@@ -17,7 +17,7 @@
 | -------------------------- | ---- | ------------------------------------------- |
 | `FLOW_NOT_FOUND`           | 404  | Flow ID does not exist                      |
 | `VALIDATION_ERROR`         | 400  | Input/config validation failed              |
-| `DEPENDENCY_NOT_SATISFIED` | 400  | Required service not connected              |
+| `DEPENDENCY_NOT_SATISFIED` | 400  | Required provider not connected             |
 | `CONFIG_INCOMPLETE`        | 400  | Required config fields missing              |
 | `EXECUTION_IN_PROGRESS`    | 409  | Concurrent execution limit reached          |
 | `UNAUTHORIZED`             | 401  | Missing or invalid authentication           |
@@ -38,7 +38,7 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 
 | Error | Agent Action |
 |-------|-------------|
-| `DEPENDENCY_NOT_SATISFIED` | Call `GET /api/flows/{packageId}` → find which service has `status: "disconnected"` → call `GET /auth/integrations` to check the provider's `authMode` → if `api_key` or `custom`, ask user for credentials and connect. If `oauth2`, generate the auth URL and give it to the user. |
+| `DEPENDENCY_NOT_SATISFIED` | Call `GET /api/flows/{packageId}` → find which provider has `status: "disconnected"` → call `GET /auth/integrations` to check the provider's `authMode` → if `api_key` or `custom`, ask user for credentials and connect. If `oauth2`, generate the auth URL and give it to the user. |
 | `CONFIG_INCOMPLETE` | Call `GET /api/flows/{packageId}` → read `manifest.config.schema` to find required fields → check which are missing in `config` → if fields have `default` values, set them via `PUT /api/flows/{packageId}/config`. If no defaults, ask the user for values. |
 | `NAME_COLLISION` | The resource already exists. Call `GET /api/flows` (or skills/extensions) to find it, then decide: update instead of create, or choose a different ID. |
 | `EXECUTION_IN_PROGRESS` | Call `GET /api/flows/{packageId}/executions?limit=5` → find the running execution → either poll it until completion, or cancel via `POST /api/executions/{execId}/cancel`. |
@@ -49,7 +49,7 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 
 ## Common Workflows
 
-### Workflow 1: Set up a new external service integration
+### Workflow 1: Set up a new external provider integration
 
 ```
 1. GET /api/providers                         → Check if the provider already exists
@@ -67,13 +67,13 @@ When you get an error, **don't ask the user what to do**. Diagnose and resolve i
 
 ```
 1. GET /api/flows                             → Check if the flow ID already exists
-2. GET /api/providers                         → Check which providers are available for services
+2. GET /api/providers                         → Check which providers are available for providers
 3. GET /api/packages/skills                    → Check available skills
 4. GET /api/packages/extensions                → Check available extensions
 5. POST /api/flows                            → Create the flow (manifest + prompt + skillIds + extensionIds)
-6. GET /api/flows/{packageId}                    → Verify creation, check service status
-7. IF services disconnected:
-   → Follow Workflow 1 for each missing service
+6. GET /api/flows/{packageId}                    → Verify creation, check provider status
+7. IF providers disconnected:
+   → Follow Workflow 1 for each missing provider
 8. IF config has required fields:
    PUT /api/flows/{packageId}/config             → Set config values
 9. POST /api/flows/{packageId}/run               → Run with input

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { PackageType } from "@appstrate/shared-types";
 import { VersionSelector } from "../version-selector";
 import { packageListPath } from "../../lib/package-paths";
 
@@ -8,7 +9,7 @@ interface SharedHeaderDetail {
   displayName: string;
   description: string;
   source: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   version?: string | null;
   versionCount?: number;
   hasUnpublishedChanges?: boolean;

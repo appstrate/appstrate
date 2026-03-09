@@ -13,6 +13,7 @@ import {
   type CreateItemInput,
 } from "./package-items.ts";
 import { isValidVersion } from "@appstrate/core/semver";
+import type { PackageType } from "@appstrate/core/validation";
 
 /** Parse manifest.json from normalized ZIP files. Throws if not found. */
 function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<string, unknown> {
@@ -60,7 +61,7 @@ async function upsertItem(
  * handles skill/extension upsert + storage.
  */
 export async function postInstallPackage(params: {
-  packageType: "flow" | "skill" | "extension" | "provider";
+  packageType: PackageType;
   packageId: string;
   orgId: string;
   userId: string;

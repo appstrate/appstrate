@@ -2,6 +2,7 @@ export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/sch
 export type {
   AuthMode,
   AvailableScope,
+  PackageType,
   ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";
@@ -10,8 +11,6 @@ import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
 
 // --- Package Types ---
-
-type PackageType = "flow" | "skill" | "extension" | "provider";
 
 // --- Execution Types ---
 
@@ -287,6 +286,7 @@ export interface Integration {
 import type {
   AuthMode as _AuthMode,
   AvailableScope as _AvailableScope,
+  PackageType,
   ProviderSetupGuide as _ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";

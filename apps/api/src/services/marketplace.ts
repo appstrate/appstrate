@@ -19,7 +19,7 @@ import { getLatestVersionId } from "./package-versions.ts";
 import { syncFlowDepsJunctionTable } from "./package-items/dependencies.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { packageVersions } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/core/validation";
+import type { Manifest, PackageType } from "@appstrate/core/validation";
 
 // --- Status ---
 
@@ -50,7 +50,7 @@ export function getMarketplaceStatus(): MarketplaceStatus {
 
 export interface MarketplaceSearchOpts {
   q?: string;
-  type?: "flow" | "skill" | "extension" | "provider";
+  type?: PackageType;
   sort?: "relevance" | "downloads" | "recent";
   page?: number;
   perPage?: number;
@@ -131,7 +131,7 @@ interface CollectedPackage {
   scope: string;
   name: string;
   version: string;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   manifest: Record<string, unknown>;
   content: string;
   files: Record<string, Uint8Array>;
