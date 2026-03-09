@@ -1,28 +1,106 @@
+name: appstrate
+
 services:
-  postgres:
+  appstrate-postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 1g
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "wal_level=minimal"
+      - "-c"
+      - "max_wal_senders=0"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "effective_cache_size=512MB"
     environment:
-      POSTGRES_USER: appstrate
-      POSTGRES_PASSWORD: appstrate
+      POSTGRES_USER: ${POSTGRES_USER:-appstrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: appstrate
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appstrate"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appstrate}"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-    ports:
-      - "5432:5432"
 
-  migrate:
-    build: .
-    command: bun packages/db/src/migrate.ts
+  appstrate-redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  appstrate-pi:
+    build:
+      context: ./runtime-pi
+    image: appstrate-pi:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
+
+  appstrate-sidecar:
+    build:
+      context: ./runtime-pi/sidecar
+    image: appstrate-sidecar:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
+
+  appstrate-migrate:
+    build:
+      context: .
+    restart: "no"
+    command: ["bun", "packages/db/src/migrate.ts"]
     environment:
-      DATABASE_URL: postgresql://appstrate:appstrate@postgres:5432/appstrate
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
     depends_on:
-      postgres:
+      appstrate-postgres:
         condition: service_healthy
+
+  appstrate:
+    build:
+      context: .
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    mem_limit: 8g
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
+      - APP_URL=${APP_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-claude-sonnet-4-5-20250929}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY}
+      - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL}
+      - STORAGE_DIR=${STORAGE_DIR:-./storage}
+      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
+      - DOCKER_SOCKET=/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appstrate-storage:/app/storage
+    depends_on:
+      appstrate-migrate:
+        condition: service_completed_successfully
+      appstrate-pi:
+        condition: service_completed_successfully
+      appstrate-sidecar:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
+  appstrate-storage:
