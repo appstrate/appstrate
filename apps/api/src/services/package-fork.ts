@@ -1,5 +1,6 @@
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 import type { Manifest } from "@appstrate/core/validation";
+import { zipArtifact, type Zippable } from "@appstrate/core/zip";
 import {
   getOrgItem,
   getPackageById,
@@ -14,6 +15,11 @@ import {
 } from "./package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
+import { getLatestVersionId, createVersionAndUpload } from "./package-versions-impl.ts";
+import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
+import { db } from "../lib/db.ts";
+import { packageVersions } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
   flow: FLOW_CONFIG,
@@ -32,7 +38,8 @@ export type ForkError =
   | { code: "ALREADY_OWNED" }
   | { code: "NOT_FOUND" }
   | { code: "NAME_COLLISION"; existingId: string }
-  | { code: "UNKNOWN_TYPE"; type: string };
+  | { code: "UNKNOWN_TYPE"; type: string }
+  | { code: "NO_PUBLISHED_VERSION" };
 
 export async function forkPackage(
   orgId: string,
@@ -85,9 +92,34 @@ async function forkWithConfig(
   cfg: PackageTypeConfig,
   userId?: string,
 ): Promise<ForkResult | ForkError> {
-  // Load source package
-  const source = await getOrgItem(orgId, sourcePackageId, cfg);
-  if (!source) return { code: "NOT_FOUND" };
+  // Resolve latest published version of the source
+  const latestVersionId = await getLatestVersionId(sourcePackageId);
+  if (!latestVersionId) return { code: "NO_PUBLISHED_VERSION" };
+
+  const [versionRow] = await db
+    .select({
+      version: packageVersions.version,
+      manifest: packageVersions.manifest,
+      integrity: packageVersions.integrity,
+    })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, latestVersionId))
+    .limit(1);
+
+  if (!versionRow) return { code: "NO_PUBLISHED_VERSION" };
+
+  // Download the source version ZIP
+  const sourceZip = await downloadVersionZip(sourcePackageId, versionRow.version);
+  if (!sourceZip) return { code: "NO_PUBLISHED_VERSION" };
+
+  // Extract content from the ZIP
+  const zipEntries = unzipAndNormalize(sourceZip);
+  const decoder = new TextDecoder();
+  const content = zipEntries["prompt.md"]
+    ? decoder.decode(zipEntries["prompt.md"])
+    : zipEntries["SKILL.md"]
+      ? decoder.decode(zipEntries["SKILL.md"])
+      : "";
 
   // Build target packageId
   const targetId = `@${orgSlug}/${sourceName}`;
@@ -96,19 +128,19 @@ async function forkWithConfig(
   const existing = await getPackageById(targetId);
   if (existing) return { code: "NAME_COLLISION", existingId: targetId };
 
-  // Update manifest.name to new packageId
-  const updatedManifest = { ...(source.manifest ?? {}) };
-  updatedManifest.name = targetId;
+  // Build manifest from the published version snapshot, update name
+  const versionManifest = (versionRow.manifest ?? {}) as Record<string, unknown>;
+  const updatedManifest = { ...versionManifest, name: targetId };
 
-  // Create the fork
+  // Create the fork package (draft)
   const newPkg = await createOrgItem(
     orgId,
     orgSlug,
     {
       id: sourceName,
-      name: (source.name as string) ?? undefined,
-      description: (source.description as string) ?? undefined,
-      content: source.content ?? "",
+      name: (versionManifest.displayName as string) ?? undefined,
+      description: (versionManifest.description as string) ?? undefined,
+      content,
       createdBy: userId,
     },
     cfg,
@@ -116,11 +148,32 @@ async function forkWithConfig(
     sourcePackageId,
   );
 
-  // Copy storage files if they exist
+  // Copy storage files from the version ZIP (not from draft storage)
   const files = await downloadPackageFiles(cfg.storageFolder, orgId, sourcePackageId);
   if (files && Object.keys(files).length > 0) {
     await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, files);
   }
+
+  // Rebuild ZIP with updated manifest for the local version
+  const newZipEntries: Zippable = {};
+  for (const [path, data] of Object.entries(zipEntries)) {
+    if (path === "manifest.json") continue; // Replace with updated manifest
+    newZipEntries[path] = data;
+  }
+  newZipEntries["manifest.json"] = new TextEncoder().encode(
+    JSON.stringify(updatedManifest, null, 2),
+  );
+  const newZipBuffer = Buffer.from(zipArtifact(newZipEntries, 6));
+
+  // Create a local published version
+  await createVersionAndUpload({
+    packageId: newPkg.id,
+    version: versionRow.version,
+    orgId,
+    createdBy: userId ?? null,
+    zipBuffer: newZipBuffer,
+    manifest: updatedManifest,
+  });
 
   // Sync flow dependencies if it's a flow
   if (cfg.type === "flow") {

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
+import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
 
 /**
  * Tests for the forkPackage service.
@@ -17,6 +18,13 @@ let mockCreatedItems: unknown[] = [];
 let mockUploadedFiles: unknown[] = [];
 let mockSyncCalls: unknown[] = [];
 let mockDownloadedFiles: Record<string, unknown> | null = null;
+let mockLatestVersionId: Record<string, number | null> = {};
+let mockVersionRows: Record<
+  number,
+  { version: string; manifest: Record<string, unknown>; integrity: string }
+> = {};
+let mockVersionZips: Record<string, Buffer | null> = {};
+let mockCreatedVersions: unknown[] = [];
 
 // --- Type configs (replicated from package-items config) ---
 
@@ -100,6 +108,45 @@ function extractDepsFromManifest(_manifest: unknown) {
   return { skillIds: [] as string[], extensionIds: [] as string[], providerIds: [] as string[] };
 }
 
+async function getLatestVersionId(packageId: string): Promise<number | null> {
+  return mockLatestVersionId[packageId] ?? null;
+}
+
+function getVersionRow(versionId: number) {
+  return mockVersionRows[versionId] ?? null;
+}
+
+function downloadVersionZip(packageId: string, version: string): Buffer | null {
+  return mockVersionZips[`${packageId}@${version}`] ?? null;
+}
+
+async function createVersionAndUpload(params: {
+  packageId: string;
+  version: string;
+  orgId: string | null;
+  createdBy: string | null;
+  zipBuffer: Buffer;
+  manifest: Record<string, unknown>;
+}): Promise<{ id: number; version: string } | null> {
+  const entry = { ...params, id: mockCreatedVersions.length + 1 };
+  mockCreatedVersions.push(entry);
+  return { id: entry.id, version: params.version };
+}
+
+// --- Helper: build a minimal ZIP for testing ---
+
+function buildTestZip(
+  manifest: Record<string, unknown>,
+  content: string,
+  contentFileName = "prompt.md",
+): Buffer {
+  const entries: Zippable = {
+    "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
+    [contentFileName]: new TextEncoder().encode(content),
+  };
+  return Buffer.from(zipArtifact(entries, 6));
+}
+
 // --- Inline fork logic (replicated from package-fork.ts) ---
 
 interface ForkResult {
@@ -112,7 +159,8 @@ type ForkError =
   | { code: "ALREADY_OWNED" }
   | { code: "NOT_FOUND" }
   | { code: "NAME_COLLISION"; existingId: string }
-  | { code: "UNKNOWN_TYPE"; type: string };
+  | { code: "UNKNOWN_TYPE"; type: string }
+  | { code: "NO_PUBLISHED_VERSION" };
 
 async function forkPackage(
   orgId: string,
@@ -146,9 +194,25 @@ async function forkPackage(
     cfg = typeCfg;
   }
 
-  // Load source package
-  const source = await getOrgItem(orgId, sourcePackageId, cfg);
-  if (!source) return { code: "NOT_FOUND" };
+  // Resolve latest published version
+  const latestVersionId = await getLatestVersionId(sourcePackageId);
+  if (!latestVersionId) return { code: "NO_PUBLISHED_VERSION" };
+
+  const versionRow = getVersionRow(latestVersionId);
+  if (!versionRow) return { code: "NO_PUBLISHED_VERSION" };
+
+  // Download source version ZIP
+  const sourceZip = downloadVersionZip(sourcePackageId, versionRow.version);
+  if (!sourceZip) return { code: "NO_PUBLISHED_VERSION" };
+
+  // Extract content from ZIP
+  const zipEntries = unzipArtifact(new Uint8Array(sourceZip));
+  const decoder = new TextDecoder();
+  const content = zipEntries["prompt.md"]
+    ? decoder.decode(zipEntries["prompt.md"])
+    : zipEntries["SKILL.md"]
+      ? decoder.decode(zipEntries["SKILL.md"])
+      : "";
 
   // Build target packageId
   const forkName = customName ?? parsed.name;
@@ -158,9 +222,9 @@ async function forkPackage(
   const existing = await getPackageById(targetId);
   if (existing) return { code: "NAME_COLLISION", existingId: targetId };
 
-  // Update manifest.name to new packageId
-  const updatedManifest = { ...((source.manifest as Record<string, unknown>) ?? {}) };
-  updatedManifest.name = targetId;
+  // Build manifest from version snapshot
+  const versionManifest = (versionRow.manifest ?? {}) as Record<string, unknown>;
+  const updatedManifest = { ...versionManifest, name: targetId };
 
   // Create the fork
   const newPkg = await createOrgItem(
@@ -168,9 +232,9 @@ async function forkPackage(
     orgSlug,
     {
       id: forkName,
-      name: (source.name as string) ?? undefined,
-      description: (source.description as string) ?? undefined,
-      content: (source.content as string) ?? "",
+      name: (versionManifest.displayName as string) ?? undefined,
+      description: (versionManifest.description as string) ?? undefined,
+      content,
       createdBy: userId,
     },
     cfg,
@@ -183,6 +247,27 @@ async function forkPackage(
   if (files && Object.keys(files).length > 0) {
     await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, files);
   }
+
+  // Rebuild ZIP with updated manifest
+  const newZipEntries: Zippable = {};
+  for (const [path, data] of Object.entries(zipEntries)) {
+    if (path === "manifest.json") continue;
+    newZipEntries[path] = data;
+  }
+  newZipEntries["manifest.json"] = new TextEncoder().encode(
+    JSON.stringify(updatedManifest, null, 2),
+  );
+  const newZipBuffer = Buffer.from(zipArtifact(newZipEntries, 6));
+
+  // Create local published version
+  await createVersionAndUpload({
+    packageId: newPkg.id,
+    version: versionRow.version,
+    orgId,
+    createdBy: userId ?? null,
+    zipBuffer: newZipBuffer,
+    manifest: updatedManifest,
+  });
 
   // Sync flow dependencies if it's a flow
   if (cfg.type === "flow") {
@@ -197,6 +282,53 @@ async function forkPackage(
   };
 }
 
+// --- Helper: set up a source package with a published version ---
+
+function setupSourcePackage(opts: {
+  packageId: string;
+  type: string;
+  version?: string;
+  content?: string;
+  displayName?: string;
+  description?: string;
+  manifest?: Record<string, unknown>;
+}) {
+  const version = opts.version ?? "1.0.0";
+  const content = opts.content ?? "# prompt";
+  const manifest = opts.manifest ?? {
+    name: opts.packageId,
+    type: opts.type,
+    version,
+    ...(opts.displayName ? { displayName: opts.displayName } : {}),
+    ...(opts.description ? { description: opts.description } : {}),
+  };
+
+  // Set up org item (for type detection)
+  mockOrgItems[opts.packageId] = {
+    id: opts.packageId,
+    orgId: "org-1",
+    name: opts.displayName ?? opts.packageId,
+    description: opts.description ?? null,
+    content,
+    manifest,
+    source: "local",
+  };
+
+  // Set up published version
+  const versionId = Object.keys(mockVersionRows).length + 1;
+  mockLatestVersionId[opts.packageId] = versionId;
+  mockVersionRows[versionId] = {
+    version,
+    manifest,
+    integrity: "sha256-test",
+  };
+
+  // Build and store the version ZIP
+  const contentFileName = opts.type === "skill" ? "SKILL.md" : "prompt.md";
+  const zip = buildTestZip(manifest, content, contentFileName);
+  mockVersionZips[`${opts.packageId}@${version}`] = zip;
+}
+
 // --- Reset ---
 
 beforeEach(() => {
@@ -206,19 +338,21 @@ beforeEach(() => {
   mockUploadedFiles = [];
   mockSyncCalls = [];
   mockDownloadedFiles = null;
+  mockLatestVersionId = {};
+  mockVersionRows = {};
+  mockVersionZips = {};
+  mockCreatedVersions = [];
 });
 
 describe("forkPackage", () => {
-  test("fork non-owned → success with correct packageId and forkedFrom", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
-      description: "A cool flow",
+  test("fork non-owned with published version → success", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
       content: "# Cool flow prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
-    };
+      displayName: "Cool Flow",
+      description: "A cool flow",
+    });
 
     const result = await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
 
@@ -248,16 +382,33 @@ describe("forkPackage", () => {
     }
   });
 
-  test("fork name collision → NAME_COLLISION", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
+  test("fork package with no published version → NO_PUBLISHED_VERSION", async () => {
+    // Set up org item but NO published version
+    mockOrgItems["@other/draft-only"] = {
+      id: "@other/draft-only",
       orgId: "org-1",
-      name: "Cool Flow",
-      description: "A cool flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
+      name: "Draft Only",
+      content: "# draft",
+      manifest: { name: "@other/draft-only", type: "flow", version: "1.0.0" },
       source: "local",
     };
+    // No entry in mockLatestVersionId → getLatestVersionId returns null
+
+    const result = await forkPackage("org-1", "acme", "@other/draft-only", "user-1");
+
+    expect("code" in result).toBe(true);
+    if ("code" in result) {
+      expect(result.code).toBe("NO_PUBLISHED_VERSION");
+    }
+  });
+
+  test("fork name collision → NAME_COLLISION", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+      displayName: "Cool Flow",
+      description: "A cool flow",
+    });
     mockPackageById["@acme/cool-flow"] = { id: "@acme/cool-flow", orgId: "org-1" };
 
     const result = await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
@@ -269,15 +420,11 @@ describe("forkPackage", () => {
   });
 
   test("manifest.name updated to new scoped ID", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
-      description: "A cool flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0", displayName: "Cool" },
-      source: "local",
-    };
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+      displayName: "Cool",
+    });
 
     await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
 
@@ -295,16 +442,14 @@ describe("forkPackage", () => {
     }
   });
 
-  test("fork copies source metadata (name, description, content, createdBy)", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow Display",
-      description: "A really cool flow",
+  test("fork uses version manifest metadata (displayName, description)", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
       content: "# Cool flow prompt content",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
-    };
+      displayName: "Cool Flow Display",
+      description: "A really cool flow",
+    });
 
     await forkPackage("org-1", "acme", "@other/cool-flow", "user-42");
 
@@ -316,15 +461,45 @@ describe("forkPackage", () => {
     expect(created.createdBy).toBe("user-42");
   });
 
-  test("fork flow triggers syncFlowDepsJunctionTable", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
+  test("fork creates a local published version", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+      version: "2.1.0",
+    });
+
+    await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
+
+    expect(mockCreatedVersions.length).toBe(1);
+    const ver = mockCreatedVersions[0] as {
+      packageId: string;
+      version: string;
+      manifest: Record<string, unknown>;
     };
+    expect(ver.packageId).toBe("@acme/cool-flow");
+    expect(ver.version).toBe("2.1.0");
+    expect(ver.manifest.name).toBe("@acme/cool-flow");
+  });
+
+  test("forked version manifest has updated name", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+    });
+
+    await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
+
+    expect(mockCreatedVersions.length).toBe(1);
+    const ver = mockCreatedVersions[0] as { manifest: Record<string, unknown> };
+    expect(ver.manifest.name).toBe("@acme/cool-flow");
+    expect(ver.manifest.type).toBe("flow");
+  });
+
+  test("fork flow triggers syncFlowDepsJunctionTable", async () => {
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+    });
 
     await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
 
@@ -334,14 +509,11 @@ describe("forkPackage", () => {
   });
 
   test("fork skill does NOT trigger syncFlowDepsJunctionTable", async () => {
-    mockOrgItems["@other/my-skill"] = {
-      id: "@other/my-skill",
-      orgId: "org-1",
-      name: "My Skill",
+    setupSourcePackage({
+      packageId: "@other/my-skill",
+      type: "skill",
       content: "# skill content",
-      manifest: { name: "@other/my-skill", type: "skill", version: "1.0.0" },
-      source: "local",
-    };
+    });
 
     await forkPackage("org-1", "acme", "@other/my-skill", "user-1");
 
@@ -352,14 +524,10 @@ describe("forkPackage", () => {
   });
 
   test("fork copies storage files when present", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
-    };
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+    });
     mockDownloadedFiles = { "flow.md": "content" };
 
     await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
@@ -373,15 +541,12 @@ describe("forkPackage", () => {
   });
 
   test("fork with custom name uses custom name instead of source name", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+      displayName: "Cool Flow",
       description: "A cool flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
-    };
+    });
 
     const result = await forkPackage(
       "org-1",
@@ -405,14 +570,10 @@ describe("forkPackage", () => {
   });
 
   test("fork with custom name checks collision against custom name", async () => {
-    mockOrgItems["@other/cool-flow"] = {
-      id: "@other/cool-flow",
-      orgId: "org-1",
-      name: "Cool Flow",
-      content: "# prompt",
-      manifest: { name: "@other/cool-flow", type: "flow", version: "1.0.0" },
-      source: "local",
-    };
+    setupSourcePackage({
+      packageId: "@other/cool-flow",
+      type: "flow",
+    });
     mockPackageById["@acme/my-custom-name"] = { id: "@acme/my-custom-name", orgId: "org-1" };
 
     const result = await forkPackage(

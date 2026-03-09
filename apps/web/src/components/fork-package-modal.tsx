@@ -56,6 +56,8 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
             setError(t("fork.errorOwned"));
           } else if (code === "NAME_COLLISION") {
             setError(t("fork.errorCollision"));
+          } else if (code === "NO_PUBLISHED_VERSION") {
+            setError(t("fork.errorNoPublishedVersion"));
           } else {
             setError(err instanceof Error ? err.message : t("fork.errorCollision"));
           }

@@ -308,11 +308,27 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field. Admin only.",
+        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "skillId", in: "path", required: true, schema: { type: "string" } },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "201": {
           description: "Version created",
@@ -711,11 +727,27 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current extension draft. Version is determined by the manifest version field. Admin only.",
+        "Create an immutable version snapshot from the current extension draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "201": {
           description: "Version created",
@@ -1184,11 +1216,27 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a flow version from draft",
       description:
-        "Create an immutable version snapshot. Requires no running executions. Admin only.",
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running executions. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "flowId", in: "path", required: true, schema: { type: "string" } },
       ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
       responses: {
         "201": {
           description: "Version created",
@@ -1320,7 +1368,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
-        "Create an editable copy of a non-owned package under the current organization's scope. The fork preserves the source content and manifest but updates the package name to use the org scope. Admin only.",
+        "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1377,7 +1425,7 @@ export const packagesPaths = {
           },
         },
         "400": {
-          description: "Already owned, name collision, or invalid name",
+          description: "Already owned, name collision, invalid name, or no published version",
           content: {
             "application/json": {
               schema: {
@@ -1385,7 +1433,12 @@ export const packagesPaths = {
                 properties: {
                   error: {
                     type: "string",
-                    enum: ["ALREADY_OWNED", "NAME_COLLISION", "INVALID_NAME"],
+                    enum: [
+                      "ALREADY_OWNED",
+                      "NAME_COLLISION",
+                      "INVALID_NAME",
+                      "NO_PUBLISHED_VERSION",
+                    ],
                   },
                   message: { type: "string" },
                 },
