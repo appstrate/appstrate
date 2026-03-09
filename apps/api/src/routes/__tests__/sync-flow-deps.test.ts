@@ -5,7 +5,7 @@ describe("extractDepsFromManifest", () => {
   test("extracts skills, extensions, and providers from manifest.requires", () => {
     const result = extractDepsFromManifest({
       requires: {
-        services: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
+        providers: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
         skills: { "skill-a": "1.0.0", "skill-b": "2.0.0" },
         extensions: { "ext-1": "0.1.0" },
       },
