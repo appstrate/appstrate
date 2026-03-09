@@ -21,6 +21,7 @@ import { useProfiles } from "../hooks/use-profiles";
 import { useMarkRead } from "../hooks/use-notifications";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
+import { JsonView } from "../components/json-view";
 
 function formatToolArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -319,9 +320,7 @@ export function ExecutionDetailPage() {
 
       {activeTab === "state" &&
         (stateData ? (
-          <pre className="p-4 text-xs font-mono rounded-lg border border-border bg-card overflow-auto max-h-[600px]">
-            {JSON.stringify(stateData, null, 2)}
-          </pre>
+          <JsonView data={stateData} />
         ) : (
           <EmptyState message={t("exec.emptyState")} compact />
         ))}

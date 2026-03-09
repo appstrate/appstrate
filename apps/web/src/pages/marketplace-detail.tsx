@@ -32,6 +32,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
 import { PublishPlanModal } from "../components/publish-plan-modal";
+import { Markdown, InlineMarkdown } from "../components/markdown";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -157,7 +158,11 @@ export function MarketplaceDetailPage() {
           </h2>
           <TypeBadge type={pkg.type} />
         </div>
-        <p className="text-sm text-muted-foreground leading-relaxed">{pkg.description}</p>
+        {pkg.description && (
+          <InlineMarkdown className="text-sm text-muted-foreground leading-relaxed">
+            {pkg.description}
+          </InlineMarkdown>
+        )}
 
         <div className="flex items-center gap-4 flex-wrap">
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -306,7 +311,7 @@ export function MarketplaceDetailPage() {
           <h3 className="text-sm font-semibold text-muted-foreground mb-2">
             {t("marketplace.readme")}
           </h3>
-          <div className="text-sm leading-relaxed text-muted-foreground">{pkg.readme}</div>
+          <Markdown className="text-sm leading-relaxed max-w-none">{pkg.readme}</Markdown>
         </div>
       )}
 
