@@ -20,10 +20,10 @@ interface ProviderStatusInfo {
 interface ShareDropdownProps {
   packageId: string;
   isAdmin: boolean;
-  services: ProviderStatusInfo[];
+  providers: ProviderStatusInfo[];
 }
 
-export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownProps) {
+export function ShareDropdown({ packageId, isAdmin, providers }: ShareDropdownProps) {
   const { t } = useTranslation(["flows", "common"]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -33,15 +33,15 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
   };
 
   // Check if the flow can be shared publicly:
-  // All services must be admin-mode and connected
+  // All providers must be admin-mode and connected
   const canSharePublic =
-    services.length === 0 ||
-    services.every(
+    providers.length === 0 ||
+    providers.every(
       (s) =>
         (s.connectionMode ?? "user") === "admin" && s.adminProvided && s.status === "connected",
     );
 
-  const hasUserModeServices = services.some((s) => (s.connectionMode ?? "user") === "user");
+  const hasUserModeProviders = providers.some((s) => (s.connectionMode ?? "user") === "user");
 
   const generateShareLink = async () => {
     setGenerating(true);
@@ -84,7 +84,7 @@ export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownPro
             onSelect={generateShareLink}
             disabled={!canSharePublic || generating}
             title={
-              hasUserModeServices
+              hasUserModeProviders
                 ? t("share.cantShareUserMode")
                 : !canSharePublic
                   ? t("share.cantShareNotConnected")

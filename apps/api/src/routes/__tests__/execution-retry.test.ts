@@ -173,7 +173,7 @@ function makeFlow(overrides: {
       displayName: "Test Flow",
       description: "A test flow",
       author: "test",
-      requires: { services: {}, skills: {}, extensions: {} },
+      requires: { providers: {}, skills: {}, extensions: {} },
       output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
       execution: {
         timeout: overrides.timeout ?? 300,
