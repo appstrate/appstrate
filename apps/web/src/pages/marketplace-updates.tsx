@@ -4,23 +4,16 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable, type ColumnDef } from "../components/data-table";
-import { useMarketplaceUpdates, useUpdatePackage } from "../hooks/use-marketplace";
+import {
+  useMarketplaceUpdates,
+  useUpdatePackage,
+  type PackageUpdateStatus,
+} from "../hooks/use-marketplace";
 import { LoadingState, EmptyState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
 
-interface UpdateRow {
-  id: string;
-  scope: string;
-  name: string;
-  displayName: string | null;
-  type: "flow" | "skill" | "extension";
-  installedVersion: string;
-  latestVersion: string | null;
-  updateAvailable: boolean;
-}
-
-function UpdateAction({ pkg }: { pkg: UpdateRow }) {
+function UpdateAction({ pkg }: { pkg: PackageUpdateStatus }) {
   const { t } = useTranslation(["settings", "common"]);
   const update = useUpdatePackage();
 
@@ -47,7 +40,7 @@ export function MarketplaceUpdatesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data, isLoading, refetch, isFetching } = useMarketplaceUpdates();
 
-  const columns = useMemo<ColumnDef<UpdateRow, unknown>[]>(
+  const columns = useMemo<ColumnDef<PackageUpdateStatus, unknown>[]>(
     () => [
       {
         accessorKey: "displayName",
@@ -104,7 +97,7 @@ export function MarketplaceUpdatesPage() {
     );
   }
 
-  const updates = (data?.updates ?? []) as UpdateRow[];
+  const updates = data?.updates ?? [];
 
   return (
     <div className="max-w-[900px]">

@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useRegistryStatus } from "../hooks/use-registry";
+import type { PackageType } from "@appstrate/shared-types";
 import {
   useFlows,
   usePackageList,
@@ -25,7 +26,7 @@ import { PublishPlanModal } from "../components/publish-plan-modal";
 
 interface PublishableItem {
   id: string;
-  type: "flow" | "skill" | "extension";
+  type: PackageType;
   displayName: string;
   version?: string | null;
 }
@@ -105,8 +106,10 @@ export function MarketplacePublishPage() {
   const { data: flows, isLoading: flowsLoading } = useFlows();
   const { data: skills, isLoading: skillsLoading } = usePackageList("skill");
   const { data: extensions, isLoading: extensionsLoading } = usePackageList("extension");
+  const { data: providers, isLoading: providersLoading } = usePackageList("provider");
 
-  const isLoading = statusLoading || flowsLoading || skillsLoading || extensionsLoading;
+  const isLoading =
+    statusLoading || flowsLoading || skillsLoading || extensionsLoading || providersLoading;
 
   // Build publishable items list (exclude system packages)
   const publishableItems: PublishableItem[] = [];
@@ -124,26 +127,22 @@ export function MarketplacePublishPage() {
     }
   }
 
-  if (skills) {
-    for (const s of skills) {
-      if (s.source !== "system") {
-        publishableItems.push({
-          id: s.id,
-          type: "skill",
-          displayName: s.name || s.id,
-        });
-      }
-    }
-  }
+  const nonFlowData = [
+    { items: skills, type: "skill" as const },
+    { items: extensions, type: "extension" as const },
+    { items: providers, type: "provider" as const },
+  ];
 
-  if (extensions) {
-    for (const e of extensions) {
-      if (e.source !== "system") {
-        publishableItems.push({
-          id: e.id,
-          type: "extension",
-          displayName: e.name || e.id,
-        });
+  for (const { items, type } of nonFlowData) {
+    if (items) {
+      for (const item of items) {
+        if (item.source !== "system") {
+          publishableItems.push({
+            id: item.id,
+            type,
+            displayName: item.name || item.id,
+          });
+        }
       }
     }
   }

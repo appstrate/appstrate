@@ -57,7 +57,7 @@ async function upsertItem(
 
 /**
  * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (flow, skill, extension),
+ * Creates a version in packageVersions for ALL types (flow, skill, extension, provider),
  * handles skill/extension upsert + storage.
  */
 export async function postInstallPackage(params: {
