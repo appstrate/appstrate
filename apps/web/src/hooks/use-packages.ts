@@ -200,10 +200,13 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
 export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (version?: string) => {
       return api<{ id: number; version: string; message: string }>(
         `${packageBasePath(type, packageId)}/versions`,
-        { method: "POST" },
+        {
+          method: "POST",
+          body: version ? JSON.stringify({ version }) : undefined,
+        },
       );
     },
     onSuccess: () => {

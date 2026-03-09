@@ -18,6 +18,26 @@ function semverGt(a: string, b: string): boolean {
   return false;
 }
 
+function semverEq(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  return pa[0] === pb[0] && pa[1] === pb[1] && pa[2] === pb[2];
+}
+
+type BumpType = "patch" | "minor" | "major";
+
+function bumpVersion(version: string, type: BumpType): string {
+  const [major, minor, patch] = version.split(".").map(Number);
+  switch (type) {
+    case "patch":
+      return `${major}.${minor}.${patch + 1}`;
+    case "minor":
+      return `${major}.${minor + 1}.0`;
+    case "major":
+      return `${major + 1}.0.0`;
+  }
+}
+
 interface CreateVersionModalProps {
   open: boolean;
   onClose: () => void;
@@ -30,15 +50,27 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
   const [error, setError] = useState<string | null>(null);
+  const [selectedBump, setSelectedBump] = useState<BumpType>("patch");
 
   const latestVersion = versionInfo?.latestVersion ?? null;
   const draftVersion = versionInfo?.draftVersion ?? null;
 
-  const canCreate = !!draftVersion && (!latestVersion || semverGt(draftVersion, latestVersion));
+  // Mode A: draft === latest → show bump selector
+  const needsBump = !!draftVersion && !!latestVersion && semverEq(draftVersion, latestVersion);
+  // Mode B: draft > latest or no latest → direct create
+  const canCreateDirect =
+    !!draftVersion && (!latestVersion || semverGt(draftVersion, latestVersion));
+  // Mode C: draft < latest (but not equal) → blocked
+  const isBlocked = !!draftVersion && !!latestVersion && !needsBump && !canCreateDirect;
+
+  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : draftVersion;
+
+  const canCreate = needsBump || canCreateDirect;
 
   const handleSubmit = () => {
     setError(null);
-    createVersion.mutate(undefined, {
+    const versionArg = needsBump ? targetVersion : undefined;
+    createVersion.mutate(versionArg ?? undefined, {
       onSuccess: () => {
         onClose();
       },
@@ -48,6 +80,12 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
     });
   };
 
+  const bumpOptions: { type: BumpType; label: string }[] = [
+    { type: "patch", label: t("version.bumpPatch") },
+    { type: "minor", label: t("version.bumpMinor") },
+    { type: "major", label: t("version.bumpMajor") },
+  ];
+
   return (
     <Modal
       open={open}
@@ -55,7 +93,10 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
       title={t("version.createVersion")}
       actions={
         <Button onClick={handleSubmit} disabled={!canCreate || createVersion.isPending}>
-          {createVersion.isPending && <Spinner />} {t("version.createVersion")}
+          {createVersion.isPending && <Spinner />}{" "}
+          {targetVersion
+            ? t("version.createVersionX", { version: targetVersion })
+            : t("version.createVersion")}
         </Button>
       }
     >
@@ -66,15 +107,47 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
               {t("version.latestPublished")}: <strong>{latestVersion}</strong>
             </Label>
           )}
-          <Label className="block text-sm">
-            {t("version.draftVersionLabel")}:{" "}
-            <strong>{draftVersion ?? t("version.noVersion")}</strong>
-          </Label>
+          {!needsBump && (
+            <Label className="block text-sm">
+              {t("version.draftVersionLabel")}:{" "}
+              <strong>{draftVersion ?? t("version.noVersion")}</strong>
+            </Label>
+          )}
         </div>
-        {!canCreate && draftVersion && latestVersion && (
+
+        {needsBump && (
+          <div className="space-y-2">
+            <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
+            <div className="flex gap-2">
+              {bumpOptions.map((opt) => {
+                const bumped = bumpVersion(latestVersion, opt.type);
+                const isSelected = selectedBump === opt.type;
+                return (
+                  <button
+                    key={opt.type}
+                    type="button"
+                    onClick={() => setSelectedBump(opt.type)}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border hover:border-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-medium">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {latestVersion} → {bumped}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {isBlocked && draftVersion && latestVersion && (
           <p className="text-sm text-warning">{t("version.mustBeHigher")}</p>
         )}
-        {!canCreate && !draftVersion && (
+        {!draftVersion && (
           <p className="text-sm text-warning">{t("version.noVersionInManifest")}</p>
         )}
         {error && <span className="text-sm text-destructive">{error}</span>}
