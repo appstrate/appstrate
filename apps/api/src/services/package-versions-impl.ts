@@ -517,6 +517,7 @@ export async function createVersionFromDraft(params: {
   packageId: string;
   orgId: string;
   userId: string;
+  version?: string;
 }): Promise<{ id: number; version: string } | null> {
   const { packageId, orgId, userId } = params;
 
@@ -530,9 +531,19 @@ export async function createVersionFromDraft(params: {
 
   const baseManifest = pkg.manifest as Record<string, unknown>;
   const content = pkg.content as string;
-  const version = baseManifest.version as string | undefined;
+
+  // Use override version if provided, otherwise use manifest version
+  const version = params.version ?? (baseManifest.version as string | undefined);
 
   if (!version || !isValidVersion(version)) return null;
+
+  // If override version differs from manifest, sync the draft manifest in DB
+  if (params.version && params.version !== baseManifest.version) {
+    await db
+      .update(packages)
+      .set({ manifest: { ...baseManifest, version: params.version } })
+      .where(eq(packages.id, packageId));
+  }
 
   const manifest = { ...baseManifest, version };
 
