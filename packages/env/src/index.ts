@@ -22,17 +22,17 @@ const envSchema = z.object({
     .transform((s) => JSON.parse(s) as unknown[]),
 
   // App
-  APP_URL: z.string().default("http://localhost:3010"),
+  APP_URL: z.string().default("http://localhost:3000"),
   TRUSTED_ORIGINS: z
     .string()
-    .default("http://localhost:3010,http://localhost:5173")
+    .default("http://localhost:3000,http://localhost:5173")
     .transform((s) =>
       s
         .split(",")
         .map((o) => o.trim())
         .filter(Boolean),
     ),
-  PORT: z.coerce.number().int().positive().default(3010),
+  PORT: z.coerce.number().int().positive().default(3000),
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
   PLATFORM_API_URL: z.string().optional(),
   OAUTH_CALLBACK_URL: z.string().optional(),

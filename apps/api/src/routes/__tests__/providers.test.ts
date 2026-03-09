@@ -40,7 +40,7 @@ mock.module("@appstrate/db/schema", () => ({
 }));
 
 mock.module("@appstrate/env", () => ({
-  getEnv: () => ({ APP_URL: "http://localhost:3010" }),
+  getEnv: () => ({ APP_URL: "http://localhost:3000" }),
 }));
 
 mock.module("../../middleware/guards.ts", () => ({
@@ -205,7 +205,7 @@ describe("GET /api/providers", () => {
 
     const res = await app.request("/api/providers");
     const json = (await res.json()) as { callbackUrl: string };
-    expect(json.callbackUrl).toBe("http://localhost:3010/api/auth/callback");
+    expect(json.callbackUrl).toBe("http://localhost:3000/api/auth/callback");
   });
 
   test("generates default adminCredentialSchema for oauth2", async () => {

@@ -22,7 +22,7 @@ bun run build-sidecar         # docker build -t appstrate-sidecar ./runtime-pi/s
 bun run build                 # turbo build → apps/web/dist/
 
 # 6. Start platform (API + Vite build --watch in parallel)
-bun run dev                   # turbo dev → Hono on :3010
+bun run dev                   # turbo dev → Hono on :3000
 
 # 7. First signup creates an organization automatically
 ```
@@ -43,7 +43,7 @@ bun run dev                   # turbo dev → Hono on :3010
 
 ```
 appstrate/
-├── apps/api/src/             # @appstrate/api — Hono backend (:3010)
+├── apps/api/src/             # @appstrate/api — Hono backend (:3000)
 │   ├── index.ts              # Entry: middleware, auth, startup init
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
@@ -84,7 +84,7 @@ appstrate/
 ## Architecture
 
 ```
-User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3010)
+User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (email/password → cookie session)
      |                                |
@@ -206,25 +206,25 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 
 `getEnv()` from `@appstrate/env` (Zod-validated, cached after first call, fail-fast at startup). Key variables:
 
-| Variable                    | Required | Default                                       | Notes                                                                                                                                  |
-| --------------------------- | -------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                                                           |
-| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                                                 |
-| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                                                  |
-| `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`)                             |
-| `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array of system proxy definitions                                                                                                 |
-| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                                               |
-| `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                                             |
-| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Passed to agent containers                                                                                                             |
-| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed through to agent containers (or `OPENAI_API_KEY`, etc.)                                                                         |
-| `LOG_LEVEL`                 | No       | `info`                                        | `debug`\|`info`\|`warn`\|`error`                                                                                                       |
-| `PORT`                      | No       | `3010`                                        | Server port                                                                                                                            |
-| `APP_URL`                   | No       | `http://localhost:3010`                       | Public URL for OAuth callbacks                                                                                                         |
-| `TRUSTED_ORIGINS`           | No       | `http://localhost:3010,http://localhost:5173` | CORS origins, comma-separated                                                                                                          |
-| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                                                  |
-| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                                                        |
-| `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                                                           |
-| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                                             |
+| Variable                    | Required | Default                                       | Notes                                                                                                      |
+| --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
+| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |
+| `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
+| `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array of system proxy definitions                                                                     |
+| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                   |
+| `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                 |
+| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Passed to agent containers                                                                                 |
+| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed through to agent containers (or `OPENAI_API_KEY`, etc.)                                             |
+| `LOG_LEVEL`                 | No       | `info`                                        | `debug`\|`info`\|`warn`\|`error`                                                                           |
+| `PORT`                      | No       | `3000`                                        | Server port                                                                                                |
+| `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                             |
+| `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins, comma-separated                                                                              |
+| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                      |
+| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                            |
+| `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                               |
+| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                 |
 
 ## Flow & Extension Gotchas
 
