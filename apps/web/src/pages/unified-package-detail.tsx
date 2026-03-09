@@ -42,7 +42,7 @@ import {
 import { FlowModals } from "../components/package-detail/flow-modals";
 import { RunFlowButton } from "../components/run-flow-button";
 import { useFlowReadiness } from "../hooks/use-flow-readiness";
-import { computeServicesSummary } from "../lib/service-status";
+import { computeProvidersSummary } from "../lib/provider-status";
 
 type DetailTab =
   | "connectors"
@@ -176,7 +176,7 @@ export function UnifiedPackageDetailPage({
   ];
   const hasDisconnectedServices =
     type === "flow" &&
-    flowDetail?.requires.services.some(
+    flowDetail?.requires.providers.some(
       (s) => s.status !== "connected" || s.scopesSufficient === false,
     );
   const defaultTab: DetailTab =
@@ -250,7 +250,9 @@ export function UnifiedPackageDetailPage({
 
   // Determine available tabs based on type
   const servicesSummary =
-    type === "flow" && flowDetail ? computeServicesSummary(flowDetail.requires.services, t) : null;
+    type === "flow" && flowDetail
+      ? computeProvidersSummary(flowDetail.requires.providers, t)
+      : null;
 
   const flowTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
     { id: "executions", label: t("detail.tabExecutions") },

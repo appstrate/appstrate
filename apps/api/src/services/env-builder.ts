@@ -1,16 +1,16 @@
 import type { PromptContext } from "./adapters/types.ts";
-import type { LoadedFlow, FlowServiceRequirement } from "../types/index.ts";
+import type { LoadedFlow, FlowProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
-import { buildServiceTokens } from "./token-resolver.ts";
+import { buildProviderTokens } from "./token-resolver.ts";
 import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxyUrl } from "./org-proxies.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 /**
  * Resolve unique provider definitions for prompt context.
@@ -18,9 +18,9 @@ import { resolveManifestServices } from "../lib/manifest-utils.ts";
 export async function resolveProviderDefs(
   database: Db,
   orgId: string,
-  services: FlowServiceRequirement[],
+  providers: FlowProviderRequirement[],
 ): Promise<NonNullable<PromptContext["providers"]>> {
-  const uniqueProviders = [...new Set(services.map((s) => s.provider))];
+  const uniqueProviders = [...new Set(providers.map((s) => s.provider))];
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
   return defs
     .filter((def): def is NonNullable<typeof def> => def != null)
@@ -76,11 +76,7 @@ export function buildPromptContext(params: {
       config: params.flow.manifest.config?.schema,
       output: params.flow.manifest.output?.schema,
     },
-    services: resolveManifestServices(params.flow.manifest).map((s) => ({
-      id: s.id,
-      provider: s.provider,
-    })),
-    providers: params.providers,
+    providers: params.providers ?? [],
     memories: params.memories,
     llmModel: getEnv().LLM_MODEL_ID,
     proxyUrl: params.proxyUrl,
@@ -105,7 +101,7 @@ export function buildPromptContext(params: {
 export async function buildExecutionContext(params: {
   executionId: string;
   flow: LoadedFlow;
-  serviceProfiles: Record<string, string>;
+  providerProfiles: Record<string, string>;
   orgId: string;
   userId: string;
   input?: Record<string, unknown>;
@@ -117,9 +113,9 @@ export async function buildExecutionContext(params: {
   flowPackage: Buffer | null;
   flowVersionId: number | null;
 }> {
-  const { executionId, flow, serviceProfiles, orgId, userId, input, files } = params;
+  const { executionId, flow, providerProfiles, orgId, userId, input, files } = params;
 
-  const manifestServices = resolveManifestServices(flow.manifest);
+  const manifestProviders = resolveManifestProviders(flow.manifest);
   const [
     tokens,
     config,
@@ -130,10 +126,10 @@ export async function buildExecutionContext(params: {
     proxyUrl,
     memories,
   ] = await Promise.all([
-    buildServiceTokens(manifestServices, serviceProfiles, orgId),
+    buildProviderTokens(manifestProviders, providerProfiles, orgId),
     params.config ?? getPackageConfig(orgId, flow.id),
     getLastExecutionState(flow.id, userId, orgId),
-    resolveProviderDefs(db, orgId, manifestServices),
+    resolveProviderDefs(db, orgId, manifestProviders),
     getPackageZip(flow, orgId),
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)

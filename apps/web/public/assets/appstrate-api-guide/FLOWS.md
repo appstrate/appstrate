@@ -165,11 +165,11 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
     "license": "MIT"
   },
   "requires": {
-    "services": { "@appstrate/google-gmail": "1.0.0" },
+    "providers": { "@appstrate/google-gmail": "1.0.0" },
     "skills": { "@appstrate/web-research": "*" },
     "extensions": { "@appstrate/web-fetch": "*" }
   },
-  "servicesConfiguration": {
+  "providersConfiguration": {
     "@appstrate/google-gmail": {
       "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
       "connectionMode": "user"
@@ -237,15 +237,15 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
 ### Key Rules
 
 - **`metadata.id`**: Must be a kebab-case slug (`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-- **`requires.services`**: Record mapping provider package IDs (scoped names like `@scope/provider`) to version strings. Each key must match a configured provider ID. **Verify it exists** via `GET /api/providers` before referencing it.
-- **`servicesConfiguration`** (top-level, optional): Record mapping provider IDs to configuration objects with `scopes` (string array) and `connectionMode` (`"user"` default or `"admin"`).
+- **`requires.providers`**: Record mapping provider package IDs (scoped names like `@scope/provider`) to version strings. Each key must match a configured provider ID. **Verify it exists** via `GET /api/providers` before referencing it.
+- **`providersConfiguration`** (top-level, optional): Record mapping provider IDs to configuration objects with `scopes` (string array) and `connectionMode` (`"user"` default or `"admin"`).
 - **`requires.skills`** and **`requires.extensions`**: Records mapping scoped package IDs (`@scope/name`) to version ranges (e.g. `"*"`, `"^1.0.0"`). **Verify they exist** via `GET /api/packages/skills` and `GET /api/packages/extensions`.
 - **`input.schema.required`**: Array at the object level. Do NOT use `required: true` on individual properties.
 - **Field types**: `string`, `number`, `boolean`, `array`, `object`, `file`.
 - **`execution.timeout`**: In seconds. Default varies by adapter.
 - **`execution.outputRetries`**: 0-5. Number of retry attempts if output validation fails. Default 2 when output schema exists.
 
-### Service Connection Modes (in `servicesConfiguration`)
+### Provider Connection Modes (in `providersConfiguration`)
 
 - **`user` mode** (default): Each user who runs the flow must have their own connection to the service. The agent uses the running user's credentials.
 - **`admin` mode**: An admin binds their connection to the flow once. All executions use the admin's credentials regardless of who triggers the run. Useful for shared resources (e.g., a team Gmail inbox).

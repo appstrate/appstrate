@@ -56,7 +56,7 @@ appstrate/
 │   ├── hooks/                # React Query hooks + SSE realtime hooks
 │   ├── components/           # UI components (modals, forms, editors)
 │   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
-│   ├── lib/                  # Utilities (auth-client, markdown, service-status, strings)
+│   ├── lib/                  # Utilities (auth-client, markdown, provider-status, strings)
 │   ├── styles.css            # Single CSS file (dark theme, no Tailwind/modules)
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │

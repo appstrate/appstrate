@@ -10,7 +10,7 @@ export async function getAdminConnections(
 ): Promise<Record<string, string>> {
   const rows = await db
     .select({
-      serviceId: packageAdminConnections.serviceId,
+      providerId: packageAdminConnections.providerId,
       profileId: packageAdminConnections.profileId,
     })
     .from(packageAdminConnections)
@@ -23,7 +23,7 @@ export async function getAdminConnections(
   const result: Record<string, string> = {};
   for (const row of rows) {
     if (row.profileId) {
-      result[row.serviceId] = row.profileId;
+      result[row.providerId] = row.profileId;
     }
   }
   return result;
@@ -32,7 +32,7 @@ export async function getAdminConnections(
 export async function bindAdminConnection(
   orgId: string,
   packageId: string,
-  serviceId: string,
+  providerId: string,
   profileId: string,
 ): Promise<void> {
   await db
@@ -40,12 +40,12 @@ export async function bindAdminConnection(
     .values({
       orgId,
       packageId,
-      serviceId,
+      providerId,
       profileId,
       connectedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [packageAdminConnections.packageId, packageAdminConnections.serviceId],
+      target: [packageAdminConnections.packageId, packageAdminConnections.providerId],
       set: {
         orgId,
         profileId,
@@ -57,7 +57,7 @@ export async function bindAdminConnection(
 export async function unbindAdminConnection(
   orgId: string,
   packageId: string,
-  serviceId: string,
+  providerId: string,
 ): Promise<void> {
   await db
     .delete(packageAdminConnections)
@@ -65,7 +65,7 @@ export async function unbindAdminConnection(
       and(
         eq(packageAdminConnections.orgId, orgId),
         eq(packageAdminConnections.packageId, packageId),
-        eq(packageAdminConnections.serviceId, serviceId),
+        eq(packageAdminConnections.providerId, providerId),
       ),
     );
 }

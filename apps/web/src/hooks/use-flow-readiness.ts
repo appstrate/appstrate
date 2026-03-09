@@ -17,14 +17,14 @@ export function useFlowReadiness(detail: FlowDetail | undefined) {
   return useMemo(
     () => ({
       allConnected: detail
-        ? detail.requires.services.every(
+        ? detail.requires.providers.every(
             (s) =>
               (s.status === "connected" || s.status === "needs_reconnection") &&
               s.scopesSufficient !== false,
           )
         : false,
       hasReconnectionNeeded: detail
-        ? detail.requires.services.some((s) => s.status === "needs_reconnection")
+        ? detail.requires.providers.some((s) => s.status === "needs_reconnection")
         : false,
       hasRequiredConfig: detail ? checkRequiredConfig(detail) : false,
       hasConfigSchema: detail

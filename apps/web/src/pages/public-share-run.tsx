@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import type { JSONSchemaObject, ServiceStatus } from "@appstrate/shared-types";
+import type { JSONSchemaObject, ProviderStatus } from "@appstrate/shared-types";
 import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
 import { ResultRenderer } from "../components/result-renderer";
@@ -16,7 +16,7 @@ interface FlowInfo {
   displayName: string;
   description?: string;
   input?: { schema: JSONSchemaObject };
-  services?: ServiceStatus[];
+  providers?: ProviderStatus[];
   consumed: boolean;
   execution?: {
     id: string;
@@ -232,9 +232,9 @@ export function PublicShareRunPage() {
           )}
         </div>
 
-        {flowInfo.services && flowInfo.services.length > 0 && (
+        {flowInfo.providers && flowInfo.providers.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-4">
-            {flowInfo.services.map((svc) => {
+            {flowInfo.providers.map((svc) => {
               const isConnected = svc.status === "connected";
               if (svc.connectionMode === "admin" && svc.adminProvided) {
                 return (

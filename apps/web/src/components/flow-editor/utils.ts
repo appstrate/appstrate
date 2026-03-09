@@ -1,4 +1,4 @@
-import type { FlowFormState, ServiceEntry, ResourceEntry } from "./types";
+import type { FlowFormState, ProviderEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { getOrderedKeys } from "@appstrate/shared-types";
@@ -24,7 +24,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
       tags: [],
     },
     prompt: "",
-    services: [],
+    providers: [],
     skills: [],
     extensions: [],
     inputSchema: [],
@@ -143,16 +143,14 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       ? detail.id.split("--").slice(1).join("--")
       : detail.id;
 
-  // Services: read from requires.services Record + servicesConfiguration
+  // Providers: read from requires.providers Record + providersConfiguration
   const rawRequires = (m.requires ?? {}) as Record<string, unknown>;
-  const rawServicesRecord = (rawRequires.services ?? {}) as Record<string, string>;
-  const rawServicesConfig = ((m as Record<string, unknown>).servicesConfiguration ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
-  const services: ServiceEntry[] = Object.entries(rawServicesRecord).map(
+  const rawProvidersRecord = (rawRequires.providers ?? {}) as Record<string, string>;
+  const rawProvidersConfig = ((m as Record<string, unknown>).providersConfiguration ??
+    {}) as Record<string, Record<string, unknown>>;
+  const providers: ProviderEntry[] = Object.entries(rawProvidersRecord).map(
     ([providerId, version]) => {
-      const cfg = rawServicesConfig[providerId] ?? {};
+      const cfg = rawProvidersConfig[providerId] ?? {};
       return {
         id: providerId,
         version: (version as string) || "*",
@@ -176,7 +174,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       tags: (m.tags as string[]) ?? [],
     },
     prompt: detail.prompt || "",
-    services,
+    providers,
     skills: (detail.requires.skills ?? []).map(toResourceEntry),
     extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
     inputSchema: schemaToFields(detail.input?.schema, "input"),
@@ -223,22 +221,22 @@ export function assemblePayload(state: FlowFormState) {
     if (e.id) filteredExtensions[e.id] = e.version;
   }
 
-  // Build services Record and servicesConfiguration
-  const filteredServices: Record<string, string> = {};
-  const servicesConfiguration: Record<string, Record<string, unknown>> = {};
-  for (const s of state.services) {
+  // Build providers Record and providersConfiguration
+  const filteredProviders: Record<string, string> = {};
+  const providersConfiguration: Record<string, Record<string, unknown>> = {};
+  for (const s of state.providers) {
     if (!s.id) continue;
-    filteredServices[s.id] = s.version;
+    filteredProviders[s.id] = s.version;
     const cfg: Record<string, unknown> = {};
     const scopes = s.scopes.filter(Boolean);
     if (scopes.length > 0) cfg.scopes = scopes;
     if (s.connectionMode !== "user") cfg.connectionMode = s.connectionMode;
-    if (Object.keys(cfg).length > 0) servicesConfiguration[s.id] = cfg;
+    if (Object.keys(cfg).length > 0) providersConfiguration[s.id] = cfg;
   }
 
   const requires: Record<string, unknown> = {
     ...baseRequires, // Preserve unknown fields in requires
-    services: filteredServices,
+    providers: filteredProviders,
   };
   if ("skills" in baseRequires || Object.keys(filteredSkills).length > 0) {
     requires.skills = filteredSkills;
@@ -261,11 +259,11 @@ export function assemblePayload(state: FlowFormState) {
     requires,
   };
 
-  // servicesConfiguration: write only if non-empty
-  if (Object.keys(servicesConfiguration).length > 0) {
-    manifest.servicesConfiguration = servicesConfiguration;
+  // providersConfiguration: write only if non-empty
+  if (Object.keys(providersConfiguration).length > 0) {
+    manifest.providersConfiguration = providersConfiguration;
   } else {
-    delete manifest.servicesConfiguration;
+    delete manifest.providersConfiguration;
   }
 
   // tags: write only if present in original or non-empty
@@ -336,14 +334,14 @@ export function payloadToFormState(payload: {
 }): FlowFormState {
   const { manifest, prompt } = payload;
   const requires = (manifest.requires as Record<string, unknown>) || {};
-  const rawServicesRecord = (requires.services ?? {}) as Record<string, string>;
-  const rawServicesConfig = ((manifest as Record<string, unknown>).servicesConfiguration ??
+  const rawProvidersRecord = (requires.providers ?? {}) as Record<string, string>;
+  const rawProvidersConfig = ((manifest as Record<string, unknown>).providersConfiguration ??
     {}) as Record<string, Record<string, unknown>>;
   const execution = (manifest.execution as Record<string, unknown>) || {};
 
-  const services: ServiceEntry[] = Object.entries(rawServicesRecord).map(
+  const providers: ProviderEntry[] = Object.entries(rawProvidersRecord).map(
     ([providerId, version]) => {
-      const cfg = rawServicesConfig[providerId] ?? {};
+      const cfg = rawProvidersConfig[providerId] ?? {};
       return {
         id: providerId,
         version: (version as string) || "*",
@@ -379,7 +377,7 @@ export function payloadToFormState(payload: {
       tags: Array.isArray(manifest.tags) ? (manifest.tags as string[]) : [],
     },
     prompt,
-    services,
+    providers,
     skills,
     extensions,
     inputSchema: schemaToFields(inputObj?.schema, "input"),

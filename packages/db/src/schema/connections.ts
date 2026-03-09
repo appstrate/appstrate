@@ -60,7 +60,7 @@ export const packageAdminConnections = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    serviceId: text("service_id").notNull(),
+    providerId: text("provider_id").notNull(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -68,7 +68,7 @@ export const packageAdminConnections = pgTable(
     connectedAt: timestamp("connected_at").defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.packageId, table.serviceId] }),
+    primaryKey({ columns: [table.packageId, table.providerId] }),
     index("idx_package_admin_connections_package_id").on(table.packageId),
     index("idx_package_admin_connections_org_id").on(table.orgId),
   ],

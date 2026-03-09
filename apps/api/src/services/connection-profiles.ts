@@ -7,7 +7,7 @@ import { db } from "../lib/db.ts";
 import { connectionProfiles, userPackageProfiles, serviceConnections } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { getAdminConnections } from "./state.ts";
-import type { FlowServiceRequirement } from "../types/index.ts";
+import type { FlowProviderRequirement } from "../types/index.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
 
@@ -169,15 +169,15 @@ export async function removePackageProfileOverride(
     );
 }
 
-// ─── Service Profile Resolution ─────────────────────────────
+// ─── Provider Profile Resolution ────────────────────────────
 
 /**
- * Resolve profile IDs for each service in a package.
- * Admin services get their profile from package_admin_connections.
- * User services get the effective profile for the user+package.
+ * Resolve profile IDs for each provider in a package.
+ * Admin providers get their profile from package_admin_connections.
+ * User providers get the effective profile for the user+package.
  */
-export async function resolveServiceProfiles(
-  services: FlowServiceRequirement[],
+export async function resolveProviderProfiles(
+  providers: FlowProviderRequirement[],
   userId: string,
   packageId: string,
   orgId: string,
@@ -187,7 +187,7 @@ export async function resolveServiceProfiles(
   const adminConns = await getAdminConnections(orgId, packageId);
   const map: Record<string, string> = {};
 
-  for (const svc of services) {
+  for (const svc of providers) {
     const mode = svc.connectionMode ?? "user";
     if (mode === "admin") {
       const adminProfileId = adminConns[svc.id];

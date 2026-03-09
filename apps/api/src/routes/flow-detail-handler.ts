@@ -10,8 +10,8 @@ import {
   getRunningExecutionsForPackage,
 } from "../services/state.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { resolveServiceStatuses } from "../services/connection-manager.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveProviderStatuses } from "../services/connection-manager.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 
@@ -39,8 +39,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(user.id, flow.id),
   ]);
 
-  const serviceStatuses = await resolveServiceStatuses(
-    resolveManifestServices(m),
+  const providerStatuses = await resolveProviderStatuses(
+    resolveManifestProviders(m),
     adminConns,
     orgId,
     userProfileId,
@@ -78,7 +78,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       scope: parsed?.scope ?? null,
       version: m.version ?? null,
       requires: {
-        services: serviceStatuses,
+        providers: providerStatuses,
         skills: flow.skills.map((s) => ({
           id: s.id,
           version: s.version ?? "*",

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { extractDepsFromManifest, resolveManifestServices } from "../../lib/manifest-utils.ts";
+import { extractDepsFromManifest, resolveManifestProviders } from "../../lib/manifest-utils.ts";
 
 describe("extractDepsFromManifest", () => {
   test("extracts skills, extensions, and providers from manifest.requires", () => {
@@ -66,13 +66,13 @@ describe("extractDepsFromManifest", () => {
   });
 });
 
-describe("resolveManifestServices", () => {
-  test("merges requires.services with servicesConfiguration", () => {
-    const result = resolveManifestServices({
+describe("resolveManifestProviders", () => {
+  test("merges requires.providers with providersConfiguration", () => {
+    const result = resolveManifestProviders({
       requires: {
-        services: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
+        providers: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
       },
-      servicesConfiguration: {
+      providersConfiguration: {
         "@acme/gmail": { scopes: ["gmail.readonly"], connectionMode: "admin" },
       },
     } as Record<string, unknown>);
@@ -88,8 +88,8 @@ describe("resolveManifestServices", () => {
     ]);
   });
 
-  test("returns empty array when no services", () => {
-    const result = resolveManifestServices({});
+  test("returns empty array when no providers", () => {
+    const result = resolveManifestProviders({});
     expect(result).toEqual([]);
   });
 });

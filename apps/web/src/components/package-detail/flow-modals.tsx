@@ -3,7 +3,7 @@ import { usePackageDetail } from "../../hooks/use-packages";
 import {
   useConnectApiKey,
   useConnectCredentials,
-  useBindAdminService,
+  useBindAdminProvider,
 } from "../../hooks/use-mutations";
 import { useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../../hooks/use-schedules";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
@@ -23,7 +23,7 @@ export function FlowModals({ packageId }: { packageId: string }) {
 
   const apiKeyMutation = useConnectApiKey();
   const credentialsMutation = useConnectCredentials();
-  const bindAdmin = useBindAdminService(packageId);
+  const bindAdmin = useBindAdminProvider(packageId);
   const createSchedule = useCreateSchedule(packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();

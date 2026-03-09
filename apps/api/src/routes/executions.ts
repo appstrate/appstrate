@@ -15,7 +15,7 @@ import {
   addPackageMemories,
 } from "../services/state.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
-import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
@@ -27,7 +27,7 @@ import { trackExecution, untrackExecution, abortExecution } from "../services/ex
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { stopContainer } from "../services/docker.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -171,7 +171,7 @@ export async function executeFlowInBackground(
             previousState: null,
             input: {},
             schemas: { output: outputSchema },
-            services: [],
+            providers: [],
             llmModel: promptContext.llmModel,
           };
 
@@ -334,9 +334,9 @@ export function createExecutionsRouter() {
     const profileIdOverride = c.req.query("profileId");
 
     // Run independent pre-flight operations in parallel
-    const manifestServices = resolveManifestServices(flow.manifest);
-    const [serviceProfiles, config, userProfileId, inputResult] = await Promise.all([
-      resolveServiceProfiles(manifestServices, user.id, packageId, orgId, profileIdOverride),
+    const manifestProviders = resolveManifestProviders(flow.manifest);
+    const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
+      resolveProviderProfiles(manifestProviders, user.id, packageId, orgId, profileIdOverride),
       getPackageConfig(orgId, packageId),
       profileIdOverride
         ? Promise.resolve(profileIdOverride)
@@ -344,8 +344,8 @@ export function createExecutionsRouter() {
       parseRequestInput(c, flow.manifest.input?.schema),
     ]);
 
-    // Validate service dependencies (needs serviceProfiles)
-    const depError = await validateFlowDependencies(manifestServices, serviceProfiles, orgId);
+    // Validate provider dependencies (needs providerProfiles)
+    const depError = await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
     if (depError) {
       return c.json(depError, 400);
     }
@@ -413,7 +413,7 @@ export function createExecutionsRouter() {
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow: effectiveFlow,
-      serviceProfiles,
+      providerProfiles,
       orgId,
       userId: user.id,
       input: parsedInput,

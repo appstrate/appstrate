@@ -72,7 +72,7 @@ export function useRunFlow(packageId: string) {
   });
 }
 
-function invalidateServiceRelated(qc: ReturnType<typeof useQueryClient>) {
+function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["services"] });
   qc.invalidateQueries({ queryKey: ["user-connections"] });
   // Invalidate all flow detail queries (service status may have changed)
@@ -116,7 +116,7 @@ export function useConnect() {
         }, 500);
       });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }
@@ -138,7 +138,7 @@ export function useConnectApiKey() {
         body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }
@@ -158,7 +158,7 @@ export function useDisconnect() {
       const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
       return apiFetch(`/auth/connections/${provider}${qs}`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }
@@ -168,31 +168,31 @@ export function useDeleteAllConnections() {
   return useMutation({
     mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
     onSuccess: () => {
-      invalidateServiceRelated(qc);
+      invalidateProviderRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
     },
     onError: onMutationError,
   });
 }
 
-export function useBindAdminService(packageId: string) {
+export function useBindAdminProvider(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (serviceId: string) => {
-      return api(`/flows/${packageId}/services/${serviceId}/bind`, { method: "POST" });
+    mutationFn: async (providerId: string) => {
+      return api(`/flows/${packageId}/providers/${providerId}/bind`, { method: "POST" });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     // No onError — handled by the component (may open connect flow before retrying)
   });
 }
 
-export function useUnbindAdminService(packageId: string) {
+export function useUnbindAdminProvider(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (serviceId: string) => {
-      return api(`/flows/${packageId}/services/${serviceId}/bind`, { method: "DELETE" });
+    mutationFn: async (providerId: string) => {
+      return api(`/flows/${packageId}/providers/${providerId}/bind`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }
@@ -248,7 +248,7 @@ export function useConnectCredentials() {
         body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateServiceRelated(qc),
+    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }

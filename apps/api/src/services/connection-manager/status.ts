@@ -1,6 +1,6 @@
 import { db } from "../../lib/db.ts";
-import type { FlowServiceRequirement } from "../../types/index.ts";
-import type { ServiceStatus } from "@appstrate/shared-types";
+import type { FlowProviderRequirement } from "../../types/index.ts";
+import type { ProviderStatus } from "@appstrate/shared-types";
 import { getConnection, validateScopes } from "@appstrate/connect";
 import { getProviderAuthMode } from "./providers.ts";
 import { authModeLabel } from "./helpers.ts";
@@ -49,17 +49,17 @@ function buildScopeInfo(
 }
 
 /**
- * Resolve service statuses for a flow's required services.
- * Uses profileId for both user and admin connections (via serviceProfiles map).
+ * Resolve provider statuses for a flow's required providers.
+ * Uses profileId for both user and admin connections (via providerProfiles map).
  */
-export async function resolveServiceStatuses(
-  services: FlowServiceRequirement[],
+export async function resolveProviderStatuses(
+  providers: FlowProviderRequirement[],
   adminConns: Record<string, string>,
   orgId: string,
   userProfileId?: string,
-): Promise<ServiceStatus[]> {
+): Promise<ProviderStatus[]> {
   return Promise.all(
-    services.map(async (svc) => {
+    providers.map(async (svc) => {
       const mode = svc.connectionMode ?? "user";
       const base = {
         id: svc.id,

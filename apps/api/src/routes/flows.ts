@@ -22,7 +22,7 @@ import {
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -45,7 +45,7 @@ export function createFlowsRouter() {
         author: f.manifest.author,
         tags: f.manifest.tags ?? [],
         requires: {
-          services: resolveManifestServices(f.manifest).map((s) => s.id),
+          providers: resolveManifestProviders(f.manifest).map((s) => s.id),
           skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),
           extensions: Object.fromEntries(f.extensions.map((e) => [e.id, e.version ?? "*"])),
         },
@@ -95,21 +95,21 @@ export function createFlowsRouter() {
     });
   });
 
-  // POST /api/flows/:scope/:name/services/:svcScope/:svcName/bind — bind a profile's connection to a service
+  // POST /api/flows/:scope/:name/providers/:svcScope/:svcName/bind — bind a profile's connection to a provider
   router.post(
-    "/:scope{@[^/]+}/:name/services/:svcScope{@[^/]+}/:svcName/bind",
+    "/:scope{@[^/]+}/:name/providers/:svcScope{@[^/]+}/:svcName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
       const user = c.get("user");
-      const serviceId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
+      const providerId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
 
-      // Verify the service exists and is in admin mode
-      const svc = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
+      // Verify the provider exists and is in admin mode
+      const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
       if (!svc) {
         return c.json(
-          { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
+          { error: "PROVIDER_NOT_FOUND", message: `Provider '${providerId}' not found` },
           404,
         );
       }
@@ -117,7 +117,7 @@ export function createFlowsRouter() {
         return c.json(
           {
             error: "INVALID_CONNECTION_MODE",
-            message: `Service '${serviceId}' is not in admin mode`,
+            message: `Provider '${providerId}' is not in admin mode`,
           },
           400,
         );
@@ -146,29 +146,29 @@ export function createFlowsRouter() {
         );
       }
 
-      await bindAdminConnection(orgId, flow.id, serviceId, effectiveProfileId);
+      await bindAdminConnection(orgId, flow.id, providerId, effectiveProfileId);
       return c.json({ bound: true });
     },
   );
 
-  // DELETE /api/flows/:scope/:name/services/:svcScope/:svcName/bind — unbind admin's connection from a service
+  // DELETE /api/flows/:scope/:name/providers/:svcScope/:svcName/bind — unbind admin's connection from a provider
   router.delete(
-    "/:scope{@[^/]+}/:name/services/:svcScope{@[^/]+}/:svcName/bind",
+    "/:scope{@[^/]+}/:name/providers/:svcScope{@[^/]+}/:svcName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
-      const serviceId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
+      const providerId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
 
-      const svc = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
+      const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
       if (!svc) {
         return c.json(
-          { error: "SERVICE_NOT_FOUND", message: `Service '${serviceId}' not found` },
+          { error: "PROVIDER_NOT_FOUND", message: `Provider '${providerId}' not found` },
           404,
         );
       }
 
-      await unbindAdminConnection(c.get("orgId"), flow.id, serviceId);
+      await unbindAdminConnection(c.get("orgId"), flow.id, providerId);
       return c.json({ unbound: true });
     },
   );
@@ -270,12 +270,12 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const services = resolveManifestServices(flow.manifest);
+    const providers = resolveManifestProviders(flow.manifest);
 
     // Verify the flow is shareable publicly
-    if (services.length > 0) {
-      // Check for user-mode services
-      const userModeService = services.find((s) => (s.connectionMode ?? "user") === "user");
+    if (providers.length > 0) {
+      // Check for user-mode providers
+      const userModeService = providers.find((s) => (s.connectionMode ?? "user") === "user");
       if (userModeService) {
         return c.json(
           {
@@ -287,14 +287,14 @@ export function createFlowsRouter() {
         );
       }
 
-      // All services are admin-mode — verify each is bound
+      // All providers are admin-mode — verify each is bound
       const adminConns = await getAdminConnections(orgId, flow.id);
-      for (const svc of services) {
+      for (const svc of providers) {
         if (!adminConns[svc.id]) {
           return c.json(
             {
               error: "SHARE_NOT_READY",
-              message: "All admin services must be bound before generating a public link.",
+              message: "All admin providers must be bound before generating a public link.",
             },
             400,
           );

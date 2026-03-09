@@ -183,6 +183,20 @@
       "when": 1773792000000,
       "tag": "0025_add_forked_from",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1773878400000,
+      "tag": "0026_rename_service_id_to_provider_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1773878400001,
+      "tag": "0027_rename_services_to_providers_in_manifests",
+      "breakpoints": true
     }
   ]
 }

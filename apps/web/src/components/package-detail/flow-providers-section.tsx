@@ -6,17 +6,17 @@ import { usePackageDetail } from "../../hooks/use-packages";
 import { useOrg } from "../../hooks/use-org";
 import {
   useConnect,
-  useBindAdminService,
-  useUnbindAdminService,
+  useBindAdminProvider,
+  useUnbindAdminProvider,
   useDisconnect,
 } from "../../hooks/use-mutations";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useProviders } from "../../hooks/use-providers";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
-import { getServiceStatusDisplay, computeServicesSummary } from "../../lib/service-status";
+import { getProviderStatusDisplay, computeProvidersSummary } from "../../lib/provider-status";
 
-function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
-  const { statusLabel, statusIcon } = getServiceStatusDisplay(status, t);
+function ProviderIcon({ status, t }: { status: string; t: TFunction }) {
+  const { statusLabel, statusIcon } = getProviderStatusDisplay(status, t);
   const colorMap: Record<string, string> = {
     connected: "text-success",
     not_connected: "text-destructive",
@@ -32,7 +32,7 @@ function ServiceIcon({ status, t }: { status: string; t: TFunction }) {
   );
 }
 
-export function FlowServicesSection({ packageId }: { packageId: string }) {
+export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
   const { isOrgAdmin } = useOrg();
   const { data: detail } = usePackageDetail("flow", packageId);
@@ -40,8 +40,8 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
   const pParam = profileIdParam(profileId);
 
   const connectMutation = useConnect();
-  const bindAdmin = useBindAdminService(packageId);
-  const unbindAdmin = useUnbindAdminService(packageId);
+  const bindAdmin = useBindAdminProvider(packageId);
+  const unbindAdmin = useUnbindAdminProvider(packageId);
   const disconnectMutation = useDisconnect();
 
   const { data: providersData } = useProviders();
@@ -49,7 +49,10 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
   const setApiKeyService = useFlowDetailUI((s) => s.setApiKeyService);
   const setCustomCredService = useFlowDetailUI((s) => s.setCustomCredService);
 
-  const getServiceAuthMode = (svc: { provider: string; authMode?: string }): string | undefined => {
+  const getProviderAuthMode = (svc: {
+    provider: string;
+    authMode?: string;
+  }): string | undefined => {
     if (svc.authMode) return svc.authMode;
     const pDef = providers?.find((p) => p.id === svc.provider);
     return pDef?.authMode === "api_key"
@@ -66,7 +69,7 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
 
   if (!detail) return null;
 
-  const summary = computeServicesSummary(detail.requires.services, t);
+  const summary = computeProvidersSummary(detail.requires.providers, t);
 
   return (
     <>
@@ -83,10 +86,10 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
         </div>
       )}
       <div className="flex flex-wrap gap-2 mb-4">
-        {detail.requires.services.map((svc) => {
+        {detail.requires.providers.map((svc) => {
           const isConnected = svc.status === "connected";
           const isAdminMode = svc.connectionMode === "admin";
-          const authMode = getServiceAuthMode(svc);
+          const authMode = getProviderAuthMode(svc);
           const effectiveStatus =
             isConnected && svc.scopesSufficient === false ? "needs_reconnection" : svc.status;
 
@@ -133,7 +136,7 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
                   className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
                   title={svc.description}
                 >
-                  <ServiceIcon status="connected" t={t} />
+                  <ProviderIcon status="connected" t={t} />
                   {svc.name || svc.id}
                   <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                     {t("admin")}
@@ -158,7 +161,7 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
                 className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
                 title={svc.description}
               >
-                <ServiceIcon status="not_connected" t={t} />
+                <ProviderIcon status="not_connected" t={t} />
                 {svc.name || svc.id}
                 {isOrgAdmin ? (
                   <Button
@@ -180,7 +183,7 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
           }
 
           const needsReconnection = svc.status === "needs_reconnection";
-          const handleServiceConnect = () => {
+          const handleProviderConnect = () => {
             if (authMode === "API_KEY") {
               setApiKeyService({ provider: svc.provider, id: svc.id });
             } else if (isCredentialAuth(svc.provider)) {
@@ -206,13 +209,13 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
                 className="flex items-center gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-1.5 text-sm"
                 title={svc.description}
               >
-                <ServiceIcon status="needs_reconnection" t={t} />
+                <ProviderIcon status="needs_reconnection" t={t} />
                 {svc.name || svc.id}
                 <Button
                   variant="outline"
                   size="sm"
                   className="ml-1 h-6 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
-                  onClick={handleServiceConnect}
+                  onClick={handleProviderConnect}
                   disabled={connectMutation.isPending}
                 >
                   {t("detail.reconnect", { defaultValue: "Reconnect" })}
@@ -230,14 +233,14 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
                 )}
                 title={svc.description}
               >
-                <ServiceIcon status={effectiveStatus} t={t} />
+                <ProviderIcon status={effectiveStatus} t={t} />
                 {svc.name || svc.id}
                 {hasScopeIssue && svc.scopesMissing && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="ml-1 h-6 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
-                    onClick={handleServiceConnect}
+                    onClick={handleProviderConnect}
                     disabled={connectMutation.isPending}
                     title={`Missing: ${svc.scopesMissing.join(", ")}`}
                   >
@@ -269,10 +272,10 @@ export function FlowServicesSection({ packageId }: { packageId: string }) {
               type="button"
               variant="outline"
               className="flex items-center gap-1.5 border-dashed text-muted-foreground hover:border-primary hover:text-foreground"
-              onClick={handleServiceConnect}
+              onClick={handleProviderConnect}
               title={svc.description}
             >
-              <ServiceIcon status="not_connected" t={t} />
+              <ProviderIcon status="not_connected" t={t} />
               {svc.name || svc.id}
               {` (${t("detail.connect")})`}
             </Button>

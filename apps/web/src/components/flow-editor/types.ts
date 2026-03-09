@@ -4,13 +4,13 @@ import type { ExecutionSettings } from "./execution-section";
 export type EditorTab =
   | "general"
   | "prompt"
-  | "services"
+  | "providers"
   | "schema"
   | "skills"
   | "extensions"
   | "json";
 
-export interface ServiceEntry {
+export interface ProviderEntry {
   id: string;
   version: string;
   scopes: string[];
@@ -35,7 +35,7 @@ export interface FlowFormState {
     tags: string[];
   };
   prompt: string;
-  services: ServiceEntry[];
+  providers: ProviderEntry[];
   skills: ResourceEntry[];
   extensions: ResourceEntry[];
   inputSchema: SchemaField[];

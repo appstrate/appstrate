@@ -111,7 +111,7 @@ export interface ProviderDisplayInfo {
   logo: string;
 }
 
-export interface ServiceStatus {
+export interface ProviderStatus {
   id: string;
   name?: string;
   provider: string;
@@ -135,7 +135,7 @@ export interface FlowListItem {
   author: string;
   tags: string[];
   requires: {
-    services: string[];
+    providers: string[];
     skills: Record<string, string>;
     extensions: Record<string, string>;
   };
@@ -153,7 +153,7 @@ export interface FlowDetail {
   description: string;
   source: "system" | "local";
   requires: {
-    services: ServiceStatus[];
+    providers: ProviderStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
     extensions: { id: string; version: string; name?: string; description?: string }[];
   };
