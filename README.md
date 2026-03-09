@@ -39,7 +39,7 @@ bun run build-sidecar         # docker build -t appstrate-sidecar ./runtime-pi/s
 bun run build                 # turbo build → apps/web/dist/
 
 # 6. Start platform
-bun run dev                   # turbo dev → Hono on :3010
+bun run dev                   # turbo dev → Hono on :3000
 
 # 7. First signup creates an organization automatically
 ```
@@ -49,7 +49,7 @@ bun run dev                   # turbo dev → Hono on :3010
 ```
 appstrate/
 ├── apps/
-│   ├── api/src/              # Hono API server (:3010)
+│   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
 │   │   ├── openapi/          # OpenAPI 3.1 spec (110 endpoints)
@@ -112,7 +112,7 @@ Full interactive docs: `GET /api/docs` (Swagger UI).
 ## Architecture
 
 ```
-Browser (React SPA)              Platform (Bun + Hono :3010)
+Browser (React SPA)              Platform (Bun + Hono :3000)
     |                                |
     |-- Login/Signup --------------->|-- Better Auth (cookie session)
     |-- POST /api/flows/:id/run --->|
@@ -135,19 +135,19 @@ Browser (React SPA)              Platform (Bun + Hono :3010)
 
 Key variables (see `.env.example` for full list):
 
-| Variable                    | Required | Default                                       | Description                                            |
-| --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------ |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                           |
-| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                 |
-| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials           |
-| `LLM_PROVIDER`              | No       | `anthropic`                                   | LLM provider for agent containers                      |
-| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Model ID for agent containers                          |
-| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed to agent containers                             |
-| `PORT`                      | No       | `3010`                                        | Server port                                            |
-| `APP_URL`                   | No       | `http://localhost:3010`                       | Public URL for OAuth callbacks                         |
-| `TRUSTED_ORIGINS`           | No       | `http://localhost:3010,http://localhost:5173` | CORS origins                                           |
-| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                                     |
-| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers             |
+| Variable                    | Required | Default                                       | Description                                  |
+| --------------------------- | -------- | --------------------------------------------- | -------------------------------------------- |
+| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                 |
+| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                       |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials |
+| `LLM_PROVIDER`              | No       | `anthropic`                                   | LLM provider for agent containers            |
+| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Model ID for agent containers                |
+| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed to agent containers                   |
+| `PORT`                      | No       | `3000`                                        | Server port                                  |
+| `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks               |
+| `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins                                 |
+| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                           |
+| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers   |
 
 ## Development
 
