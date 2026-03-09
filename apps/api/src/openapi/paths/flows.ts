@@ -70,16 +70,16 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{packageId}/services/{serviceId}/bind": {
+  "/api/flows/{packageId}/providers/{providerId}/bind": {
     post: {
-      operationId: "bindFlowService",
+      operationId: "bindFlowProvider",
       tags: ["Flows"],
-      summary: "Bind admin connection to service",
-      description: "Bind the current admin user's connection for a flow service. Admin only.",
+      summary: "Bind admin connection to provider",
+      description: "Bind the current admin user's connection for a flow provider. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "packageId", in: "path", required: true, schema: { type: "string" } },
-        { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         content: {
@@ -107,14 +107,14 @@ export const flowsPaths = {
       },
     },
     delete: {
-      operationId: "unbindFlowService",
+      operationId: "unbindFlowProvider",
       tags: ["Flows"],
-      summary: "Unbind admin connection from service",
-      description: "Remove the admin connection binding for a flow service. Admin only.",
+      summary: "Unbind admin connection from provider",
+      description: "Remove the admin connection binding for a flow provider. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "packageId", in: "path", required: true, schema: { type: "string" } },
-        { name: "serviceId", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

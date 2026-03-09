@@ -11,8 +11,8 @@ import { isProviderEnabled } from "@appstrate/connect";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext } from "./env-builder.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
-import { resolveServiceProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -251,17 +251,17 @@ async function triggerScheduledExecution(
       return;
     }
 
-    // Resolve service profiles for this user + package
-    const manifestServices = resolveManifestServices(flow.manifest);
-    const serviceProfiles = await resolveServiceProfiles(
-      manifestServices,
+    // Resolve provider profiles for this user + package
+    const manifestProviders = resolveManifestProviders(flow.manifest);
+    const providerProfiles = await resolveProviderProfiles(
+      manifestProviders,
       userId,
       packageId,
       orgId,
     );
 
     // Validate provider enabled status
-    for (const svc of manifestServices) {
+    for (const svc of manifestProviders) {
       const enabled = await isProviderEnabled(db, orgId, svc.provider);
       if (!enabled) {
         logger.warn("Provider not enabled, skipping schedule", {
@@ -272,12 +272,12 @@ async function triggerScheduledExecution(
       }
     }
 
-    // Validate service dependencies — skip if not connected
-    for (const svc of manifestServices) {
-      const profileId = serviceProfiles[svc.id];
+    // Validate provider dependencies — skip if not connected
+    for (const svc of manifestProviders) {
+      const profileId = providerProfiles[svc.id];
       if (!profileId) {
-        logger.warn("Service profile not resolved, skipping schedule", {
-          serviceId: svc.id,
+        logger.warn("Provider profile not resolved, skipping schedule", {
+          providerId: svc.id,
           scheduleId,
           packageId,
         });
@@ -286,8 +286,8 @@ async function triggerScheduledExecution(
 
       const conn = await getConnectionStatus(svc.provider, profileId);
       if (conn.status !== "connected") {
-        logger.warn("Service not connected, skipping schedule", {
-          serviceId: svc.id,
+        logger.warn("Provider not connected, skipping schedule", {
+          providerId: svc.id,
           profileId,
           scheduleId,
           packageId,
@@ -303,7 +303,7 @@ async function triggerScheduledExecution(
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow,
-      serviceProfiles,
+      providerProfiles,
       orgId,
       userId,
       input,

@@ -8,7 +8,7 @@ import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -148,25 +148,25 @@ export function createInternalRouter() {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
     }
 
-    const service = resolveManifestServices(flow.manifest).find((s) => s.id === serviceId);
-    if (!service) {
-      logger.warn("Credential request for unknown service", {
+    const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === serviceId);
+    if (!provider) {
+      logger.warn("Credential request for unknown provider", {
         executionId,
-        serviceId,
+        providerId: serviceId,
         packageId: execution.packageId,
       });
       return c.json(
         {
-          error: "SERVICE_NOT_FOUND",
-          message: `Service '${serviceId}' is not required by this flow`,
+          error: "PROVIDER_NOT_FOUND",
+          message: `Provider '${serviceId}' is not required by this flow`,
         },
         404,
       );
     }
 
     try {
-      // Resolve profile for this service
-      const connectionMode = service.connectionMode ?? "user";
+      // Resolve profile for this provider
+      const connectionMode = provider.connectionMode ?? "user";
       let profileId: string;
 
       if (connectionMode === "admin") {
@@ -193,7 +193,7 @@ export function createInternalRouter() {
       const result = await resolveCredentialsForProxy(
         db,
         profileId,
-        service.provider,
+        provider.provider,
         execution.orgId,
       );
 
@@ -209,8 +209,8 @@ export function createInternalRouter() {
 
       logger.info("Credential access", {
         executionId,
-        serviceId,
-        provider: service.provider,
+        providerId: serviceId,
+        provider: provider.provider,
         packageId: execution.packageId,
         connectionMode,
         profileId,
@@ -220,7 +220,7 @@ export function createInternalRouter() {
     } catch (err) {
       logger.error("Failed to resolve credentials", {
         executionId,
-        serviceId,
+        providerId: serviceId,
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to resolve credentials" }, 500);

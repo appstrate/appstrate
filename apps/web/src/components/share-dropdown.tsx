@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ShareLinkModal } from "./share-link-modal";
 
-interface ServiceStatus {
+interface ProviderStatusInfo {
   id: string;
   connectionMode?: string;
   status: string;
@@ -20,7 +20,7 @@ interface ServiceStatus {
 interface ShareDropdownProps {
   packageId: string;
   isAdmin: boolean;
-  services: ServiceStatus[];
+  services: ProviderStatusInfo[];
 }
 
 export function ShareDropdown({ packageId, isAdmin, services }: ShareDropdownProps) {

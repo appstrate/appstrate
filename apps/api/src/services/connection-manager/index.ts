@@ -1,5 +1,5 @@
 export type { ConnectionStatus } from "./status.ts";
-export { getConnectionStatus, resolveServiceStatuses } from "./status.ts";
+export { getConnectionStatus, resolveProviderStatuses } from "./status.ts";
 
 export { initiateConnection, handleCallback, handleOAuth1CallbackAndSave } from "./oauth.ts";
 

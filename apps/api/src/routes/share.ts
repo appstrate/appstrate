@@ -10,14 +10,14 @@ import {
 } from "../services/share-tokens.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { createExecution, getAdminConnections } from "../services/state.ts";
-import { resolveServiceStatuses } from "../services/connection-manager.ts";
+import { resolveProviderStatuses } from "../services/connection-manager.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext } from "../services/env-builder.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
-import { resolveServiceProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 export function createShareRouter() {
   const router = new Hono();
@@ -37,10 +37,10 @@ export function createShareRouter() {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
 
-    // Resolve service statuses
+    // Resolve provider statuses
     const adminConns = await getAdminConnections(orgId, flow.id);
-    const serviceStatuses = await resolveServiceStatuses(
-      resolveManifestServices(flow.manifest),
+    const providerStatuses = await resolveProviderStatuses(
+      resolveManifestProviders(flow.manifest),
       adminConns,
       orgId,
       undefined,
@@ -50,7 +50,7 @@ export function createShareRouter() {
       displayName: flow.manifest.displayName,
       description: flow.manifest.description,
       ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
-      ...(serviceStatuses.length > 0 ? { services: serviceStatuses } : {}),
+      ...(providerStatuses.length > 0 ? { providers: providerStatuses } : {}),
       consumed: !!shareToken.consumedAt,
     };
 
@@ -120,17 +120,17 @@ export function createShareRouter() {
       size: f.size,
     }));
 
-    // Resolve service profiles
-    const manifestServices = resolveManifestServices(flow.manifest);
-    const serviceProfiles = await resolveServiceProfiles(
-      manifestServices,
+    // Resolve provider profiles
+    const manifestProviders = resolveManifestProviders(flow.manifest);
+    const providerProfiles = await resolveProviderProfiles(
+      manifestProviders,
       userId,
       packageId,
       orgId,
     );
 
-    // Validate service dependencies before execution
-    const depError = await validateFlowDependencies(manifestServices, serviceProfiles, orgId);
+    // Validate provider dependencies before execution
+    const depError = await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
     if (depError) {
       return c.json(depError, 400);
     }
@@ -141,7 +141,7 @@ export function createShareRouter() {
     const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
       executionId,
       flow,
-      serviceProfiles,
+      providerProfiles,
       orgId,
       userId,
       input: parsedInput,

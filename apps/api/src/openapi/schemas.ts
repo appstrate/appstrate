@@ -74,10 +74,10 @@ export const schemas = {
       },
     },
   },
-  ServiceStatus: {
+  ProviderStatus: {
     type: "object",
     properties: {
-      id: { type: "string", description: "Service ID" },
+      id: { type: "string", description: "Provider requirement ID" },
       provider: { type: "string", description: "Provider ID" },
       description: { type: "string" },
       connectionMode: { type: "string", enum: ["user", "admin"] },
@@ -132,7 +132,7 @@ export const schemas = {
       requires: {
         type: "object",
         properties: {
-          services: { type: "array", items: { type: "string" } },
+          providers: { type: "array", items: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
           extensions: { type: "object", additionalProperties: { type: "string" } },
         },
@@ -181,7 +181,7 @@ export const schemas = {
       requires: {
         type: "object",
         properties: {
-          services: { type: "array", items: { $ref: "#/components/schemas/ServiceStatus" } },
+          providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/FlowSkillRef" } },
           extensions: { type: "array", items: { $ref: "#/components/schemas/FlowExtensionRef" } },
         },
@@ -481,7 +481,7 @@ export const schemas = {
           schema: { type: "object" },
         },
       },
-      services: { type: "array", items: { type: "object" } },
+      providers: { type: "array", items: { type: "object" } },
       consumed: { type: "boolean" },
       execution: {
         type: "object",

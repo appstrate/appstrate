@@ -30,8 +30,8 @@ const expectedEndpoints = [
   // Flows (runtime — flows.ts + user-flows.ts junction endpoints)
   "GET /api/flows",
   "PUT /api/flows/{packageId}/config",
-  "POST /api/flows/{packageId}/services/{serviceId}/bind",
-  "DELETE /api/flows/{packageId}/services/{serviceId}/bind",
+  "POST /api/flows/{packageId}/providers/{providerId}/bind",
+  "DELETE /api/flows/{packageId}/providers/{providerId}/bind",
   "POST /api/flows/{packageId}/share-token",
   "GET /api/flows/{packageId}/memories",
   "DELETE /api/flows/{packageId}/memories",
@@ -176,7 +176,7 @@ const expectedEndpoints = [
 
   // Internal
   "GET /internal/execution-history",
-  "GET /internal/credentials/{serviceId}",
+  "GET /internal/credentials/{providerId}",
 
   // Meta
   "GET /api/openapi.json",

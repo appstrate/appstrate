@@ -17,7 +17,7 @@ import { SchemaSection } from "../components/flow-editor/schema-section";
 import { ExecutionSection } from "../components/flow-editor/execution-section";
 import { ResourceSection } from "../components/flow-editor/resource-section";
 import { PromptEditor } from "../components/flow-editor/prompt-editor";
-import { ServicePicker } from "../components/flow-editor/service-picker";
+import { ProviderPicker } from "../components/flow-editor/provider-picker";
 import { JsonEditor } from "../components/flow-editor/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
@@ -38,7 +38,7 @@ import { getPackageTypeModule } from "../lib/package-type-modules";
 type GenericEditorTab =
   | "general"
   | "prompt"
-  | "services"
+  | "providers"
   | "schema"
   | "skills"
   | "extensions"
@@ -124,7 +124,7 @@ function FlowEditorInner({
   const flowTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
     { id: "prompt", label: t("editor.tabPrompt") },
-    { id: "services", label: t("editor.tabServices") },
+    { id: "providers", label: t("editor.tabServices") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "extensions", label: t("editor.tabExtensions") },
@@ -193,10 +193,10 @@ function FlowEditorInner({
           onChange={(prompt) => setForm((s) => ({ ...s, prompt }))}
         />
       )}
-      {activeTab === "services" && (
-        <ServicePicker
-          value={form.services}
-          onChange={(services) => setForm((s) => ({ ...s, services }))}
+      {activeTab === "providers" && (
+        <ProviderPicker
+          value={form.providers}
+          onChange={(providers) => setForm((s) => ({ ...s, providers }))}
         />
       )}
       {activeTab === "schema" && (

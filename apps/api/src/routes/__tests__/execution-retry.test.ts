@@ -136,7 +136,7 @@ function makePromptContext(): PromptContext {
     previousState: null,
     input: {},
     schemas: {},
-    services: [],
+    providers: [],
     llmModel: "claude-sonnet-4-5-20250929",
   };
 }

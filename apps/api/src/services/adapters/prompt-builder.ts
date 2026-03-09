@@ -7,19 +7,6 @@ import {
 } from "@appstrate/connect";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
-type ProviderLike = NonNullable<PromptContext["providers"]>[number];
-
-/**
- * Get provider definition for prompt building from the execution context.
- * All providers are resolved from the DB and passed via ctx.providers.
- */
-function getProviderDef(providerId: string, ctx?: PromptContext): ProviderLike | null {
-  if (ctx?.providers) {
-    return ctx.providers.find((p) => p.id === providerId) ?? null;
-  }
-  return null;
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -28,7 +15,7 @@ function formatFileSize(bytes: number): string {
 
 export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
-  const connectedServices = ctx.services.filter((s) => ctx.tokens[s.id]);
+  const connectedServices = ctx.providers.filter((s) => ctx.tokens[s.id]);
 
   // --- System identity & environment ---
   sections.push("## System\n");
@@ -124,22 +111,19 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         "consider paginating or narrowing your query.\n",
     );
 
-    sections.push("### Connected Services\n");
+    sections.push("### Connected Providers\n");
 
     for (const svc of connectedServices) {
-      const provider = getProviderDef(svc.provider, ctx);
-      const displayName = provider?.displayName ?? svc.id;
-      const authorizedUris = provider
-        ? getDefaultAuthorizedUris(provider as ProviderDefinition)
-        : null;
-      const allowAllUris = provider?.allowAllUris ?? false;
+      const displayName = svc.displayName ?? svc.id;
+      const authorizedUris = getDefaultAuthorizedUris(svc as ProviderDefinition);
+      const allowAllUris = svc.allowAllUris ?? false;
 
       sections.push(`- **${displayName}** (service ID: \`${svc.id}\`)`);
 
       // For providers with credentialSchema, show all credential variables
-      if (provider && provider.credentialSchema) {
+      if (svc.credentialSchema) {
         const props =
-          (provider.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
+          (svc.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
           const desc = props[name]?.description ?? name;
@@ -150,16 +134,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         }
       } else {
         // OAuth2 / API key — single credential field with header info
-        const fieldName = provider
-          ? getCredentialFieldName(provider as ProviderDefinition)
-          : "token";
-        const headerName = provider?.credentialHeaderName ?? "Authorization";
-        const headerPrefix = provider?.credentialHeaderPrefix ?? "Bearer ";
+        const fieldName = getCredentialFieldName(svc as ProviderDefinition);
+        const headerName = svc.credentialHeaderName ?? "Authorization";
+        const headerPrefix = svc.credentialHeaderPrefix ?? "Bearer ";
         sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
       }
 
-      if (provider?.docsUrl) {
-        sections.push(`  Documentation: ${provider.docsUrl}`);
+      if (svc.docsUrl) {
+        sections.push(`  Documentation: ${svc.docsUrl}`);
       }
 
       if (allowAllUris) {
@@ -302,8 +284,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
   // Agent-driven proxy (if a proxy service is connected)
   const proxyServices = connectedServices.filter((s) => {
-    const provider = getProviderDef(s.provider, ctx);
-    return provider?.categories?.includes("proxy");
+    return s.categories?.includes("proxy");
   });
   if (proxyServices.length > 0 && !ctx.proxyUrl) {
     sections.push("## Proxy Services\n");

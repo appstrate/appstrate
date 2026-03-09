@@ -15,13 +15,13 @@ import {
 } from "@/components/ui/select";
 import { useProviders } from "../../hooks/use-providers";
 import { useOrg } from "../../hooks/use-org";
-import type { ServiceEntry } from "./types";
+import type { ProviderEntry } from "./types";
 import type { AvailableScope, ProviderConfig } from "@appstrate/shared-types";
 import { VersionSelect } from "./resource-section";
 
-interface ServicePickerProps {
-  value: ServiceEntry[];
-  onChange: (value: ServiceEntry[]) => void;
+interface ProviderPickerProps {
+  value: ProviderEntry[];
+  onChange: (value: ProviderEntry[]) => void;
 }
 
 interface ScopeOption {
@@ -178,13 +178,13 @@ function ScopeMultiSelect({
   );
 }
 
-export function ServicePicker({ value, onChange }: ServicePickerProps) {
+export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const { data: providersData, isLoading } = useProviders();
   const providers = providersData?.providers;
   const { isOrgAdmin } = useOrg();
 
-  const update = (index: number, patch: Partial<ServiceEntry>) => {
+  const update = (index: number, patch: Partial<ProviderEntry>) => {
     const next = value.map((s, i) => (i === index ? { ...s, ...patch } : s));
     onChange(next);
   };
@@ -212,7 +212,7 @@ export function ServicePicker({ value, onChange }: ServicePickerProps) {
 
   return (
     <div>
-      {/* Selected services */}
+      {/* Selected providers */}
       {value.length > 0 && (
         <div className="mb-4">
           <div className="text-sm font-medium text-muted-foreground mb-2">

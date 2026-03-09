@@ -76,9 +76,9 @@ export class PiAdapter implements ExecutionAdapter {
         SIDECAR_URL: "http://sidecar:8080",
       };
 
-      const connectedServiceIds = ctx.services.filter((s) => ctx.tokens[s.id]).map((s) => s.id);
-      if (connectedServiceIds.length > 0) {
-        containerEnv.CONNECTED_SERVICES = connectedServiceIds.join(",");
+      const connectedProviderIds = ctx.providers.filter((s) => ctx.tokens[s.id]).map((s) => s.id);
+      if (connectedProviderIds.length > 0) {
+        containerEnv.CONNECTED_PROVIDERS = connectedProviderIds.join(",");
       }
 
       for (const key of LLM_API_KEY_NAMES) {

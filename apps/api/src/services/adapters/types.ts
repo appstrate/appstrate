@@ -46,11 +46,7 @@ export interface PromptContext {
     config?: import("@appstrate/shared-types").JSONSchemaObject;
     output?: import("@appstrate/shared-types").JSONSchemaObject;
   };
-  services: Array<{
-    id: string;
-    provider: string;
-  }>;
-  providers?: Array<{
+  providers: Array<{
     id: string;
     displayName: string;
     authMode: string;

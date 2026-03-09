@@ -8,7 +8,7 @@ import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
-import { FlowServicesSection } from "./flow-services-section";
+import { FlowProvidersSection } from "./flow-providers-section";
 import { ExecutionRow } from "../execution-row";
 import { ScheduleRow } from "../schedule-row";
 import { RunFlowButton } from "../run-flow-button";
@@ -112,7 +112,7 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
 }
 
 export function FlowConnectorsTab({ packageId }: { packageId: string }) {
-  return <FlowServicesSection packageId={packageId} />;
+  return <FlowProvidersSection packageId={packageId} />;
 }
 
 export function FlowMemoriesTab({

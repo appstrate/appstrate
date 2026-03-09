@@ -60,8 +60,8 @@ export function ShareableRunPage() {
 
   useExecutionRealtime(executionId, handleStatusChange);
 
-  const services = flow?.requires?.services ?? [];
-  const allConnected = services.every((s) => s.status === "connected");
+  const providers = flow?.requires?.providers ?? [];
+  const allConnected = providers.every((s) => s.status === "connected");
 
   const handleRun = async () => {
     if (!packageId) return;
@@ -140,9 +140,9 @@ export function ShareableRunPage() {
           )}
         </div>
 
-        {services.length > 0 && (
+        {providers.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-4">
-            {services.map((svc) => {
+            {providers.map((svc) => {
               const isConnected = svc.status === "connected";
               const isAdminMode = svc.connectionMode === "admin";
 
@@ -188,7 +188,7 @@ export function ShareableRunPage() {
                 );
               }
 
-              const handleServiceConnect = () => {
+              const handleProviderConnect = () => {
                 if (svc.authMode === "API_KEY") {
                   setApiKeyService({ provider: svc.provider, id: svc.id });
                 } else {
@@ -202,7 +202,7 @@ export function ShareableRunPage() {
                   variant="outline"
                   type="button"
                   className="flex items-center gap-1.5 border-dashed px-2.5 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground"
-                  onClick={handleServiceConnect}
+                  onClick={handleProviderConnect}
                   title={svc.description}
                 >
                   <span className="h-2 w-2 rounded-full bg-destructive inline-block" />

@@ -9,7 +9,7 @@ export type { OrgRole } from "@appstrate/shared-types";
 import type { FlowManifest } from "@appstrate/core/validation";
 export type { FlowManifest };
 
-export interface FlowServiceRequirement {
+export interface FlowProviderRequirement {
   id: string;
   provider: string;
   description?: string;

@@ -51,7 +51,7 @@ The manifest defines everything about the flow. Follow this structure exactly:
   },
 
   "requires": {
-    "services": {}
+    "providers": {}
   },
 
   "execution": {
@@ -64,17 +64,17 @@ The manifest defines everything about the flow. Follow this structure exactly:
 
 **metadata.id**: Kebab-case slug, unique across all flows. This becomes the flow ID. Examples: `email-summary`, `slack-digest`, `invoice-processor`.
 
-**requires.services**: Record mapping provider package IDs (scoped names) to version strings. Each entry represents a service the agent needs OAuth/API tokens for:
+**requires.providers**: Record mapping provider package IDs (scoped names) to version strings. Each entry represents a provider the agent needs OAuth/API tokens for:
 ```json
-"services": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" }
+"providers": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" }
 ```
 - The key is the provider package ID (scoped name). Must match a configured provider. See Available Providers below.
 - The value is a version string (e.g., `"1.0.0"`, `"*"`).
 - The token is injected as `TOKEN_{KEY_UPPERCASED}` (hyphens/slashes become underscores, `@` removed).
 
-**servicesConfiguration** (optional, top-level): Per-service configuration (scopes, connection mode):
+**providersConfiguration** (optional, top-level): Per-provider configuration (scopes, connection mode):
 ```json
-"servicesConfiguration": {
+"providersConfiguration": {
   "@appstrate/gmail": {
     "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
     "connectionMode": "admin"
@@ -386,7 +386,7 @@ After creating the flow files (before packaging):
 
 1. **Check the manifest is valid JSON**: `cat /tmp/appstrate-flow-{flow-name}/{flow-name}/manifest.json | jq .`
 2. **Verify prompt doesn't use template syntax**: Prompts should NOT contain `{{...}}` — all context is injected automatically as structured sections
-3. **Verify service IDs**: Each service in `requires.services` must reference a configured provider
+3. **Verify provider IDs**: Each provider in `requires.providers` must reference a configured provider
 4. **For built-in flows**: Restart the dev server (`bun run dev`), the flow should appear in the flow list. Check the logs for "Loaded flow: {name}"
 5. **For ZIP imports**: Import via the UI or API, check the flow appears in the flow list without restart
 
@@ -408,7 +408,7 @@ These providers are loaded as system packages (ZIPs in `apps/api/providers/`) at
 | `@appstrate/trello` | OAuth2 | Trello |
 | `@appstrate/brevo` | API Key | Brevo |
 
-If the flow needs a service not in this list, tell the user they need to:
+If the flow needs a provider not in this list, tell the user they need to:
 1. Add a custom provider via the Org Settings page or API (`POST /api/providers`)
 2. Reference the correct scoped `provider` key in the manifest
 
@@ -429,12 +429,12 @@ If the flow needs a service not in this list, tell the user they need to:
   },
 
   "requires": {
-    "services": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" },
+    "providers": { "@appstrate/gmail": "1.0.0", "@appstrate/clickup": "1.0.0" },
     "skills": {},
     "extensions": { "@appstrate/web-search": "1.0.0" }
   },
 
-  "servicesConfiguration": {
+  "providersConfiguration": {
     "@appstrate/gmail": {
       "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },

@@ -11,7 +11,7 @@ import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
-import { resolveManifestServices } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
@@ -147,7 +147,7 @@ export function createProvidersRouter() {
     const allFlows = await listPackages(orgId);
     const providerUsage = new Map<string, number>();
     for (const flow of allFlows) {
-      for (const svc of resolveManifestServices(flow.manifest)) {
+      for (const svc of resolveManifestProviders(flow.manifest)) {
         providerUsage.set(svc.id, (providerUsage.get(svc.id) ?? 0) + 1);
       }
     }
@@ -578,7 +578,7 @@ export function createProvidersRouter() {
     const allFlows = await listPackages(orgId);
     let usageCount = 0;
     for (const flow of allFlows) {
-      for (const svc of resolveManifestServices(flow.manifest)) {
+      for (const svc of resolveManifestProviders(flow.manifest)) {
         if (svc.id === providerId) {
           usageCount++;
           break;

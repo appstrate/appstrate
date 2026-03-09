@@ -8,12 +8,12 @@
     "tags": ["category1", "category2"]
   },
   "requires": {
-    "services": { "@scope/my-service": "1.0.0" },
+    "providers": { "@scope/my-provider": "1.0.0" },
     "skills": {},
     "extensions": {}
   },
-  "servicesConfiguration": {
-    "@scope/my-service": {
+  "providersConfiguration": {
+    "@scope/my-provider": {
       "scopes": [],
       "connectionMode": "user"
     }
