@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
 import { VersionSelector } from "../version-selector";
 import { packageListPath } from "../../lib/package-paths";
+import { InlineMarkdown } from "../markdown";
 
 interface SharedHeaderDetail {
   id: string;
@@ -71,7 +72,9 @@ export function SharedHeader({
         </div>
         <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
         {detail.description && (
-          <p className="text-sm text-muted-foreground mt-1">{detail.description}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            <InlineMarkdown>{detail.description}</InlineMarkdown>
+          </p>
         )}
         {(hasActions || hasVersionSelector) && (
           <div className="flex items-center gap-2 mt-3">

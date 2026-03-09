@@ -11,6 +11,7 @@ import { initInputValues, buildInputPayload } from "../components/input-utils";
 import { ResultRenderer } from "../components/result-renderer";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { Spinner } from "../components/spinner";
+import { InlineMarkdown } from "../components/markdown";
 import { api, uploadFormData } from "../api";
 
 type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
@@ -136,7 +137,9 @@ export function ShareableRunPage() {
         <div className="mb-4">
           <h2 className="text-lg font-semibold">{flow.displayName}</h2>
           {flow.description && (
-            <p className="text-sm text-muted-foreground mt-1">{flow.description}</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              <InlineMarkdown>{flow.description}</InlineMarkdown>
+            </p>
           )}
         </div>
 

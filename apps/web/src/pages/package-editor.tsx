@@ -22,6 +22,7 @@ import { JsonEditor } from "../components/flow-editor/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
+import { JsonView } from "../components/json-view";
 import { EmptyState } from "../components/page-states";
 import { useProviders } from "../hooks/use-providers";
 
@@ -380,10 +381,8 @@ function PackageEditorInner({
       )}
 
       {activeTab === "json" && (
-        <div className="rounded-lg border border-border overflow-hidden my-4">
-          <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-card">
-            {JSON.stringify(form, null, 2)}
-          </pre>
+        <div className="my-4">
+          <JsonView data={form} />
         </div>
       )}
 

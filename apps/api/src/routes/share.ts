@@ -50,6 +50,7 @@ export function createShareRouter() {
       displayName: flow.manifest.displayName,
       description: flow.manifest.description,
       ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
+      ...(flow.manifest.output ? { output: { schema: flow.manifest.output.schema } } : {}),
       ...(providerStatuses.length > 0 ? { providers: providerStatuses } : {}),
       consumed: !!shareToken.consumedAt,
     };

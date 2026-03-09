@@ -1,31 +1,4 @@
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 import i18n from "../i18n";
-
-marked.setOptions({ breaks: true, gfm: true });
-
-DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-  if (node.tagName === "A" && node.getAttribute("href")?.startsWith("http")) {
-    node.setAttribute("target", "_blank");
-    node.setAttribute("rel", "noopener noreferrer");
-  }
-});
-
-export function convertMarkdown(text: string): string {
-  if (!text) return "";
-  const rawHtml = marked.parse(text, { async: false }) as string;
-  return DOMPurify.sanitize(rawHtml, { ADD_ATTR: ["target", "rel"] });
-}
-
-export function escapeHtml(str: string): string {
-  return DOMPurify.sanitize(str, { ALLOWED_TAGS: [] });
-}
-
-export function linkifyText(str: string): string {
-  if (!str) return "";
-  const rawHtml = marked.parseInline(str, { async: false }) as string;
-  return DOMPurify.sanitize(rawHtml, { ADD_ATTR: ["target", "rel"] });
-}
 
 export function truncate(str: string, max: number): string {
   if (str.length <= max) return str;

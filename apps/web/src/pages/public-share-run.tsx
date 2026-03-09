@@ -16,6 +16,7 @@ interface FlowInfo {
   displayName: string;
   description?: string;
   input?: { schema: JSONSchemaObject };
+  output?: { schema: JSONSchemaObject };
   providers?: ProviderStatus[];
   consumed: boolean;
   execution?: {
@@ -317,7 +318,7 @@ export function PublicShareRunPage() {
                 {execError}
               </div>
             )}
-            {result && <ResultRenderer data={result} outputSchema={flowInfo.input?.schema} />}
+            {result && <ResultRenderer data={result} outputSchema={flowInfo.output?.schema} />}
           </div>
         )}
       </div>

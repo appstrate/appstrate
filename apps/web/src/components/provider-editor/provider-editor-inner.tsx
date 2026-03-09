@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "../spinner";
+import { JsonView } from "../json-view";
 import { MetadataSection } from "../flow-editor/metadata-section";
 import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "../flow-editor/utils";
@@ -776,14 +777,10 @@ export function ProviderEditorInner({
 
       {/* ── JSON Tab ── */}
       {activeTab === "json" && (
-        <div className="rounded-lg border border-border overflow-hidden my-4">
-          <pre className="p-4 text-xs font-mono overflow-auto max-h-[600px] bg-card">
-            {JSON.stringify(
-              buildPayload(metadata, fields, isEdit, availableScopes, credentialFields),
-              null,
-              2,
-            )}
-          </pre>
+        <div className="my-4">
+          <JsonView
+            data={buildPayload(metadata, fields, isEdit, availableScopes, credentialFields)}
+          />
         </div>
       )}
 

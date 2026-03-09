@@ -290,5 +290,13 @@
   "fork.errorOwned": "You already own this package",
   "fork.errorCollision": "A package with this name already exists",
   "ownership.readOnly": "This package belongs to another organization (read-only)",
+  "result.copyAll": "Copy",
+  "result.copied": "Copied!",
+  "result.expandAll": "Expand all",
+  "result.collapseAll": "Collapse all",
+  "result.showMore": "Show more",
+  "result.showLess": "Show less",
+  "result.items": "{{count}} item(s)",
+  "result.noData": "No data",
   "ownership.forkedFrom": "Forked from "
 }
