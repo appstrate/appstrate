@@ -27,7 +27,7 @@ Returns complete flow information including:
 
 - `manifest`: Full manifest JSON
 - `prompt`: Agent prompt markdown
-- `services`: Array of required services with connection status
+- `providers`: Array of required providers with connection status
 - `config`: Current configuration values
 - `lastExecution`: Most recent execution summary
 - `runningExecutions`: Count of active executions
@@ -247,7 +247,7 @@ The manifest defines a flow's metadata, dependencies, input/output schemas, and 
 
 ### Provider Connection Modes (in `providersConfiguration`)
 
-- **`user` mode** (default): Each user who runs the flow must have their own connection to the service. The agent uses the running user's credentials.
+- **`user` mode** (default): Each user who runs the flow must have their own connection to the provider. The agent uses the running user's credentials.
 - **`admin` mode**: An admin binds their connection to the flow once. All executions use the admin's credentials regardless of who triggers the run. Useful for shared resources (e.g., a team Gmail inbox).
 
 A ready-to-use manifest template is available in `manifest-template.json` in this skill directory.

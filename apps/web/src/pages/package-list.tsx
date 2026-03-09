@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
+import type { PackageType } from "@appstrate/shared-types";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
@@ -12,7 +13,7 @@ export interface CardItem {
   id: string;
   displayName: string;
   description?: string | null;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   source?: "system" | "local";
   runningExecutions?: number;
   tags?: string[];

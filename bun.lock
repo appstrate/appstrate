@@ -150,6 +150,7 @@
       "name": "@appstrate/shared-types",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/core": "^2.4.0",
         "@appstrate/db": "workspace:*",
       },
     },

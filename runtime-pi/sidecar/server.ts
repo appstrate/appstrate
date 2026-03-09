@@ -10,9 +10,9 @@ const config = {
 const MAX_RESPONSE_SIZE = 50_000;
 const OUTBOUND_TIMEOUT_MS = 30_000;
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
-const SERVICE_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-// In-memory cookie jar keyed by serviceId. Ephemeral — lives only for this execution.
+// In-memory cookie jar keyed by providerId. Ephemeral — lives only for this execution.
 const cookieJar = new Map<string, string[]>();
 
 const app = new Hono();
@@ -25,12 +25,12 @@ interface CredentialsResponse {
   allowAllUris: boolean;
 }
 
-async function fetchCredentials(serviceId: string): Promise<CredentialsResponse> {
-  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${serviceId}`, {
+async function fetchCredentials(providerId: string): Promise<CredentialsResponse> {
+  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${providerId}`, {
     headers: { Authorization: `Bearer ${config.executionToken}` },
   });
   if (!res.ok) {
-    throw new Error(`Failed to fetch credentials for ${serviceId}: ${res.status}`);
+    throw new Error(`Failed to fetch credentials for ${providerId}: ${res.status}`);
   }
   return res.json() as Promise<CredentialsResponse>;
 }
@@ -148,27 +148,27 @@ app.get("/execution-history", async (c) => {
 // Transparent credential-injecting proxy
 app.all("/proxy", async (c) => {
   // 1. Extract routing headers
-  const serviceId = c.req.header("X-Service");
+  const providerId = c.req.header("X-Provider");
   const targetUrl = c.req.header("X-Target");
   const substituteBody = c.req.header("X-Substitute-Body");
   const proxyHeader = c.req.header("X-Proxy");
 
-  if (!serviceId) {
-    return c.json({ error: "Missing X-Service header" }, 400);
+  if (!providerId) {
+    return c.json({ error: "Missing X-Provider header" }, 400);
   }
   if (!targetUrl) {
     return c.json({ error: "Missing X-Target header" }, 400);
   }
 
-  // 1b. Validate serviceId format (prevent path traversal)
-  if (!SERVICE_ID_RE.test(serviceId)) {
-    return c.json({ error: "Invalid X-Service format" }, 400);
+  // 1b. Validate providerId format (prevent path traversal)
+  if (!PROVIDER_ID_RE.test(providerId)) {
+    return c.json({ error: "Invalid X-Provider format" }, 400);
   }
 
   // 2. Fetch credentials
   let creds: CredentialsResponse;
   try {
-    creds = await fetchCredentials(serviceId);
+    creds = await fetchCredentials(providerId);
   } catch (err) {
     return c.json(
       { error: `Credential fetch failed: ${err instanceof Error ? err.message : String(err)}` },
@@ -204,7 +204,7 @@ app.all("/proxy", async (c) => {
     if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
       return c.json(
         {
-          error: `URL not authorized for service "${serviceId}". Allowed: ${creds.authorizedUris.join(", ")}`,
+          error: `URL not authorized for provider "${providerId}". Allowed: ${creds.authorizedUris.join(", ")}`,
         },
         403,
       );
@@ -224,7 +224,7 @@ app.all("/proxy", async (c) => {
   for (const [key, value] of Object.entries(c.req.header())) {
     const lower = key.toLowerCase();
     if (
-      lower === "x-service" ||
+      lower === "x-provider" ||
       lower === "x-target" ||
       lower === "x-substitute-body" ||
       lower === "x-proxy" ||
@@ -271,7 +271,7 @@ app.all("/proxy", async (c) => {
   }
 
   // 5c. Inject stored cookies from cookie jar
-  const storedCookies = cookieJar.get(serviceId);
+  const storedCookies = cookieJar.get(providerId);
   if (storedCookies && storedCookies.length > 0) {
     const existing = forwardedHeaders["cookie"] || "";
     const merged = existing
@@ -334,7 +334,7 @@ app.all("/proxy", async (c) => {
     // Extract cookie name=value pairs (strip attributes like Path, Expires, etc.)
     const cookieValues = setCookieHeaders.map((h) => h.split(";")[0]!.trim());
     // Merge with existing jar: update by cookie name, keep others
-    const existing = cookieJar.get(serviceId) ?? [];
+    const existing = cookieJar.get(providerId) ?? [];
     const byName = new Map<string, string>();
     for (const c of existing) {
       const name = c.split("=")[0]!;
@@ -344,7 +344,7 @@ app.all("/proxy", async (c) => {
       const name = c.split("=")[0]!;
       byName.set(name, c);
     }
-    cookieJar.set(serviceId, [...byName.values()]);
+    cookieJar.set(providerId, [...byName.values()]);
   }
 
   // 9. Forward upstream response transparently (pass-through proxy)

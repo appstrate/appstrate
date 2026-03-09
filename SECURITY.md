@@ -123,7 +123,7 @@ The agent sends a regular HTTP request to the sidecar with two routing headers:
 
 ```bash
 curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Service: gmail" \
+  -H "X-Provider: gmail" \
   -H "X-Target: https://gmail.googleapis.com/gmail/v1/users/me/messages" \
   -H "Authorization: Bearer {{token}}"
 ```
@@ -147,11 +147,11 @@ The sidecar:
 
 ### Credential access is scoped and audited
 
-The platform API (`/internal/credentials/:serviceId`) enforces additional controls:
+The platform API (`/internal/credentials/:providerId`) enforces additional controls:
 
 - **Execution must be running** — tokens for completed/failed executions are rejected (`internal.ts`)
-- **Provider must be declared** — the requested `serviceId` must appear as a key in the flow's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
-- **Access is logged** — every credential fetch is recorded with execution ID, service ID, and flow ID
+- **Provider must be declared** — the requested `providerId` must appear as a key in the flow's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
+- **Access is logged** — every credential fetch is recorded with execution ID, provider ID, and flow ID
 
 ### Why not pass credentials as environment variables?
 
@@ -175,7 +175,7 @@ Every outbound request through the sidecar is validated against an allowlist of 
 
 ### How it works
 
-Each service declares `authorized_uris` — either explicitly in the flow manifest or derived from provider defaults:
+Each provider declares `authorized_uris` — either explicitly in the flow manifest or derived from provider defaults:
 
 ```json
 {
@@ -202,7 +202,7 @@ function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
 
 ```json
 {
-  "error": "URL not authorized for service \"gmail\". Allowed: https://gmail.googleapis.com/*, https://www.googleapis.com/upload/*"
+  "error": "URL not authorized for provider \"gmail\". Allowed: https://gmail.googleapis.com/*, https://www.googleapis.com/upload/*"
 }
 ```
 
@@ -476,7 +476,7 @@ await stopContainer(containerId);
 
 ### Structured logging
 
-All backend operations use structured JSON logging (`lib/logger.ts`). Credential access events are logged with execution ID, service ID, and flow ID — **never with credential values**.
+All backend operations use structured JSON logging (`lib/logger.ts`). Credential access events are logged with execution ID, provider ID, and flow ID — **never with credential values**.
 
 ### Response size limits
 

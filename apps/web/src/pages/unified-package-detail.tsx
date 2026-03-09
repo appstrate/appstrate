@@ -10,7 +10,7 @@ import {
   usePackageDownload,
   useDeletePackage,
 } from "../hooks/use-packages";
-import type { FlowDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { FlowDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
@@ -100,11 +100,7 @@ function FlowRunButtonInline({
 
 // ─── Main Page ──────────────────────────────────────────────────────
 
-export function UnifiedPackageDetailPage({
-  type,
-}: {
-  type: "flow" | "skill" | "extension" | "provider";
-}) {
+export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["flows", "settings", "common"]);
   const {
     scope,

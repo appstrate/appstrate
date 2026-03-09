@@ -4,8 +4,8 @@
 
 **Before running any flow, always call `GET /api/flows/{packageId}` and verify:**
 
-1. **Services**: Every entry in `services[]` must have `status: "connected"`. If any is `disconnected` or `expired`, resolve it before running.
-2. **Admin bindings**: For services with `connectionMode: "admin"`, check `adminConnection` is set. If not, bind via `POST /api/flows/{packageId}/services/{serviceId}/bind`.
+1. **Providers**: Every entry in `providers[]` must have `status: "connected"`. If any is `disconnected` or `expired`, resolve it before running.
+2. **Admin bindings**: For providers with `connectionMode: "admin"`, check `adminConnection` is set. If not, bind via `POST /api/flows/{packageId}/providers/{providerId}/bind`.
 3. **Config**: Compare `config` (current values) against `manifest.config.schema` — ensure all `required` fields have values. If not, set them via `PUT /api/flows/{packageId}/config`.
 4. **Running executions**: Check `runningExecutions` — if > 0, either wait or cancel the existing one.
 5. **Input schema**: Read `manifest.input.schema` to know what input fields are required and their types.
@@ -132,7 +132,7 @@ Deletes all completed executions for the flow. Returns `{ "deleted": 15 }`.
 1. `POST /api/flows/{packageId}/run` validates input, checks service dependencies, creates execution record (status: `pending`)
 2. Execution runs in background: creates isolated Docker network, starts sidecar proxy + agent container
 3. Agent container receives the enriched prompt (raw prompt.md + structured context sections)
-4. Agent calls external services via the sidecar proxy at `$SIDECAR_URL/proxy` with `X-Service` and `X-Target` headers
+4. Agent calls external services via the sidecar proxy at `$SIDECAR_URL/proxy` with `X-Provider` and `X-Target` headers
 5. Agent streams progress events on stdout as JSON lines
 6. On completion, result is validated against `output.schema` (if defined). If invalid, retries up to `outputRetries` times
 7. Final result and status are persisted. If `result.state` exists, it's saved for the next execution

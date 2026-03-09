@@ -8,11 +8,10 @@ import type {
   OrgPackageItemDetail,
   FlowListItem,
   FlowDetail,
+  PackageType,
 } from "@appstrate/shared-types";
 
 // --- Packages — config-driven factory ---
-
-type PackageType = "flow" | "skill" | "extension" | "provider";
 
 const PACKAGE_CONFIG = {
   flow: { path: "flows", listKey: "flows", detailKey: "flow" },

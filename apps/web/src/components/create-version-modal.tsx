@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { PackageType } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,7 @@ function semverGt(a: string, b: string): boolean {
 interface CreateVersionModalProps {
   open: boolean;
   onClose: () => void;
-  type: "flow" | "skill" | "extension" | "provider";
+  type: PackageType;
   packageId: string;
 }
 

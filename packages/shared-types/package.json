@@ -10,6 +10,7 @@
     "lint:fix": "prettier --write src/"
   },
   "dependencies": {
+    "@appstrate/core": "^2.4.0",
     "@appstrate/db": "workspace:*"
   }
 }

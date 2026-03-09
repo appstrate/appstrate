@@ -1,4 +1,4 @@
-import type { Manifest } from "@appstrate/core/validation";
+import type { Manifest, PackageType } from "@appstrate/core/validation";
 
 export interface RegistryConfig {
   baseUrl: string;
@@ -26,7 +26,7 @@ export interface RegistryPackageSummary {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension";
+  type: PackageType;
   description: string;
   keywords: string[];
   downloads: number;
@@ -59,7 +59,7 @@ export interface RegistryVersionDetail {
 export interface RegistryDependency {
   depScope: string;
   depName: string;
-  depType: "flow" | "skill" | "extension";
+  depType: PackageType;
   versionRange: string;
 }
 
@@ -67,7 +67,7 @@ export interface RegistryPackageDetail {
   id: number;
   scope: string;
   name: string;
-  type: "flow" | "skill" | "extension";
+  type: PackageType;
   description: string;
   keywords: string[];
   readme: string | null;
@@ -88,7 +88,7 @@ export interface RegistryPackageDetail {
 
 export interface RegistrySearchOptions {
   q?: string;
-  type?: "flow" | "skill" | "extension" | "provider";
+  type?: PackageType;
   sort?: "relevance" | "downloads" | "recent";
   page?: number;
   perPage?: number;

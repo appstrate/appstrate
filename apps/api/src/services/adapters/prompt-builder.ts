@@ -88,7 +88,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "Make authenticated API requests via the sidecar proxy at `$SIDECAR_URL/proxy`.\n",
     );
     sections.push("Headers:");
-    sections.push("- `X-Service`: the service ID");
+    sections.push("- `X-Provider`: the provider ID");
     sections.push("- `X-Target`: the target URL (must match the service's authorized URLs)");
     sections.push("- All other headers and the body are forwarded as-is");
     sections.push(
@@ -100,7 +100,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("Example:");
     sections.push("```bash");
     sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
-    sections.push(`  -H "X-Service: <service_id>" \\`);
+    sections.push(`  -H "X-Provider: <provider_id>" \\`);
     sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
     sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
     sections.push("```\n");
@@ -118,7 +118,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       const authorizedUris = getDefaultAuthorizedUris(svc as ProviderDefinition);
       const allowAllUris = svc.allowAllUris ?? false;
 
-      sections.push(`- **${displayName}** (service ID: \`${svc.id}\`)`);
+      sections.push(`- **${displayName}** (provider ID: \`${svc.id}\`)`);
 
       // For providers with credentialSchema, show all credential variables
       if (svc.credentialSchema) {
@@ -294,7 +294,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("Use the `X-Proxy` header to route a request through a proxy:\n");
     sections.push("```bash");
     sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
-    sections.push(`  -H "X-Service: ${proxyServices[0]!.id}" \\`);
+    sections.push(`  -H "X-Provider: ${proxyServices[0]!.id}" \\`);
     sections.push(`  -H "X-Proxy: {{url}}" \\`);
     sections.push(`  -H "X-Target: https://example.com/api/data"`);
     sections.push("```\n");
