@@ -880,10 +880,22 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
     }
 
+    // Parse optional version override from request body
+    let versionOverride: string | undefined;
+    try {
+      const body = await c.req.json();
+      if (body?.version && typeof body.version === "string") {
+        versionOverride = body.version;
+      }
+    } catch {
+      // No body or invalid JSON — proceed without override
+    }
+
     const result = await createVersionFromDraft({
       packageId: itemId,
       orgId,
       userId: user.id,
+      version: versionOverride,
     });
 
     if (!result) {
@@ -1126,6 +1138,14 @@ export function createPackagesRouter() {
         case "UNKNOWN_TYPE":
           return c.json(
             { error: "UNKNOWN_TYPE", message: `Unsupported package type: ${result.type}` },
+            400,
+          );
+        case "NO_PUBLISHED_VERSION":
+          return c.json(
+            {
+              error: "NO_PUBLISHED_VERSION",
+              message: "Source package has no published version",
+            },
             400,
           );
       }
