@@ -16,7 +16,7 @@ const VALID_MANIFEST = {
   author: "test",
   tags: ["test"],
   requires: {
-    services: { "@appstrate/gmail": "1.0.0" },
+    providers: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
     extensions: { "@appstrate/web-search": "*" },
   },
@@ -111,7 +111,7 @@ describe("validateManifest", () => {
       displayName: "Minimal",
       description: "Minimal flow",
       author: "test",
-      requires: { services: {} },
+      requires: { providers: {} },
     };
     const result = validateManifest(minimal);
     expect(result.valid).toBe(true);
@@ -144,7 +144,7 @@ describe("validateManifest", () => {
       name: "@test-org/test",
       version: "1.0.0",
       type: "flow",
-      requires: { services: {} },
+      requires: { providers: {} },
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);
