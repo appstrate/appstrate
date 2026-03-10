@@ -292,7 +292,7 @@ export const marketplacePaths = {
           in: "path",
           required: true,
           schema: { type: "string" },
-          description: "Package scope (with or without @ prefix)",
+          description: "Package scope (e.g. @demo)",
         },
         {
           name: "name",
