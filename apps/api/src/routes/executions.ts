@@ -410,7 +410,7 @@ export function createExecutionsRouter() {
     }));
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
+    const { promptContext, flowPackage, flowVersionId, proxyLabel } = await buildExecutionContext({
       executionId,
       flow: effectiveFlow,
       providerProfiles,
@@ -432,6 +432,7 @@ export function createExecutionsRouter() {
       undefined,
       flowVersionId ?? undefined,
       userProfileId,
+      proxyLabel ?? undefined,
     );
 
     // Fire-and-forget background execution

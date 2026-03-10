@@ -9,7 +9,7 @@ import { buildProviderTokens } from "./token-resolver.ts";
 import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
-import { resolveProxyUrl } from "./org-proxies.ts";
+import { resolveProxy } from "./org-proxies.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 /**
@@ -112,6 +112,7 @@ export async function buildExecutionContext(params: {
   promptContext: PromptContext;
   flowPackage: Buffer | null;
   flowVersionId: number | null;
+  proxyLabel: string | null;
 }> {
   const { executionId, flow, providerProfiles, orgId, userId, input, files } = params;
 
@@ -123,7 +124,7 @@ export async function buildExecutionContext(params: {
     providerDefs,
     flowPackage,
     latestVersion,
-    proxyUrl,
+    proxyResult,
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
@@ -136,7 +137,7 @@ export async function buildExecutionContext(params: {
       : flow.source !== "system"
         ? getLatestVersionWithManifest(flow.id).catch(() => null)
         : null,
-    resolveProxyUrl(orgId, flow.id, params.config),
+    resolveProxy(orgId, flow.id, params.config),
     getPackageMemories(flow.id, orgId),
   ]);
 
@@ -155,6 +156,9 @@ export async function buildExecutionContext(params: {
     flowVersionId = null;
   }
 
+  const proxyUrl = proxyResult?.url ?? null;
+  const proxyLabel = proxyResult?.label ?? null;
+
   const promptContext = buildPromptContext({
     flow,
     tokens,
@@ -172,5 +176,5 @@ export async function buildExecutionContext(params: {
     proxyUrl,
   });
 
-  return { promptContext, flowPackage, flowVersionId };
+  return { promptContext, flowPackage, flowVersionId, proxyLabel };
 }

@@ -62,6 +62,7 @@
   "exec.resultLabel": "Résultat :",
   "exec.draft": "brouillon",
   "exec.user": "par {{name}}",
+  "exec.proxy": "proxy {{label}}",
   "import.title": "Importer un package",
   "import.dropText": "Glissez un fichier ZIP ici",
   "import.dropHint": "ou cliquez pour parcourir",

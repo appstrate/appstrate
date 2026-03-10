@@ -244,6 +244,7 @@ export const schemas = {
       connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
       flowVersionId: { type: "integer" },
+      proxyLabel: { type: ["string", "null"], description: "Proxy label used at execution time" },
     },
   },
   ExecutionLog: {

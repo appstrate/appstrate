@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Shield } from "lucide-react";
 import { Badge } from "./badge";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -73,6 +74,7 @@ export function ExecutionRow({
         <UIBadge variant={execution.packageVersion ? "outline" : "secondary"}>
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </UIBadge>
+        {execution.proxyLabel && <Shield size={12} className="text-muted-foreground" />}
         {execution.scheduleId && <UIBadge variant="secondary">cron</UIBadge>}
       </div>
     </Link>
