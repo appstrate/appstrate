@@ -87,10 +87,10 @@ export class PiAdapter implements ExecutionAdapter {
       }
 
       if (ctx.proxyUrl) {
-        containerEnv.HTTP_PROXY = ctx.proxyUrl;
-        containerEnv.HTTPS_PROXY = ctx.proxyUrl;
-        containerEnv.http_proxy = ctx.proxyUrl;
-        containerEnv.https_proxy = ctx.proxyUrl;
+        containerEnv.HTTP_PROXY = "http://sidecar:8081";
+        containerEnv.HTTPS_PROXY = "http://sidecar:8081";
+        containerEnv.http_proxy = "http://sidecar:8081";
+        containerEnv.https_proxy = "http://sidecar:8081";
         containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
         containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
       }
@@ -131,7 +131,7 @@ export class PiAdapter implements ExecutionAdapter {
           networkAlias: "sidecar",
           extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
           portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-          exposedPorts: { "8080/tcp": {} },
+          exposedPorts: { "8080/tcp": {}, "8081/tcp": {} },
         });
 
         if (platformNetwork) {
