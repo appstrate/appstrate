@@ -120,7 +120,7 @@ export const schemas = {
       source: { type: "string", enum: ["system", "local"] },
       scope: {
         type: ["string", "null"],
-        description: "Scope from manifest name (e.g. myorg from @myorg/name)",
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
       type: {
