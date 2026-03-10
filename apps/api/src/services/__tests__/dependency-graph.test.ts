@@ -196,8 +196,7 @@ describe("buildGraph", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "My Flow",
-          manifest: { displayName: "My Flow", version: "1.0.0" },
+          draftManifest: { displayName: "My Flow", version: "1.0.0" },
           source: "local",
         },
       ],
@@ -218,8 +217,7 @@ describe("buildGraph", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { version: "1.0.0" },
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],
@@ -230,8 +228,7 @@ describe("buildGraph", () => {
         {
           id: "@test/system-skill",
           type: "skill",
-          name: "System",
-          manifest: { version: "1.0.0" },
+          draftManifest: { version: "1.0.0" },
           source: "system",
         },
       ],
@@ -252,8 +249,7 @@ describe("buildGraph", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "db-name",
-          manifest: { name: "Manifest Name", version: "1.0.0" },
+          draftManifest: { name: "Manifest Name", version: "1.0.0" },
           source: "local",
         },
       ],
@@ -263,31 +259,13 @@ describe("buildGraph", () => {
     expect(graph.nodes.get("@test/flow")!.displayName).toBe("Manifest Name");
   });
 
-  test("displayName falls back to pkg.name when manifest has neither", async () => {
+  test("displayName falls back to packageId when manifest has neither displayName nor name", async () => {
     queues.select = [
       [
         {
           id: "@test/flow",
           type: "flow",
-          name: "DB Column Name",
-          manifest: { version: "1.0.0" },
-          source: "local",
-        },
-      ],
-      [],
-    ];
-    const graph = await buildGraph("@test/flow", "org-1");
-    expect(graph.nodes.get("@test/flow")!.displayName).toBe("DB Column Name");
-  });
-
-  test("displayName falls back to packageId when all sources are falsy", async () => {
-    queues.select = [
-      [
-        {
-          id: "@test/flow",
-          type: "flow",
-          name: "",
-          manifest: { version: "1.0.0" },
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],
@@ -304,8 +282,7 @@ describe("buildGraph", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { displayName: "Test Flow", version: "1.0.0" },
+          draftManifest: { displayName: "Test Flow", version: "1.0.0" },
           source: "local",
         },
       ],
@@ -316,8 +293,7 @@ describe("buildGraph", () => {
         {
           id: "@test/skill-a",
           type: "skill",
-          name: "Skill A",
-          manifest: { displayName: "Skill A", version: "0.1.0" },
+          draftManifest: { displayName: "Skill A", version: "0.1.0" },
           source: "local",
         },
       ],
@@ -350,8 +326,7 @@ describe("getPublishPlan", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { displayName: "Test Flow", version: "2.0.0" },
+          draftManifest: { displayName: "Test Flow", version: "2.0.0" },
           source: "local",
         },
       ],
@@ -362,8 +337,7 @@ describe("getPublishPlan", () => {
         {
           id: "@test/skill",
           type: "skill",
-          name: "Skill",
-          manifest: { displayName: "Test Skill", version: "1.0.0" },
+          draftManifest: { displayName: "Test Skill", version: "1.0.0" },
           source: "local",
         },
       ],
@@ -389,8 +363,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { version: "1.0.0" },
+
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],
@@ -408,8 +382,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { version: "1.0.0" },
+
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],
@@ -418,8 +392,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/skill",
           type: "skill",
-          name: "Skill",
-          manifest: { version: "0.5.0" },
+
+          draftManifest: { version: "0.5.0" },
           source: "local",
         },
       ],
@@ -437,8 +411,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/flow",
           type: "flow",
-          name: "Flow",
-          manifest: { version: "0.1.0" },
+
+          draftManifest: { version: "0.1.0" },
           source: "local",
         },
       ],
@@ -462,8 +436,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/a",
           type: "flow",
-          name: "A",
-          manifest: { version: "1.0.0" },
+
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],
@@ -474,8 +448,8 @@ describe("getPublishPlan", () => {
         {
           id: "@test/b",
           type: "skill",
-          name: "B",
-          manifest: { version: "1.0.0" },
+
+          draftManifest: { version: "1.0.0" },
           source: "local",
         },
       ],

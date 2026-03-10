@@ -275,8 +275,8 @@ async function commitPackages(
         await tx
           .update(packages)
           .set({
-            manifest: pkg.manifest,
-            content: pkg.content,
+            draftManifest: pkg.manifest,
+            draftContent: pkg.content,
             updatedAt: new Date(),
             ...(!pkg.autoInstalled && { autoInstalled: false }),
           })
@@ -287,9 +287,8 @@ async function commitPackages(
           orgId,
           type: pkg.type,
           source: "local",
-          name: `${pkg.scope}/${pkg.name}`,
-          manifest: pkg.manifest,
-          content: pkg.content,
+          draftManifest: pkg.manifest,
+          draftContent: pkg.content,
           autoInstalled: pkg.autoInstalled,
           createdBy: userId,
           updatedAt: new Date(),
@@ -491,8 +490,18 @@ export async function getMarketplacePackageWithInstallStatus(
     }
   }
 
+  // Extract displayName from the latest version's manifest
+  const latestTag = pkg.distTags?.find((t: { tag: string }) => t.tag === "latest");
+  const latestVer = latestTag
+    ? pkg.versions.find((v: { id: number }) => v.id === latestTag.versionId)
+    : pkg.versions[pkg.versions.length - 1];
+  const displayName =
+    ((latestVer?.manifest as Record<string, unknown> | undefined)?.displayName as string | null) ??
+    null;
+
   return {
     ...pkg,
+    displayName,
     installedVersion,
     integrityConflict,
     localVersionAhead,
@@ -506,7 +515,7 @@ export async function getInstalledRegistryPackages(orgId: string) {
     .select({
       id: packages.id,
       type: packages.type,
-      manifest: packages.manifest,
+      draftManifest: packages.draftManifest,
       updatedAt: packages.updatedAt,
     })
     .from(packages)
@@ -580,7 +589,7 @@ export async function checkRegistryUpdates(
         remoteDistTags: remote.distTags?.map((t) => ({ tag: t.tag, versionId: t.versionId })) ?? [],
       });
 
-      const manifest = (pkg.manifest ?? {}) as Partial<Manifest>;
+      const manifest = (pkg.draftManifest ?? {}) as Partial<Manifest>;
       return {
         id: pkg.id,
         type: pkg.type,

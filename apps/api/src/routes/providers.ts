@@ -135,7 +135,7 @@ export function createProvidersRouter() {
     // Query all provider packages
     const rows = await db
       .select({
-        pkg: { id: packages.id, manifest: packages.manifest, source: packages.source },
+        pkg: { id: packages.id, draftManifest: packages.draftManifest, source: packages.source },
       })
       .from(packages)
       .where(
@@ -166,7 +166,10 @@ export function createProvidersRouter() {
 
     const providers: ProviderConfig[] = rows.map(({ pkg }) => {
       const cred = credMap.get(pkg.id) ?? null;
-      const cfg = packageToProviderConfig(pkg, cred);
+      const cfg = packageToProviderConfig(
+        { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
+        cred,
+      );
       cfg.usedByFlows = providerUsage.get(pkg.id) ?? 0;
       return cfg;
     });
@@ -249,8 +252,7 @@ export function createProvidersRouter() {
             orgId,
             type: "provider",
             source: "local",
-            name: data.id,
-            manifest: {
+            draftManifest: {
               name: data.id,
               type: "provider",
               version: data.version ?? "1.0.0",
@@ -263,7 +265,7 @@ export function createProvidersRouter() {
               docsUrl: data.docsUrl,
               definition,
             },
-            content: "",
+            draftContent: "",
             createdBy: c.get("user").id,
           })
           .onConflictDoNothing();
@@ -359,7 +361,7 @@ export function createProvidersRouter() {
 
     // Fetch existing package
     const [existingPkg] = await db
-      .select({ manifest: packages.manifest })
+      .select({ draftManifest: packages.draftManifest })
       .from(packages)
       .where(
         and(
@@ -375,7 +377,7 @@ export function createProvidersRouter() {
     }
 
     const data = parsed.data;
-    const oldManifest = (existingPkg.manifest ?? {}) as Record<string, unknown>;
+    const oldManifest = (existingPkg.draftManifest ?? {}) as Record<string, unknown>;
     const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
     const authMode = data.authMode ?? (oldDef.authMode as string);
 
@@ -422,7 +424,7 @@ export function createProvidersRouter() {
         await tx
           .update(packages)
           .set({
-            manifest: {
+            draftManifest: {
               ...oldManifest,
               ...(data.displayName ? { displayName: data.displayName } : {}),
               ...(data.version !== undefined ? { version: data.version } : {}),
@@ -485,7 +487,7 @@ export function createProvidersRouter() {
 
     // Verify the provider exists and get its admin credential schema
     const [pkg] = await db
-      .select({ id: packages.id, manifest: packages.manifest })
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
       .from(packages)
       .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
       .limit(1);
@@ -499,7 +501,7 @@ export function createProvidersRouter() {
 
     // Validate required fields against admin credential schema only when credentials are provided
     if (hasCredentials) {
-      const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
+      const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
       const def = (manifest.definition ?? {}) as Record<string, unknown>;
       const authMode = (def.authMode as string) ?? "oauth2";
       const adminSchema =

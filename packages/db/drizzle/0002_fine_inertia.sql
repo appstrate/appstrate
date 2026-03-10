@@ -1,1 +1,0 @@
-ALTER TABLE "packages" DROP COLUMN "registry_version_id";

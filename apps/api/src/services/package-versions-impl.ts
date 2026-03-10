@@ -468,7 +468,7 @@ export async function getVersionInfo(
 ): Promise<{ latestVersion: string | null; draftVersion: string | null }> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
-      .select({ manifest: packages.manifest })
+      .select({ draftManifest: packages.draftManifest })
       .from(packages)
       .where(eq(packages.id, packageId))
       .limit(1),
@@ -480,7 +480,7 @@ export async function getVersionInfo(
   ]);
 
   const draftVersion =
-    ((pkg?.manifest as Record<string, unknown> | null)?.version as string | undefined) ?? null;
+    ((pkg?.draftManifest as Record<string, unknown> | null)?.version as string | undefined) ?? null;
 
   let latestVersion: string | null = null;
   if (latestTag) {
@@ -522,15 +522,19 @@ export async function createVersionFromDraft(params: {
   const { packageId, orgId, userId } = params;
 
   const [pkg] = await db
-    .select({ manifest: packages.manifest, content: packages.content, type: packages.type })
+    .select({
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      type: packages.type,
+    })
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
 
   if (!pkg) return null;
 
-  const baseManifest = pkg.manifest as Record<string, unknown>;
-  const content = pkg.content as string;
+  const baseManifest = pkg.draftManifest as Record<string, unknown>;
+  const content = pkg.draftContent as string;
 
   // Use override version if provided, otherwise use manifest version
   const version = params.version ?? (baseManifest.version as string | undefined);
@@ -541,7 +545,7 @@ export async function createVersionFromDraft(params: {
   if (params.version && params.version !== baseManifest.version) {
     await db
       .update(packages)
-      .set({ manifest: { ...baseManifest, version: params.version } })
+      .set({ draftManifest: { ...baseManifest, version: params.version } })
       .where(eq(packages.id, packageId));
   }
 

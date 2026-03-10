@@ -1,0 +1,1 @@
+ALTER TABLE "packages" RENAME COLUMN "version" TO "lock_version";

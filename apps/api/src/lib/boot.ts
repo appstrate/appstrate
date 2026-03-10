@@ -191,15 +191,14 @@ async function syncSystemPackages(): Promise<void> {
         orgId: null,
         type,
         source: "system",
-        name: manifest.name as string,
-        manifest: manifest as unknown as Record<string, unknown>,
-        content: entry.content,
+        draftManifest: manifest as unknown as Record<string, unknown>,
+        draftContent: entry.content,
       })
       .onConflictDoUpdate({
         target: packages.id,
         set: {
-          manifest: manifest as unknown as Record<string, unknown>,
-          content: entry.content,
+          draftManifest: manifest as unknown as Record<string, unknown>,
+          draftContent: entry.content,
           source: "system",
           orgId: null,
           ...(isNewVersion ? { updatedAt: new Date() } : {}),
@@ -240,12 +239,12 @@ async function backfillFlowProviderDeps(): Promise<void> {
   let total = 0;
   for (const org of orgs) {
     const orgFlows = await db
-      .select({ id: packages.id, manifest: packages.manifest })
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
       .from(packages)
       .where(and(eq(packages.orgId, org.id), eq(packages.type, "flow")));
 
     for (const flow of orgFlows) {
-      const { providerIds } = extractDepsFromManifest(flow.manifest as Partial<Manifest>);
+      const { providerIds } = extractDepsFromManifest(flow.draftManifest as Partial<Manifest>);
       if (providerIds.length > 0) {
         await setFlowItems(flow.id, org.id, providerIds, PROVIDER_CONFIG);
         total++;

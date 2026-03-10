@@ -109,7 +109,7 @@ export async function buildRegistryDependencies(
     .select({
       dependencyId: packageDependencies.dependencyId,
       type: packages.type,
-      manifest: packages.manifest,
+      draftManifest: packages.draftManifest,
     })
     .from(packageDependencies)
     .innerJoin(packages, eq(packages.id, packageDependencies.dependencyId))
@@ -117,7 +117,7 @@ export async function buildRegistryDependencies(
 
   const rows = deps.map((dep) => {
     const parsed = parseScopedName(dep.dependencyId);
-    const m = (dep.manifest ?? {}) as Record<string, unknown>;
+    const m = (dep.draftManifest ?? {}) as Record<string, unknown>;
     return {
       type: dep.type,
       registryScope: parsed?.scope ?? null,

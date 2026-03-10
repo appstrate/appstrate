@@ -19,6 +19,7 @@ interface MarketplacePackage {
   keywords: string[];
   downloads: number;
   latestVersion: string | null;
+  displayName: string | null;
   license: string | null;
   updatedAt: string;
 }
@@ -35,6 +36,7 @@ interface MarketplacePackageDetail {
   scope: string;
   name: string;
   type: PackageType;
+  displayName: string | null;
   description: string;
   keywords: string[];
   readme: string | null;

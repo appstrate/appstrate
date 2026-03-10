@@ -6,18 +6,18 @@ import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
 interface DbPackageRow {
   id: string;
-  manifest: unknown;
-  content: string;
+  draftManifest: unknown;
+  draftContent: string;
   source?: string;
   depRefs?: {
     dependencyId: string;
     type: string;
-    manifest: unknown;
+    draftManifest: unknown;
   }[];
 }
 
 function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
-  const manifest = (row.manifest ?? {
+  const manifest = (row.draftManifest ?? {
     schemaVersion: "1.0",
     name: row.id,
     version: "0.0.0",
@@ -36,7 +36,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const depSkills = (row.depRefs ?? [])
     .filter((d) => d.type === "skill")
     .map((d) => {
-      const m = (d.manifest ?? {}) as Partial<Manifest>;
+      const m = (d.draftManifest ?? {}) as Partial<Manifest>;
       return {
         id: d.dependencyId,
         version: manifestSkillsMap[d.dependencyId] ?? "*",
@@ -48,7 +48,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const depExtensions = (row.depRefs ?? [])
     .filter((d) => d.type === "extension")
     .map((d) => {
-      const m = (d.manifest ?? {}) as Partial<Manifest>;
+      const m = (d.draftManifest ?? {}) as Partial<Manifest>;
       return {
         id: d.dependencyId,
         version: manifestExtensionsMap[d.dependencyId] ?? "*",
@@ -60,7 +60,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   return {
     id: row.id,
     manifest,
-    prompt: row.content,
+    prompt: row.draftContent,
     skills: depSkills,
     extensions: depExtensions,
     source: (row.source as "system" | "local") ?? "local",
@@ -77,8 +77,8 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
   const pkgRows = await db
     .select({
       id: packages.id,
-      manifest: packages.manifest,
-      content: packages.content,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
       source: packages.source,
     })
     .from(packages)
@@ -93,7 +93,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
     .select({
       dependencyId: packageDependencies.dependencyId,
       type: packages.type,
-      manifest: packages.manifest,
+      draftManifest: packages.draftManifest,
     })
     .from(packageDependencies)
     .innerJoin(packages, eq(packageDependencies.dependencyId, packages.id))
@@ -101,8 +101,8 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
 
   return dbRowToLoadedFlow({
     id: pkgRow.id,
-    manifest: pkgRow.manifest,
-    content: pkgRow.content ?? "",
+    draftManifest: pkgRow.draftManifest,
+    draftContent: pkgRow.draftContent ?? "",
     source: pkgRow.source,
     depRefs,
   });
@@ -117,8 +117,8 @@ export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
   const rows = await db
     .select({
       id: packages.id,
-      manifest: packages.manifest,
-      content: packages.content,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
       source: packages.source,
     })
     .from(packages)
@@ -128,8 +128,8 @@ export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
   return rows.map((row) =>
     dbRowToLoadedFlow({
       id: row.id,
-      manifest: row.manifest,
-      content: row.content ?? "",
+      draftManifest: row.draftManifest,
+      draftContent: row.draftContent ?? "",
       source: row.source,
     }),
   );

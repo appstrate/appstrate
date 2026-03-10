@@ -88,6 +88,10 @@ export const marketplacePaths = {
                         name: { type: "string" },
                         type: { type: "string" },
                         description: { type: "string" },
+                        displayName: {
+                          type: ["string", "null"],
+                          description: "Human-readable display name",
+                        },
                         latestVersion: { type: "string" },
                         downloads: { type: "integer" },
                       },
@@ -309,6 +313,10 @@ export const marketplacePaths = {
                   scope: { type: "string" },
                   name: { type: "string" },
                   type: { type: "string" },
+                  displayName: {
+                    type: ["string", "null"],
+                    description: "Human-readable display name",
+                  },
                   description: { type: "string" },
                   readme: { type: "string" },
                   versions: { type: "array", items: { type: "object" } },

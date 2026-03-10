@@ -31,6 +31,7 @@ export interface RegistryPackageSummary {
   keywords: string[];
   downloads: number;
   latestVersion: string | null;
+  displayName: string | null;
   license: string | null;
   updatedAt: string;
 }

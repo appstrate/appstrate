@@ -449,6 +449,7 @@ export const schemas = {
       createdByName: { type: "string" },
       usedByFlows: { type: "integer" },
       autoInstalled: { type: "boolean" },
+      lockVersion: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", description: "Full manifest object" },
       manifestName: {

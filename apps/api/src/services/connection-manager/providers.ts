@@ -141,7 +141,7 @@ export async function listAllUserConnections(userId: string): Promise<{
   if (uniqueProviderIds.length > 0) {
     for (const org of userOrgs) {
       const pkgRows = await db
-        .select({ id: packages.id, manifest: packages.manifest })
+        .select({ id: packages.id, draftManifest: packages.draftManifest })
         .from(packages)
         .where(
           and(
@@ -151,7 +151,7 @@ export async function listAllUserConnections(userId: string): Promise<{
         );
       for (const pkg of pkgRows) {
         if (!providerInfo[pkg.id]) {
-          const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
+          const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
           providerInfo[pkg.id] = {
             displayName: (manifest.displayName as string) ?? pkg.id,
             logo: (manifest.iconUrl as string) ?? "",
