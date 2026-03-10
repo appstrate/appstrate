@@ -5,20 +5,12 @@ import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { getEnv, LLM_API_KEY_NAMES } from "@appstrate/env";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
-  connectContainerToNetwork,
-  createContainer,
-  createNetwork,
-  detectPlatformNetwork,
-  getContainerHostPort,
-  injectFiles,
-  startContainer,
-  removeContainer,
-  removeNetwork,
-} from "../docker.ts";
-import { acquireSidecar, waitForSidecarHealth } from "../sidecar-pool.ts";
+  getOrchestrator,
+  type WorkloadHandle,
+  type IsolationBoundary,
+} from "../orchestrator/index.ts";
 
 const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
-const SIDECAR_IMAGE = "appstrate-sidecar:latest";
 
 export class PiAdapter implements ExecutionAdapter {
   async *execute(
@@ -35,38 +27,20 @@ export class PiAdapter implements ExecutionAdapter {
     const provider = apiEnv.LLM_PROVIDER;
     const modelId = apiEnv.LLM_MODEL_ID;
 
-    const networkName = `appstrate-exec-${executionId}`;
-    let networkId: string | undefined;
-    let sidecarContainerId: string | undefined;
+    const orchestrator = getOrchestrator();
+    let boundary: IsolationBoundary | undefined;
+    let sidecarHandle: WorkloadHandle | undefined;
 
     try {
-      // Phase 1: Create network + detect platform network (parallel)
-      const [netId, platformNetwork] = await Promise.all([
-        createNetwork(networkName),
-        detectPlatformNetwork(),
-      ]);
-      networkId = netId;
+      // Phase 1: Create isolation boundary
+      boundary = await orchestrator.createIsolationBoundary(executionId);
 
-      // Single source of truth for sidecar configuration
+      // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
         executionToken: ctx.executionApi?.token ?? "",
-        platformApiUrl: ctx.executionApi
-          ? platformNetwork
-            ? `http://${platformNetwork.hostname}:${apiEnv.PORT}`
-            : ctx.executionApi.url
-          : "",
+        platformApiUrl: ctx.executionApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
       };
-
-      // Env vars representation (for fresh sidecar creation fallback)
-      const sidecarEnv: Record<string, string> = { PORT: "8080" };
-      if (sidecarConfig.executionToken) {
-        sidecarEnv.EXECUTION_TOKEN = sidecarConfig.executionToken;
-        sidecarEnv.PLATFORM_API_URL = sidecarConfig.platformApiUrl;
-      }
-      if (sidecarConfig.proxyUrl) {
-        sidecarEnv.PROXY_URL = sidecarConfig.proxyUrl;
-      }
 
       // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
@@ -109,91 +83,53 @@ export class PiAdapter implements ExecutionAdapter {
         }
       }
 
-      // Phase 2: Setup sidecar + create agent + inject files (parallel)
-      // The sidecar path (pool or fresh) runs concurrently with agent creation + file injection.
-      const sidecarSetup = async (): Promise<string> => {
-        // Try pool first (pre-warmed sidecar: ~50-130ms)
-        const pooled = await acquireSidecar(
-          executionId,
-          networkId!,
-          sidecarConfig,
-          platformNetwork,
-        );
-        if (pooled) return pooled;
-
-        // Fallback: create fresh sidecar (~500-1500ms)
-        const id = await createContainer(executionId, sidecarEnv, {
-          image: SIDECAR_IMAGE,
-          adapterName: "sidecar",
-          memory: 256 * 1024 * 1024,
-          nanoCpus: 500_000_000,
-          networkId: networkId!,
-          networkAlias: "sidecar",
-          extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
-          portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-          exposedPorts: { "8080/tcp": {}, "8081/tcp": {} },
-        });
-
-        if (platformNetwork) {
-          await connectContainerToNetwork(platformNetwork.networkId, id);
-        }
-
-        await startContainer(id);
-        const hostPort = await getContainerHostPort(id, "8080/tcp");
-        if (!hostPort) throw new Error("No host port mapped for fresh sidecar");
-        await waitForSidecarHealth(hostPort);
-        return id;
-      };
-
-      const agentSetup = async (): Promise<string> => {
-        const id = await createContainer(executionId, containerEnv, {
-          image: PI_RUNTIME_IMAGE,
-          adapterName: "pi",
-          networkId: networkId!,
-          networkAlias: "agent",
-        });
-
-        // Inject files while sidecar is starting
-        if (filesToInject.length > 0) {
-          await injectFiles(id, filesToInject, "/workspace");
-        }
-
-        return id;
-      };
-
-      // Run both in parallel — agent creation + file injection overlaps with sidecar startup
-      const [sidecarId, containerId] = await Promise.all([sidecarSetup(), agentSetup()]);
-      sidecarContainerId = sidecarId;
+      // Phase 2: Setup sidecar + create agent (parallel)
+      const [sidecar, agent] = await Promise.all([
+        orchestrator.createSidecar(executionId, boundary, sidecarConfig),
+        orchestrator.createWorkload(
+          {
+            executionId,
+            role: "agent",
+            image: PI_RUNTIME_IMAGE,
+            env: containerEnv,
+            resources: { memoryBytes: 1024 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+            files:
+              filesToInject.length > 0
+                ? { items: filesToInject, targetDir: "/workspace" }
+                : undefined,
+          },
+          boundary,
+        ),
+      ]);
+      sidecarHandle = sidecar;
 
       // Phase 3: Run agent container lifecycle (start + stream + wait + cleanup)
-      // Files are already injected above — pass no files to runContainerLifecycle
       yield* runContainerLifecycle({
-        containerId,
+        orchestrator,
+        handle: agent,
         adapterName: "pi",
         executionId,
         timeout,
-        // flowPackage/inputFiles already injected in agentSetup
         extraData: { provider, model: modelId },
         signal,
-        stopOnTimeout: sidecarContainerId ? [sidecarContainerId] : [],
+        stopOnTimeout: [sidecarHandle],
         processLogs: processPiLogs,
       });
     } finally {
-      // Cleanup sidecar + network in parallel (idempotent — 404 is OK)
-      // removeContainer uses force=true which kills + removes in a single Docker call
+      // Cleanup sidecar + boundary in parallel (idempotent — 404 is OK)
       const cleanups: Promise<void>[] = [];
-      if (sidecarContainerId) {
+      if (sidecarHandle) {
         cleanups.push(
-          removeContainer(sidecarContainerId).catch((err) => {
+          orchestrator.removeWorkload(sidecarHandle).catch((err) => {
             logger.error("Failed to remove sidecar", {
               error: err instanceof Error ? err.message : String(err),
             });
           }),
         );
       }
-      if (networkId) {
+      if (boundary) {
         cleanups.push(
-          removeNetwork(networkId).catch((err) => {
+          orchestrator.removeIsolationBoundary(boundary).catch((err) => {
             logger.error("Failed to remove network", {
               error: err instanceof Error ? err.message : String(err),
             });

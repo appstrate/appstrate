@@ -9,7 +9,7 @@ import {
   createNetwork,
   removeNetwork,
 } from "./docker.ts";
-const SIDECAR_IMAGE = "appstrate-sidecar:latest";
+export const SIDECAR_IMAGE = "appstrate-sidecar:latest";
 const POOL_SIZE = 2;
 const HEALTH_CHECK_RETRIES = 20;
 const HEALTH_CHECK_DELAY_MS = 100;

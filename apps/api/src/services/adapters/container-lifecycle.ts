@@ -1,51 +1,46 @@
 import { logger } from "../../lib/logger.ts";
 import type { ExecutionMessage } from "./types.ts";
 import { TimeoutError } from "./types.ts";
-import {
-  startContainer,
-  streamLogs,
-  waitForExit,
-  stopContainer,
-  removeContainer,
-} from "../docker.ts";
+import type { ContainerOrchestrator, WorkloadHandle } from "../orchestrator/index.ts";
 
 export interface ContainerLifecycleOptions {
-  containerId: string;
+  orchestrator: ContainerOrchestrator;
+  handle: WorkloadHandle;
   adapterName: string;
   executionId: string;
   timeout: number;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
-  /** Extra container IDs to stop on timeout (e.g. sidecar). */
-  stopOnTimeout?: string[];
+  /** Extra workload handles to stop on timeout (e.g. sidecar). */
+  stopOnTimeout?: WorkloadHandle[];
   processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
 }
 
 /**
- * Shared container lifecycle: start, timeout, stream loop, exit handling, and cleanup.
+ * Shared workload lifecycle: start, timeout, stream loop, exit handling, and cleanup.
  * File injection must be done before calling this (for parallelization with sidecar startup).
  */
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
 ): AsyncGenerator<ExecutionMessage> {
-  const { containerId, adapterName, executionId, timeout, extraData, signal } = options;
+  const { orchestrator, handle, adapterName, executionId, timeout, extraData, signal } = options;
 
   yield {
     type: "progress",
     message: `${adapterName} container started`,
-    data: { adapter: adapterName, executionId, containerId, ...extraData },
+    data: { adapter: adapterName, executionId, workloadId: handle.id, ...extraData },
   };
 
-  await startContainer(containerId);
+  await orchestrator.startWorkload(handle);
 
-  // Timeout: stop the container if it exceeds the limit
+  // Timeout: stop the workload if it exceeds the limit
   const timeoutMs = timeout * 1000;
   let timedOut = false;
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
-    stopContainer(containerId).catch(() => {});
-    for (const id of options.stopOnTimeout ?? []) {
-      stopContainer(id).catch(() => {});
+    orchestrator.stopWorkload(handle).catch(() => {});
+    for (const h of options.stopOnTimeout ?? []) {
+      orchestrator.stopWorkload(h).catch(() => {});
     }
   }, timeoutMs);
 
@@ -53,31 +48,31 @@ export async function* runContainerLifecycle(
   let lastError: string | undefined;
 
   try {
-    for await (const msg of options.processLogs(streamLogs(containerId, signal))) {
+    for await (const msg of options.processLogs(orchestrator.streamLogs(handle, signal))) {
       if (msg.type === "result") hasResult = true;
       if (msg.type === "error") lastError = msg.message;
       yield msg;
     }
 
-    // Skip waitForExit if cancelled — container will be killed by stopContainer
+    // Skip waitForExit if cancelled — workload will be killed by stopWorkload
     if (signal?.aborted) {
       throw new Error("Execution cancelled");
     }
 
-    const exitCode = await waitForExit(containerId);
+    const exitCode = await orchestrator.waitForExit(handle);
 
     if (timedOut) {
       throw new TimeoutError(`Execution timed out after ${timeout}s`);
     }
 
     if (exitCode !== 0 && !hasResult) {
-      throw new Error(lastError ?? `${adapterName} container exited with code ${exitCode}`);
+      throw new Error(lastError ?? `${adapterName} workload exited with code ${exitCode}`);
     }
   } finally {
     clearTimeout(timeoutHandle);
-    await removeContainer(containerId).catch((err) => {
-      logger.error("Failed to remove container", {
-        containerId,
+    await orchestrator.removeWorkload(handle).catch((err) => {
+      logger.error("Failed to remove workload", {
+        workloadId: handle.id,
         error: err instanceof Error ? err.message : String(err),
       });
     });

@@ -20,7 +20,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   // --- System identity & environment ---
   sections.push("## System\n");
   sections.push("You are an AI agent running on the Appstrate platform.");
-  sections.push("You execute a specific task inside an isolated, ephemeral Docker container.\n");
+  sections.push("You execute a specific task inside an isolated, ephemeral container.\n");
 
   sections.push("### Environment");
   sections.push(

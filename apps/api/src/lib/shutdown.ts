@@ -2,7 +2,7 @@ import { closeDb } from "./db.ts";
 import { logger } from "./logger.ts";
 import { shutdownScheduler } from "../services/scheduler.ts";
 import { getInFlightCount, waitForInFlight } from "../services/execution-tracker.ts";
-import { shutdownSidecarPool } from "../services/sidecar-pool.ts";
+import { getOrchestrator } from "../services/orchestrator/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
@@ -16,7 +16,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutdown initiated, stopping scheduler and sidecar pool...");
     shutdownScheduler();
-    await shutdownSidecarPool();
+    await getOrchestrator().shutdown();
 
     const inFlight = getInFlightCount();
     if (inFlight > 0) {

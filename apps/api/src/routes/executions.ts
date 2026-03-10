@@ -26,7 +26,7 @@ import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
-import { stopContainer } from "../services/docker.ts";
+import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
@@ -527,7 +527,9 @@ export function createExecutionsRouter() {
 
     // Abort in-flight fetch calls immediately, then stop the container as backup
     abortExecution(execId);
-    stopContainer(`appstrate-pi-${execId}`).catch(() => {});
+    getOrchestrator()
+      .stopByExecutionId(execId)
+      .catch(() => {});
 
     return c.json({ ok: true });
   });

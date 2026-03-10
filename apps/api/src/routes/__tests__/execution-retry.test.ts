@@ -94,8 +94,8 @@ mock.module("../../middleware/rate-limit.ts", () => ({
   rateLimit: mock(() => mock()),
 }));
 
-mock.module("../../services/docker.ts", () => ({
-  stopContainer: mock(async () => {}),
+mock.module("../../services/orchestrator/index.ts", () => ({
+  getOrchestrator: () => ({ stopByExecutionId: mock(async () => "stopped") }),
 }));
 
 // Track how many times the adapter's execute() is called
