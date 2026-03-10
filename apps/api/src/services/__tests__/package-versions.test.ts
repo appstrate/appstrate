@@ -1,5 +1,13 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
-import { queues, resetQueues, db, schemaStubs, packageStorageStub, tracking } from "./_db-mock.ts";
+import {
+  queues,
+  resetQueues,
+  db,
+  schemaStubs,
+  packageStorageStub,
+  packageItemsStorageStub,
+  tracking,
+} from "./_db-mock.ts";
 
 // --- Mocks ---
 
@@ -33,11 +41,7 @@ mock.module("../package-version-deps.ts", () => ({
 
 // --- Import after mocks ---
 
-mock.module("../package-items/storage.ts", () => ({
-  downloadPackageFiles: async () => null,
-  uploadPackageFiles: async () => {},
-  deletePackageFiles: async () => {},
-}));
+mock.module("../package-items/storage.ts", () => packageItemsStorageStub);
 
 mock.module("../package-items/dependencies.ts", () => ({
   buildRegistryDependencies: async () => null,
@@ -781,5 +785,114 @@ describe("replaceVersionContent", () => {
     // Should not attempt dep operations
     expect(depsTracking.clearCalls).toEqual([]);
     expect(depsTracking.storeCalls).toEqual([]);
+  });
+});
+
+describe("createVersionFromDraft — skill/extension error on missing files", () => {
+  beforeEach(() => {
+    resetQueues();
+    // Ensure downloadPackageFiles returns null (no stored files)
+    packageItemsStorageStub.downloadPackageFiles = async () => null;
+  });
+
+  test("throws error for skill when storage files are missing", async () => {
+    queues.select = [
+      [
+        {
+          draftManifest: { version: "1.0.0", name: "@acme/my-skill" },
+          draftContent: "skill content",
+          type: "skill",
+        },
+      ],
+    ];
+
+    const promise = createVersionFromDraft({
+      packageId: "@acme/my-skill",
+      orgId: "org-1",
+      userId: "user-1",
+    });
+    await expect(promise).rejects.toThrow(
+      "Cannot create version for @acme/my-skill: package files not found in storage",
+    );
+  });
+
+  test("throws error for extension when storage files are missing", async () => {
+    queues.select = [
+      [
+        {
+          draftManifest: { version: "1.0.0", name: "@acme/my-ext" },
+          draftContent: "ext content",
+          type: "extension",
+        },
+      ],
+    ];
+
+    const promise = createVersionFromDraft({
+      packageId: "@acme/my-ext",
+      orgId: "org-1",
+      userId: "user-1",
+    });
+    await expect(promise).rejects.toThrow(
+      "Cannot create version for @acme/my-ext: package files not found in storage",
+    );
+  });
+});
+
+describe("createVersionFromDraft — flow stored files round-trip", () => {
+  beforeEach(() => {
+    resetQueues();
+  });
+
+  test("uses stored files when available for flow", async () => {
+    const storedFiles: Record<string, Uint8Array> = {
+      "manifest.json": new TextEncoder().encode("{}"),
+      "prompt.md": new TextEncoder().encode("old prompt"),
+      "extra-file.txt": new TextEncoder().encode("extra content"),
+    };
+    packageItemsStorageStub.downloadPackageFiles = async () => storedFiles;
+
+    queues.select = [
+      [
+        {
+          draftManifest: { version: "1.0.0", name: "test-flow" },
+          draftContent: "updated prompt",
+          type: "flow",
+        },
+      ],
+      [], // createPackageVersion: allExisting
+      [], // createPackageVersion: currentLatest
+    ];
+    queues.insert = [[{ id: 1, version: "1.0.0" }]];
+
+    const result = await createVersionFromDraft({
+      packageId: "test-flow",
+      orgId: "org-1",
+      userId: "user-1",
+    });
+    expect(result).toEqual({ id: 1, version: "1.0.0" });
+  });
+
+  test("falls back to minimal ZIP when no stored files for flow", async () => {
+    packageItemsStorageStub.downloadPackageFiles = async () => null;
+
+    queues.select = [
+      [
+        {
+          draftManifest: { version: "1.0.0", name: "test-flow" },
+          draftContent: "prompt content",
+          type: "flow",
+        },
+      ],
+      [], // createPackageVersion: allExisting
+      [], // createPackageVersion: currentLatest
+    ];
+    queues.insert = [[{ id: 1, version: "1.0.0" }]];
+
+    const result = await createVersionFromDraft({
+      packageId: "test-flow",
+      orgId: "org-1",
+      userId: "user-1",
+    });
+    expect(result).toEqual({ id: 1, version: "1.0.0" });
   });
 });

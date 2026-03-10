@@ -109,6 +109,10 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
   }
 
+  if (packageType === "flow" && Object.keys(files).length > 0) {
+    await uploadPackageFiles("flows", orgId, packageId, files);
+  }
+
   if (packageType === "provider") {
     // UPSERT providerCredentials (providerId, orgId) — empty, admin configures later
     await db
