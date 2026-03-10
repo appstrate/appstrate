@@ -148,7 +148,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
       nanoCpus: 500_000_000,
       networkId: standbyNetworkId!,
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-      exposedPorts: { "8080/tcp": {} },
+      exposedPorts: { "8080/tcp": {}, "8081/tcp": {} },
       labels: { "appstrate.pool": "sidecar" },
     },
   );

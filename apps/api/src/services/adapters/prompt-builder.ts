@@ -275,10 +275,11 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("## Network Proxy\n");
     sections.push("An outbound HTTP proxy is configured for this execution.");
     sections.push(
-      "All `curl` and HTTP requests are automatically routed through the proxy via environment variables.",
+      "All `curl` and HTTP requests are automatically routed through the proxy via environment variables (`HTTP_PROXY`/`HTTPS_PROXY`).",
     );
+    sections.push("Sidecar API calls via `$SIDECAR_URL/proxy` are also routed through the proxy.");
     sections.push(
-      "Sidecar API calls via `$SIDECAR_URL/proxy` are also routed through the proxy.\n",
+      "The proxy is handled transparently — no credentials are required on your side.\n",
     );
   }
 

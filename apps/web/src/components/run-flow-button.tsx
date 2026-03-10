@@ -84,7 +84,8 @@ export function RunFlowButton({
     setFetching(true);
     try {
       const qs = profileId ? `?profileId=${profileId}` : "";
-      const flowDetail = await api<FlowDetail>(`/flows/${packageId}${qs}`);
+      const data = await api<{ flow: FlowDetail }>(`/packages/flows/${packageId}${qs}`);
+      const flowDetail = data.flow;
       setFetchedDetail(flowDetail);
 
       const needsInput = !!(
