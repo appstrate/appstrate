@@ -304,5 +304,22 @@
   "result.showLess": "Voir moins",
   "result.items": "{{count}} élément(s)",
   "result.noData": "Aucune donnée",
-  "ownership.forkedFrom": "Dupliqué depuis "
+  "ownership.forkedFrom": "Dupliqué depuis ",
+  "detail.tabApi": "API",
+  "api.title": "Exécuter ce flow via l'API",
+  "api.noKey": "Aucune clé API trouvée.",
+  "api.noKeyHint": "Créez une clé API pour exécuter ce flow de manière programmatique.",
+  "api.noKeyNonAdmin": "Demandez à un administrateur de créer une clé API.",
+  "api.createKey": "Créer une clé API",
+  "api.selectKey": "Clé API",
+  "api.keyMasked": "Clé complète visible uniquement à la création",
+  "api.curlTitle": "Exemple curl",
+  "api.copy": "Copier",
+  "api.copied": "Copié !",
+  "api.docsLink": "Documentation API complète",
+  "api.fileInputNote": "Ce flow accepte des fichiers en entrée.",
+  "api.responseTitle": "Réponse",
+  "api.responseHint": "L'exécution est asynchrone. L'API retourne un ID d'exécution immédiatement.",
+  "api.manageKeys": "Gérer les clés API",
+  "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation."
 }

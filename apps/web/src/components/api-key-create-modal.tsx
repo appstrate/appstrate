@@ -17,9 +17,10 @@ import { useCreateApiKey } from "../hooks/use-api-keys";
 interface Props {
   open: boolean;
   onClose: () => void;
+  onKeyCreated?: (rawKey: string) => void;
 }
 
-export function ApiKeyCreateModal({ open, onClose }: Props) {
+export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateApiKey();
 
@@ -49,6 +50,7 @@ export function ApiKeyCreateModal({ open, onClose }: Props) {
       {
         onSuccess: (data) => {
           setCreatedKey(data.key);
+          onKeyCreated?.(data.key);
         },
       },
     );

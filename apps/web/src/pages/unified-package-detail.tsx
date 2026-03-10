@@ -38,6 +38,7 @@ import {
   FlowExecutionsTab,
   FlowSchedulesTab,
   FlowMemoriesTab,
+  FlowApiTab,
 } from "../components/package-detail/flow-tabs";
 import { FlowModals } from "../components/package-detail/flow-modals";
 import { RunFlowButton } from "../components/run-flow-button";
@@ -49,6 +50,7 @@ type DetailTab =
   | "executions"
   | "schedules"
   | "memories"
+  | "api"
   | "versions"
   | "changes"
   | "content"
@@ -165,6 +167,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "executions",
     "schedules",
     "memories",
+    "api",
     "versions",
     "changes",
     "content",
@@ -265,6 +268,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       id: "memories",
       label: t("detail.tabMemories"),
     },
+    { id: "api", label: t("detail.tabApi") },
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
@@ -448,6 +452,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
       {type === "flow" && tab === "memories" && (
         <FlowMemoriesTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
+      )}
+      {type === "flow" && tab === "api" && (
+        <FlowApiTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
       )}
 
       {type !== "flow" && tab === "content" && pkgDetail && (
