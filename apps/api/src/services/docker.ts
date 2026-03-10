@@ -361,6 +361,7 @@ export async function cleanupOrphanedContainers(): Promise<{
   containers: number;
   networks: number;
 }> {
+  // Clean up orphaned containers
   const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
   const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
 
@@ -374,24 +375,34 @@ export async function cleanupOrphanedContainers(): Promise<{
     Labels: Record<string, string>;
   }>;
 
-  if (containers.length === 0) return { containers: 0, networks: 0 };
-
-  const executionIds = new Set<string>();
-  for (const c of containers) {
-    const execId = c.Labels["appstrate.execution"];
-    if (execId) executionIds.add(execId);
+  // Remove all containers in parallel (force=true handles running containers)
+  if (containers.length > 0) {
+    await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
   }
 
-  // Remove all containers in parallel (force=true handles running containers)
-  await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
-
-  // Remove associated networks in parallel
-  const networkResults = await Promise.allSettled(
-    [...executionIds].map((id) => removeNetwork(`appstrate-exec-${id}`)),
-  );
-  const networkCount = networkResults.filter((r) => r.status === "fulfilled").length;
+  // Clean up orphaned networks by listing Docker networks directly.
+  // This catches networks that leaked when containers were already removed
+  // (crash, kill -9, Docker auto-cleanup) but their network persisted.
+  const networkCount = await cleanupOrphanedNetworks();
 
   return { containers: containers.length, networks: networkCount };
+}
+
+/**
+ * List all Docker networks matching `appstrate-exec-*` and remove them.
+ * This is safe to call at startup because no executions should be running.
+ */
+async function cleanupOrphanedNetworks(): Promise<number> {
+  const res = await dockerFetch("/networks");
+  if (!res.ok) return 0;
+
+  const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
+  const orphaned = networks.filter((n) => n.Name.startsWith("appstrate-exec-"));
+
+  if (orphaned.length === 0) return 0;
+
+  const results = await Promise.allSettled(orphaned.map((n) => removeNetwork(n.Id)));
+  return results.filter((r) => r.status === "fulfilled").length;
 }
 
 // --- Platform network auto-detection ---
