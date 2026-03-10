@@ -570,8 +570,19 @@ export async function createVersionFromDraft(params: {
     };
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
   } else if (pkg.type === "flow") {
-    const { buildMinimalZip } = await import("./package-storage.ts");
-    zipBuffer = buildMinimalZip(finalManifest, content);
+    const { downloadPackageFiles } = await import("./package-items/storage.ts");
+    const storedFiles = await downloadPackageFiles("flows", orgId, packageId);
+    if (storedFiles) {
+      const { zipArtifact } = await import("@appstrate/core/zip");
+      const entries: Record<string, Uint8Array> = { ...storedFiles };
+      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
+      entries["prompt.md"] = new TextEncoder().encode(content);
+      zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    } else {
+      // Locally-created flows have no stored files — minimal ZIP is correct
+      const { buildMinimalZip } = await import("./package-storage.ts");
+      zipBuffer = buildMinimalZip(finalManifest, content);
+    }
   } else {
     // For skills/extensions, build ZIP from storage files or content
     const { downloadPackageFiles } = await import("./package-items/storage.ts");
@@ -587,11 +598,9 @@ export async function createVersionFromDraft(params: {
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
       zipBuffer = Buffer.from(zipArtifact(entries, 6));
     } else {
-      // Fallback: create minimal ZIP with manifest + content using correct filename
-      const { buildMinimalZip } = await import("./package-storage.ts");
-      const contentFileName =
-        pkg.type === "skill" ? "SKILL.md" : `${parseScopedName(packageId)?.name ?? packageId}.ts`;
-      zipBuffer = buildMinimalZip(finalManifest, content, contentFileName);
+      throw new Error(
+        `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
+      );
     }
   }
 

@@ -160,6 +160,12 @@ export const systemPackagesStub = {
   getSystemPackagesByType: () => [],
 };
 
+export const packageItemsStorageStub = {
+  uploadPackageFiles: async () => "sha256-test-items",
+  downloadPackageFiles: async () => null as Record<string, Uint8Array> | null,
+  deletePackageFiles: async () => {},
+};
+
 export const packageStorageStub = {
   getPackageZip: async () => null,
   uploadPackageZip: async () => {},
