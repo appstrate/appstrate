@@ -68,6 +68,7 @@ mock.module("../../services/env-builder.ts", () => ({
     promptContext: makePromptContext(),
     flowPackage: null,
     flowVersionId: null,
+    proxyLabel: null,
   })),
 }));
 

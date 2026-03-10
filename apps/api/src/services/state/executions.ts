@@ -14,6 +14,7 @@ export async function createExecution(
   scheduleId?: string,
   packageVersionId?: number,
   connectionProfileId?: string,
+  proxyLabel?: string,
 ): Promise<void> {
   await db.insert(executions).values({
     id,
@@ -26,6 +27,7 @@ export async function createExecution(
     connectionProfileId: connectionProfileId ?? null,
     scheduleId: scheduleId ?? null,
     packageVersionId: packageVersionId ?? null,
+    proxyLabel: proxyLabel ?? null,
   });
 }
 

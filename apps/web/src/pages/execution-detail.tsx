@@ -12,6 +12,7 @@ import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
@@ -230,6 +231,12 @@ export function ExecutionDetailPage() {
         {userName && (
           <span className="text-sm text-muted-foreground">
             {t("exec.user", { name: userName })}
+          </span>
+        )}
+        {execution.proxyLabel && (
+          <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+            <Shield size={12} />
+            {t("exec.proxy", { label: execution.proxyLabel })}
           </span>
         )}
         <span className="text-xs text-muted-foreground">{date}</span>

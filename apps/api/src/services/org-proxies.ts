@@ -146,11 +146,11 @@ export async function setDefaultProxy(orgId: string, proxyId: string | null): Pr
 
 // --- Resolution ---
 
-export async function resolveProxyUrl(
+export async function resolveProxy(
   orgId: string,
   packageId: string,
   config?: Record<string, unknown>,
-): Promise<string | null> {
+): Promise<{ url: string; label: string } | null> {
   // 1. Check flow config for __proxyId
   const resolved = config ?? (await getPackageConfig(orgId, packageId));
   const proxyId = resolved.__proxyId as string | undefined | null;
@@ -159,8 +159,8 @@ export async function resolveProxyUrl(
 
   if (proxyId) {
     // Load specific proxy
-    const url = await loadProxyUrl(orgId, proxyId);
-    if (url) return url;
+    const result = await loadProxy(orgId, proxyId);
+    if (result) return result;
     logger.warn("Flow proxy override not found, falling through to org default", {
       packageId,
       proxyId,
@@ -182,7 +182,7 @@ export async function resolveProxyUrl(
 
   if (dbDefault) {
     try {
-      return decrypt(dbDefault.urlEncrypted);
+      return { url: decrypt(dbDefault.urlEncrypted), label: dbDefault.label };
     } catch {
       logger.warn("Failed to decrypt default proxy URL", { proxyId: dbDefault.id });
     }
@@ -192,23 +192,31 @@ export async function resolveProxyUrl(
   const system = getSystemProxies();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return def.url;
+      return { url: def.url, label: def.label };
     }
   }
 
   // 4. Fallback to PROXY_URL env var
-  return getEnv().PROXY_URL ?? null;
+  const envUrl = getEnv().PROXY_URL;
+  return envUrl ? { url: envUrl, label: "Proxy" } : null;
 }
 
-async function loadProxyUrl(orgId: string, proxyId: string): Promise<string | null> {
+async function loadProxy(
+  orgId: string,
+  proxyId: string,
+): Promise<{ url: string; label: string } | null> {
   // Check system proxies first
   const system = getSystemProxies();
   const systemDef = system.get(proxyId);
-  if (systemDef) return systemDef.url;
+  if (systemDef) return { url: systemDef.url, label: systemDef.label };
 
   // Check DB
   const [row] = await db
-    .select({ urlEncrypted: orgProxies.urlEncrypted, enabled: orgProxies.enabled })
+    .select({
+      urlEncrypted: orgProxies.urlEncrypted,
+      enabled: orgProxies.enabled,
+      label: orgProxies.label,
+    })
     .from(orgProxies)
     .where(and(eq(orgProxies.id, proxyId), eq(orgProxies.orgId, orgId)))
     .limit(1);
@@ -216,7 +224,7 @@ async function loadProxyUrl(orgId: string, proxyId: string): Promise<string | nu
   if (!row || !row.enabled) return null;
 
   try {
-    return decrypt(row.urlEncrypted);
+    return { url: decrypt(row.urlEncrypted), label: row.label };
   } catch {
     logger.warn("Failed to decrypt proxy URL", { proxyId });
     return null;

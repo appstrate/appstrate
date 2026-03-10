@@ -139,7 +139,7 @@ export function createShareRouter() {
     const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId } = await buildExecutionContext({
+    const { promptContext, flowPackage, flowVersionId, proxyLabel } = await buildExecutionContext({
       executionId,
       flow,
       providerProfiles,
@@ -159,6 +159,7 @@ export function createShareRouter() {
       undefined,
       flowVersionId ?? undefined,
       userProfileId,
+      proxyLabel ?? undefined,
     );
     await linkExecutionToToken(tokenId, executionId);
 

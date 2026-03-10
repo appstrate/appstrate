@@ -43,6 +43,7 @@ export const executions = pgTable(
     packageVersionId: integer("package_version_id").references(() => packageVersions.id),
     notifiedAt: timestamp("notified_at"),
     readAt: timestamp("read_at"),
+    proxyLabel: text("proxy_label"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),
