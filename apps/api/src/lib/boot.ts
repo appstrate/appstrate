@@ -20,9 +20,8 @@ import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { Manifest } from "@appstrate/core/validation";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
-import { cleanupOrphanedContainers } from "../services/docker.ts";
 import { initScheduler } from "../services/scheduler.ts";
-import { initSidecarPool } from "../services/sidecar-pool.ts";
+import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureStorageBucket } from "../services/package-storage.ts";
 import { ensurePackageItemsBucket } from "../services/package-items.ts";
 import { initRegistryProvider } from "../services/registry-provider.ts";
@@ -95,20 +94,21 @@ export async function boot(): Promise<void> {
     });
   }
 
+  const orchestrator = getOrchestrator();
   try {
-    const { containers, networks } = await cleanupOrphanedContainers();
-    if (containers > 0 || networks > 0) {
-      logger.info("Cleaned up orphaned Docker resources", { containers, networks });
+    const report = await orchestrator.cleanupOrphans();
+    if (report.workloads > 0 || report.isolationBoundaries > 0) {
+      logger.info("Cleaned up orphaned resources", { ...report });
     }
   } catch (err) {
-    logger.warn("Could not clean up orphaned Docker resources", {
+    logger.warn("Could not clean up orphaned resources", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
   // Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
   await Promise.all([
-    initSidecarPool().catch((err) => {
+    orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize sidecar pool", {
         error: err instanceof Error ? err.message : String(err),
       });

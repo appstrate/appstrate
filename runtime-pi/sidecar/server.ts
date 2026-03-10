@@ -5,7 +5,7 @@ import type { CredentialsResponse } from "./helpers.ts";
 // Mutable config — can be set via env vars at startup or updated at runtime
 // via POST /configure (used by sidecar pool for pre-warmed containers).
 const config = {
-  platformApiUrl: process.env.PLATFORM_API_URL || "http://host.docker.internal:3000",
+  platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   executionToken: process.env.EXECUTION_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
 };

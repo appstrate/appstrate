@@ -17,6 +17,7 @@ export interface CreateContainerOptions {
   adapterName: string;
   memory?: number;
   nanoCpus?: number;
+  pidsLimit?: number;
   networkId?: string;
   networkAlias?: string;
   extraHosts?: string[];
@@ -51,6 +52,9 @@ export async function createContainer(
     HostConfig: {
       Memory: options.memory ?? 1024 * 1024 * 1024,
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
+      SecurityOpt: ["no-new-privileges"],
+      CapDrop: ["ALL"],
+      PidsLimit: options.pidsLimit ?? 256,
       AutoRemove: false,
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
@@ -280,6 +284,25 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
     const error = await res.text();
     throw new Error(`Failed to stop container: ${res.status} ${error}`);
   }
+}
+
+/**
+ * Stop all containers belonging to an execution, identified by label.
+ * Returns "stopped" if any containers were found, "not_found" otherwise.
+ */
+export async function stopContainersByExecution(
+  executionId: string,
+  timeout = 5,
+): Promise<"stopped" | "not_found"> {
+  const filters = JSON.stringify({
+    label: [`appstrate.execution=${executionId}`, "appstrate.managed=true"],
+  });
+  const res = await dockerFetch(`/containers/json?filters=${encodeURIComponent(filters)}`);
+  if (!res.ok) return "not_found";
+  const containers = (await res.json()) as Array<{ Id: string }>;
+  if (containers.length === 0) return "not_found";
+  await Promise.allSettled(containers.map((c) => stopContainer(c.Id, timeout)));
+  return "stopped";
 }
 
 // --- Docker Network operations ---
