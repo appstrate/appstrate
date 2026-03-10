@@ -429,7 +429,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(
         {
           packageId,
-          lockVersion: item.version,
+          lockVersion: item.lockVersion,
           message: `${rcfg.cfg.label.slice(0, -1)} created`,
         },
         201,
@@ -509,12 +509,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // After-create hook
     if (rcfg.afterCreate) {
-      const finalManifest = (item.manifest ?? {}) as Record<string, unknown>;
+      const finalManifest = (item.draftManifest ?? {}) as Record<string, unknown>;
       await rcfg.afterCreate({ packageId: item.id, orgId, manifest: finalManifest });
     }
 
     // Create initial version (non-fatal)
-    const finalManifest = (item.manifest ?? {}) as Record<string, unknown>;
+    const finalManifest = (item.draftManifest ?? {}) as Record<string, unknown>;
     await createVersionSafe({
       packageId: item.id,
       orgId,
@@ -527,10 +527,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       {
         [rcfg.responseKey]: {
           id: item.id,
-          name: item.name,
-          description: ((item.manifest ?? {}) as Partial<Manifest>).description ?? null,
+          name: item.id,
+          description: ((item.draftManifest ?? {}) as Partial<Manifest>).description ?? null,
         },
-        lockVersion: item.version,
+        lockVersion: item.lockVersion,
         ...(warnings.length > 0 ? { warnings } : {}),
       },
       201,
@@ -701,10 +701,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     return c.json({
       [rcfg.responseKey]: {
         id: updated.id,
-        name: updated.name,
-        description: ((updated.manifest ?? {}) as Partial<Manifest>).description ?? null,
+        name: updated.id,
+        description: ((updated.draftManifest ?? {}) as Partial<Manifest>).description ?? null,
       },
-      lockVersion: updated.version,
+      lockVersion: updated.lockVersion,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
   };
@@ -1004,7 +1004,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     return c.json({
       message: `Version ${detail.version} restored`,
       restoredVersion: detail.version,
-      lockVersion: updated.version,
+      lockVersion: updated.lockVersion,
     });
   };
 }
@@ -1244,7 +1244,7 @@ export function createPackagesRouter() {
                 "Ce package a des modifications non publiées qui seront écrasées par l'import.",
               details: {
                 packageId,
-                draftVersion: (existing.manifest as Record<string, unknown>)?.version ?? null,
+                draftVersion: (existing.draftManifest as Record<string, unknown>)?.version ?? null,
               },
             },
             409,
@@ -1275,7 +1275,7 @@ export function createPackagesRouter() {
       // Update existing package manifest and content
       await db
         .update(packages)
-        .set({ manifest, content, updatedAt: new Date() })
+        .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
         .where(eq(packages.id, packageId));
     } else {
       // New package — insert (orgSlug=null since packageId is already fully scoped from manifest.name)

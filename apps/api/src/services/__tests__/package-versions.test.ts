@@ -449,7 +449,7 @@ describe("getVersionInfo", () => {
   test("returns both values when present", async () => {
     // Promise.all: [pkg select, latestTag select]
     queues.select = [
-      [{ manifest: { version: "2.0.0" } }], // pkg
+      [{ draftManifest: { version: "2.0.0" } }], // pkg
       [{ versionId: 5 }], // latestTag
       [{ version: "1.0.0" }], // version row for latestTag
     ];
@@ -460,7 +460,7 @@ describe("getVersionInfo", () => {
 
   test("returns null latestVersion when no dist-tag", async () => {
     queues.select = [
-      [{ manifest: { version: "1.0.0" } }], // pkg
+      [{ draftManifest: { version: "1.0.0" } }], // pkg
       [], // no latestTag
     ];
     const result = await getVersionInfo("pkg-1");
@@ -470,7 +470,7 @@ describe("getVersionInfo", () => {
 
   test("returns null draftVersion when manifest has no version", async () => {
     queues.select = [
-      [{ manifest: {} }], // pkg — no version field
+      [{ draftManifest: {} }], // pkg — no version field
       [], // no latestTag
     ];
     const result = await getVersionInfo("pkg-1");
@@ -672,7 +672,7 @@ describe("createVersionFromDraft", () => {
   });
 
   test("returns null when manifest has no version", async () => {
-    queues.select = [[{ manifest: {}, content: "test", type: "flow" }]];
+    queues.select = [[{ draftManifest: {}, draftContent: "test", type: "flow" }]];
     const result = await createVersionFromDraft({
       packageId: "pkg-1",
       orgId: "org-1",
@@ -682,7 +682,9 @@ describe("createVersionFromDraft", () => {
   });
 
   test("returns null for invalid semver in manifest", async () => {
-    queues.select = [[{ manifest: { version: "not-valid" }, content: "test", type: "flow" }]];
+    queues.select = [
+      [{ draftManifest: { version: "not-valid" }, draftContent: "test", type: "flow" }],
+    ];
     const result = await createVersionFromDraft({
       packageId: "pkg-1",
       orgId: "org-1",
@@ -694,7 +696,13 @@ describe("createVersionFromDraft", () => {
   test("creates version from flow type draft", async () => {
     // pkg lookup
     queues.select = [
-      [{ manifest: { version: "1.0.0", name: "test" }, content: "prompt content", type: "flow" }],
+      [
+        {
+          draftManifest: { version: "1.0.0", name: "test" },
+          draftContent: "prompt content",
+          type: "flow",
+        },
+      ],
       [], // createPackageVersion: allExisting
       [], // createPackageVersion: currentLatest
     ];

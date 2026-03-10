@@ -125,12 +125,12 @@ function validCreateBody(overrides: Record<string, unknown> = {}) {
 }
 
 function makePackageRow(
-  overrides: Partial<{ id: string; manifest: Record<string, unknown>; source: string }> = {},
+  overrides: Partial<{ id: string; draftManifest: Record<string, unknown>; source: string }> = {},
 ) {
   return {
     pkg: {
       id: "@test/provider",
-      manifest: { displayName: "Test Provider", definition: { authMode: "oauth2" } },
+      draftManifest: { displayName: "Test Provider", definition: { authMode: "oauth2" } },
       source: "local",
       ...overrides,
     },
@@ -210,7 +210,9 @@ describe("GET /api/providers", () => {
 
   test("generates default adminCredentialSchema for oauth2", async () => {
     queues.select.push([
-      makePackageRow({ manifest: { displayName: "OAuth2", definition: { authMode: "oauth2" } } }),
+      makePackageRow({
+        draftManifest: { displayName: "OAuth2", definition: { authMode: "oauth2" } },
+      }),
     ]);
     queues.select.push([]); // no credentials
 
@@ -285,11 +287,11 @@ describe("POST /api/providers", () => {
     const res = await jsonRequest("/api/providers", "POST", validCreateBody({ authMode: "proxy" }));
     expect(res.status).toBe(201);
 
-    const pkgInsert = tracking.insertCalls[0] as { manifest: Record<string, unknown> };
-    const def = pkgInsert.manifest.definition as Record<string, unknown>;
+    const pkgInsert = tracking.insertCalls[0] as { draftManifest: Record<string, unknown> };
+    const def = pkgInsert.draftManifest.definition as Record<string, unknown>;
     expect(def.allowAllUris).toBe(true);
     expect(def.credentialFieldName).toBe("url");
-    expect((pkgInsert.manifest.categories as string[]).includes("proxy")).toBe(true);
+    expect((pkgInsert.draftManifest.categories as string[]).includes("proxy")).toBe(true);
   });
 
   test("encrypts admin credentials when clientId/clientSecret provided", async () => {
@@ -344,7 +346,9 @@ describe("POST /api/providers", () => {
 describe("PUT /api/providers/:scope/:name", () => {
   test("updates manifest → 200", async () => {
     queues.select.push([]); // isSystemProviderInDb → not system
-    queues.select.push([{ manifest: { displayName: "Old", definition: { authMode: "oauth2" } } }]); // existing package
+    queues.select.push([
+      { draftManifest: { displayName: "Old", definition: { authMode: "oauth2" } } },
+    ]); // existing package
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
       displayName: "New Name",
@@ -379,7 +383,7 @@ describe("PUT /api/providers/:scope/:name", () => {
     queues.select.push([]); // isSystemProviderInDb
     queues.select.push([
       {
-        manifest: {
+        draftManifest: {
           displayName: "Old Name",
           description: "Old desc",
           definition: {
@@ -396,10 +400,10 @@ describe("PUT /api/providers/:scope/:name", () => {
     });
     expect(res.status).toBe(200);
 
-    const upd = tracking.updateCalls[0] as { manifest: Record<string, unknown> };
-    expect(upd.manifest.displayName).toBe("Old Name"); // preserved
-    expect(upd.manifest.description).toBe("Old desc"); // preserved
-    const def = upd.manifest.definition as Record<string, unknown>;
+    const upd = tracking.updateCalls[0] as { draftManifest: Record<string, unknown> };
+    expect(upd.draftManifest.displayName).toBe("Old Name"); // preserved
+    expect(upd.draftManifest.description).toBe("Old desc"); // preserved
+    const def = upd.draftManifest.definition as Record<string, unknown>;
     expect(def.authorizationUrl).toBe("https://old.com/auth"); // preserved
     expect(def.tokenUrl).toBe("https://new.com/token"); // updated
   });
@@ -407,7 +411,7 @@ describe("PUT /api/providers/:scope/:name", () => {
   test("forces proxy defaults on authMode change", async () => {
     queues.select.push([]); // isSystemProviderInDb
     queues.select.push([
-      { manifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
+      { draftManifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
@@ -415,8 +419,8 @@ describe("PUT /api/providers/:scope/:name", () => {
     });
     expect(res.status).toBe(200);
 
-    const upd = tracking.updateCalls[0] as { manifest: Record<string, unknown> };
-    const def = upd.manifest.definition as Record<string, unknown>;
+    const upd = tracking.updateCalls[0] as { draftManifest: Record<string, unknown> };
+    const def = upd.draftManifest.definition as Record<string, unknown>;
     expect(def.allowAllUris).toBe(true);
     expect(def.credentialFieldName).toBe("url");
   });
@@ -424,7 +428,7 @@ describe("PUT /api/providers/:scope/:name", () => {
   test("updates credentials when clientId/clientSecret provided", async () => {
     queues.select.push([]); // isSystemProviderInDb
     queues.select.push([
-      { manifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
+      { draftManifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
@@ -440,7 +444,7 @@ describe("PUT /api/providers/:scope/:name", () => {
   test("does not touch credentials when none provided", async () => {
     queues.select.push([]); // isSystemProviderInDb
     queues.select.push([
-      { manifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
+      { draftManifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
@@ -504,7 +508,7 @@ describe("DELETE /api/providers/:scope/:name", () => {
 describe("PUT /api/providers/credentials/:scope/:name", () => {
   test("configures credentials → 200", async () => {
     queues.select.push([
-      { id: "@test/provider", manifest: { definition: { authMode: "oauth2" } } },
+      { id: "@test/provider", draftManifest: { definition: { authMode: "oauth2" } } },
     ]); // provider exists
 
     const res = await jsonRequest("/api/providers/credentials/@test/provider", "PUT", {
@@ -528,7 +532,7 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
 
   test("returns 400 when required fields missing (oauth2 default schema)", async () => {
     queues.select.push([
-      { id: "@test/provider", manifest: { definition: { authMode: "oauth2" } } },
+      { id: "@test/provider", draftManifest: { definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/credentials/@test/provider", "PUT", {
@@ -542,7 +546,7 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
 
   test("supports partial update (only enabled flag)", async () => {
     queues.select.push([
-      { id: "@test/provider", manifest: { definition: { authMode: "oauth2" } } },
+      { id: "@test/provider", draftManifest: { definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/credentials/@test/provider", "PUT", {
@@ -557,7 +561,7 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
 
   test("encrypts credentials before storage", async () => {
     queues.select.push([
-      { id: "@test/provider", manifest: { definition: { authMode: "oauth2" } } },
+      { id: "@test/provider", draftManifest: { definition: { authMode: "oauth2" } } },
     ]);
 
     const res = await jsonRequest("/api/providers/credentials/@test/provider", "PUT", {
@@ -574,7 +578,7 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
     queues.select.push([
       {
         id: "@test/provider",
-        manifest: {
+        draftManifest: {
           definition: {
             authMode: "custom",
             adminCredentialSchema: {

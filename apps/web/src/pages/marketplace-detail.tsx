@@ -153,9 +153,7 @@ export function MarketplaceDetailPage() {
 
       <div className="flex flex-col gap-2 mb-6">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">
-            {pkg.scope}/{pkg.name}
-          </h2>
+          <h2 className="text-lg font-semibold">{pkg.displayName || `${pkg.scope}/${pkg.name}`}</h2>
           <TypeBadge type={pkg.type} />
         </div>
         {pkg.description && (

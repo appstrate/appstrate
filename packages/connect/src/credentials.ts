@@ -59,12 +59,12 @@ export async function getCredentials(
 
   // Look up the provider definition from packages.manifest.definition
   const [pkg] = await db
-    .select({ manifest: packages.manifest })
+    .select({ draftManifest: packages.draftManifest })
     .from(packages)
     .where(eq(packages.id, providerId))
     .limit(1);
 
-  const manifest = (pkg?.manifest ?? {}) as Record<string, unknown>;
+  const manifest = (pkg?.draftManifest ?? {}) as Record<string, unknown>;
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
   const authMode = def.authMode as string | undefined;
 
@@ -139,14 +139,14 @@ export async function resolveCredentialsForProxy(
   const result = await getCredentials(db, profileId, providerId, orgId);
   if (!result) return null;
 
-  // Look up provider definition from packages.manifest.definition
+  // Look up provider definition from packages.draftManifest.definition
   const [pkg] = await db
-    .select({ manifest: packages.manifest })
+    .select({ draftManifest: packages.draftManifest })
     .from(packages)
     .where(eq(packages.id, providerId))
     .limit(1);
 
-  const manifest = (pkg?.manifest ?? {}) as Record<string, unknown>;
+  const manifest = (pkg?.draftManifest ?? {}) as Record<string, unknown>;
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
   const authMode = def.authMode as string | undefined;
 

@@ -62,8 +62,7 @@ describe("listOrgItems — autoInstalled filter", () => {
     const orgItem = {
       id: "my-skill",
       orgId: "org-1",
-      name: "my-skill",
-      manifest: { type: "skill", displayName: "My Skill", description: "A skill" },
+      draftManifest: { type: "skill", displayName: "My Skill", description: "A skill" },
       source: "local",
       type: "skill",
       createdBy: "user-1",
@@ -96,7 +95,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "@acme/parent",
-          manifest: {
+          draftManifest: {
             displayName: "Parent Pkg",
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
@@ -133,7 +132,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "@acme/target",
-          manifest: {
+          draftManifest: {
             displayName: "Self",
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
@@ -154,7 +153,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "@acme/other",
-          manifest: null,
+          draftManifest: null,
         },
       ],
     ];
@@ -170,7 +169,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       // flow refs exist → IN_USE
       [{ packageId: "flow-1" }],
       // getPackageDisplayNames for flows
-      [{ id: "flow-1", manifest: { displayName: "My Flow" } }],
+      [{ id: "flow-1", draftManifest: { displayName: "My Flow" } }],
       // findRegistryDependents would find dependents but is never reached
     ];
 
@@ -189,7 +188,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
       [
         {
           id: "@acme/dep",
-          manifest: {
+          draftManifest: {
             registryDependencies: { skills: { "@acme/target": "*" } },
           },
         },
@@ -234,7 +233,7 @@ describe("createOrgItem", () => {
       { version: "2.0.0", customField: true },
     );
     expect(tracking.insertCalls).toHaveLength(1);
-    const manifest = tracking.insertCalls[0]!.manifest as Record<string, unknown>;
+    const manifest = tracking.insertCalls[0]!.draftManifest as Record<string, unknown>;
     expect(manifest.version).toBe("2.0.0");
     expect(manifest.displayName).toBe("Custom Skill");
     expect(manifest.type).toBe("skill");
@@ -272,10 +271,9 @@ describe("getOrgItem", () => {
         {
           id: "@acme/skill",
           orgId: "org-1",
-          name: "skill",
           type: "skill",
-          manifest: {},
-          content: "code",
+          draftManifest: {},
+          draftContent: "code",
           source: "local",
           createdBy: "user-1",
           createdAt: new Date(),
@@ -285,7 +283,7 @@ describe("getOrgItem", () => {
       // depRefs (packageDependencies)
       [{ packageId: "flow-1" }],
       // getPackageDisplayNames for flows
-      [{ id: "flow-1", manifest: { displayName: "My Flow" } }],
+      [{ id: "flow-1", draftManifest: { displayName: "My Flow" } }],
     ];
     const result = await getOrgItem("org-1", "@acme/skill", SKILL_CONFIG);
     expect(result).not.toBeNull();

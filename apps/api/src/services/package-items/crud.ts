@@ -28,12 +28,12 @@ async function getPackageDisplayNames(
 ): Promise<{ id: string; displayName: string }[]> {
   if (packageIds.length === 0) return [];
   const rows = await db
-    .select({ id: packages.id, manifest: packages.manifest })
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(inArray(packages.id, packageIds));
 
   return rows.map((r) => {
-    const m = (r.manifest ?? {}) as Partial<Manifest>;
+    const m = (r.draftManifest ?? {}) as Partial<Manifest>;
     return {
       id: r.id,
       displayName: m.displayName ?? r.id,
@@ -47,14 +47,14 @@ async function findRegistryDependents(
   targetPackageId: string,
 ): Promise<{ id: string; displayName: string }[]> {
   const registryPkgs = await db
-    .select({ id: packages.id, manifest: packages.manifest })
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(eq(packages.orgId, orgId));
 
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of registryPkgs) {
-    if (!pkg.manifest || pkg.id === targetPackageId) continue;
-    const m = pkg.manifest as Partial<Manifest>;
+    if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
+    const m = pkg.draftManifest as Partial<Manifest>;
     const deps = extractDependencies(m);
     for (const dep of deps) {
       if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
@@ -106,9 +106,8 @@ export async function createOrgItem(
       orgId,
       type: cfg.type,
       source: "local",
-      name: item.id,
-      manifest: finalManifest,
-      content: item.content,
+      draftManifest: finalManifest,
+      draftContent: item.content,
       createdBy: item.createdBy ?? null,
       createdAt: now,
       updatedAt: now,
@@ -132,12 +131,12 @@ export async function updateOrgItem(
   const rows = await db
     .update(packages)
     .set({
-      manifest: payload.manifest,
-      content: payload.content,
+      draftManifest: payload.manifest,
+      draftContent: payload.content,
       updatedAt: new Date(),
-      version: sql`${packages.version} + 1`,
+      lockVersion: sql`${packages.lockVersion} + 1`,
     })
-    .where(and(eq(packages.id, id), eq(packages.version, expectedVersion)))
+    .where(and(eq(packages.id, id), eq(packages.lockVersion, expectedVersion)))
     .returning();
 
   return rows[0] ?? null;
@@ -167,11 +166,11 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   }
 
   return data.map((row) => {
-    const m = (row.manifest ?? {}) as Partial<Manifest>;
+    const m = (row.draftManifest ?? {}) as Partial<Manifest>;
     return {
       id: row.id,
       orgId: row.orgId,
-      name: m.displayName ?? row.name,
+      name: m.displayName ?? row.id,
       description: m.description ?? null,
       source: row.source ?? "local",
       createdBy: row.createdBy,
@@ -204,13 +203,13 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
 
   const packageIds = depRefs.map((d) => d.packageId);
 
-  const m = (data.manifest ?? {}) as Partial<Manifest>;
+  const m = (data.draftManifest ?? {}) as Partial<Manifest>;
   return {
     id: data.id,
     orgId: data.orgId,
-    name: m.displayName ?? data.name,
+    name: m.displayName ?? data.id,
     description: m.description ?? null,
-    content: data.content,
+    content: data.draftContent,
     source: data.source ?? "local",
     createdBy: data.createdBy,
     createdAt: data.createdAt?.toISOString() ?? "",
@@ -218,8 +217,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     autoInstalled: data.autoInstalled,
     version: (m.version as string) ?? null,
     manifestName: (m.name as string) ?? null,
-    manifest: (data.manifest ?? {}) as Record<string, unknown>,
-    lockVersion: data.version,
+    manifest: (data.draftManifest ?? {}) as Record<string, unknown>,
+    lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
     flows: await getPackageDisplayNames(packageIds),
   };

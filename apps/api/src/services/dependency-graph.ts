@@ -112,8 +112,7 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
       .select({
         id: packages.id,
         type: packages.type,
-        name: packages.name,
-        manifest: packages.manifest,
+        draftManifest: packages.draftManifest,
         source: packages.source,
       })
       .from(packages)
@@ -122,9 +121,8 @@ export async function buildGraph(rootId: string, orgId: string): Promise<Depende
 
     if (!pkg) continue;
 
-    const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
-    const displayName =
-      (manifest.displayName as string) || (manifest.name as string) || pkg.name || packageId;
+    const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
+    const displayName = (manifest.displayName as string) || (manifest.name as string) || packageId;
     const version = manifest.version as string | null;
 
     nodes.set(packageId, {

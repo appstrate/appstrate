@@ -133,7 +133,7 @@ export function MarketplacePage() {
               >
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="font-semibold text-sm">
-                    {pkg.scope}/{pkg.name}
+                    {pkg.displayName || `${pkg.scope}/${pkg.name}`}
                   </span>
                   <TypeBadge type={pkg.type} />
                 </div>

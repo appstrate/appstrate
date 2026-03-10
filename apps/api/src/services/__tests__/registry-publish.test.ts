@@ -76,11 +76,9 @@ function makePackageRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "@acme/my-flow",
     type: "flow",
-    name: "My Flow",
     orgId: "org-1",
     manifest: { name: "@acme/my-flow", version: "1.0.0" },
     source: "local",
-    content: null,
     ...overrides,
   };
 }

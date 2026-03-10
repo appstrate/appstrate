@@ -114,7 +114,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
         ? {
             manifest: flow.manifest,
             updatedAt: rawItem.updatedAt,
-            lockVersion: rawItem.version,
+            lockVersion: rawItem.lockVersion,
             prompt: flow.prompt,
           }
         : {}),
