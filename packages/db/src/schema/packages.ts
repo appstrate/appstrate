@@ -12,7 +12,7 @@ import {
   primaryKey,
   check,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -38,8 +38,13 @@ export const packages = pgTable(
   "packages",
   {
     id: text("id").primaryKey(),
-    orgId: uuid("org_id")
-      .references(() => organizations.id, { onDelete: "cascade" }),
+    scope: text("scope").generatedAlwaysAs(
+      (): SQL => sql`substring(${packages.id} from '^(@[^/]+)/')`,
+    ),
+    name: text("name").generatedAlwaysAs(
+      (): SQL => sql`substring(${packages.id} from '^@[^/]+/(.+)$')`,
+    ),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
     type: packageTypeEnum("type").notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
     draftManifest: jsonb("draft_manifest"),
@@ -54,6 +59,7 @@ export const packages = pgTable(
   (table) => [
     index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
+    index("idx_packages_scope").on(table.scope),
     check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
   ],
 );

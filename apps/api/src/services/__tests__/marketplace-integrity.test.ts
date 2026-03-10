@@ -431,6 +431,8 @@ describe("checkRegistryUpdates — integrity filter", () => {
       [
         {
           id: "@acme/foo",
+          scope: "@acme",
+          name: "foo",
           type: "skill",
           manifest: { version: "1.0.0" },
           updatedAt: new Date(),
@@ -461,6 +463,8 @@ describe("checkRegistryUpdates — integrity filter", () => {
       [
         {
           id: "@acme/foo",
+          scope: "@acme",
+          name: "foo",
           type: "skill",
           manifest: { version: "1.0.0" },
           updatedAt: new Date(),
@@ -493,6 +497,8 @@ describe("checkRegistryUpdates — integrity filter", () => {
       [
         {
           id: "@acme/foo",
+          scope: "@acme",
+          name: "foo",
           type: "skill",
           manifest: { version: "1.0.0" },
           updatedAt: new Date(),

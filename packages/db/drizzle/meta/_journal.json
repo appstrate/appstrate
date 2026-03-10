@@ -15,6 +15,20 @@
       "when": 1773101038450,
       "tag": "0001_useful_wendell_vaughn",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773102510981,
+      "tag": "0002_flat_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773104011760,
+      "tag": "0003_married_kang",
+      "breakpoints": true
     }
   ]
 }

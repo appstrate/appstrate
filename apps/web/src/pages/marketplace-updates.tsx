@@ -25,7 +25,7 @@ function UpdateAction({ pkg }: { pkg: PackageUpdateStatus }) {
       size="sm"
       onClick={() =>
         update.mutate(
-          { scope: `@${pkg.scope}`, name: pkg.name },
+          { scope: pkg.scope, name: pkg.name },
           { onError: (err) => alert(t("error.prefix", { message: err.message })) },
         )
       }
@@ -47,7 +47,7 @@ export function MarketplaceUpdatesPage() {
         header: t("marketplace.colPackage"),
         cell: ({ row }) => (
           <Link
-            to={`/marketplace/@${row.original.scope}/${row.original.name}`}
+            to={`/marketplace/${row.original.scope}/${row.original.name}`}
             className="hover:text-primary"
           >
             {row.original.displayName || `${row.original.scope}/${row.original.name}`}

@@ -10,7 +10,7 @@ import { eq, and, or, isNull, inArray, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
-import { normalizeScope, buildPackageId, parseScopedName } from "@appstrate/core/naming";
+import { normalizeScope, buildPackageId } from "@appstrate/core/naming";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { resolveLatestVersion, versionGt, compareVersionsDesc } from "@appstrate/core/semver";
 import { checkUpdateAvailable } from "@appstrate/core/update-check";
@@ -511,24 +511,17 @@ export async function getMarketplacePackageWithInstallStatus(
 // --- Installed registry packages ---
 
 export async function getInstalledRegistryPackages(orgId: string) {
-  const rows = await db
+  return db
     .select({
       id: packages.id,
+      scope: packages.scope,
+      name: packages.name,
       type: packages.type,
       draftManifest: packages.draftManifest,
       updatedAt: packages.updatedAt,
     })
     .from(packages)
     .where(eq(packages.orgId, orgId));
-
-  return rows.map((row) => {
-    const parsed = parseScopedName(row.id);
-    return {
-      ...row,
-      registryScope: parsed?.scope ?? null,
-      registryName: parsed?.name ?? null,
-    };
-  });
 }
 
 // --- Check for updates ---
@@ -560,12 +553,11 @@ export async function checkRegistryUpdates(
 
   const results = await Promise.allSettled(
     installed.map(async (pkg): Promise<PackageUpdateStatus | null> => {
-      const parsed = parseScopedName(pkg.id);
-      if (!parsed) return null;
+      if (!pkg.scope || !pkg.name) return null;
 
       let remote;
       try {
-        remote = await authedClient.getPackage(`@${parsed.scope}`, parsed.name);
+        remote = await authedClient.getPackage(pkg.scope, pkg.name);
       } catch {
         return null;
       }
@@ -593,8 +585,8 @@ export async function checkRegistryUpdates(
       return {
         id: pkg.id,
         type: pkg.type,
-        scope: parsed.scope,
-        name: parsed.name,
+        scope: pkg.scope,
+        name: pkg.name,
         displayName: manifest.displayName ?? null,
         // "0.0.0" ensures any registry version satisfies the update check
         installedVersion: installedVersion ?? "0.0.0",
