@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { useFormErrors } from "../hooks/use-form-errors";
+import { AuthLayout } from "../components/auth-layout";
 
 export function WelcomePage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -80,84 +81,88 @@ export function WelcomePage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
-        <h1 className="text-2xl font-bold text-center mb-2">
-          <span>App</span>strate
-        </h1>
-        <p className="text-center text-sm text-muted-foreground mb-6">{t("welcome.subtitle")}</p>
+    <AuthLayout>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col items-center gap-2">
+          <h1 className="text-xl font-bold">
+            <span>App</span>strate
+          </h1>
+          <p className="text-center text-sm text-muted-foreground">{t("welcome.subtitle")}</p>
+        </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="displayName">{t("welcome.displayName")}</Label>
-            <Input
-              id="displayName"
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={t("login.namePlaceholder")}
-              autoComplete="name"
-              autoFocus
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="password">
-              {t("welcome.password")}{" "}
-              <span className="text-xs text-muted-foreground font-normal">
-                ({t("welcome.optional")})
-              </span>
-            </Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                clearField("password");
-              }}
-              onBlur={() => onBlur("password", password)}
-              placeholder="••••••••"
-              minLength={8}
-              autoComplete="new-password"
-              aria-invalid={errors.password ? true : undefined}
-              className={cn(errors.password && "border-destructive")}
-            />
-            {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
-          </div>
-
-          {password && (
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">{t("preferences.confirmPassword")}</Label>
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="displayName">{t("welcome.displayName")}</Label>
               <Input
-                id="confirmPassword"
+                id="displayName"
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder={t("login.namePlaceholder")}
+                autoComplete="name"
+                autoFocus
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="password">
+                {t("welcome.password")}{" "}
+                <span className="text-xs text-muted-foreground font-normal">
+                  ({t("welcome.optional")})
+                </span>
+              </Label>
+              <Input
+                id="password"
                 type="password"
-                value={confirmPassword}
+                value={password}
                 onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  clearField("confirmPassword");
+                  setPassword(e.target.value);
+                  clearField("password");
                 }}
-                onBlur={() => onBlur("confirmPassword", confirmPassword)}
+                onBlur={() => onBlur("password", password)}
                 placeholder="••••••••"
                 minLength={8}
                 autoComplete="new-password"
-                aria-invalid={errors.confirmPassword ? true : undefined}
-                className={cn(errors.confirmPassword && "border-destructive")}
+                aria-invalid={errors.password ? true : undefined}
+                className={cn(errors.password && "border-destructive")}
               />
-              {errors.confirmPassword && (
-                <div className="text-sm text-destructive">{errors.confirmPassword}</div>
-              )}
+              {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
             </div>
-          )}
 
-          {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+            {password && (
+              <div className="grid gap-2">
+                <Label htmlFor="confirmPassword">{t("preferences.confirmPassword")}</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    clearField("confirmPassword");
+                  }}
+                  onBlur={() => onBlur("confirmPassword", confirmPassword)}
+                  placeholder="••••••••"
+                  minLength={8}
+                  autoComplete="new-password"
+                  aria-invalid={errors.confirmPassword ? true : undefined}
+                  className={cn(errors.confirmPassword && "border-destructive")}
+                />
+                {errors.confirmPassword && (
+                  <div className="text-sm text-destructive">{errors.confirmPassword}</div>
+                )}
+              </div>
+            )}
 
-          <Button className="w-full mt-4" type="submit" disabled={loading}>
-            {loading ? <Spinner /> : t("welcome.save")}
-          </Button>
+            {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+
+            <Button className="w-full" type="submit" disabled={loading}>
+              {loading ? <Spinner /> : t("welcome.save")}
+            </Button>
+          </div>
         </form>
 
-        <p className="text-center text-sm text-muted-foreground mt-4">
+        <p className="text-center text-sm text-muted-foreground">
           <Button
             type="button"
             variant="link"
@@ -168,6 +173,6 @@ export function WelcomePage() {
           </Button>
         </p>
       </div>
-    </div>
+    </AuthLayout>
   );
 }

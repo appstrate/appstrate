@@ -23,6 +23,7 @@ import { ExtensionsPage } from "./pages/extensions-page";
 import { ProvidersPage } from "./pages/providers-page";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
+import { RegisterPage } from "./pages/register";
 import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
@@ -251,29 +252,6 @@ function OrgGate({ children }: { children: React.ReactNode }) {
 
 export function App() {
   const { user, loading } = useAuth();
-  const location = useLocation();
-
-  // Public share routes — no authentication required
-  if (location.pathname.startsWith("/share/")) {
-    return (
-      <ErrorBoundary>
-        <Routes>
-          <Route path="/share/:token" element={<PublicShareRunPage />} />
-        </Routes>
-      </ErrorBoundary>
-    );
-  }
-
-  // Public invitation routes — no authentication required
-  if (location.pathname.startsWith("/invite/")) {
-    return (
-      <ErrorBoundary>
-        <Routes>
-          <Route path="/invite/:token" element={<InviteAcceptPage />} />
-        </Routes>
-      </ErrorBoundary>
-    );
-  }
 
   if (loading) {
     return (
@@ -286,7 +264,17 @@ export function App() {
   }
 
   if (!user) {
-    return <LoginPage />;
+    return (
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          <Route path="/share/:token" element={<PublicShareRunPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </ErrorBoundary>
+    );
   }
 
   return (
@@ -295,6 +283,10 @@ export function App() {
       <OrgGate>
         <GlobalRealtimeSync>
           <Routes>
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/register" element={<Navigate to="/" replace />} />
+            <Route path="/share/:token" element={<PublicShareRunPage />} />
+            <Route path="/invite/:token" element={<InviteAcceptPage />} />
             <Route path="/create-org" element={<CreateOrgPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />

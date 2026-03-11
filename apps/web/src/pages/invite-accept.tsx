@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { refreshAuth } from "../hooks/use-auth";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
+import { AuthLayout } from "../components/auth-layout";
 
 interface InviteInfo {
   email: string;
@@ -73,15 +74,12 @@ export function InviteAcceptPage() {
       const data = await res.json();
 
       if (data.isNewUser) {
-        // New user — refresh auth state (session cookie was set by backend), then go to welcome
         orgStore.getState().setId(data.orgId);
         await refreshAuth();
         navigate(`/welcome?org=${data.orgId}`);
       } else if (data.requiresLogin) {
-        // Existing user but not logged in
         navigate("/");
       } else {
-        // Existing user, already logged in — switch org and go home
         if (data.orgId) {
           orgStore.getState().setId(data.orgId);
         }
@@ -96,46 +94,48 @@ export function InviteAcceptPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
-          <div className="flex items-center justify-center py-8">
-            <Spinner />
-          </div>
+      <AuthLayout>
+        <div className="flex items-center justify-center py-8">
+          <Spinner />
         </div>
-      </div>
+      </AuthLayout>
     );
   }
 
   if (error && !info) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
-          <h1 className="text-2xl font-bold text-center mb-2">
-            <span>App</span>strate
-          </h1>
+      <AuthLayout>
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <h1 className="text-xl font-bold">
+              <span>App</span>strate
+            </h1>
+          </div>
           <p className="text-sm text-destructive text-center">{error}</p>
-          <Button className="w-full mt-4" onClick={() => navigate("/")}>
+          <Button className="w-full" onClick={() => navigate("/")}>
             {t("invite.goHome")}
           </Button>
         </div>
-      </div>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
-        <h1 className="text-2xl font-bold text-center mb-2">
-          <span>App</span>strate
-        </h1>
-        <p className="text-center text-sm text-muted-foreground mb-6">
-          {t("invite.description", {
-            inviter: info?.inviterName,
-            org: info?.orgName,
-          })}
-        </p>
+    <AuthLayout>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col items-center gap-2">
+          <h1 className="text-xl font-bold">
+            <span>App</span>strate
+          </h1>
+          <p className="text-center text-sm text-muted-foreground">
+            {t("invite.description", {
+              inviter: info?.inviterName,
+              org: info?.orgName,
+            })}
+          </p>
+        </div>
 
-        <div className="rounded-lg border border-border bg-muted/50 p-4 mb-4">
+        <div className="rounded-lg border bg-muted/50 p-4">
           <div className="text-xs text-muted-foreground">{t("invite.emailLabel")}</div>
           <div className="text-sm font-medium">{info?.email}</div>
           <div className="text-xs text-muted-foreground mt-2">{t("invite.roleLabel")}</div>
@@ -144,12 +144,12 @@ export function InviteAcceptPage() {
           </div>
         </div>
 
-        {error && <p className="text-sm text-destructive mt-2">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
-        <Button className="w-full mt-4" onClick={handleAccept} disabled={accepting}>
+        <Button className="w-full" onClick={handleAccept} disabled={accepting}>
           {accepting ? <Spinner /> : t("invite.accept")}
         </Button>
       </div>
-    </div>
+    </AuthLayout>
   );
 }
