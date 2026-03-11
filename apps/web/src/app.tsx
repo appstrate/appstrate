@@ -8,6 +8,7 @@ import { ShareableRunPage } from "./pages/shareable-run";
 import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { ExecutionsPage } from "./pages/executions-page";
+import { DashboardPage } from "./pages/dashboard";
 import { MarketplacePage } from "./pages/marketplace";
 import { MarketplaceDetailPage } from "./pages/marketplace-detail";
 import { MarketplaceUpdatesPage } from "./pages/marketplace-updates";
@@ -39,6 +40,7 @@ import {
   FileText,
   LogOut,
   ShoppingBag,
+  LayoutGrid,
   Sun,
   Moon,
   Monitor,
@@ -177,6 +179,13 @@ function MainLayout() {
         </Link>
         <OrgSwitcher />
         <Link
+          to="/flows"
+          className="inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          title="Flows"
+        >
+          <LayoutGrid size={18} />
+        </Link>
+        <Link
           to="/marketplace"
           className="inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           title="Marketplace"
@@ -290,7 +299,8 @@ export function App() {
             <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
-              <Route path="/" element={<PackageList />} />
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/flows" element={<PackageList />} />
               <Route path="/flows/new" element={<PackageEditorPage type="flow" />} />
               <Route path="/flows/:scope/:name/edit" element={<PackageEditorPage type="flow" />} />
               <Route

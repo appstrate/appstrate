@@ -5,7 +5,7 @@ import { Shield } from "lucide-react";
 import { Badge } from "./badge";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { formatDateField, truncate } from "../lib/markdown";
+import { formatDateField } from "../lib/markdown";
 import type { Execution } from "@appstrate/shared-types";
 
 export function ExecutionRow({
@@ -23,7 +23,6 @@ export function ExecutionRow({
   const isRunning = execution.status === "running" || execution.status === "pending";
   const isUnread = execution.notifiedAt != null && execution.readAt == null;
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
-  const inputPreview = execution.input ? truncate(JSON.stringify(execution.input), 60) : "";
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -64,11 +63,6 @@ export function ExecutionRow({
         {execution.tokensUsed != null && (
           <span className="text-muted-foreground text-xs">
             {execution.tokensUsed.toLocaleString()} tok
-          </span>
-        )}
-        {inputPreview && (
-          <span className="text-muted-foreground text-xs truncate max-w-[200px]">
-            {inputPreview}
           </span>
         )}
         <UIBadge variant={execution.packageVersion ? "outline" : "secondary"}>

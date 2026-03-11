@@ -1,4 +1,9 @@
 {
+  "dashboard.recentFlows": "Derniers flows exécutés",
+  "dashboard.recentExecutions": "Dernières exécutions",
+  "dashboard.seeAll": "Voir tout",
+  "dashboard.empty": "Aucune activité récente",
+  "dashboard.emptyHint": "Lancez un flow pour voir votre activité ici",
   "list.create": "Créer un flow",
   "list.createItem": "Créer",
   "list.import": "Importer un package (.zip)",

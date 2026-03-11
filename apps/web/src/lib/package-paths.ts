@@ -7,7 +7,7 @@ export function packageDetailPath(type: PackageType | string, packageId: string)
 
 /** / for flows, /{type}s for others */
 export function packageListPath(type: PackageType | string): string {
-  return type === "flow" ? "/" : `/${type}s`;
+  return type === "flow" ? "/flows" : `/${type}s`;
 }
 
 /** /{type}s/{id}/edit */

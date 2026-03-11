@@ -135,7 +135,7 @@ function FlowEditorInner({
   return (
     <div className="space-y-4">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/" className="text-muted-foreground hover:text-foreground">
+        <Link to="/flows" className="text-muted-foreground hover:text-foreground">
           {t("detail.breadcrumb")}
         </Link>
         <span className="opacity-50">/</span>
@@ -458,7 +458,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/flows" replace />;
   }
 
   if (isEdit && detail && (detail as { source?: string }).source === "system") {

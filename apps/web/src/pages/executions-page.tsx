@@ -52,7 +52,7 @@ export function ExecutionsPage() {
           hint={t("executions.emptyHint")}
           icon={PlayCircle}
         >
-          <Link to="/">
+          <Link to="/flows">
             <Button variant="outline">{t("executions.goToFlows")}</Button>
           </Link>
         </EmptyState>
