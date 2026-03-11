@@ -22,6 +22,24 @@ export function rateLimit(maxPerMinute: number) {
   };
 }
 
+/** Bearer token-based rate limiter for internal container routes. */
+export function rateLimitByBearer(maxPerMinute: number) {
+  return async (c: Context, next: Next) => {
+    const auth = c.req.header("Authorization") ?? "";
+    // Extract executionId portion (before the HMAC dot) for unique-per-execution keying
+    const token = auth.startsWith("Bearer ")
+      ? (auth.slice(7).split(".")[0] ?? "unknown")
+      : "unknown";
+    const key = `internal:${c.req.path}:${token}`;
+
+    if (!store.consume(key, maxPerMinute, maxPerMinute)) {
+      return c.json({ error: "RATE_LIMITED", message: "Too many requests" }, 429);
+    }
+
+    return next();
+  };
+}
+
 /** IP-based rate limiter for public (unauthenticated) routes. */
 export function rateLimitByIp(maxPerMinute: number) {
   return async (c: Context, next: Next) => {

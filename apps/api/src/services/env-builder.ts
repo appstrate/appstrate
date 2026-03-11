@@ -5,6 +5,7 @@ import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
+import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
 import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
 import { getPackageZip } from "./package-storage.ts";
@@ -41,11 +42,12 @@ export async function resolveProviderDefs(
 
 /**
  * Build the execution API descriptor for container-to-host calls.
+ * Token is HMAC-signed to prevent forgery from leaked executionIds.
  */
 export function buildExecutionApi(executionId: string): { url: string; token: string } {
   const apiEnv = getEnv();
   const url = apiEnv.PLATFORM_API_URL ?? `http://localhost:${apiEnv.PORT}`;
-  return { url, token: executionId };
+  return { url, token: signExecutionToken(executionId) };
 }
 
 /**

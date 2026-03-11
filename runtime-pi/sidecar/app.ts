@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
+  MAX_SUBSTITUTE_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
   substituteVars,
   findUnresolvedPlaceholders,
@@ -19,6 +20,7 @@ export interface AppDeps {
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch;        // default: global fetch — injectable for tests
   isReady?: () => boolean;       // default: () => true — controls /health
+  configSecret?: string;         // One-time config secret (from CONFIG_SECRET env var)
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -36,8 +38,30 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ status: "ok" });
   });
 
-  // Runtime configuration endpoint (used by sidecar pool for pre-warmed containers)
+  // Runtime configuration endpoint (used by sidecar pool for pre-warmed containers).
+  // If CONFIG_SECRET is set, requires Authorization header and disables after first use.
+  let configUsed = false;
   app.post("/configure", async (c) => {
+    // Enforce one-time config secret when set (pooled sidecars)
+    if (deps.configSecret) {
+      if (configUsed) {
+        return c.json({ error: "Already configured" }, 403);
+      }
+      const auth = c.req.header("Authorization") ?? "";
+      const expected = `Bearer ${deps.configSecret}`;
+      // Constant-time comparison to prevent timing attacks
+      if (auth.length !== expected.length) {
+        return c.json({ error: "Unauthorized" }, 403);
+      }
+      let diff = 0;
+      for (let i = 0; i < auth.length; i++) {
+        diff |= auth.charCodeAt(i) ^ expected.charCodeAt(i);
+      }
+      if (diff !== 0) {
+        return c.json({ error: "Unauthorized" }, 403);
+      }
+    }
+
     const body = await c.req.json<{
       executionToken?: string;
       platformApiUrl?: string;
@@ -46,6 +70,8 @@ export function createApp(deps: AppDeps): Hono {
     if (body.executionToken) config.executionToken = body.executionToken;
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
+
+    configUsed = true;
 
     // Reset cookie jar for new execution context
     cookieJar.clear();
@@ -112,11 +138,8 @@ export function createApp(deps: AppDeps): Hono {
     // 3b. Check for unresolved placeholders in URL
     const unresolvedInUrl = findUnresolvedPlaceholders(resolvedUrl);
     if (unresolvedInUrl.length > 0) {
-      const available = Object.keys(creds.credentials);
       return c.json(
-        {
-          error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}. Available: ${available.join(", ") || "(none)"}`,
-        },
+        { error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}` },
         400,
       );
     }
@@ -176,11 +199,8 @@ export function createApp(deps: AppDeps): Hono {
     if (resolvedProxy) {
       const unresolvedInProxy = findUnresolvedPlaceholders(resolvedProxy);
       if (unresolvedInProxy.length > 0) {
-        const available = Object.keys(creds.credentials);
         return c.json(
-          {
-            error: `Unresolved placeholders in X-Proxy: {{${unresolvedInProxy.join()}}}. Available: ${available.join(", ") || "(none)"}`,
-          },
+          { error: `Unresolved placeholders in X-Proxy: {{${unresolvedInProxy.join()}}}` },
           400,
         );
       }
@@ -190,11 +210,8 @@ export function createApp(deps: AppDeps): Hono {
     for (const [key, value] of Object.entries(forwardedHeaders)) {
       const unresolved = findUnresolvedPlaceholders(value);
       if (unresolved.length > 0) {
-        const available = Object.keys(creds.credentials);
         return c.json(
-          {
-            error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}. Available: ${available.join(", ") || "(none)"}`,
-          },
+          { error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}` },
           400,
         );
       }
@@ -216,17 +233,22 @@ export function createApp(deps: AppDeps): Hono {
 
     if (method !== "GET" && method !== "HEAD") {
       if (substituteBody) {
+        // Check body size before buffering
+        const contentLength = parseInt(c.req.header("content-length") || "0", 10);
+        if (contentLength > MAX_SUBSTITUTE_BODY_SIZE) {
+          return c.json({ error: "Request body too large" }, 413);
+        }
         // Buffer body and substitute variables
         const rawBody = await c.req.text();
+        if (rawBody.length > MAX_SUBSTITUTE_BODY_SIZE) {
+          return c.json({ error: "Request body too large" }, 413);
+        }
         body = substituteVars(rawBody, creds.credentials);
         // Check for unresolved placeholders in body
         const unresolvedInBody = findUnresolvedPlaceholders(body);
         if (unresolvedInBody.length > 0) {
-          const available = Object.keys(creds.credentials);
           return c.json(
-            {
-              error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}. Available: ${available.join(", ") || "(none)"}`,
-            },
+            { error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}` },
             400,
           );
         }

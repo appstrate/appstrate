@@ -233,8 +233,10 @@ async function triggerScheduledExecution(
   input?: Record<string, unknown>,
 ) {
   try {
-    // Distributed lock: prevent duplicate executions across instances
+    // Distributed lock: prevent duplicate executions across instances.
+    // Round to the second for deterministic locking across instances with clock skew.
     const fireTime = new Date();
+    fireTime.setMilliseconds(0);
     const locked = await tryAcquireScheduleLock(scheduleId, fireTime);
 
     if (!locked) {
