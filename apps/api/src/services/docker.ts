@@ -3,12 +3,19 @@ import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
+const DOCKER_API_TIMEOUT_MS = 30_000;
 
-// Bun supports fetch() with unix: option for Unix sockets
-async function dockerFetch(path: string, options: RequestInit = {}): Promise<Response> {
+// Bun supports fetch() with unix: option for Unix sockets.
+// Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
+async function dockerFetch(
+  path: string,
+  options: RequestInit = {},
+  timeoutMs: number | false = DOCKER_API_TIMEOUT_MS,
+): Promise<Response> {
   return fetch(`http://localhost${path}`, {
     ...options,
     unix: DOCKER_SOCKET,
+    ...(timeoutMs !== false && { signal: AbortSignal.timeout(timeoutMs) }),
   });
 }
 
@@ -107,6 +114,7 @@ export async function* streamLogs(
   const res = await dockerFetch(
     `/containers/${containerId}/logs?follow=true&stdout=true&stderr=true&timestamps=false`,
     { method: "GET" },
+    false, // Long-running streaming — no timeout
   );
 
   if (!res.ok) {
@@ -186,9 +194,11 @@ export async function* streamLogs(
 }
 
 export async function waitForExit(containerId: string): Promise<number> {
-  const res = await dockerFetch(`/containers/${containerId}/wait`, {
-    method: "POST",
-  });
+  const res = await dockerFetch(
+    `/containers/${containerId}/wait`,
+    { method: "POST" },
+    false, // Long-running — blocks until container exits
+  );
 
   if (!res.ok) {
     const error = await res.text();
@@ -412,7 +422,7 @@ export async function cleanupOrphanedContainers(): Promise<{
 }
 
 /**
- * List all Docker networks matching `appstrate-exec-*` and remove them.
+ * List all Docker networks matching `appstrate-exec-*` or `appstrate-sidecar-pool` and remove them.
  * This is safe to call at startup because no executions should be running.
  */
 async function cleanupOrphanedNetworks(): Promise<number> {
@@ -420,7 +430,9 @@ async function cleanupOrphanedNetworks(): Promise<number> {
   if (!res.ok) return 0;
 
   const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
-  const orphaned = networks.filter((n) => n.Name.startsWith("appstrate-exec-"));
+  const orphaned = networks.filter(
+    (n) => n.Name.startsWith("appstrate-exec-") || n.Name === "appstrate-sidecar-pool",
+  );
 
   if (orphaned.length === 0) return 0;
 

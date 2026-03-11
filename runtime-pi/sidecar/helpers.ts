@@ -5,6 +5,7 @@ export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0
 
 export const MAX_RESPONSE_SIZE = 50_000;
 export const OUTBOUND_TIMEOUT_MS = 30_000;
+export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 
 export interface SidecarConfig {
   platformApiUrl: string;

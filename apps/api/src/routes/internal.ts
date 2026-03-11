@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
+import { parseSignedToken } from "../lib/execution-token.ts";
+import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentExecutions, getAdminConnections } from "../services/state.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
@@ -36,7 +38,16 @@ async function verifyExecutionToken(c: Context): Promise<
     };
   }
 
-  const executionId = authHeader.slice(7);
+  const rawToken = authHeader.slice(7);
+  if (!rawToken) {
+    return {
+      ok: false,
+      response: c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401),
+    };
+  }
+
+  // Verify HMAC signature before DB lookup
+  const executionId = parseSignedToken(rawToken);
   if (!executionId) {
     return {
       ok: false,
@@ -87,8 +98,11 @@ async function verifyExecutionToken(c: Context): Promise<
 export function createInternalRouter() {
   const router = new Hono();
 
+  // Rate limit all internal endpoints (200 req/min per token)
+  router.use("/*", rateLimitByBearer(200));
+
   // GET /internal/execution-history — called from inside containers
-  // Auth: Bearer <executionId> (verified against executions table, must be running)
+  // Auth: Bearer <signedToken> (HMAC-verified, then checked against executions table)
   router.get("/execution-history", async (c) => {
     const auth = await verifyExecutionToken(c);
     if (!auth.ok) return auth.response;
@@ -133,7 +147,7 @@ export function createInternalRouter() {
   });
 
   // GET /internal/credentials/:scope/:name — called from inside containers
-  // Auth: Bearer <executionId> (same mechanism as execution-history)
+  // Auth: Bearer <signedToken> (same HMAC mechanism as execution-history)
   // Returns unified format: { credentials: Record<string, string>, authorizedUris: string[] | null }
   router.get("/credentials/:scope{@[^/]+}/:name", async (c) => {
     const auth = await verifyExecutionToken(c);

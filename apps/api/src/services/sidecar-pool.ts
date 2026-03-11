@@ -19,6 +19,7 @@ const HEALTH_CHECK_DELAYS_MS = [
 interface PooledSidecar {
   containerId: string;
   hostPort: number;
+  configSecret: string;
 }
 
 const pool: PooledSidecar[] = [];
@@ -37,6 +38,11 @@ export async function initSidecarPool(): Promise<void> {
     enabled = true;
     logger.info("Sidecar pool initialized", { size: pool.length });
   } catch (err) {
+    // Clean up the network if it was created before replenish() failed
+    if (standbyNetworkId) {
+      await removeNetwork(standbyNetworkId).catch(() => {});
+      standbyNetworkId = undefined;
+    }
     logger.warn("Sidecar pool disabled — falling back to on-demand creation", {
       error: err instanceof Error ? err.message : String(err),
     });
@@ -64,11 +70,14 @@ export async function acquireSidecar(
   const entry = pool.pop()!;
 
   try {
-    // Configure sidecar via its host-mapped port
+    // Configure sidecar via its host-mapped port (authenticated with one-time secret)
     const host = await getDockerHostAddress();
     const configRes = await fetch(`http://${host}:${entry.hostPort}/configure`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${entry.configSecret}`,
+      },
       body: JSON.stringify({
         executionToken: sidecarEnv.executionToken,
         platformApiUrl: sidecarEnv.platformApiUrl,
@@ -140,9 +149,10 @@ function scheduleReplenish(): void {
 
 /** Create a single pooled sidecar container. */
 async function createPooledSidecar(): Promise<PooledSidecar> {
+  const configSecret = crypto.randomUUID();
   const containerId = await createContainer(
     "pool",
-    { PORT: "8080" },
+    { PORT: "8080", CONFIG_SECRET: configSecret },
     {
       image: SIDECAR_IMAGE,
       adapterName: "sidecar-pool",
@@ -164,7 +174,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
   }
 
   await waitForSidecarHealth(hostPort);
-  return { containerId, hostPort };
+  return { containerId, hostPort, configSecret };
 }
 
 /** Fill the pool to its target size (parallel creation). */

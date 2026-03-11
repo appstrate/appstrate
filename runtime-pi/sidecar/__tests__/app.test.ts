@@ -108,6 +108,55 @@ describe("POST /configure", () => {
     expect(deps.config.executionToken).toBe("new-tok");
     expect(deps.config.platformApiUrl).toBe("http://original:3000");
   });
+
+  test("rejects without valid configSecret when set", async () => {
+    const app = createApp(makeDeps({ configSecret: "secret-123" }));
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ executionToken: "new-tok" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("accepts valid configSecret", async () => {
+    const deps = makeDeps({ configSecret: "secret-123" });
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ executionToken: "new-tok" }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer secret-123",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(deps.config.executionToken).toBe("new-tok");
+  });
+
+  test("rejects second configure call (one-time)", async () => {
+    const app = createApp(makeDeps({ configSecret: "secret-123" }));
+    // First call succeeds
+    const res1 = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ executionToken: "tok1" }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer secret-123",
+      },
+    });
+    expect(res1.status).toBe(200);
+    // Second call rejected
+    const res2 = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ executionToken: "tok2" }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer secret-123",
+      },
+    });
+    expect(res2.status).toBe(403);
+  });
 });
 
 // --- GET /execution-history ---
@@ -388,6 +437,22 @@ describe("ALL /proxy — forwarding", () => {
     expect(res.status).toBe(400);
     const body = await res.json() as { error: string };
     expect(body.error).toContain("Unresolved placeholders in body");
+  });
+
+  test("returns 413 for oversized body with X-Substitute-Body", async () => {
+    const app = createApp(makeDeps());
+    const largeBody = "x".repeat(6 * 1024 * 1024); // 6MB > 5MB limit
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/action",
+        "X-Substitute-Body": "true",
+        "Content-Type": "text/plain",
+      },
+      body: largeBody,
+    });
+    expect(res.status).toBe(413);
   });
 
   test("returns 502 when target request fails", async () => {
