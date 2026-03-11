@@ -184,6 +184,7 @@ const expectedEndpoints = [
 
   // Notifications
   "GET /api/notifications/unread-count",
+  "GET /api/notifications/unread-counts-by-flow",
   "PUT /api/notifications/read/{executionId}",
   "PUT /api/notifications/read-all",
   "GET /api/executions",

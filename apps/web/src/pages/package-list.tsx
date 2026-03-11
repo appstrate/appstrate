@@ -6,6 +6,7 @@ import type { PackageType } from "@appstrate/shared-types";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
+import { useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
@@ -18,6 +19,7 @@ export interface CardItem {
   runningExecutions?: number;
   tags?: string[];
   usedByFlows?: number;
+  unreadCount?: number;
   statusBadge?: ReactNode;
   actions?: ReactNode;
   iconUrl?: string;
@@ -93,6 +95,7 @@ export function PackageList() {
   const { t } = useTranslation(["flows", "common"]);
   const { data: flows, isLoading, error } = useFlows();
   const { isOrgAdmin } = useOrg();
+  const { data: unreadCounts } = useUnreadCountsByFlow();
 
   const items: CardItem[] | undefined = flows?.map((f) => ({
     id: f.id,
@@ -102,6 +105,7 @@ export function PackageList() {
     source: f.source,
     runningExecutions: f.runningExecutions,
     tags: f.tags,
+    unreadCount: unreadCounts?.[f.id],
   }));
 
   return (

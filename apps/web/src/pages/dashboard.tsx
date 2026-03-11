@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRight } from "lucide-react";
 import { useFlows } from "../hooks/use-packages";
-import { useAllExecutions } from "../hooks/use-notifications";
+import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ExecutionRow } from "../components/execution-row";
@@ -12,6 +12,7 @@ export function DashboardPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { data: execData, isLoading: execLoading, error: execError } = useAllExecutions(0, 20);
   const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
+  const { data: unreadCounts } = useUnreadCountsByFlow();
 
   const isLoading = execLoading || flowsLoading;
   const error = execError || flowsError;
@@ -96,11 +97,11 @@ export function DashboardPage() {
               {t("dashboard.seeAll")}
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto pb-2">
+          <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
             {recentFlowIds.map((flowId) => {
               const flow = flowMap.get(flowId);
               return (
-                <div key={flowId} className="min-w-[260px] max-w-[300px] shrink-0">
+                <div key={flowId} className="min-w-[260px] max-w-[300px] shrink-0 flex">
                   <PackageCard
                     id={flowId}
                     displayName={flow?.displayName ?? flowId}
@@ -109,6 +110,7 @@ export function DashboardPage() {
                     source={flow?.source as "system" | "local" | undefined}
                     runningExecutions={flow?.runningExecutions}
                     tags={flow?.tags}
+                    unreadCount={unreadCounts?.[flowId]}
                   />
                 </div>
               );

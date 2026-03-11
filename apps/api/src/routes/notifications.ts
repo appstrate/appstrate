@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   getUnreadNotificationCount,
+  getUnreadCountsByFlow,
   markNotificationRead,
   markAllNotificationsRead,
   listUserExecutions,
@@ -16,6 +17,14 @@ export function createNotificationsRouter() {
     const orgId = c.get("orgId");
     const count = await getUnreadNotificationCount(user.id, orgId);
     return c.json({ count });
+  });
+
+  // GET /api/notifications/unread-counts-by-flow
+  router.get("/notifications/unread-counts-by-flow", async (c) => {
+    const user = c.get("user");
+    const orgId = c.get("orgId");
+    const counts = await getUnreadCountsByFlow(user.id, orgId);
+    return c.json({ counts });
   });
 
   // PUT /api/notifications/read/:executionId
