@@ -5,7 +5,6 @@ import { db } from "../lib/db.ts";
 import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
-import type { ProviderSetupGuide } from "@appstrate/core/validation";
 import { getEnv } from "@appstrate/env";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
@@ -14,10 +13,8 @@ import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
-import {
-  getDefaultAdminCredentialSchema,
-  buildProviderDefinitionFromManifest,
-} from "@appstrate/core/validation";
+import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
+import { packageToProviderConfig } from "../lib/provider-config.ts";
 
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
@@ -45,39 +42,6 @@ function applyProxyProviderDefaults(data: { authMode?: string } & Record<string,
   if (!cats.includes("proxy")) {
     data.categories = [...cats, "proxy"];
   }
-}
-
-function packageToProviderConfig(
-  pkg: {
-    id: string;
-    manifest: unknown;
-    source: string | null;
-  },
-  credRow?: { credentialsEncrypted: string | null; enabled: boolean } | null,
-): ProviderConfig {
-  const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
-  const resolved = buildProviderDefinitionFromManifest(pkg.id, manifest);
-  const isSystem = pkg.source === "system";
-  const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
-  const adminCredentialSchema =
-    explicitSchema ??
-    (getDefaultAdminCredentialSchema(resolved.authMode) as JSONSchemaObject | undefined) ??
-    undefined;
-  return {
-    ...resolved,
-    version: (manifest.version as string) ?? undefined,
-    description: (manifest.description as string) ?? undefined,
-    author: (manifest.author as string) ?? undefined,
-    tags: (manifest.tags as string[]) ?? undefined,
-    source: isSystem ? "built-in" : "custom",
-    hasCredentials: !!credRow?.credentialsEncrypted,
-    enabled: !!credRow?.enabled,
-    adminCredentialSchema,
-    setupGuide: (manifest.setupGuide as ProviderSetupGuide) ?? undefined,
-    tokenAuthMethod: resolved.tokenAuthMethod as ProviderConfig["tokenAuthMethod"],
-    credentialSchema: (def.credentialSchema as Record<string, unknown>) ?? undefined,
-  };
 }
 
 const createProviderSchema = z.object({
@@ -125,10 +89,7 @@ const updateProviderSchema = createProviderSchema.omit({ id: true }).partial();
 export function createProvidersRouter() {
   const router = new Hono<AppEnv>();
 
-  // All endpoints are admin-only
-  router.use("*", requireAdmin());
-
-  // GET /api/providers — list all providers
+  // GET /api/providers — list all providers (all org members)
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
 
@@ -178,8 +139,8 @@ export function createProvidersRouter() {
     return c.json({ providers, callbackUrl });
   });
 
-  // POST /api/providers — create a custom provider
-  router.post("/", async (c) => {
+  // POST /api/providers — create a custom provider (admin only)
+  router.post("/", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const parsed = createProviderSchema.safeParse(body);
@@ -337,8 +298,8 @@ export function createProvidersRouter() {
     return c.json({ id: data.id }, 201);
   });
 
-  // PUT /api/providers/:scope/:name — update a provider (custom only)
-  router.put("/:scope{@[^/]+}/:name", async (c) => {
+  // PUT /api/providers/:scope/:name — update a provider (admin only, custom only)
+  router.put("/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
@@ -470,8 +431,8 @@ export function createProvidersRouter() {
     return c.json({ id: providerId });
   });
 
-  // PUT /api/providers/credentials/:scope/:name — configure credentials for a provider
-  router.put("/credentials/:scope{@[^/]+}/:name", async (c) => {
+  // PUT /api/providers/credentials/:scope/:name — configure credentials (admin only)
+  router.put("/credentials/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
@@ -545,8 +506,8 @@ export function createProvidersRouter() {
     return c.json({ configured: true });
   });
 
-  // DELETE /api/providers/credentials/:scope/:name — delete credentials for a provider
-  router.delete("/credentials/:scope{@[^/]+}/:name", async (c) => {
+  // DELETE /api/providers/credentials/:scope/:name — delete credentials (admin only)
+  router.delete("/credentials/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
@@ -560,8 +521,8 @@ export function createProvidersRouter() {
     return c.json({ configured: false });
   });
 
-  // DELETE /api/providers/:scope/:name — delete provider (custom only)
-  router.delete("/:scope{@[^/]+}/:name", async (c) => {
+  // DELETE /api/providers/:scope/:name — delete provider (admin only, custom only)
+  router.delete("/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 

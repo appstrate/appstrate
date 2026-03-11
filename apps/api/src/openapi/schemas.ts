@@ -206,6 +206,15 @@ export const schemas = {
         type: "boolean",
         description: "Whether the flow has local changes not yet published as a version",
       },
+      populatedProviders: {
+        type: "object",
+        additionalProperties: { $ref: "#/components/schemas/ProviderConfig" },
+        description: "ProviderConfig keyed by provider ID for the flow's required providers",
+      },
+      callbackUrl: {
+        type: "string",
+        description: "OAuth callback URL for provider connections",
+      },
     },
   },
   FlowVersion: {

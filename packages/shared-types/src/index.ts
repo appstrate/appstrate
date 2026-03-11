@@ -175,6 +175,8 @@ export interface FlowDetail {
   version?: string | null;
   manifest?: Record<string, unknown>;  // Raw manifest from DB (user flows only)
 
+  populatedProviders?: Record<string, ProviderConfig>;
+  callbackUrl?: string;
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;

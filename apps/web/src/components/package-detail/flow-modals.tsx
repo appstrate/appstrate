@@ -7,7 +7,6 @@ import {
 } from "../../hooks/use-mutations";
 import { useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../../hooks/use-schedules";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
-import { useProviders } from "../../hooks/use-providers";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { ConfigModal } from "../config-modal";
 import { ScheduleModal } from "../schedule-modal";
@@ -16,8 +15,7 @@ import { CustomCredentialsModal } from "../custom-credentials-modal";
 
 export function FlowModals({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("flow", packageId);
-  const { data: providersData } = useProviders();
-  const providers = providersData?.providers;
+  const populatedProviders = detail?.populatedProviders;
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
 
@@ -44,7 +42,7 @@ export function FlowModals({ packageId }: { packageId: string }) {
   if (!detail) return null;
 
   const customCredProviderDef = customCredService
-    ? providers?.find((p) => p.id === customCredService.provider)
+    ? populatedProviders?.[customCredService.provider]
     : undefined;
   const customCredSchema =
     (customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined) ?? undefined;

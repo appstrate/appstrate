@@ -1,5 +1,8 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { eq, and, or, isNull, inArray } from "drizzle-orm";
+import { db } from "../lib/db.ts";
+import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/flow-service.ts";
 import { getPackageById } from "../services/package-items.ts";
 import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
@@ -12,6 +15,8 @@ import {
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { packageToProviderConfig } from "../lib/provider-config.ts";
+import { getEnv } from "@appstrate/env";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 
@@ -39,12 +44,59 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(user.id, flow.id),
   ]);
 
+  const manifestProviders = resolveManifestProviders(m);
+
   const providerStatuses = await resolveProviderStatuses(
-    resolveManifestProviders(m),
+    manifestProviders,
     adminConns,
     orgId,
     userProfileId,
   );
+
+  // Build populatedProviders: ProviderConfig keyed by provider ID
+  const providerIds = [...new Set(manifestProviders.map((p) => p.provider))];
+  let populatedProviders: Record<string, unknown> = {};
+  if (providerIds.length > 0) {
+    const [providerPkgs, providerCreds] = await Promise.all([
+      db
+        .select({
+          id: packages.id,
+          draftManifest: packages.draftManifest,
+          source: packages.source,
+        })
+        .from(packages)
+        .where(
+          and(
+            or(eq(packages.orgId, orgId), isNull(packages.orgId)),
+            eq(packages.type, "provider"),
+            inArray(packages.id, providerIds),
+          ),
+        ),
+      db
+        .select({
+          providerId: providerCredentials.providerId,
+          credentialsEncrypted: providerCredentials.credentialsEncrypted,
+          enabled: providerCredentials.enabled,
+        })
+        .from(providerCredentials)
+        .where(
+          and(
+            eq(providerCredentials.orgId, orgId),
+            inArray(providerCredentials.providerId, providerIds),
+          ),
+        ),
+    ]);
+    const credMap = new Map(providerCreds.map((r) => [r.providerId, r]));
+    populatedProviders = Object.fromEntries(
+      providerPkgs.map((pkg) => [
+        pkg.id,
+        packageToProviderConfig(
+          { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
+          credMap.get(pkg.id) ?? null,
+        ),
+      ]),
+    );
+  }
 
   const [currentConfig, lastExec, runningCount] = await Promise.all([
     getPackageConfig(orgId, flow.id),
@@ -107,6 +159,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
             duration: lastExec.duration,
           }
         : null,
+      populatedProviders,
+      callbackUrl: `${getEnv().APP_URL}/api/auth/callback`,
       versionCount,
       hasUnpublishedChanges,
       forkedFrom: rawItem?.forkedFrom ?? null,
