@@ -14,6 +14,7 @@ import {
   Upload,
   Wrench,
   Puzzle,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
@@ -74,6 +75,12 @@ export function OrgSwitcher() {
 
           <DropdownMenuSeparator />
 
+          <DropdownMenuItem asChild>
+            <Link to="/flows" className="flex items-center gap-2">
+              <Layers size={14} />
+              {t("orgSwitcher.flows")}
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link to="/executions" className="flex items-center gap-2">
               <Activity size={14} />

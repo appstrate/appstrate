@@ -28,11 +28,11 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
 
     qc.invalidateQueries({ queryKey: ["flows", orgId] });
     qc.invalidateQueries({ queryKey: ["packages", "flow", orgId, packageId] });
+    qc.invalidateQueries({ queryKey: ["all-executions"] });
 
     if (TERMINAL_STATUSES.has(status)) {
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });
       qc.invalidateQueries({ queryKey: ["unread-count", orgId] });
-      qc.invalidateQueries({ queryKey: ["all-executions"] });
     }
   } catch {
     // Ignore malformed payloads

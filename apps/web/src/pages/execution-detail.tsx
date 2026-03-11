@@ -203,7 +203,7 @@ export function ExecutionDetailPage() {
   return (
     <>
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/" className="text-muted-foreground hover:text-foreground">
+        <Link to="/flows" className="text-muted-foreground hover:text-foreground">
           {t("detail.breadcrumb")}
         </Link>
         <span className="opacity-50">/</span>

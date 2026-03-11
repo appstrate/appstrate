@@ -10,6 +10,7 @@
   "userMenu.themeSystem": "System",
   "orgSwitcher.ariaLabel": "Switch organization",
   "orgSwitcher.ariaLabelList": "Organizations",
+  "orgSwitcher.flows": "Flows",
   "orgSwitcher.executions": "Executions",
   "orgSwitcher.schedules": "Schedules",
   "orgSwitcher.packages": "Packages",
