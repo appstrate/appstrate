@@ -47,7 +47,8 @@ export function OrgSwitcher() {
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
-            className="gap-1.5 text-muted-foreground max-w-[180px]"
+            size="sm"
+            className="gap-1.5 text-muted-foreground max-w-[180px] px-2"
             aria-label={t("orgSwitcher.ariaLabel")}
           >
             <Users size={16} className="flex-shrink-0" />

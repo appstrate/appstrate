@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders } from "../hooks/use-providers";
@@ -14,57 +13,11 @@ import {
 } from "../hooks/use-mutations";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
-import { Modal } from "../components/modal";
-import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
+import { ProviderConfigBadge } from "../components/provider-config-badge";
+import { ProviderConfigureButton } from "../components/provider-configure-button";
 import { ItemTab } from "./item-tab";
 import { providerTabConfig } from "./item-tab-configs";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
-
-function ProviderConnectButton({
-  isConnected,
-  disabled,
-  onConnect,
-  onDisconnect,
-  isPending,
-}: {
-  isConnected: boolean;
-  disabled: boolean;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  isPending: boolean;
-}) {
-  const { t } = useTranslation(["settings", "flows"]);
-
-  if (isConnected) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-emerald-500">{t("services.connected")}</span>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={onDisconnect}
-          disabled={isPending}
-        >
-          {t("detail.disconnect", { ns: "flows" })}
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      className="h-7 px-2 text-xs"
-      onClick={onConnect}
-      disabled={disabled || isPending}
-      title={disabled ? t("providers.notConfigured") : undefined}
-    >
-      {t("detail.connect", { ns: "flows" })}
-    </Button>
-  );
-}
 
 export function ProvidersPage() {
   const { t } = useTranslation(["settings", "flows"]);
@@ -87,10 +40,7 @@ export function ProvidersPage() {
     name: string;
     schema: JSONSchemaObject;
   } | null>(null);
-  const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
-  const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
 
-  // Build a lookup: providerId → connected status
   const connectedProviders = new Set<string>();
   if (integrations) {
     for (const integ of integrations) {
@@ -130,39 +80,51 @@ export function ProvidersPage() {
   const iconMap = new Map<string, string>();
   if (providersData?.providers) {
     for (const p of providersData.providers) {
-      // Icon
-      if (p.iconUrl) {
-        iconMap.set(p.id, p.iconUrl);
-      }
+      if (p.iconUrl) iconMap.set(p.id, p.iconUrl);
 
-      // Credential status badge (admin config)
-      badgeMap.set(
-        p.id,
-        p.enabled ? (
-          <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
-            {t("providers.configured")}
-          </span>
-        ) : (
-          <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium">
-            {t("providers.notConfigured")}
-          </span>
-        ),
-      );
+      badgeMap.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
-      // Connection button (user-level)
-      // Proxy providers don't have user connections
-      if (p.authMode !== "proxy") {
-        const isConnected = connectedProviders.has(p.id);
-        const needsAdminConfig = !p.enabled;
+      const isConnected = connectedProviders.has(p.id);
+      const connectButton =
+        p.authMode !== "proxy" ? (
+          isConnected ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-emerald-500">{t("services.connected")}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => handleDisconnect(p.id)}
+                disabled={isPending}
+              >
+                {t("detail.disconnect", { ns: "flows" })}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => handleConnect(p)}
+              disabled={!p.enabled || isPending}
+              title={!p.enabled ? t("providers.notConfigured") : undefined}
+            >
+              {t("detail.connect", { ns: "flows" })}
+            </Button>
+          )
+        ) : null;
+
+      const configButton = isOrgAdmin ? (
+        <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
+      ) : null;
+
+      if (connectButton || configButton) {
         actionsMap.set(
           p.id,
-          <ProviderConnectButton
-            isConnected={isConnected}
-            disabled={needsAdminConfig}
-            onConnect={() => handleConnect(p)}
-            onDisconnect={() => handleDisconnect(p.id)}
-            isPending={isPending}
-          />,
+          <>
+            {connectButton}
+            {configButton}
+          </>,
         );
       }
     }
@@ -172,12 +134,9 @@ export function ProvidersPage() {
   const enabledIds = new Set<string>();
   if (providersData?.providers) {
     for (const p of providersData.providers) {
-      if (p.enabled) {
-        enabledIds.add(p.id);
-      }
+      if (p.enabled) enabledIds.add(p.id);
     }
   }
-  const allProviders = providersData?.providers ?? [];
 
   const filterToggle = (
     <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
@@ -188,17 +147,6 @@ export function ProvidersPage() {
     </Tabs>
   );
 
-  const configureButton = isOrgAdmin ? (
-    <Button
-      variant="outline"
-      onClick={() => setConfigurePickerOpen(true)}
-      disabled={allProviders.length === 0}
-    >
-      <Settings size={14} />
-      {t("providers.configureProvider")}
-    </Button>
-  ) : null;
-
   return (
     <>
       <ItemTab
@@ -208,8 +156,6 @@ export function ProvidersPage() {
         iconMap={iconMap}
         filterIds={showAll ? undefined : enabledIds}
         headerContent={filterToggle}
-        extraActions={configureButton}
-        emptyExtraActions={configureButton}
       />
       <ApiKeyModal
         open={!!apiKeyProvider}
@@ -238,59 +184,6 @@ export function ProvidersPage() {
               { onSuccess: () => setCustomCredProvider(null) },
             );
           }}
-        />
-      )}
-      <Modal
-        open={configurePickerOpen}
-        onClose={() => setConfigurePickerOpen(false)}
-        title={t("providers.configureProvider")}
-      >
-        <p className="text-sm text-muted-foreground mb-4">{t("providers.selectProvider")}</p>
-        {allProviders.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            {t("providers.allConfigured")}
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {allProviders.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
-                onClick={() => {
-                  setConfigurePickerOpen(false);
-                  setConfigureProvider(p);
-                }}
-              >
-                {p.iconUrl ? (
-                  <img src={p.iconUrl} alt="" className="w-6 h-6 rounded" />
-                ) : (
-                  <div className="w-6 h-6 rounded bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
-                    {p.displayName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{p.displayName}</span>
-                </div>
-                {p.enabled ? (
-                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
-                    {t("providers.configured")}
-                  </span>
-                ) : (
-                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium">
-                    {t("providers.notConfigured")}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </Modal>
-      {configureProvider && (
-        <ProviderCredentialsModal
-          provider={configureProvider}
-          callbackUrl={providersData?.callbackUrl}
-          onClose={() => setConfigureProvider(null)}
         />
       )}
     </>
