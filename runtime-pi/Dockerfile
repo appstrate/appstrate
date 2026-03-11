@@ -16,6 +16,7 @@ RUN useradd -m -s /bin/bash pi
 
 WORKDIR /workspace
 RUN chown pi:pi /workspace
+RUN ln -sf /runtime/node_modules /workspace/node_modules
 
 USER pi
 

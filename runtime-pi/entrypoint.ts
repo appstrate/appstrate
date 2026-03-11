@@ -44,14 +44,22 @@ function resolveDefaultExport(mod: Record<string, unknown>): unknown {
 // --- 1. Init workspace ---
 
 const WORKSPACE = "/workspace";
-try {
-  await run(["git", "init", "-q", WORKSPACE]);
-  await Promise.all([
-    run(["git", "-C", WORKSPACE, "config", "user.email", "pi@appstrate.local"]),
-    run(["git", "-C", WORKSPACE, "config", "user.name", "Pi"]),
-  ]);
-} catch {
-  // Non-fatal — git init may fail if already initialized
+
+/** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
+async function initGitWorkspace(): Promise<void> {
+  const gitDir = `${WORKSPACE}/.git`;
+  try {
+    await fs.mkdir(`${gitDir}/refs`, { recursive: true });
+    await Promise.all([
+      fs.writeFile(`${gitDir}/HEAD`, "ref: refs/heads/main\n"),
+      fs.writeFile(
+        `${gitDir}/config`,
+        "[user]\n\temail = pi@appstrate.local\n\tname = Pi\n",
+      ),
+    ]);
+  } catch {
+    // Non-fatal — git dir may already exist
+  }
 }
 
 // --- 2. Load extensions ---
@@ -65,35 +73,48 @@ const loadedExtensionIds = new Set<string>();
  */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!(await exists(dir))) return;
-  for (const entry of await fs.readdir(dir)) {
-    if (!entry.endsWith(".ts")) continue;
-    const id = entry.replace(/\.ts$/, "");
-    if (loadedExtensionIds.has(id)) continue;
-    const extPath = path.join(dir, entry);
-    try {
-      const mod = await import(extPath);
-      const factory = resolveDefaultExport(mod);
-      if (typeof factory !== "function") {
-        emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
-        continue;
-      }
-      extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
-      loadedExtensionIds.add(id);
-      emit({ type: "text_delta", text: `Loaded extension (${label}): ${entry}\n` });
-    } catch (err) {
-      emit({ type: "error", message: `Failed to load extension '${entry}' (${label}): ${err}` });
+  const entries = (await fs.readdir(dir)).filter((e) => e.endsWith(".ts"));
+
+  const results = await Promise.allSettled(
+    entries
+      .filter((e) => !loadedExtensionIds.has(e.replace(/\.ts$/, "")))
+      .map(async (entry) => {
+        const id = entry.replace(/\.ts$/, "");
+        const mod = await import(path.join(dir, entry));
+        const factory = resolveDefaultExport(mod);
+        if (typeof factory !== "function") {
+          emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
+          return;
+        }
+        extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
+        loadedExtensionIds.add(id);
+        emit({ type: "text_delta", text: `Loaded extension (${label}): ${entry}\n` });
+      }),
+  );
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      emit({ type: "error", message: `Failed to load extension (${label}): ${result.reason}` });
     }
   }
 }
 
-// --- 2a. Extract flow package if present ---
+// --- 2a. Phase A: git init + extract flow package in parallel ---
 
 const packagePath = path.join(WORKSPACE, "flow-package.zip");
+const hasPackage = await exists(packagePath);
 
-if (await exists(packagePath)) {
+await Promise.all([
+  initGitWorkspace(),
+  hasPackage
+    ? run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.flow-package`])
+    : Promise.resolve(),
+]);
+
+// --- 2b. Phase B: load extensions (depends on extraction) ---
+
+if (hasPackage) {
   try {
-    await run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.flow-package`]);
-
     // Install skills
     const skillsDir = path.join(WORKSPACE, ".flow-package", "skills");
     if (await exists(skillsDir)) {
@@ -103,28 +124,17 @@ if (await exists(packagePath)) {
       emit({ type: "text_delta", text: "Installed skills from flow package\n" });
     }
 
-    // Ensure node_modules resolution works for dynamically imported extensions
-    const workspaceNodeModules = path.join(WORKSPACE, "node_modules");
-    if (!(await exists(workspaceNodeModules))) {
-      try {
-        await fs.symlink("/runtime/node_modules", workspaceNodeModules);
-      } catch {
-        // Non-fatal — Bun resolves from parent dirs too
-      }
-    }
-
     // Load flow-package extensions first (they take priority over runtime built-ins)
     await loadExtensionsFromDir(path.join(WORKSPACE, ".flow-package", "extensions"), "flow-package");
 
-    // Cleanup extracted package
-    await run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]);
+    // Cleanup extracted package (fire-and-forget)
+    run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]).catch(() => {});
   } catch (err) {
-    emit({ type: "error", message: `Failed to extract flow package: ${err}` });
+    emit({ type: "error", message: `Failed to process flow package: ${err}` });
   }
 }
 
-// --- 2b. Load runtime built-in extensions (skip any already loaded from flow package) ---
-
+// Load runtime built-in extensions (skip any already loaded from flow package)
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 // --- 3. Setup auth + model ---
