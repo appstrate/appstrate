@@ -18,7 +18,7 @@ export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
   const { t } = useTranslation(["flows", "common"]);
   const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
   const containerRef = useRef<HTMLDivElement>(null);
-  const [allExpanded, setAllExpanded] = useState<boolean | null>(null);
+  const [allExpanded, setAllExpanded] = useState(true);
 
   const hasSchema = outputSchema?.properties && Object.keys(outputSchema.properties).length > 0;
   const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
