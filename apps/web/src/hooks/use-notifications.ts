@@ -15,6 +15,20 @@ export function useUnreadCount() {
   });
 }
 
+export function useUnreadCountsByFlow() {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["unread-counts-by-flow", orgId],
+    queryFn: async () => {
+      const data = await api<{ counts: Record<string, number> }>(
+        "/notifications/unread-counts-by-flow",
+      );
+      return data.counts;
+    },
+    refetchInterval: 30_000,
+  });
+}
+
 export function useAllExecutions(page: number, limit = 20) {
   const orgId = useCurrentOrgId();
   const offset = page * limit;
@@ -36,6 +50,7 @@ export function useMarkRead() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
       qc.invalidateQueries({ queryKey: ["all-executions"] });
     },
   });
@@ -49,6 +64,7 @@ export function useMarkAllRead() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
       qc.invalidateQueries({ queryKey: ["all-executions"] });
     },
   });

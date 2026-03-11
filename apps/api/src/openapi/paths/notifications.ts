@@ -24,6 +24,36 @@ export const notificationsPaths = {
       },
     },
   },
+  "/api/notifications/unread-counts-by-flow": {
+    get: {
+      operationId: "getUnreadCountsByFlow",
+      tags: ["Notifications"],
+      summary: "Get unread notification counts grouped by flow",
+      description:
+        "Returns the number of unread execution notifications per flow for the current user.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Unread counts keyed by package ID",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  counts: {
+                    type: "object",
+                    additionalProperties: { type: "integer" },
+                    description: "Map of packageId to unread notification count",
+                  },
+                },
+                required: ["counts"],
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/notifications/read/{executionId}": {
     put: {
       operationId: "markNotificationRead",

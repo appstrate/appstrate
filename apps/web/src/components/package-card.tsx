@@ -14,6 +14,7 @@ interface PackageCardProps {
   runningExecutions?: number;
   tags?: string[];
   usedByFlows?: number;
+  unreadCount?: number;
   statusBadge?: React.ReactNode;
   actions?: React.ReactNode;
   iconUrl?: string;
@@ -29,6 +30,7 @@ export function PackageCard({
   runningExecutions,
   tags,
   usedByFlows,
+  unreadCount,
   statusBadge,
   actions,
   iconUrl,
@@ -39,7 +41,7 @@ export function PackageCard({
 
   return (
     <Link
-      className="block rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50"
+      className="flex flex-col w-full rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50 h-full"
       to={href}
     >
       <div className="flex items-start justify-between gap-2">
@@ -61,6 +63,11 @@ export function PackageCard({
             </span>
           )}
           {statusBadge}
+          {!!unreadCount && unreadCount > 0 && (
+            <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
           {type === "flow" && !!runningExecutions && runningExecutions > 0 && (
             <span className="text-[0.7rem] px-2 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1.5">
               <Spinner /> {t("list.running", { count: runningExecutions })}
@@ -83,7 +90,7 @@ export function PackageCard({
           )}
         </div>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{description || ""}</p>
+      <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
       <div className="mt-2 flex flex-wrap gap-1">
         {type === "flow" &&
           tags?.map((tag) => (

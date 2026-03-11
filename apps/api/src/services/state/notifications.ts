@@ -55,6 +55,34 @@ export async function getUnreadNotificationCount(userId: string, orgId: string):
   return row?.count ?? 0;
 }
 
+export async function getUnreadCountsByFlow(
+  userId: string,
+  orgId: string,
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select({
+      packageId: executions.packageId,
+      count: count(),
+    })
+    .from(executions)
+    .where(
+      and(
+        eq(executions.userId, userId),
+        eq(executions.orgId, orgId),
+        isNotNull(executions.notifiedAt),
+        isNull(executions.readAt),
+        isNotNull(executions.packageId),
+      ),
+    )
+    .groupBy(executions.packageId);
+
+  const result: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.packageId) result[row.packageId] = row.count;
+  }
+  return result;
+}
+
 export async function listUserExecutions(
   userId: string,
   orgId: string,

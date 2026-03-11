@@ -42,7 +42,7 @@ export function ExecutionRow({
     <Link
       className={cn(
         "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
-        isUnread && "border-l-2 border-l-primary",
+        isUnread && "border-l-2 border-l-destructive",
       )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber }}
