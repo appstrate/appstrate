@@ -9,7 +9,6 @@ import {
   useDisconnect,
 } from "../../hooks/use-mutations";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
-import { useProviders } from "../../hooks/use-providers";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { computeProvidersSummary } from "../../lib/provider-status";
 import { ProviderConfigBadge } from "../provider-config-badge";
@@ -27,12 +26,11 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const unbindAdmin = useUnbindAdminProvider(packageId);
   const disconnectMutation = useDisconnect();
 
-  const { data: providersData } = useProviders();
-  const providers = providersData?.providers;
+  const populatedProviders = detail?.populatedProviders;
   const setApiKeyService = useFlowDetailUI((s) => s.setApiKeyService);
   const setCustomCredService = useFlowDetailUI((s) => s.setCustomCredService);
 
-  const getProviderConfig = (providerId: string) => providers?.find((p) => p.id === providerId);
+  const getProviderConfig = (providerId: string) => populatedProviders?.[providerId];
 
   const getProviderAuthMode = (svc: {
     provider: string;
@@ -248,7 +246,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
                 {isOrgAdmin && providerConfig && (
                   <ProviderConfigureButton
                     provider={providerConfig}
-                    callbackUrl={providersData?.callbackUrl}
+                    callbackUrl={detail?.callbackUrl}
                   />
                 )}
               </div>

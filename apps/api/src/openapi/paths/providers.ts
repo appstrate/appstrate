@@ -5,7 +5,7 @@ export const providersPaths = {
       tags: ["Providers"],
       summary: "List all providers",
       description:
-        "List all provider configurations (built-in + custom) for the organization. Admin only.",
+        "List all provider configurations (built-in + custom) for the organization. Available to all org members.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
