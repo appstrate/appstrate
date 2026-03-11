@@ -22,7 +22,7 @@ class DockerWorkloadHandle implements WorkloadHandle {
 
 export class DockerOrchestrator implements ContainerOrchestrator {
   async initialize(): Promise<void> {
-    await sidecarPool.initSidecarPool();
+    await Promise.all([sidecarPool.initSidecarPool(), docker.detectPlatformNetwork()]);
   }
 
   async shutdown(): Promise<void> {

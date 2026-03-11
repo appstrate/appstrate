@@ -11,8 +11,10 @@ import {
 } from "./docker.ts";
 export const SIDECAR_IMAGE = "appstrate-sidecar:latest";
 const POOL_SIZE = 2;
-const HEALTH_CHECK_RETRIES = 20;
-const HEALTH_CHECK_DELAY_MS = 100;
+const HEALTH_CHECK_RETRIES = 15;
+const HEALTH_CHECK_DELAYS_MS = [
+  25, 50, 50, 100, 100, 200, 200, 400, 400, 400, 400, 400, 400, 400, 400,
+];
 
 interface PooledSidecar {
   containerId: string;
@@ -190,17 +192,17 @@ async function replenish(): Promise<void> {
 /** Wait for a sidecar to become healthy via its host-mapped port. */
 export async function waitForSidecarHealth(hostPort: number): Promise<void> {
   const host = await getDockerHostAddress();
-  for (let attempt = 1; attempt <= HEALTH_CHECK_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < HEALTH_CHECK_RETRIES; attempt++) {
     try {
       const res = await fetch(`http://${host}:${hostPort}/health`, {
-        signal: AbortSignal.timeout(1000),
+        signal: AbortSignal.timeout(attempt < 3 ? 300 : 1000),
       });
       if (res.ok) return;
     } catch {
       // Retry
     }
-    if (attempt < HEALTH_CHECK_RETRIES) {
-      await new Promise((r) => setTimeout(r, HEALTH_CHECK_DELAY_MS));
+    if (attempt < HEALTH_CHECK_RETRIES - 1) {
+      await new Promise((r) => setTimeout(r, HEALTH_CHECK_DELAYS_MS[attempt]));
     }
   }
   throw new Error("Sidecar health check failed after retries");
