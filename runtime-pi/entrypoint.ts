@@ -1,6 +1,5 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getModel } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -10,13 +9,11 @@ import {
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import type { Model, Api } from "@mariozechner/pi-ai";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
+import { emit } from "./lib/emit.ts";
 
 // --- Helpers ---
-
-function emit(obj: Record<string, unknown>) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
-}
 
 function die(message: string): never {
   emit({ type: "error", message });
@@ -139,34 +136,46 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 // --- 3. Setup auth + model ---
 
-const provider = process.env.LLM_PROVIDER || "anthropic";
+function deriveProviderFromApi(api: string): string {
+  const known: Record<string, string> = {
+    "anthropic-messages": "anthropic",
+    "openai-completions": "openai",
+    "openai-responses": "openai",
+    "google-generative-ai": "google",
+    "google-vertex": "google-vertex",
+    "azure-openai-responses": "azure-openai-responses",
+    "bedrock-converse-stream": "amazon-bedrock",
+  };
+  return known[api] ?? api.split("-")[0];
+}
+
+const api = process.env.PI_API || "anthropic-messages";
 const modelId = process.env.LLM_MODEL_ID || "claude-sonnet-4-5-20250929";
+const provider = deriveProviderFromApi(api);
 
 const authStorage = new AuthStorage("/tmp/pi-auth/auth.json");
 
-// Map provider env vars to auth storage
-const providerKeyMap: Record<string, string> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  google: "GEMINI_API_KEY",
-  groq: "GROQ_API_KEY",
-  mistral: "MISTRAL_API_KEY",
-  together: "TOGETHER_API_KEY",
-  deepseek: "DEEPSEEK_API_KEY",
-};
-
-for (const [provName, envVar] of Object.entries(providerKeyMap)) {
-  if (process.env[envVar]) {
-    authStorage.setRuntimeApiKey(provName, process.env[envVar]!);
-  }
+// Store generic LLM API key for the active provider
+const llmApiKey = process.env.LLM_API_KEY;
+if (llmApiKey) {
+  authStorage.setRuntimeApiKey(provider, llmApiKey);
 }
 
 const modelRegistry = new ModelRegistry(authStorage);
 
-const model = getModel(provider, modelId);
-if (!model) {
-  die(`Model not found: ${provider}/${modelId}`);
-}
+// Construct model directly from env vars — unified flow, no getModel()
+const model: Model<Api> = {
+  id: modelId,
+  name: modelId,
+  api,
+  provider,
+  baseUrl: process.env.LLM_BASE_URL || "",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 16384,
+};
 
 // --- 4. Build resource loader ---
 

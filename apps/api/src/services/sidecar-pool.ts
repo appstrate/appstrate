@@ -9,6 +9,11 @@ import {
   createNetwork,
   removeNetwork,
 } from "./docker.ts";
+import {
+  SIDECAR_MEMORY_BYTES,
+  SIDECAR_NANO_CPUS,
+  SIDECAR_EXPOSED_PORTS,
+} from "./orchestrator/constants.ts";
 export const SIDECAR_IMAGE = "appstrate-sidecar:latest";
 const POOL_SIZE = 2;
 const HEALTH_CHECK_RETRIES = 15;
@@ -62,6 +67,7 @@ export async function acquireSidecar(
     executionToken: string;
     platformApiUrl: string;
     proxyUrl?: string;
+    llm?: { baseUrl: string; apiKey: string; placeholder: string };
   },
   platformNetwork?: { networkId: string; hostname: string } | null,
 ): Promise<string | null> {
@@ -82,6 +88,7 @@ export async function acquireSidecar(
         executionToken: sidecarEnv.executionToken,
         platformApiUrl: sidecarEnv.platformApiUrl,
         proxyUrl: sidecarEnv.proxyUrl || "",
+        llm: sidecarEnv.llm,
       }),
       signal: AbortSignal.timeout(3000),
     });
@@ -156,11 +163,11 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
     {
       image: SIDECAR_IMAGE,
       adapterName: "sidecar-pool",
-      memory: 256 * 1024 * 1024,
-      nanoCpus: 500_000_000,
+      memory: SIDECAR_MEMORY_BYTES,
+      nanoCpus: SIDECAR_NANO_CPUS,
       networkId: standbyNetworkId!,
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-      exposedPorts: { "8080/tcp": {}, "8081/tcp": {} },
+      exposedPorts: SIDECAR_EXPOSED_PORTS,
       labels: { "appstrate.pool": "sidecar" },
     },
   );

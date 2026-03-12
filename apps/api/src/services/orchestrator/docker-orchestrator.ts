@@ -11,6 +11,7 @@ import type {
 import * as docker from "../docker.ts";
 import * as sidecarPool from "../sidecar-pool.ts";
 import { SIDECAR_IMAGE } from "../sidecar-pool.ts";
+import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS, SIDECAR_EXPOSED_PORTS } from "./constants.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -61,6 +62,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       executionToken: config.executionToken,
       platformApiUrl: resolvedPlatformApiUrl,
       proxyUrl: config.proxyUrl,
+      llm: config.llm,
     };
 
     // 1. Try pool (fast path ~50-130ms)
@@ -83,17 +85,22 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (resolvedConfig.proxyUrl) {
       sidecarEnv.PROXY_URL = resolvedConfig.proxyUrl;
     }
+    if (resolvedConfig.llm) {
+      sidecarEnv.PI_BASE_URL = resolvedConfig.llm.baseUrl;
+      sidecarEnv.PI_API_KEY = resolvedConfig.llm.apiKey;
+      sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
+    }
 
     const containerId = await docker.createContainer(executionId, sidecarEnv, {
       image: SIDECAR_IMAGE,
       adapterName: "sidecar",
-      memory: 256 * 1024 * 1024,
-      nanoCpus: 500_000_000,
+      memory: SIDECAR_MEMORY_BYTES,
+      nanoCpus: SIDECAR_NANO_CPUS,
       networkId: boundary.id,
       networkAlias: "sidecar",
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-      exposedPorts: { "8080/tcp": {}, "8081/tcp": {} },
+      exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
 
     if (platformNetwork) {

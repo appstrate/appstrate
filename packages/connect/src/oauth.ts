@@ -102,7 +102,6 @@ export interface OAuthCallbackResult {
   refreshToken?: string;
   expiresAt: string | null;
   scopesGranted: string[];
-  rawResponse: Record<string, unknown>;
 }
 
 /**
@@ -224,6 +223,5 @@ export async function handleOAuthCallback(
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
     scopesGranted: parsed.scopesGranted,
-    rawResponse: tokenData,
   };
 }

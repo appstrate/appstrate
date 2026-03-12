@@ -185,7 +185,6 @@ export async function saveConnection(
   options?: {
     scopesGranted?: string[];
     expiresAt?: string | null;
-    rawTokenResponse?: Record<string, unknown>;
   },
 ): Promise<void> {
   const encrypted = encryptCredentials(credentials);
@@ -198,7 +197,7 @@ export async function saveConnection(
       credentialsEncrypted: encrypted,
       scopesGranted: options?.scopesGranted ?? [],
       expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
-      rawTokenResponse: options?.rawTokenResponse ?? null,
+      rawTokenResponse: null,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -207,7 +206,7 @@ export async function saveConnection(
         credentialsEncrypted: encrypted,
         scopesGranted: options?.scopesGranted ?? [],
         expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
-        rawTokenResponse: options?.rawTokenResponse ?? null,
+        rawTokenResponse: null,
         updatedAt: new Date(),
       },
     });
@@ -253,7 +252,6 @@ function rowToConnection(row: typeof serviceConnections.$inferSelect): Connectio
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
-    rawTokenResponse: (row.rawTokenResponse as Record<string, unknown>) ?? null,
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     createdAt: row.createdAt?.toISOString() ?? "",
     updatedAt: row.updatedAt?.toISOString() ?? "",

@@ -105,6 +105,13 @@ export async function startContainer(containerId: string): Promise<void> {
   }
 }
 
+function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const result = new Uint8Array(a.length + b.length);
+  result.set(a, 0);
+  result.set(b, a.length);
+  return result;
+}
+
 export async function* streamLogs(
   containerId: string,
   signal?: AbortSignal,
@@ -127,6 +134,7 @@ export async function* streamLogs(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let remainder = new Uint8Array(0);
 
   // Race each reader.read() against an abort promise so the loop exits
   // immediately on cancellation (Bun's reader.cancel() hangs on unix sockets).
@@ -147,14 +155,25 @@ export async function* streamLogs(
 
       if (eof) break;
 
+      // Prepend any leftover bytes from the previous chunk
+      let raw: Uint8Array;
+      if (remainder.length > 0) {
+        raw = concatUint8Arrays(remainder, value);
+        remainder = new Uint8Array(0);
+      } else {
+        raw = value;
+      }
+
       // Docker multiplexed stream format:
       // Each frame has an 8-byte header: [stream_type(1), 0, 0, 0, size(4)]
-      // For simplicity, strip the 8-byte headers and decode as text
-      const raw = value;
       let offset = 0;
 
       while (offset < raw.length) {
-        if (offset + 8 > raw.length) break;
+        // Partial header — save for next chunk
+        if (offset + 8 > raw.length) {
+          remainder = raw.slice(offset);
+          break;
+        }
 
         // Read frame header
         const size =
@@ -165,9 +184,9 @@ export async function* streamLogs(
 
         offset += 8;
 
+        // Partial body — save header + partial body for next chunk
         if (offset + size > raw.length) {
-          // Partial frame, decode what we have
-          buffer += decoder.decode(raw.slice(offset), { stream: true });
+          remainder = raw.slice(offset - 8);
           break;
         }
 

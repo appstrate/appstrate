@@ -36,6 +36,20 @@
       "when": 1773158997858,
       "tag": "0004_illegal_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773267317722,
+      "tag": "0005_fluffy_clea",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773270789421,
+      "tag": "0006_optimal_songbird",
+      "breakpoints": true
     }
   ]
 }

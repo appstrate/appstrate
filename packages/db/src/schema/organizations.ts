@@ -110,3 +110,25 @@ export const orgProxies = pgTable(
   },
   (table) => [index("idx_org_proxies_org_id").on(table.orgId)],
 );
+
+export const orgModels = pgTable(
+  "org_models",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    api: text("api").notNull(),
+    baseUrl: text("base_url").notNull(),
+    modelId: text("model_id").notNull(),
+    apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    isDefault: boolean("is_default").notNull().default(false),
+    source: text("source").notNull().default("custom"), // "built-in" | "custom"
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("idx_org_models_org_id").on(table.orgId)],
+);

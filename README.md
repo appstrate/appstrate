@@ -140,9 +140,7 @@ Key variables (see `.env.example` for full list):
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                 |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                       |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials |
-| `LLM_PROVIDER`              | No       | `anthropic`                                   | LLM provider for agent containers            |
-| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Model ID for agent containers                |
-| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed to agent containers                   |
+| `SYSTEM_MODELS`             | No       | `[]`                                          | JSON array of system LLM model definitions   |
 | `PORT`                      | No       | `3000`                                        | Server port                                  |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks               |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins                                 |

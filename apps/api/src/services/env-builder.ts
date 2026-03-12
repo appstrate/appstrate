@@ -11,6 +11,7 @@ import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./s
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
+import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
 /**
@@ -64,6 +65,7 @@ export function buildPromptContext(params: {
   providers?: PromptContext["providers"];
   memories?: PromptContext["memories"];
   proxyUrl?: string | null;
+  llmConfig?: { api: string; baseUrl: string; modelId: string; apiKey: string } | null;
 }): PromptContext {
   return {
     rawPrompt: params.flow.prompt,
@@ -80,7 +82,8 @@ export function buildPromptContext(params: {
     },
     providers: params.providers ?? [],
     memories: params.memories,
-    llmModel: getEnv().LLM_MODEL_ID,
+    llmModel: params.llmConfig?.modelId ?? "unknown",
+    llmConfig: params.llmConfig,
     proxyUrl: params.proxyUrl,
     timeout: params.flow.manifest.execution?.timeout ?? 300,
     availableTools: params.flow.extensions.map((e) => ({
@@ -115,6 +118,7 @@ export async function buildExecutionContext(params: {
   flowPackage: Buffer | null;
   flowVersionId: number | null;
   proxyLabel: string | null;
+  modelLabel: string | null;
 }> {
   const { executionId, flow, providerProfiles, orgId, userId, input, files } = params;
 
@@ -127,6 +131,7 @@ export async function buildExecutionContext(params: {
     flowPackage,
     latestVersion,
     proxyResult,
+    modelResult,
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
@@ -140,6 +145,7 @@ export async function buildExecutionContext(params: {
         ? getLatestVersionWithManifest(flow.id).catch(() => null)
         : null,
     resolveProxy(orgId, flow.id, params.config),
+    resolveModel(orgId, flow.id, params.config),
     getPackageMemories(flow.id, orgId),
   ]);
 
@@ -160,6 +166,15 @@ export async function buildExecutionContext(params: {
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
+  const modelLabel = modelResult?.label ?? null;
+  const llmConfig = modelResult
+    ? {
+        api: modelResult.api,
+        baseUrl: modelResult.baseUrl,
+        modelId: modelResult.modelId,
+        apiKey: modelResult.apiKey,
+      }
+    : null;
 
   const promptContext = buildPromptContext({
     flow,
@@ -176,7 +191,8 @@ export async function buildExecutionContext(params: {
       createdAt: m.createdAt?.toISOString() ?? null,
     })),
     proxyUrl,
+    llmConfig,
   });
 
-  return { promptContext, flowPackage, flowVersionId, proxyLabel };
+  return { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel };
 }

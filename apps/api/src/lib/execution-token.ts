@@ -5,11 +5,11 @@
  * Prevents token reuse from leaked executionIds (logs, monitoring)
  * because the signature cannot be forged without the platform secret.
  */
+import { timingSafeEqual } from "node:crypto";
 import { getEnv } from "@appstrate/env";
 
 export function signExecutionToken(executionId: string): string {
-  const secret = getEnv().BETTER_AUTH_SECRET;
-  const hasher = new Bun.CryptoHasher("sha256", secret);
+  const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
   hasher.update(executionId);
   return `${executionId}.${hasher.digest("hex")}`;
 }
@@ -22,17 +22,13 @@ export function parseSignedToken(token: string): string | null {
   const signature = token.substring(dotIndex + 1);
   if (!executionId || !signature) return null;
 
-  const secret = getEnv().BETTER_AUTH_SECRET;
-  const hasher = new Bun.CryptoHasher("sha256", secret);
+  const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
   hasher.update(executionId);
   const expected = hasher.digest("hex");
 
   // Constant-time comparison
   if (signature.length !== expected.length) return null;
-  let diff = 0;
-  for (let i = 0; i < signature.length; i++) {
-    diff |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-
-  return diff === 0 ? executionId : null;
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  return timingSafeEqual(sigBuf, expBuf) ? executionId : null;
 }

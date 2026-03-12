@@ -45,7 +45,6 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
-      rawTokenResponse: result.rawResponse,
     },
   );
 

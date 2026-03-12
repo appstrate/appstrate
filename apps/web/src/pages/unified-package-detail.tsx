@@ -96,6 +96,7 @@ function FlowRunButtonInline({
       disabledTitle={runDisabledTitle}
       showLabel
       showProxy
+      showModel
     />
   );
 }

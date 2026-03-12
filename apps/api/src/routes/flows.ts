@@ -222,6 +222,35 @@ export function createFlowsRouter() {
     return c.json({ success: true });
   });
 
+  // GET /api/flows/:scope/:name/model — get flow model configuration
+  router.get("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const config = await getPackageConfig(orgId, flow.id);
+    const modelId = (config.__modelId as string | null) ?? null;
+
+    return c.json({ modelId });
+  });
+
+  // PUT /api/flows/:scope/:name/model — set flow model override (admin-only)
+  router.put("/:scope{@[^/]+}/:name/model", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const body = await c.req.json<{ modelId: string | null }>();
+
+    // Read existing config and merge __modelId
+    const currentConfig = await getPackageConfig(orgId, flow.id);
+    if (body.modelId === null) {
+      // Remove the override
+      const { __modelId: _, ...rest } = currentConfig;
+      await setPackageConfig(orgId, flow.id, rest);
+    } else {
+      await setPackageConfig(orgId, flow.id, { ...currentConfig, __modelId: body.modelId });
+    }
+
+    return c.json({ success: true });
+  });
+
   // GET /api/flows/:scope/:name/memories — list flow memories
   router.get("/:scope{@[^/]+}/:name/memories", requireFlow(), async (c) => {
     const flow = c.get("flow");

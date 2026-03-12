@@ -1,8 +1,5 @@
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-
-function emit(obj: Record<string, unknown>) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
-}
+import { emit } from "./lib/emit.ts";
 
 interface ToolResult {
   content: { type: string; text: string }[];
