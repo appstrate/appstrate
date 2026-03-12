@@ -18,6 +18,10 @@ const createModelSchema = z.object({
   baseUrl: z.string().url("baseUrl must be a valid URL"),
   modelId: z.string().min(1, "modelId is required"),
   apiKey: z.string().min(1, "apiKey is required"),
+  input: z.array(z.string()).optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  reasoning: z.boolean().optional(),
 });
 
 const updateModelSchema = z.object({
@@ -27,6 +31,10 @@ const updateModelSchema = z.object({
   modelId: z.string().min(1).optional(),
   apiKey: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
+  input: z.array(z.string()).nullable().optional(),
+  contextWindow: z.number().int().positive().nullable().optional(),
+  maxTokens: z.number().int().positive().nullable().optional(),
+  reasoning: z.boolean().nullable().optional(),
 });
 
 const setDefaultSchema = z.object({
@@ -58,6 +66,7 @@ export function createModelsRouter() {
     }
 
     try {
+      const { input, contextWindow, maxTokens, reasoning } = parsed.data;
       const id = await createOrgModel(
         orgId,
         parsed.data.label,
@@ -66,6 +75,9 @@ export function createModelsRouter() {
         parsed.data.modelId,
         parsed.data.apiKey,
         user.id,
+        input || contextWindow || maxTokens || reasoning !== undefined
+          ? { input, contextWindow, maxTokens, reasoning }
+          : undefined,
       );
       return c.json({ id }, 201);
     } catch (err) {

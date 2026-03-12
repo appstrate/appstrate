@@ -8,6 +8,10 @@ export interface ModelDefinition {
   baseUrl: string;
   modelId: string;
   apiKey: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
   isDefault?: boolean;
   enabled?: boolean;
 }

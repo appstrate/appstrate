@@ -22,18 +22,24 @@ const API_DEFAULT_URLS: Record<string, string> = {
   "google-generative-ai": "https://generativelanguage.googleapis.com/v1beta",
 };
 
+interface ModelFormData {
+  label: string;
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+}
+
 interface ModelFormModalProps {
   open: boolean;
   onClose: () => void;
   model: OrgModelInfo | null;
   isPending: boolean;
-  onSubmit: (data: {
-    label: string;
-    api: string;
-    baseUrl: string;
-    modelId: string;
-    apiKey: string;
-  }) => void;
+  onSubmit: (data: ModelFormData) => void;
 }
 
 function ModelFormBody({
@@ -44,13 +50,7 @@ function ModelFormBody({
 }: {
   model: OrgModelInfo | null;
   isPending: boolean;
-  onSubmit: (data: {
-    label: string;
-    api: string;
-    baseUrl: string;
-    modelId: string;
-    apiKey: string;
-  }) => void;
+  onSubmit: (data: ModelFormData) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -59,6 +59,11 @@ function ModelFormBody({
   const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "");
   const [modelId, setModelId] = useState(model?.modelId ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [inputText, setInputText] = useState(model?.input?.includes("text") !== false);
+  const [inputImage, setInputImage] = useState(model?.input?.includes("image") ?? false);
+  const [contextWindow, setContextWindow] = useState(model?.contextWindow?.toString() ?? "");
+  const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
+  const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
 
   const rules = useMemo(
     () => ({
@@ -107,13 +112,21 @@ function ModelFormBody({
 
     if (!validateAll({ label, api, baseUrl, modelId, apiKey })) return;
 
+    const inputArr = [inputText && "text", inputImage && "image"].filter(Boolean) as string[];
+    const cw = contextWindow.trim() ? parseInt(contextWindow.trim()) : undefined;
+    const mt = maxTokens.trim() ? parseInt(maxTokens.trim()) : undefined;
+
     onSubmit({
       label: label.trim(),
       api: api.trim(),
       baseUrl: baseUrl.trim(),
       modelId: modelId.trim(),
       ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-    } as { label: string; api: string; baseUrl: string; modelId: string; apiKey: string });
+      ...(inputArr.length > 0 ? { input: inputArr } : {}),
+      ...(cw ? { contextWindow: cw } : {}),
+      ...(mt ? { maxTokens: mt } : {}),
+      ...(reasoning ? { reasoning: true } : {}),
+    } as ModelFormData);
   };
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
@@ -221,6 +234,64 @@ function ModelFormBody({
             <div className="text-sm text-muted-foreground">{t("models.form.apiKeyHint")}</div>
           )}
           {errors.apiKey && <div className="text-sm text-destructive">{errors.apiKey}</div>}
+        </div>
+        <div className="border-t pt-4 mt-2 space-y-4">
+          <Label className="text-sm font-medium text-muted-foreground">
+            {t("models.form.capabilities")}
+          </Label>
+          <div className="space-y-2">
+            <Label>{t("models.form.input")}</Label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={inputText}
+                  onChange={(e) => setInputText(e.target.checked)}
+                />
+                {t("models.form.inputText")}
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={inputImage}
+                  onChange={(e) => setInputImage(e.target.checked)}
+                />
+                {t("models.form.inputImage")}
+              </label>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
+              <Input
+                id="mdl-ctx"
+                type="number"
+                value={contextWindow}
+                onChange={(e) => setContextWindow(e.target.value)}
+                placeholder="200000"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
+              <Input
+                id="mdl-maxtok"
+                type="number"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                placeholder="16384"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="mdl-reasoning"
+              type="checkbox"
+              checked={reasoning}
+              onChange={(e) => setReasoning(e.target.checked)}
+            />
+            <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
+          </div>
+          <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
         </div>
       </form>
     </Modal>

@@ -2,7 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
-import { getSystemModels, isSystemModel } from "./model-registry.ts";
+import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgModelInfo } from "@appstrate/shared-types";
@@ -28,6 +28,10 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       api: def.api,
       baseUrl: def.baseUrl,
       modelId: def.modelId,
+      input: def.input ?? null,
+      contextWindow: def.contextWindow ?? null,
+      maxTokens: def.maxTokens ?? null,
+      reasoning: def.reasoning ?? null,
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in",
@@ -46,6 +50,10 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       api: row.api,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
+      input: row.input as string[] | null,
+      contextWindow: row.contextWindow,
+      maxTokens: row.maxTokens,
+      reasoning: row.reasoning,
       enabled: row.enabled,
       isDefault: row.isDefault,
       source: row.source as "built-in" | "custom",
@@ -68,6 +76,12 @@ export async function createOrgModel(
   modelId: string,
   apiKey: string,
   userId: string,
+  capabilities?: {
+    input?: string[];
+    contextWindow?: number;
+    maxTokens?: number;
+    reasoning?: boolean;
+  },
 ): Promise<string> {
   const apiKeyEncrypted = encrypt(apiKey);
   const [row] = await db
@@ -79,6 +93,10 @@ export async function createOrgModel(
       baseUrl,
       modelId,
       apiKeyEncrypted,
+      input: capabilities?.input ?? null,
+      contextWindow: capabilities?.contextWindow ?? null,
+      maxTokens: capabilities?.maxTokens ?? null,
+      reasoning: capabilities?.reasoning ?? null,
       source: "custom",
       createdBy: userId,
     })
@@ -96,6 +114,10 @@ export async function updateOrgModel(
     modelId?: string;
     apiKey?: string;
     enabled?: boolean;
+    input?: string[] | null;
+    contextWindow?: number | null;
+    maxTokens?: number | null;
+    reasoning?: boolean | null;
   },
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
@@ -109,6 +131,10 @@ export async function updateOrgModel(
   if (data.modelId !== undefined) updates.modelId = data.modelId;
   if (data.apiKey !== undefined) updates.apiKeyEncrypted = encrypt(data.apiKey);
   if (data.enabled !== undefined) updates.enabled = data.enabled;
+  if (data.input !== undefined) updates.input = data.input;
+  if (data.contextWindow !== undefined) updates.contextWindow = data.contextWindow;
+  if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens;
+  if (data.reasoning !== undefined) updates.reasoning = data.reasoning;
 
   await db
     .update(orgModels)
@@ -143,17 +169,37 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-export async function resolveModel(
-  orgId: string,
-  packageId: string,
-  config?: Record<string, unknown>,
-): Promise<{
+interface ResolvedModel {
   api: string;
   baseUrl: string;
   modelId: string;
   apiKey: string;
   label: string;
-} | null> {
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+}
+
+function systemDefToResolved(def: ModelDefinition): ResolvedModel {
+  return {
+    api: def.api,
+    baseUrl: def.baseUrl,
+    modelId: def.modelId,
+    apiKey: def.apiKey,
+    label: def.label,
+    input: def.input ?? null,
+    contextWindow: def.contextWindow ?? null,
+    maxTokens: def.maxTokens ?? null,
+    reasoning: def.reasoning ?? null,
+  };
+}
+
+export async function resolveModel(
+  orgId: string,
+  packageId: string,
+  config?: Record<string, unknown>,
+): Promise<ResolvedModel | null> {
   // 1. Check flow config for __modelId
   const resolved = config ?? (await getPackageConfig(orgId, packageId));
   const configModelId = resolved.__modelId as string | undefined | null;
@@ -185,6 +231,10 @@ export async function resolveModel(
         modelId: dbDefault.modelId,
         apiKey: decrypt(dbDefault.apiKeyEncrypted),
         label: dbDefault.label,
+        input: dbDefault.input as string[] | null,
+        contextWindow: dbDefault.contextWindow,
+        maxTokens: dbDefault.maxTokens,
+        reasoning: dbDefault.reasoning,
       };
     } catch {
       logger.warn("Failed to decrypt default model API key", { modelId: dbDefault.id });
@@ -195,13 +245,7 @@ export async function resolveModel(
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return {
-        api: def.api,
-        baseUrl: def.baseUrl,
-        modelId: def.modelId,
-        apiKey: def.apiKey,
-        label: def.label,
-      };
+      return systemDefToResolved(def);
     }
   }
 
@@ -209,27 +253,12 @@ export async function resolveModel(
   return null;
 }
 
-async function loadModel(
-  orgId: string,
-  modelDbId: string,
-): Promise<{
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  label: string;
-} | null> {
+async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check system models first
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
-    return {
-      api: systemDef.api,
-      baseUrl: systemDef.baseUrl,
-      modelId: systemDef.modelId,
-      apiKey: systemDef.apiKey,
-      label: systemDef.label,
-    };
+    return systemDefToResolved(systemDef);
   }
 
   // Check DB
@@ -241,6 +270,10 @@ async function loadModel(
       apiKeyEncrypted: orgModels.apiKeyEncrypted,
       enabled: orgModels.enabled,
       label: orgModels.label,
+      input: orgModels.input,
+      contextWindow: orgModels.contextWindow,
+      maxTokens: orgModels.maxTokens,
+      reasoning: orgModels.reasoning,
     })
     .from(orgModels)
     .where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)))
@@ -255,6 +288,10 @@ async function loadModel(
       modelId: row.modelId,
       apiKey: decrypt(row.apiKeyEncrypted),
       label: row.label,
+      input: row.input as string[] | null,
+      contextWindow: row.contextWindow,
+      maxTokens: row.maxTokens,
+      reasoning: row.reasoning,
     };
   } catch {
     logger.warn("Failed to decrypt model API key", { modelId: modelDbId });
