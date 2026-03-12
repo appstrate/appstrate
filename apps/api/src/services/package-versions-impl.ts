@@ -1,4 +1,4 @@
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -51,6 +51,8 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
 
   try {
     return await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+
       // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
       const allExisting = await tx
         .select({ version: packageVersions.version })
@@ -82,7 +84,12 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
         return existingRow ?? null;
       }
       if (outcome.action === "rejected") {
-        logger.warn("Version not higher", { packageId, version, highest: outcome.highest });
+        logger.warn("Version rejected", {
+          packageId,
+          version,
+          error: outcome.error,
+          highest: outcome.error === "VERSION_NOT_HIGHER" ? outcome.highest : undefined,
+        });
         return null;
       }
 
@@ -331,42 +338,52 @@ export async function yankVersion(
   version: string,
   reason?: string,
 ): Promise<boolean> {
-  const [yanked] = await db
-    .update(packageVersions)
-    .set({ yanked: true, yankedReason: reason ?? null })
-    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-    .returning({ id: packageVersions.id });
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
 
-  if (!yanked) return false;
+    const [yanked] = await tx
+      .update(packageVersions)
+      .set({ yanked: true, yankedReason: reason ?? null })
+      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+      .returning({ id: packageVersions.id });
 
-  const affectedTags = await db
-    .select({ tag: packageDistTags.tag })
-    .from(packageDistTags)
-    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, yanked.id)));
+    if (!yanked) return false;
 
-  if (affectedTags.length > 0) {
-    const candidates = await db
-      .select({ id: packageVersions.id, version: packageVersions.version })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
+    const affectedTags = await tx
+      .select({ tag: packageDistTags.tag })
+      .from(packageDistTags)
+      .where(
+        and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, yanked.id)),
+      );
 
-    const instructions = planTagReassignment(affectedTags, candidates);
+    if (affectedTags.length > 0) {
+      const candidates = await tx
+        .select({ id: packageVersions.id, version: packageVersions.version })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
 
-    for (const instr of instructions) {
-      if (instr.action === "reassign") {
-        await db
-          .update(packageDistTags)
-          .set({ versionId: instr.newVersionId, updatedAt: new Date() })
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
-      } else {
-        await db
-          .delete(packageDistTags)
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
+      const instructions = planTagReassignment(affectedTags, candidates);
+
+      for (const instr of instructions) {
+        if (instr.action === "reassign") {
+          await tx
+            .update(packageDistTags)
+            .set({ versionId: instr.newVersionId, updatedAt: new Date() })
+            .where(
+              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
+            );
+        } else {
+          await tx
+            .delete(packageDistTags)
+            .where(
+              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
+            );
+        }
       }
     }
-  }
 
-  return true;
+    return true;
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -375,53 +392,65 @@ export async function yankVersion(
 
 /** Permanently delete a version. Reassigns dist-tags, then removes the DB row and storage artifact. */
 export async function deletePackageVersion(packageId: string, version: string): Promise<boolean> {
-  // Find the version row
-  const [row] = await db
-    .select({ id: packageVersions.id })
-    .from(packageVersions)
-    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-    .limit(1);
+  const deleted = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
 
-  if (!row) return false;
-
-  // Reassign dist-tags that point to this version before deleting
-  const affectedTags = await db
-    .select({ tag: packageDistTags.tag })
-    .from(packageDistTags)
-    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, row.id)));
-
-  if (affectedTags.length > 0) {
-    // Candidates = all non-yanked versions EXCEPT the one being deleted
-    const candidates = await db
-      .select({ id: packageVersions.id, version: packageVersions.version })
+    // Find the version row
+    const [row] = await tx
+      .select({ id: packageVersions.id })
       .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
+      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+      .limit(1);
 
-    const filteredCandidates = candidates.filter((c) => c.id !== row.id);
-    const instructions = planTagReassignment(affectedTags, filteredCandidates);
+    if (!row) return false;
 
-    for (const instr of instructions) {
-      if (instr.action === "reassign") {
-        await db
-          .update(packageDistTags)
-          .set({ versionId: instr.newVersionId, updatedAt: new Date() })
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
-      } else {
-        await db
-          .delete(packageDistTags)
-          .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)));
+    // Reassign dist-tags that point to this version before deleting
+    const affectedTags = await tx
+      .select({ tag: packageDistTags.tag })
+      .from(packageDistTags)
+      .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, row.id)));
+
+    if (affectedTags.length > 0) {
+      // Candidates = all non-yanked versions EXCEPT the one being deleted
+      const candidates = await tx
+        .select({ id: packageVersions.id, version: packageVersions.version })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
+
+      const filteredCandidates = candidates.filter((c) => c.id !== row.id);
+      const instructions = planTagReassignment(affectedTags, filteredCandidates);
+
+      for (const instr of instructions) {
+        if (instr.action === "reassign") {
+          await tx
+            .update(packageDistTags)
+            .set({ versionId: instr.newVersionId, updatedAt: new Date() })
+            .where(
+              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
+            );
+        } else {
+          await tx
+            .delete(packageDistTags)
+            .where(
+              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
+            );
+        }
       }
     }
+
+    // Delete the version row (CASCADE removes packageVersionDependencies)
+    await tx.delete(packageVersions).where(eq(packageVersions.id, row.id));
+
+    return true;
+  });
+
+  if (deleted) {
+    // Best-effort storage cleanup (outside transaction — don't fail if missing)
+    await deleteVersionZip(packageId, version);
+    logger.info("Deleted package version", { packageId, version });
   }
 
-  // Delete the version row (CASCADE removes packageVersionDependencies)
-  await db.delete(packageVersions).where(eq(packageVersions.id, row.id));
-
-  // Best-effort storage cleanup (outside transaction — don't fail if missing)
-  await deleteVersionZip(packageId, version);
-
-  logger.info("Deleted package version", { packageId, version });
-  return true;
+  return deleted;
 }
 
 // ─────────────────────────────────────────────
@@ -629,6 +658,9 @@ export async function replaceVersionContent(params: {
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
 
+  // Upload ZIP first to avoid integrity mismatch if upload fails after DB update
+  await uploadPackageZip(packageId, version, zipBuffer);
+
   const [row] = await db
     .update(packageVersions)
     .set({ integrity, artifactSize, manifest })
@@ -639,8 +671,6 @@ export async function replaceVersionContent(params: {
     logger.warn("replaceVersionContent: version row not found", { packageId, version });
     return;
   }
-
-  await uploadPackageZip(packageId, version, zipBuffer);
 
   // Clear old deps and re-store from new manifest
   await clearVersionDependencies(row.id);
@@ -670,24 +700,35 @@ export async function createVersionAndUpload(params: {
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
 
-  const result = await createPackageVersion({
-    packageId,
-    version,
-    integrity,
-    artifactSize,
-    manifest,
-    orgId,
-    createdBy,
-  });
+  // Upload ZIP first — a ZIP without a DB row is safer than a DB row without a ZIP
+  await uploadPackageZip(packageId, version, zipBuffer);
 
-  if (result) {
-    await uploadPackageZip(packageId, result.version, zipBuffer);
+  try {
+    const result = await createPackageVersion({
+      packageId,
+      version,
+      integrity,
+      artifactSize,
+      manifest,
+      orgId,
+      createdBy,
+    });
 
-    const deps = extractDependencies(manifest);
-    if (deps.length > 0) {
-      await storeVersionDependencies(result.id, deps);
+    if (result) {
+      const deps = extractDependencies(manifest);
+      if (deps.length > 0) {
+        await storeVersionDependencies(result.id, deps);
+      }
     }
-  }
 
-  return result;
+    return result;
+  } catch (err) {
+    // Clean up uploaded ZIP on DB failure (best-effort — don't mask original error)
+    try {
+      await deleteVersionZip(packageId, version);
+    } catch {
+      logger.warn("Failed to clean up ZIP after DB error", { packageId, version });
+    }
+    throw err;
+  }
 }

@@ -57,6 +57,7 @@ const {
   getVersionDetail,
   getVersionCount,
   yankVersion,
+  deletePackageVersion,
   getMatchingDistTags,
 
   getVersionInfo,
@@ -894,5 +895,82 @@ describe("createVersionFromDraft — flow stored files round-trip", () => {
       userId: "user-1",
     });
     expect(result).toEqual({ id: 1, version: "1.0.0" });
+  });
+});
+
+describe("advisory lock tracking", () => {
+  beforeEach(() => {
+    resetQueues();
+  });
+
+  test("createPackageVersion acquires advisory lock", async () => {
+    queues.select = [
+      [], // allExisting
+      [], // currentLatest
+    ];
+    queues.insert = [[{ id: 1, version: "1.0.0" }]];
+
+    await createPackageVersion({
+      packageId: "pkg-1",
+      version: "1.0.0",
+      integrity: "sha256-x",
+      artifactSize: 100,
+      manifest: {},
+      orgId: "org-1",
+      createdBy: "user-1",
+    });
+
+    expect(tracking.executeCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("yankVersion acquires advisory lock", async () => {
+    queues.update = [[{ id: 10 }]];
+    queues.select = [
+      [], // affectedTags — none
+    ];
+
+    await yankVersion("pkg-1", "1.0.0");
+
+    expect(tracking.executeCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("deletePackageVersion acquires advisory lock", async () => {
+    queues.select = [
+      [{ id: 10 }], // version row found
+      [], // no affected tags
+    ];
+    queues.delete = [[]]; // version delete
+
+    await deletePackageVersion("pkg-1", "1.0.0");
+
+    expect(tracking.executeCalls.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("deletePackageVersion", () => {
+  beforeEach(() => {
+    resetQueues();
+  });
+
+  test("returns false when version not found", async () => {
+    queues.select = [[]]; // no version row
+    const result = await deletePackageVersion("pkg-1", "1.0.0");
+    expect(result).toBe(false);
+  });
+
+  test("deletes version and reassigns dist-tags", async () => {
+    queues.select = [
+      [{ id: 10 }], // version row
+      [{ tag: "latest" }], // affectedTags
+      [
+        { id: 9, version: "0.9.0" },
+        { id: 10, version: "1.0.0" },
+      ], // candidates (includes self)
+    ];
+    queues.update.push([]); // dist-tag update
+    queues.delete = [[]]; // version delete
+
+    const result = await deletePackageVersion("pkg-1", "1.0.0");
+    expect(result).toBe(true);
   });
 });
