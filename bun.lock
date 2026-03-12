@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
       },
       "devDependencies": {
         "@readme/openapi-parser": "^5.5.0",
@@ -23,7 +23,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/connect": "workspace:*",
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/registry-client": "workspace:*",
@@ -50,7 +50,7 @@
     "apps/web": {
       "name": "@appstrate/web",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
         "@appstrate/shared-types": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -122,7 +122,7 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
         "@appstrate/env": "workspace:*",
         "@better-auth/drizzle-adapter": "^1.5.3",
         "better-auth": "^1.2.8",
@@ -137,21 +137,21 @@
       "name": "@appstrate/env",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
         "zod": "^4.3.6",
       },
     },
     "packages/registry-client": {
       "name": "@appstrate/registry-client",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
       },
     },
     "packages/shared-types": {
       "name": "@appstrate/shared-types",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.4.2",
+        "@appstrate/core": "^2.4.3",
         "@appstrate/db": "workspace:*",
       },
     },
@@ -163,7 +163,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.4.2", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-jSbgAp0nb9kCEqFxE1vpnTI8lrH6pb0ghuspSt47KJWZE/vj+ObBxQ/eVO1C8l2oSxz4dCj43d3pr1yqmqOBBA=="],
+    "@appstrate/core": ["@appstrate/core@2.4.3", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-6+AJjXoOASDbWlElIFmIIMPFMgN26u4ubLUdIN58ALJcaOtovPbl9LTwGOENhsgTw226v6y+xKY3O2wX9DErxA=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 
