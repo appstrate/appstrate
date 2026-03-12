@@ -15,12 +15,14 @@ import {
 } from "@/components/ui/select";
 import { useFormErrors } from "../hooks/use-form-errors";
 import type { OrgModelInfo } from "@appstrate/shared-types";
-
-const API_DEFAULT_URLS: Record<string, string> = {
-  "anthropic-messages": "https://api.anthropic.com",
-  "openai-completions": "https://api.openai.com/v1",
-  "google-generative-ai": "https://generativelanguage.googleapis.com/v1beta",
-};
+import {
+  CUSTOM_ID,
+  PROVIDER_PRESETS,
+  findPresetMatch,
+  getProviderById,
+  getProviderByApi,
+} from "@/lib/model-presets";
+import { PROVIDER_ICONS } from "./icons";
 
 interface ModelFormData {
   label: string;
@@ -42,6 +44,22 @@ interface ModelFormModalProps {
   onSubmit: (data: ModelFormData) => void;
 }
 
+function detectProvider(model: OrgModelInfo | null): string {
+  if (!model) return "";
+  const match = findPresetMatch(model.api, model.modelId);
+  if (match) return match.provider.id;
+  const byApi = getProviderByApi(model.api);
+  if (byApi) return byApi.id;
+  return CUSTOM_ID;
+}
+
+function detectModel(model: OrgModelInfo | null): string {
+  if (!model) return "";
+  const match = findPresetMatch(model.api, model.modelId);
+  if (match) return match.model.modelId;
+  return CUSTOM_ID;
+}
+
 function ModelFormBody({
   model,
   isPending,
@@ -54,6 +72,10 @@ function ModelFormBody({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+
+  const [providerId, setProviderId] = useState(() => detectProvider(model));
+  const [selectedModelId, setSelectedModelId] = useState(() => detectModel(model));
+
   const [label, setLabel] = useState(model?.label ?? "");
   const [api, setApi] = useState(model?.api ?? "");
   const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "");
@@ -65,17 +87,27 @@ function ModelFormBody({
   const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
   const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
 
+  const isCustomProvider = providerId === CUSTOM_ID;
+  const isCustomModel = selectedModelId === CUSTOM_ID;
+  const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
+  const isCustom = isCustomProvider || isCustomModel;
+
+  const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId);
+
   const rules = useMemo(
     () => ({
       label: (v: string) => {
+        if (isPreset) return undefined;
         if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
       api: (v: string) => {
+        if (!isCustomProvider) return undefined;
         if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
       baseUrl: (v: string) => {
+        if (isPreset) return undefined;
         if (!v.trim()) return t("validation.required", { ns: "common" });
         try {
           new URL(v.trim());
@@ -85,6 +117,7 @@ function ModelFormBody({
         return undefined;
       },
       modelId: (v: string) => {
+        if (isPreset) return undefined;
         if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
@@ -93,18 +126,59 @@ function ModelFormBody({
         return undefined;
       },
     }),
-    [t, model],
+    [t, model, isPreset, isCustomProvider],
   );
 
-  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
+  const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
 
-  const handleApiChange = (value: string) => {
-    setApi(value);
-    clearField("api");
-    if (!baseUrl && API_DEFAULT_URLS[value]) {
-      setBaseUrl(API_DEFAULT_URLS[value]);
-      clearField("baseUrl");
+  const resetModelFields = () => {
+    setLabel("");
+    setModelId("");
+    setInputText(true);
+    setInputImage(false);
+    setContextWindow("");
+    setMaxTokens("");
+    setReasoning(false);
+  };
+
+  const handleProviderChange = (id: string) => {
+    setProviderId(id);
+    clearErrors();
+
+    if (id === CUSTOM_ID) {
+      setSelectedModelId(CUSTOM_ID);
+      setApi("");
+      setBaseUrl("");
+    } else {
+      setSelectedModelId("");
+      const provider = getProviderById(id);
+      if (provider) {
+        setApi(provider.api);
+        setBaseUrl(provider.baseUrl);
+      }
     }
+    resetModelFields();
+  };
+
+  const handleModelChange = (id: string) => {
+    setSelectedModelId(id);
+    clearErrors();
+
+    if (id === CUSTOM_ID) {
+      resetModelFields();
+      return;
+    }
+
+    const preset = selectedProvider?.models.find((m) => m.modelId === id);
+    if (!preset) return;
+
+    setLabel(preset.label);
+    setModelId(preset.modelId);
+    setInputText(preset.input.includes("text"));
+    setInputImage(preset.input.includes("image"));
+    setContextWindow(preset.contextWindow.toString());
+    setMaxTokens(preset.maxTokens.toString());
+    setReasoning(preset.reasoning);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -148,151 +222,221 @@ function ModelFormBody({
       }
     >
       <form id="model-form" onSubmit={handleSubmit} className="space-y-4">
+        {/* Provider select */}
         <div className="space-y-2">
-          <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
-          <Input
-            id="mdl-label"
-            type="text"
-            value={label}
-            onChange={(e) => {
-              setLabel(e.target.value);
-              clearField("label");
-            }}
-            onBlur={() => onBlur("label", label)}
-            placeholder="ex: Claude Sonnet"
-            autoFocus
-            aria-invalid={errors.label ? true : undefined}
-            className={cn(errors.label && "border-destructive")}
-          />
-          {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mdl-api">{t("models.form.api")}</Label>
-          <Select value={api} onValueChange={handleApiChange}>
-            <SelectTrigger id="mdl-api" className={cn(errors.api && "border-destructive")}>
-              <SelectValue placeholder={t("models.form.apiPlaceholder")} />
+          <Label htmlFor="mdl-provider">{t("models.form.provider")}</Label>
+          <Select value={providerId} onValueChange={handleProviderChange}>
+            <SelectTrigger id="mdl-provider">
+              <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="anthropic-messages">Anthropic</SelectItem>
-              <SelectItem value="openai-completions">OpenAI / Compatible</SelectItem>
-              <SelectItem value="google-generative-ai">Google AI</SelectItem>
+              {PROVIDER_PRESETS.map((p) => {
+                const Icon = PROVIDER_ICONS[p.id];
+                return (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="flex items-center gap-2">
+                      {Icon && <Icon className="size-4" />}
+                      {p.label}
+                    </span>
+                  </SelectItem>
+                );
+              })}
+              <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
             </SelectContent>
           </Select>
-          {errors.api && <div className="text-sm text-destructive">{errors.api}</div>}
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
-          <Input
-            id="mdl-baseUrl"
-            type="url"
-            value={baseUrl}
-            onChange={(e) => {
-              setBaseUrl(e.target.value);
-              clearField("baseUrl");
-            }}
-            onBlur={() => onBlur("baseUrl", baseUrl)}
-            placeholder="https://api.openai.com/v1"
-            aria-invalid={errors.baseUrl ? true : undefined}
-            className={cn(errors.baseUrl && "border-destructive")}
-          />
-          <div className="text-sm text-muted-foreground">{t("models.form.baseUrlHint")}</div>
-          {errors.baseUrl && <div className="text-sm text-destructive">{errors.baseUrl}</div>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
-          <Input
-            id="mdl-modelId"
-            type="text"
-            value={modelId}
-            onChange={(e) => {
-              setModelId(e.target.value);
-              clearField("modelId");
-            }}
-            onBlur={() => onBlur("modelId", modelId)}
-            placeholder="ex: claude-sonnet-4-5-20250929"
-            aria-invalid={errors.modelId ? true : undefined}
-            className={cn(errors.modelId && "border-destructive")}
-          />
-          {errors.modelId && <div className="text-sm text-destructive">{errors.modelId}</div>}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="mdl-apiKey">{t("models.form.apiKey")}</Label>
-          <Input
-            id="mdl-apiKey"
-            type="password"
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              clearField("apiKey");
-            }}
-            onBlur={() => onBlur("apiKey", apiKey)}
-            placeholder="sk-..."
-            aria-invalid={errors.apiKey ? true : undefined}
-            className={cn(errors.apiKey && "border-destructive")}
-          />
-          {model && (
-            <div className="text-sm text-muted-foreground">{t("models.form.apiKeyHint")}</div>
-          )}
-          {errors.apiKey && <div className="text-sm text-destructive">{errors.apiKey}</div>}
-        </div>
-        <div className="border-t pt-4 mt-2 space-y-4">
-          <Label className="text-sm font-medium text-muted-foreground">
-            {t("models.form.capabilities")}
-          </Label>
+
+        {/* Model select (only for known providers) */}
+        {selectedProvider && (
           <div className="space-y-2">
-            <Label>{t("models.form.input")}</Label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={inputText}
-                  onChange={(e) => setInputText(e.target.checked)}
-                />
-                {t("models.form.inputText")}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={inputImage}
-                  onChange={(e) => setInputImage(e.target.checked)}
-                />
-                {t("models.form.inputImage")}
-              </label>
-            </div>
+            <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
+            <Select value={selectedModelId} onValueChange={handleModelChange}>
+              <SelectTrigger id="mdl-model">
+                <SelectValue placeholder={t("models.form.modelPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                {selectedProvider.models.map((m) => (
+                  <SelectItem key={m.modelId} value={m.modelId}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-              <Input
-                id="mdl-ctx"
-                type="number"
-                value={contextWindow}
-                onChange={(e) => setContextWindow(e.target.value)}
-                placeholder="200000"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-              <Input
-                id="mdl-maxtok"
-                type="number"
-                value={maxTokens}
-                onChange={(e) => setMaxTokens(e.target.value)}
-                placeholder="16384"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              id="mdl-reasoning"
-              type="checkbox"
-              checked={reasoning}
-              onChange={(e) => setReasoning(e.target.checked)}
+        )}
+
+        {/* Label — only for custom provider/model */}
+        {isCustom && (
+          <div className="space-y-2">
+            <Label htmlFor="mdl-label">{t("models.form.label")}</Label>
+            <Input
+              id="mdl-label"
+              type="text"
+              value={label}
+              onChange={(e) => {
+                setLabel(e.target.value);
+                clearField("label");
+              }}
+              onBlur={() => onBlur("label", label)}
+              placeholder="ex: Claude Sonnet"
+              autoFocus
+              aria-invalid={errors.label ? true : undefined}
+              className={cn(errors.label && "border-destructive")}
             />
-            <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
+            {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
           </div>
-          <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
-        </div>
+        )}
+
+        {/* API Key — visible once a model is chosen */}
+        {!!selectedModelId && (
+          <div className="space-y-2">
+            <Label htmlFor="mdl-apiKey">{t("models.form.apiKey")}</Label>
+            <Input
+              id="mdl-apiKey"
+              type="password"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                clearField("apiKey");
+              }}
+              onBlur={() => onBlur("apiKey", apiKey)}
+              placeholder="sk-..."
+              aria-invalid={errors.apiKey ? true : undefined}
+              className={cn(errors.apiKey && "border-destructive")}
+            />
+            {model && (
+              <div className="text-sm text-muted-foreground">{t("models.form.apiKeyHint")}</div>
+            )}
+            {errors.apiKey && <div className="text-sm text-destructive">{errors.apiKey}</div>}
+          </div>
+        )}
+
+        {/* Custom fields — visible for custom provider or custom model */}
+        {isCustom && (
+          <>
+            {isCustomProvider && (
+              <div className="space-y-2">
+                <Label htmlFor="mdl-api">{t("models.form.api")}</Label>
+                <Select
+                  value={api}
+                  onValueChange={(v) => {
+                    setApi(v);
+                    clearField("api");
+                  }}
+                >
+                  <SelectTrigger id="mdl-api" className={cn(errors.api && "border-destructive")}>
+                    <SelectValue placeholder={t("models.form.apiPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="anthropic-messages">Anthropic</SelectItem>
+                    <SelectItem value="openai-completions">OpenAI / Compatible</SelectItem>
+                    <SelectItem value="google-generative-ai">Google AI</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.api && <div className="text-sm text-destructive">{errors.api}</div>}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="mdl-baseUrl">{t("models.form.baseUrl")}</Label>
+              <Input
+                id="mdl-baseUrl"
+                type="url"
+                value={baseUrl}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  clearField("baseUrl");
+                }}
+                onBlur={() => onBlur("baseUrl", baseUrl)}
+                placeholder="https://api.openai.com/v1"
+                aria-invalid={errors.baseUrl ? true : undefined}
+                className={cn(errors.baseUrl && "border-destructive")}
+              />
+              <div className="text-sm text-muted-foreground">{t("models.form.baseUrlHint")}</div>
+              {errors.baseUrl && <div className="text-sm text-destructive">{errors.baseUrl}</div>}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mdl-modelId">{t("models.form.modelId")}</Label>
+              <Input
+                id="mdl-modelId"
+                type="text"
+                value={modelId}
+                onChange={(e) => {
+                  setModelId(e.target.value);
+                  clearField("modelId");
+                }}
+                onBlur={() => onBlur("modelId", modelId)}
+                placeholder="ex: claude-sonnet-4-5-20250929"
+                aria-invalid={errors.modelId ? true : undefined}
+                className={cn(errors.modelId && "border-destructive")}
+              />
+              {errors.modelId && <div className="text-sm text-destructive">{errors.modelId}</div>}
+            </div>
+
+            <div className="border-t pt-4 mt-2 space-y-4">
+              <Label className="text-sm font-medium text-muted-foreground">
+                {t("models.form.capabilities")}
+              </Label>
+              <div className="space-y-2">
+                <Label>{t("models.form.input")}</Label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={inputText}
+                      onChange={(e) => setInputText(e.target.checked)}
+                    />
+                    {t("models.form.inputText")}
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={inputImage}
+                      onChange={(e) => setInputImage(e.target.checked)}
+                    />
+                    {t("models.form.inputImage")}
+                  </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
+                  <Input
+                    id="mdl-ctx"
+                    type="number"
+                    value={contextWindow}
+                    onChange={(e) => setContextWindow(e.target.value)}
+                    placeholder="200000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
+                  <Input
+                    id="mdl-maxtok"
+                    type="number"
+                    value={maxTokens}
+                    onChange={(e) => setMaxTokens(e.target.value)}
+                    placeholder="16384"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="mdl-reasoning"
+                  type="checkbox"
+                  checked={reasoning}
+                  onChange={(e) => setReasoning(e.target.checked)}
+                />
+                <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {t("models.form.capabilitiesHint")}
+              </div>
+            </div>
+          </>
+        )}
       </form>
     </Modal>
   );

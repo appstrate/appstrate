@@ -34,6 +34,8 @@ import {
 } from "../hooks/use-models";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ModelFormModal } from "../components/model-form-modal";
+import { PROVIDER_ICONS } from "../components/icons";
+import { PROVIDER_PRESETS } from "../lib/model-presets";
 
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -819,9 +821,14 @@ function ModelsTab({
         <div className="flex flex-col gap-3">
           {models.map((m) => {
             const isBuiltIn = m.source === "built-in";
+            const provider = PROVIDER_PRESETS.find(
+              (p) => p.api === m.api && p.baseUrl === m.baseUrl,
+            );
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
               <div key={m.id} className="rounded-lg border border-border bg-card p-5">
                 <div className="flex items-center gap-3 mb-3">
+                  {ProviderIcon && <ProviderIcon className="size-5" />}
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
                     <span className="text-sm text-muted-foreground">
