@@ -302,12 +302,14 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
 // --- Connection test ---
 
-export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
-  const model = await loadModel(orgId, modelDbId);
-  if (!model)
-    return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
-
-  if (isBlockedUrl(model.baseUrl)) {
+/** Test a model config directly (no DB lookup). */
+export async function testModelConfig(config: {
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+}): Promise<TestResult> {
+  if (isBlockedUrl(config.baseUrl)) {
     return {
       ok: false,
       latency: 0,
@@ -320,38 +322,38 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
   // Anthropic: POST /v1/messages with max_tokens:1 (GET /v1/models is not available for all key types)
   // OpenAI/custom: GET /models (lightweight, no tokens consumed)
   // Google: GET /models (lightweight, no tokens consumed)
-  const base = model.baseUrl.replace(/\/+$/, "");
+  const base = config.baseUrl.replace(/\/+$/, "");
   let url: string;
   let method = "GET";
   let body: string | undefined;
   const headers: Record<string, string> = {};
 
-  switch (model.api) {
+  switch (config.api) {
     case "anthropic-messages":
       url = `${base}/v1/messages`;
       method = "POST";
-      if (model.apiKey.startsWith("sk-ant-oat")) {
+      if (config.apiKey.startsWith("sk-ant-oat")) {
         // OAuth tokens require Bearer auth + beta header (same as Pi SDK / Claude Code)
-        headers["Authorization"] = `Bearer ${model.apiKey}`;
+        headers["Authorization"] = `Bearer ${config.apiKey}`;
         headers["anthropic-beta"] = "oauth-2025-04-20";
       } else {
-        headers["x-api-key"] = model.apiKey;
+        headers["x-api-key"] = config.apiKey;
       }
       headers["anthropic-version"] = "2023-06-01";
       headers["content-type"] = "application/json";
       body = JSON.stringify({
-        model: model.modelId,
+        model: config.modelId,
         max_tokens: 1,
         messages: [{ role: "user", content: "hi" }],
       });
       break;
     case "google-generative-ai":
-      url = `${base}/models?key=${encodeURIComponent(model.apiKey)}`;
+      url = `${base}/models?key=${encodeURIComponent(config.apiKey)}`;
       break;
     case "openai-completions":
     default:
       url = `${base}/models`;
-      headers["Authorization"] = `Bearer ${model.apiKey}`;
+      headers["Authorization"] = `Bearer ${config.apiKey}`;
       break;
   }
 
@@ -387,4 +389,13 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
       message: err instanceof Error ? err.message : "Network error",
     };
   }
+}
+
+/** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */
+export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
+  const model = await loadModel(orgId, modelDbId);
+  if (!model)
+    return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+
+  return testModelConfig(model);
 }

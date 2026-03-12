@@ -99,6 +99,7 @@ const expectedEndpoints = [
   "GET /api/models",
   "POST /api/models",
   "PUT /api/models/default",
+  "POST /api/models/test",
   "PUT /api/models/{modelId}",
   "DELETE /api/models/{modelId}",
   "POST /api/models/{modelId}/test",

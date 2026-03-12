@@ -121,6 +121,49 @@ export const modelsPaths = {
       },
     },
   },
+  "/api/models/test": {
+    post: {
+      operationId: "testModelInline",
+      tags: ["Models"],
+      summary: "Test model configuration inline",
+      description:
+        "Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute. Admin only.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["api", "baseUrl", "modelId"],
+              properties: {
+                api: { type: "string", description: "API type" },
+                baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
+                modelId: { type: "string", description: "Model identifier" },
+                apiKey: { type: "string", description: "API key (required for new models)" },
+                existingModelId: {
+                  type: "string",
+                  description: "Existing model ID to fall back to for stored API key",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Test result",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/TestResult" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "429": { description: "Rate limited" },
+      },
+    },
+  },
   "/api/models/{modelId}": {
     put: {
       operationId: "updateModel",

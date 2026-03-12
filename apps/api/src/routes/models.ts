@@ -11,6 +11,8 @@ import {
   deleteOrgModel,
   setDefaultModel,
   testModelConnection,
+  testModelConfig,
+  loadModel,
 } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -41,6 +43,14 @@ const updateModelSchema = z.object({
 
 const setDefaultSchema = z.object({
   modelId: z.string().nullable(),
+});
+
+const testInlineSchema = z.object({
+  api: z.string().min(1),
+  baseUrl: z.string().url(),
+  modelId: z.string().min(1),
+  apiKey: z.string().optional(),
+  existingModelId: z.string().optional(),
 });
 
 export function createModelsRouter() {
@@ -104,6 +114,51 @@ export function createModelsRouter() {
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to set default model" }, 500);
+    }
+  });
+
+  // POST /api/models/test — test model config inline (before saving)
+  // MUST be registered before /:id/test
+  router.post("/test", rateLimit(5), async (c) => {
+    const orgId = c.get("orgId");
+    const body = await c.req.json();
+    const parsed = testInlineSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+    }
+
+    let { apiKey } = parsed.data;
+
+    // In edit mode, if no apiKey provided, fall back to the stored key
+    if (!apiKey && parsed.data.existingModelId) {
+      const existing = await loadModel(orgId, parsed.data.existingModelId);
+      if (existing) apiKey = existing.apiKey;
+    }
+
+    if (!apiKey) {
+      return c.json(
+        { ok: false, latency: 0, error: "VALIDATION_ERROR", message: "API key is required" },
+        400,
+      );
+    }
+
+    try {
+      const result = await testModelConfig({
+        api: parsed.data.api,
+        baseUrl: parsed.data.baseUrl,
+        modelId: parsed.data.modelId,
+        apiKey,
+      });
+      return c.json(result);
+    } catch (err) {
+      logger.error("Model inline test failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json(
+        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
+        500,
+      );
     }
   });
 

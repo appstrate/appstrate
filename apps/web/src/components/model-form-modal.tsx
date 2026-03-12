@@ -14,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useFormErrors } from "../hooks/use-form-errors";
-import type { OrgModelInfo } from "@appstrate/shared-types";
+import { useTestModelInline } from "../hooks/use-models";
+import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
@@ -131,6 +132,36 @@ function ModelFormBody({
 
   const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
 
+  // --- Inline test ---
+  const testMutation = useTestModelInline();
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  const canTest =
+    !!api.trim() && !!baseUrl.trim() && !!modelId.trim() && (!!apiKey.trim() || !!model);
+
+  const handleTest = () => {
+    setTestResult(null);
+    testMutation.mutate(
+      {
+        api: api.trim(),
+        baseUrl: baseUrl.trim(),
+        modelId: modelId.trim(),
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        ...(model ? { existingModelId: model.id } : {}),
+      },
+      {
+        onSuccess: (result) => setTestResult(result),
+        onError: () =>
+          setTestResult({
+            ok: false,
+            latency: 0,
+            error: "NETWORK_ERROR",
+            message: "Request failed",
+          }),
+      },
+    );
+  };
+
   const resetModelFields = () => {
     setLabel("");
     setModelId("");
@@ -212,6 +243,23 @@ function ModelFormBody({
       title={title}
       actions={
         <>
+          <div className="flex items-center gap-2 mr-auto">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTest}
+              disabled={!canTest || testMutation.isPending}
+            >
+              {testMutation.isPending ? <Spinner /> : t("models.test")}
+            </Button>
+            {testResult && (
+              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
+                {testResult.ok
+                  ? t("models.testSuccess", { latency: testResult.latency })
+                  : t("models.testFailed", { message: testResult.message })}
+              </span>
+            )}
+          </div>
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
