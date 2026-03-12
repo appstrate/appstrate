@@ -13,6 +13,8 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "./spinner";
+import { PROVIDER_ICONS } from "./icons";
+import { PROVIDER_PRESETS } from "@/lib/model-presets";
 import { InputModal } from "./input-modal";
 import { useRunFlow } from "../hooks/use-mutations";
 import { useCurrentProfileId } from "../hooks/use-current-profile";
@@ -194,12 +196,19 @@ export function RunFlowButton({
                         : t("models.flow.inheritNoDefault", { ns: "settings" })}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    {orgModels!.map((m) => (
-                      <DropdownMenuItem key={m.id} onSelect={() => setFlowModel.mutate(m.id)}>
-                        {flowModelId === m.id ? <Check size={14} /> : <span className="w-3.5" />}
-                        {m.label}
-                      </DropdownMenuItem>
-                    ))}
+                    {orgModels!.map((m) => {
+                      const mp = PROVIDER_PRESETS.find(
+                        (p) => p.api === m.api && p.baseUrl === m.baseUrl,
+                      );
+                      const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
+                      return (
+                        <DropdownMenuItem key={m.id} onSelect={() => setFlowModel.mutate(m.id)}>
+                          {flowModelId === m.id ? <Check size={14} /> : <span className="w-3.5" />}
+                          {MIcon && <MIcon className="size-3.5" />}
+                          {m.label}
+                        </DropdownMenuItem>
+                      );
+                    })}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               )}
