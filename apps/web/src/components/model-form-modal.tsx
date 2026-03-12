@@ -21,7 +21,7 @@ import {
   PROVIDER_PRESETS,
   findPresetMatch,
   getProviderById,
-  getProviderByApi,
+  findProviderByApiAndBaseUrl,
 } from "@/lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
 
@@ -49,8 +49,8 @@ function detectProvider(model: OrgModelInfo | null): string {
   if (!model) return "";
   const match = findPresetMatch(model.api, model.modelId);
   if (match) return match.provider.id;
-  const byApi = getProviderByApi(model.api);
-  if (byApi) return byApi.id;
+  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
+  if (byApiAndUrl) return byApiAndUrl.id;
   return CUSTOM_ID;
 }
 
@@ -58,6 +58,8 @@ function detectModel(model: OrgModelInfo | null): string {
   if (!model) return "";
   const match = findPresetMatch(model.api, model.modelId);
   if (match) return match.model.modelId;
+  const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
+  if (byApiAndUrl) return CUSTOM_ID;
   return CUSTOM_ID;
 }
 
