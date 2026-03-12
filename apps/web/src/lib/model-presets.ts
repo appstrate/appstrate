@@ -132,6 +132,13 @@ export function getProviderById(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.id === id);
 }
 
-export function getProviderByApi(api: string): ProviderPreset | undefined {
-  return PROVIDER_PRESETS.find((p) => p.api === api);
+export function findProviderByApiAndBaseUrl(
+  api: string,
+  baseUrl: string | undefined,
+): ProviderPreset | undefined {
+  if (!baseUrl) return undefined;
+  const normalized = baseUrl.replace(/\/+$/, "");
+  return PROVIDER_PRESETS.find(
+    (p) => p.api === api && normalized.startsWith(p.baseUrl.replace(/\/+$/, "")),
+  );
 }
