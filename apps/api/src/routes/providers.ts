@@ -26,24 +26,6 @@ async function isSystemProviderInDb(providerId: string): Promise<boolean> {
   return pkg?.source === "system";
 }
 
-/** Apply default fields forced on proxy-type providers. */
-function applyProxyProviderDefaults(data: { authMode?: string } & Record<string, unknown>): void {
-  if (data.authMode !== "proxy") return;
-  data.allowAllUris = true;
-  data.credentialFieldName = "url";
-  data.credentialSchema = data.credentialSchema ?? {
-    type: "object",
-    properties: {
-      url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
-    },
-    required: ["url"],
-  };
-  const cats = (data.categories as string[]) ?? [];
-  if (!cats.includes("proxy")) {
-    data.categories = [...cats, "proxy"];
-  }
-}
-
 const createProviderSchema = z.object({
   id: z.string().min(1, "id is required"),
   displayName: z.string().min(1, "displayName is required"),
@@ -177,8 +159,6 @@ export function createProvidersRouter() {
         400,
       );
     }
-
-    applyProxyProviderDefaults(data);
 
     // Build the definition object for manifest.definition
     const definition: Record<string, unknown> = {
@@ -340,12 +320,6 @@ export function createProvidersRouter() {
     const data = parsed.data;
     const oldManifest = (existingPkg.draftManifest ?? {}) as Record<string, unknown>;
     const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
-    const authMode = data.authMode ?? (oldDef.authMode as string);
-
-    // Temporarily set authMode so applyProxyProviderDefaults can check it
-    const effectiveData = data as Record<string, unknown>;
-    effectiveData.authMode = authMode;
-    applyProxyProviderDefaults(effectiveData as typeof data & { authMode: string });
 
     // Merge definition
     const newDef: Record<string, unknown> = {

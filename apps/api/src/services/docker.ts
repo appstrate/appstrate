@@ -336,11 +336,18 @@ export async function stopContainersByExecution(
 
 // --- Docker Network operations ---
 
-export async function createNetwork(name: string): Promise<string> {
+export async function createNetwork(
+  name: string,
+  options?: { internal?: boolean },
+): Promise<string> {
   const res = await dockerFetch("/networks/create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ Name: name, CheckDuplicate: true }),
+    body: JSON.stringify({
+      Name: name,
+      CheckDuplicate: true,
+      Internal: options?.internal ?? false,
+    }),
   });
 
   if (!res.ok) {
@@ -450,7 +457,10 @@ async function cleanupOrphanedNetworks(): Promise<number> {
 
   const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
   const orphaned = networks.filter(
-    (n) => n.Name.startsWith("appstrate-exec-") || n.Name === "appstrate-sidecar-pool",
+    (n) =>
+      n.Name.startsWith("appstrate-exec-") ||
+      n.Name === "appstrate-sidecar-pool" ||
+      n.Name === "appstrate-egress",
   );
 
   if (orphaned.length === 0) return 0;

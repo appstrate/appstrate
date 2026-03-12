@@ -359,7 +359,6 @@ export function ProviderEditorInner({
                     <SelectItem value="api_key">{t("providers.authMode.apiKey")}</SelectItem>
                     <SelectItem value="basic">{t("providers.authMode.basic")}</SelectItem>
                     <SelectItem value="custom">{t("providers.authMode.custom")}</SelectItem>
-                    <SelectItem value="proxy">{t("providers.authMode.proxy")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

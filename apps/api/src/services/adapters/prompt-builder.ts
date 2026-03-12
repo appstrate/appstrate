@@ -29,9 +29,10 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "Do NOT rely on the filesystem for persistence.",
   );
   sections.push(
-    "- **Network isolation**: You have no direct internet access. " +
-      "All external API calls must go through the sidecar proxy at `$SIDECAR_URL/proxy`. " +
-      "You cannot reach the host machine or any service outside this container directly.",
+    "- **Network access**: Outbound HTTP/HTTPS is available. " +
+      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
+      "Only authenticated requests to connected providers require the sidecar credential proxy " +
+      "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
   );
   if (ctx.timeout) {
     sections.push(
@@ -81,21 +82,27 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // --- API access instructions ---
+  // --- Authenticated provider API access ---
   if (connectedServices.length > 0) {
-    sections.push("## API Access\n");
+    sections.push("## Authenticated Provider API\n");
     sections.push(
-      "Make authenticated API requests via the sidecar proxy at `$SIDECAR_URL/proxy`.\n",
+      "The sidecar credential proxy at `$SIDECAR_URL/proxy` injects the user's credentials into requests " +
+        "to connected provider APIs. You never see or handle raw tokens.\n",
     );
-    sections.push("Headers:");
-    sections.push("- `X-Provider`: the provider ID");
-    sections.push("- `X-Target`: the target URL (must match the service's authorized URLs)");
-    sections.push("- All other headers and the body are forwarded as-is");
+    sections.push(
+      "**Use this proxy ONLY for requests to connected providers listed below.** " +
+        "For public endpoints (no authentication required), call them directly with `curl` or `fetch` — " +
+        "do not route them through the sidecar.\n",
+    );
+    sections.push("Required headers:");
+    sections.push("- `X-Provider`: the provider ID (see list below)");
+    sections.push("- `X-Target`: the target URL (must match the provider's authorized URLs)");
+    sections.push("- All other headers and the body are forwarded as-is to the target");
     sections.push(
       "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials at request time",
     );
     sections.push(
-      "- Add `X-Substitute-Body: true` if the request body also contains placeholders\n",
+      "- Add `X-Substitute-Body: true` if the request body also contains `{{variable}}` placeholders\n",
     );
     sections.push("Example:");
     sections.push("```bash");
@@ -104,11 +111,10 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
     sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
     sections.push("```\n");
-    sections.push("The proxy forwards the upstream response as-is (status code, headers, body).");
-    sections.push("Use standard HTTP status codes to detect success or failure.");
     sections.push(
-      "If the response exceeded the size limit, the `X-Truncated: true` response header is present — " +
-        "consider paginating or narrowing your query.\n",
+      "The proxy returns the upstream response as-is (status code, body, Content-Type). " +
+        "If the response was truncated (>50 KB), the `X-Truncated: true` header is present — " +
+        "paginate or narrow your query.\n",
     );
 
     sections.push("### Connected Providers\n");
@@ -267,40 +273,6 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
     sections.push(
       "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
-    );
-  }
-
-  // --- Proxy awareness ---
-  if (ctx.proxyUrl) {
-    sections.push("## Network Proxy\n");
-    sections.push("An outbound HTTP proxy is configured for this execution.");
-    sections.push(
-      "All `curl` and HTTP requests are automatically routed through the proxy via environment variables (`HTTP_PROXY`/`HTTPS_PROXY`).",
-    );
-    sections.push("Sidecar API calls via `$SIDECAR_URL/proxy` are also routed through the proxy.");
-    sections.push(
-      "The proxy is handled transparently — no credentials are required on your side.\n",
-    );
-  }
-
-  // Agent-driven proxy (if a proxy service is connected)
-  const proxyServices = connectedServices.filter((s) => {
-    return s.categories?.includes("proxy");
-  });
-  if (proxyServices.length > 0 && !ctx.proxyUrl) {
-    sections.push("## Proxy Services\n");
-    sections.push(
-      "You have access to proxy service(s) for routing requests through residential IPs.",
-    );
-    sections.push("Use the `X-Proxy` header to route a request through a proxy:\n");
-    sections.push("```bash");
-    sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
-    sections.push(`  -H "X-Provider: ${proxyServices[0]!.id}" \\`);
-    sections.push(`  -H "X-Proxy: {{url}}" \\`);
-    sections.push(`  -H "X-Target: https://example.com/api/data"`);
-    sections.push("```\n");
-    sections.push(
-      "Use this when a direct request is blocked (403, connection refused) due to IP-based restrictions.\n",
     );
   }
 

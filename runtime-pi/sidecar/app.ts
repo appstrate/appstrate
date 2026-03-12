@@ -186,7 +186,6 @@ export function createApp(deps: AppDeps): Hono {
     const providerId = c.req.header("X-Provider");
     const targetUrl = c.req.header("X-Target");
     const substituteBody = c.req.header("X-Substitute-Body");
-    const proxyHeader = c.req.header("X-Proxy");
 
     if (!providerId) {
       return c.json({ error: "Missing X-Provider header" }, 400);
@@ -259,7 +258,6 @@ export function createApp(deps: AppDeps): Hono {
         lower === "x-provider" ||
         lower === "x-target" ||
         lower === "x-substitute-body" ||
-        lower === "x-proxy" ||
         lower === "host" ||
         lower === "content-length" ||
         HOP_BY_HOP_HEADERS.has(lower)
@@ -269,20 +267,8 @@ export function createApp(deps: AppDeps): Hono {
       forwardedHeaders[key] = substituteVars(value, creds.credentials);
     }
 
-    // Resolve proxy: X-Proxy header (agent-driven) takes priority, then env PROXY_URL
-    const resolvedProxy = (proxyHeader ? substituteVars(proxyHeader, creds.credentials) : "")
-      || config.proxyUrl
-      || "";
-
-    if (resolvedProxy) {
-      const unresolvedInProxy = findUnresolvedPlaceholders(resolvedProxy);
-      if (unresolvedInProxy.length > 0) {
-        return c.json(
-          { error: `Unresolved placeholders in X-Proxy: {{${unresolvedInProxy.join()}}}` },
-          400,
-        );
-      }
-    }
+    // Infrastructure proxy (flow-level, transparent)
+    const resolvedProxy = config.proxyUrl || "";
 
     // 5b. Check for unresolved placeholders in headers
     for (const [key, value] of Object.entries(forwardedHeaders)) {
@@ -349,9 +335,12 @@ export function createApp(deps: AppDeps): Hono {
         // @ts-expect-error - Bun supports duplex for streaming request bodies
         duplex: body instanceof ReadableStream ? "half" : undefined,
       });
-    } catch {
+    } catch (err) {
+      const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+      let domain: string | undefined;
+      try { domain = new URL(resolvedUrl).hostname; } catch {}
       return c.json(
-        { error: "Upstream request failed" },
+        { error: `Upstream request failed${code ? `: ${code}` : ""}${domain ? ` (${domain})` : ""}` },
         502,
       );
     }

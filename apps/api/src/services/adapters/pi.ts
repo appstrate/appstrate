@@ -66,14 +66,15 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.LLM_API_KEY = llmPlaceholder;
       }
 
-      if (ctx.proxyUrl) {
-        containerEnv.HTTP_PROXY = "http://sidecar:8081";
-        containerEnv.HTTPS_PROXY = "http://sidecar:8081";
-        containerEnv.http_proxy = "http://sidecar:8081";
-        containerEnv.https_proxy = "http://sidecar:8081";
-        containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
-        containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
-      }
+      // All outbound HTTP traffic routed through sidecar forward proxy.
+      // The execution network is internal (no NAT) — clients that ignore
+      // HTTP_PROXY simply get connection failures, which is the desired behavior.
+      containerEnv.HTTP_PROXY = "http://sidecar:8081";
+      containerEnv.HTTPS_PROXY = "http://sidecar:8081";
+      containerEnv.http_proxy = "http://sidecar:8081";
+      containerEnv.https_proxy = "http://sidecar:8081";
+      containerEnv.NO_PROXY = "sidecar,localhost,127.0.0.1";
+      containerEnv.no_proxy = "sidecar,localhost,127.0.0.1";
 
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
