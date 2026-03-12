@@ -1,6 +1,6 @@
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 import type { Manifest } from "@appstrate/core/validation";
-import { zipArtifact, type Zippable } from "@appstrate/core/zip";
+import { zipArtifact } from "@appstrate/core/zip";
 import {
   getOrgItem,
   getPackageById,
@@ -14,7 +14,6 @@ import {
   PROVIDER_CONFIG,
 } from "./package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
-import { downloadPackageFiles } from "./package-items/storage.ts";
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions-impl.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { db } from "../lib/db.ts";
@@ -148,22 +147,16 @@ async function forkWithConfig(
     sourcePackageId,
   );
 
-  // Copy storage files from the version ZIP (not from draft storage)
-  const files = await downloadPackageFiles(cfg.storageFolder, orgId, sourcePackageId);
-  if (files && Object.keys(files).length > 0) {
-    await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, files);
-  }
-
-  // Rebuild ZIP with updated manifest for the local version
-  const newZipEntries: Zippable = {};
+  // Build draft storage files from the version ZIP entries
+  const draftFiles: Record<string, Uint8Array> = {};
   for (const [path, data] of Object.entries(zipEntries)) {
-    if (path === "manifest.json") continue; // Replace with updated manifest
-    newZipEntries[path] = data;
+    if (path === "manifest.json") continue;
+    draftFiles[path] = data;
   }
-  newZipEntries["manifest.json"] = new TextEncoder().encode(
-    JSON.stringify(updatedManifest, null, 2),
-  );
-  const newZipBuffer = Buffer.from(zipArtifact(newZipEntries, 6));
+  draftFiles["manifest.json"] = new TextEncoder().encode(JSON.stringify(updatedManifest, null, 2));
+  await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, draftFiles);
+
+  const newZipBuffer = Buffer.from(zipArtifact(draftFiles, 6));
 
   // Create a local published version
   await createVersionAndUpload({

@@ -22,6 +22,7 @@ import {
   updateOrgItem,
   deleteOrgItem,
   uploadPackageFiles,
+  downloadPackageFiles,
   syncFlowDepsJunctionTable,
   SKILL_CONFIG,
   EXTENSION_CONFIG,
@@ -684,8 +685,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Update storage files
+    // Update storage files (merge with existing to preserve ancillary files)
+    const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, {
+      ...(existingFiles ?? {}),
       [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
     });
 
