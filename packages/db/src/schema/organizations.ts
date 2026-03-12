@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -110,7 +111,12 @@ export const orgProxies = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [index("idx_org_proxies_org_id").on(table.orgId)],
+  (table) => [
+    index("idx_org_proxies_org_id").on(table.orgId),
+    uniqueIndex("idx_org_proxies_one_default")
+      .on(table.orgId)
+      .where(sql`${table.isDefault} = true`),
+  ],
 );
 
 export const orgModels = pgTable(
@@ -136,5 +142,10 @@ export const orgModels = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [index("idx_org_models_org_id").on(table.orgId)],
+  (table) => [
+    index("idx_org_models_org_id").on(table.orgId),
+    uniqueIndex("idx_org_models_one_default")
+      .on(table.orgId)
+      .where(sql`${table.isDefault} = true`),
+  ],
 );

@@ -16,12 +16,12 @@ import { logger } from "../lib/logger.ts";
 
 const createProxySchema = z.object({
   label: z.string().min(1, "label is required"),
-  url: z.string().min(1, "url is required"),
+  url: z.url({ error: "url must be a valid URL" }),
 });
 
 const updateProxySchema = z.object({
   label: z.string().min(1).optional(),
-  url: z.string().min(1).optional(),
+  url: z.url().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -57,9 +57,11 @@ export function createProxiesRouter() {
       const id = await createOrgProxy(orgId, parsed.data.label, parsed.data.url, user.id);
       return c.json({ id }, 201);
     } catch (err) {
-      logger.error("Proxy create failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("blocked network")) {
+        return c.json({ error: "BLOCKED_URL", message: msg }, 400);
+      }
+      logger.error("Proxy create failed", { error: msg });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to create proxy" }, 500);
     }
   });
@@ -127,10 +129,11 @@ export function createProxiesRouter() {
       await updateOrgProxy(orgId, proxyId, parsed.data);
       return c.json({ id: proxyId });
     } catch (err) {
-      logger.error("Proxy update failed", {
-        proxyId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("blocked network")) {
+        return c.json({ error: "BLOCKED_URL", message: msg }, 400);
+      }
+      logger.error("Proxy update failed", { proxyId, error: msg });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to update proxy" }, 500);
     }
   });

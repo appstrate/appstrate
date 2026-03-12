@@ -19,7 +19,7 @@ import { logger } from "../lib/logger.ts";
 const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
   api: z.string().min(1, "api is required"),
-  baseUrl: z.string().url("baseUrl must be a valid URL"),
+  baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
   apiKey: z.string().min(1, "apiKey is required"),
   input: z.array(z.string()).optional(),
@@ -31,7 +31,7 @@ const createModelSchema = z.object({
 const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
   api: z.string().min(1).optional(),
-  baseUrl: z.string().url().optional(),
+  baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
   apiKey: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
@@ -47,7 +47,7 @@ const setDefaultSchema = z.object({
 
 const testInlineSchema = z.object({
   api: z.string().min(1),
-  baseUrl: z.string().url(),
+  baseUrl: z.url(),
   modelId: z.string().min(1),
   apiKey: z.string().optional(),
   existingModelId: z.string().optional(),

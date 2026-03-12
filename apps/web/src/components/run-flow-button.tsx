@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "./spinner";
 import { PROVIDER_ICONS } from "./icons";
-import { PROVIDER_PRESETS } from "@/lib/model-presets";
+import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { InputModal } from "./input-modal";
 import { useRunFlow } from "../hooks/use-mutations";
 import { useCurrentProfileId } from "../hooks/use-current-profile";
@@ -136,10 +136,6 @@ export function RunFlowButton({
   const flowModelId = flowModel?.modelId; // null = inherit, string = specific
   const isModelInherit = !flowModelId;
   const orgDefaultModel = orgModels?.find((m) => m.isDefault && m.enabled);
-  const effectiveModel = isModelInherit
-    ? orgDefaultModel
-    : orgModels?.find((m) => m.id === flowModelId);
-
   const hasSplitDropdown = hasProxies || hasModels;
 
   return (
@@ -197,9 +193,7 @@ export function RunFlowButton({
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     {orgModels!.map((m) => {
-                      const mp = PROVIDER_PRESETS.find(
-                        (p) => p.api === m.api && p.baseUrl === m.baseUrl,
-                      );
+                      const mp = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
                       const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
                       return (
                         <DropdownMenuItem key={m.id} onSelect={() => setFlowModel.mutate(m.id)}>
