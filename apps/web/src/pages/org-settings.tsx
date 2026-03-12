@@ -25,7 +25,15 @@ import {
   useDeleteProxy,
   useSetDefaultProxy,
 } from "../hooks/use-proxies";
+import {
+  useModels,
+  useCreateModel,
+  useUpdateModel,
+  useDeleteModel,
+  useSetDefaultModel,
+} from "../hooks/use-models";
 import { ProxyFormModal } from "../components/proxy-form-modal";
+import { ModelFormModal } from "../components/model-form-modal";
 
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -36,6 +44,7 @@ import type {
   OrgInvitation,
   ApiKeyInfo,
   OrgProxyInfo,
+  OrgModelInfo,
 } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
@@ -44,7 +53,7 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
-  const validTabs = ["general", "members", "proxies", "api-keys"] as const;
+  const validTabs = ["general", "members", "models", "proxies", "api-keys"] as const;
   type Tab = (typeof validTabs)[number];
   const [tab, setTab] = useTabWithHash<Tab>(validTabs, "general");
   const [editingName, setEditingName] = useState(false);
@@ -63,6 +72,15 @@ export function OrgSettingsPage() {
   const updateProxyMutation = useUpdateProxy();
   const deleteProxyMutation = useDeleteProxy();
   const setDefaultProxyMutation = useSetDefaultProxy();
+
+  // Models
+  const [modelModalOpen, setModelModalOpen] = useState(false);
+  const [editModel, setEditModel] = useState<OrgModelInfo | null>(null);
+  const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
+  const createModelMutation = useCreateModel();
+  const updateModelMutation = useUpdateModel();
+  const deleteModelMutation = useDeleteModel();
+  const setDefaultModelMutation = useSetDefaultModel();
 
   // API Keys
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
@@ -271,6 +289,7 @@ export function OrgSettingsPage() {
           <TabsTrigger value="members">
             {t("orgSettings.tabMembers", { count: members.length })}
           </TabsTrigger>
+          <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>
           <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
           <TabsTrigger value="api-keys">{t("orgSettings.tabApiKeys")}</TabsTrigger>
         </TabsList>
@@ -548,6 +567,28 @@ export function OrgSettingsPage() {
         </>
       )}
 
+      {tab === "models" && (
+        <ModelsTab
+          models={models}
+          isLoading={modelsLoading}
+          error={modelsError}
+          onCreate={() => {
+            setEditModel(null);
+            setModelModalOpen(true);
+          }}
+          onEdit={(m) => {
+            setEditModel(m);
+            setModelModalOpen(true);
+          }}
+          onDelete={(m) => {
+            if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
+            deleteModelMutation.mutate(m.id);
+          }}
+          onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
+          onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
+        />
+      )}
+
       {tab === "proxies" && (
         <ProxiesTab
           proxies={proxies}
@@ -598,6 +639,23 @@ export function OrgSettingsPage() {
             );
           } else {
             createProxyMutation.mutate(data, { onSuccess: () => setProxyModalOpen(false) });
+          }
+        }}
+      />
+
+      <ModelFormModal
+        open={modelModalOpen}
+        onClose={() => setModelModalOpen(false)}
+        model={editModel}
+        isPending={createModelMutation.isPending || updateModelMutation.isPending}
+        onSubmit={(data) => {
+          if (editModel) {
+            updateModelMutation.mutate(
+              { id: editModel.id, data },
+              { onSuccess: () => setModelModalOpen(false) },
+            );
+          } else {
+            createModelMutation.mutate(data, { onSuccess: () => setModelModalOpen(false) });
           }
         }}
       />
@@ -715,6 +773,104 @@ function ProxiesTab({
       ) : (
         <EmptyState message={t("proxies.empty")} compact>
           <Button onClick={onCreate}>{t("proxies.add")}</Button>
+        </EmptyState>
+      )}
+    </>
+  );
+}
+
+function ModelsTab({
+  models,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+  onSetDefault,
+  onRemoveDefault,
+}: {
+  models: OrgModelInfo[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  onCreate: () => void;
+  onEdit: (m: OrgModelInfo) => void;
+  onDelete: (m: OrgModelInfo) => void;
+  onSetDefault: (m: OrgModelInfo) => void;
+  onRemoveDefault: () => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
+  return (
+    <>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">{t("models.description")}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <Button onClick={onCreate}>{t("models.add")}</Button>
+      </div>
+
+      {models && models.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {models.map((m) => {
+            const isBuiltIn = m.source === "built-in";
+            return (
+              <div key={m.id} className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex-1">
+                    <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
+                    <span className="text-sm text-muted-foreground">
+                      {m.api} / {m.modelId}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
+                      {isBuiltIn && (
+                        <Badge variant="secondary" className="opacity-60">
+                          {t("models.builtIn")}
+                        </Badge>
+                      )}
+                      {!isBuiltIn && (
+                        <Badge variant="secondary" className="opacity-60">
+                          {m.enabled ? t("models.enabled") : t("models.disabled")}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
+                  {m.isDefault && !isBuiltIn && (
+                    <Button variant="outline" size="sm" onClick={onRemoveDefault}>
+                      {t("models.removeDefault")}
+                    </Button>
+                  )}
+                  {!m.isDefault && !isBuiltIn && (
+                    <Button variant="outline" size="sm" onClick={() => onSetDefault(m)}>
+                      {t("models.setDefault")}
+                    </Button>
+                  )}
+                  {!isBuiltIn && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => onEdit(m)}>
+                        {t("models.edit")}
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => onDelete(m)}>
+                        {t("models.delete")}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState message={t("models.empty")} compact>
+          <Button onClick={onCreate}>{t("models.add")}</Button>
         </EmptyState>
       )}
     </>

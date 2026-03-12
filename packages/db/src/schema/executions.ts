@@ -44,6 +44,7 @@ export const executions = pgTable(
     notifiedAt: timestamp("notified_at"),
     readAt: timestamp("read_at"),
     proxyLabel: text("proxy_label"),
+    modelLabel: text("model_label"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),

@@ -173,6 +173,7 @@ export async function executeFlowInBackground(
             schemas: { output: outputSchema },
             providers: [],
             llmModel: promptContext.llmModel,
+            llmConfig: promptContext.llmConfig,
           };
 
           try {
@@ -410,17 +411,18 @@ export function createExecutionsRouter() {
     }));
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId, proxyLabel } = await buildExecutionContext({
-      executionId,
-      flow: effectiveFlow,
-      providerProfiles,
-      orgId,
-      userId: user.id,
-      input: parsedInput,
-      files: fileRefs,
-      config,
-      overrideVersionId,
-    });
+    const { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+      await buildExecutionContext({
+        executionId,
+        flow: effectiveFlow,
+        providerProfiles,
+        orgId,
+        userId: user.id,
+        input: parsedInput,
+        files: fileRefs,
+        config,
+        overrideVersionId,
+      });
 
     // Create execution record
     await createExecution(
@@ -433,6 +435,7 @@ export function createExecutionsRouter() {
       flowVersionId ?? undefined,
       userProfileId,
       proxyLabel ?? undefined,
+      modelLabel ?? undefined,
     );
 
     // Fire-and-forget background execution

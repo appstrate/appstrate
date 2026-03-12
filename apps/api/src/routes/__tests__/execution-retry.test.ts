@@ -69,6 +69,7 @@ mock.module("../../services/env-builder.ts", () => ({
     flowPackage: null,
     flowVersionId: null,
     proxyLabel: null,
+    modelLabel: null,
   })),
 }));
 

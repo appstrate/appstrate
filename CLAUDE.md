@@ -214,9 +214,7 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
 | `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array of system proxy definitions                                                                     |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                   |
-| `LLM_PROVIDER`              | No       | `anthropic`                                   | Passed to agent containers                                                                                 |
-| `LLM_MODEL_ID`              | No       | `claude-sonnet-4-5-20250929`                  | Passed to agent containers                                                                                 |
-| `ANTHROPIC_API_KEY`         | No       | —                                             | Passed through to agent containers (or `OPENAI_API_KEY`, etc.)                                             |
+| `SYSTEM_MODELS`             | No       | `"[]"`                                        | JSON array of system LLM model definitions (same pattern as `SYSTEM_PROXIES`)                              |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug`\|`info`\|`warn`\|`error`                                                                           |
 | `PORT`                      | No       | `3000`                                        | Server port                                                                                                |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                             |

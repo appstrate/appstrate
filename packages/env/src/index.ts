@@ -20,6 +20,10 @@ const envSchema = z.object({
     .string()
     .default("[]")
     .transform((s) => JSON.parse(s) as unknown[]),
+  SYSTEM_MODELS: z
+    .string()
+    .default("[]")
+    .transform((s) => JSON.parse(s) as unknown[]),
 
   // App
   APP_URL: z.string().default("http://localhost:3000"),
@@ -40,17 +44,6 @@ const envSchema = z.object({
 
   // Execution
   EXECUTION_ADAPTER: z.enum(["pi"]).default("pi"),
-  LLM_PROVIDER: z.string().default("anthropic"),
-  LLM_MODEL_ID: z.string().default("claude-sonnet-4-5-20250929"),
-
-  // LLM API keys (passthrough to containers)
-  ANTHROPIC_API_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  GROQ_API_KEY: z.string().optional(),
-  MISTRAL_API_KEY: z.string().optional(),
-  TOGETHER_API_KEY: z.string().optional(),
-  DEEPSEEK_API_KEY: z.string().optional(),
 
   // Registry
   REGISTRY_URL: z.string().optional(),
@@ -59,6 +52,9 @@ const envSchema = z.object({
 
   // Outbound proxy
   PROXY_URL: z.string().optional(),
+
+  // Execution token signing (falls back to BETTER_AUTH_SECRET if unset)
+  EXECUTION_TOKEN_SECRET: z.string().optional(),
 });
 
 // ─── Getter ──────────────────────────────────────────────────
@@ -70,15 +66,3 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
 
-// ─── Constants ───────────────────────────────────────────────
-
-/** LLM API key env var names for passthrough to containers. */
-export const LLM_API_KEY_NAMES = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "GEMINI_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "TOGETHER_API_KEY",
-  "DEEPSEEK_API_KEY",
-] as const satisfies readonly (keyof Env)[];

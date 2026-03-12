@@ -2,7 +2,6 @@ import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
-import { getEnv, LLM_API_KEY_NAMES } from "@appstrate/env";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
@@ -23,9 +22,8 @@ export class PiAdapter implements ExecutionAdapter {
   ): AsyncGenerator<ExecutionMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
-    const apiEnv = getEnv();
-    const provider = apiEnv.LLM_PROVIDER;
-    const modelId = apiEnv.LLM_MODEL_ID;
+    const llmConfig = ctx.llmConfig;
+    const modelId = llmConfig?.modelId ?? "unknown";
 
     const orchestrator = getOrchestrator();
     let boundary: IsolationBoundary | undefined;
@@ -35,17 +33,24 @@ export class PiAdapter implements ExecutionAdapter {
       // Phase 1: Create isolation boundary
       boundary = await orchestrator.createIsolationBoundary(executionId);
 
+      // Resolve LLM config for sidecar proxy
+      const llmApiKey = llmConfig?.apiKey;
+      const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
+
       // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
         executionToken: ctx.executionApi?.token ?? "",
         platformApiUrl: ctx.executionApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
+        llm: llmApiKey
+          ? { baseUrl: llmConfig!.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
+          : undefined,
       };
 
       // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
         FLOW_PROMPT: prompt,
-        LLM_PROVIDER: provider,
+        PI_API: llmConfig?.api ?? "anthropic-messages",
         LLM_MODEL_ID: modelId,
         SIDECAR_URL: "http://sidecar:8080",
       };
@@ -55,9 +60,10 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.CONNECTED_PROVIDERS = connectedProviderIds.join(",");
       }
 
-      for (const key of LLM_API_KEY_NAMES) {
-        const val = apiEnv[key];
-        if (val) containerEnv[key] = val;
+      // Route LLM calls through sidecar proxy (agent never sees real API keys)
+      if (llmApiKey) {
+        containerEnv.LLM_BASE_URL = "http://sidecar:8080/llm";
+        containerEnv.LLM_API_KEY = llmPlaceholder;
       }
 
       if (ctx.proxyUrl) {
@@ -110,7 +116,7 @@ export class PiAdapter implements ExecutionAdapter {
         adapterName: "pi",
         executionId,
         timeout,
-        extraData: { provider, model: modelId },
+        extraData: { api: llmConfig?.api ?? "anthropic-messages", model: modelId },
         signal,
         stopOnTimeout: [sidecarHandle],
         processLogs: processPiLogs,
@@ -142,6 +148,19 @@ export class PiAdapter implements ExecutionAdapter {
 }
 
 // --- Helpers ---
+
+/**
+ * Derive a placeholder that preserves the key's dash-separated prefix.
+ * The last segment (the secret) is replaced; prefix segments are kept intact.
+ * This ensures the SDK's prefix-based behavior (e.g. OAuth detection, auth header
+ * format, beta headers) works identically with the placeholder.
+ */
+function deriveKeyPlaceholder(key: string | undefined): string {
+  if (!key) return "sk-placeholder";
+  const parts = key.split("-");
+  if (parts.length <= 1) return "sk-placeholder";
+  return parts.slice(0, -1).join("-") + "-placeholder";
+}
 
 async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<ExecutionMessage> {
   let textBuffer = "";

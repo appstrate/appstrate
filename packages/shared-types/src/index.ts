@@ -255,6 +255,22 @@ export interface OrgProxyInfo {
   updatedAt: string;
 }
 
+// --- Org Model Types ---
+
+export interface OrgModelInfo {
+  id: string;
+  label: string;
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  enabled: boolean;
+  isDefault: boolean;
+  source: "built-in" | "custom";
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- API Key Types ---
 
 export interface ApiKeyInfo {

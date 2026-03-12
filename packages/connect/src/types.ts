@@ -15,7 +15,6 @@ export interface ConnectionRecord {
   credentialsEncrypted: string;
   scopesGranted: string[];
   expiresAt: string | null;
-  rawTokenResponse: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

@@ -8,6 +8,7 @@ WORKDIR /runtime
 COPY package.json bun.lock* ./
 RUN bun install --production
 
+COPY lib/ /runtime/lib/
 COPY extensions/ /runtime/extensions/
 COPY extension-wrapper.ts /runtime/extension-wrapper.ts
 COPY entrypoint.ts /runtime/entrypoint.ts

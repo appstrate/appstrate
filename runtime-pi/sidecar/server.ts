@@ -8,6 +8,13 @@ const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   executionToken: process.env.EXECUTION_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
+  llm: process.env.PI_BASE_URL && process.env.PI_API_KEY
+    ? {
+        baseUrl: process.env.PI_BASE_URL,
+        apiKey: process.env.PI_API_KEY,
+        placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
+      }
+    : undefined,
 };
 
 const cookieJar = new Map<string, string[]>();
@@ -23,12 +30,14 @@ async function fetchCredentials(providerId: string): Promise<CredentialsResponse
 }
 
 const proxy = createForwardProxy({ config });
+const preConfigured = Boolean(process.env.EXECUTION_TOKEN);
 const app = createApp({
   config,
   fetchCredentials,
   cookieJar,
   isReady: () => proxy.readySync,
   configSecret: process.env.CONFIG_SECRET || undefined,
+  preConfigured,
 });
 
 const port = parseInt(process.env.PORT || "8080", 10);

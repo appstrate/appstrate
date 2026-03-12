@@ -302,14 +302,15 @@ async function triggerScheduledExecution(
     const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId, proxyLabel } = await buildExecutionContext({
-      executionId,
-      flow,
-      providerProfiles,
-      orgId,
-      userId,
-      input,
-    });
+    const { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+      await buildExecutionContext({
+        executionId,
+        flow,
+        providerProfiles,
+        orgId,
+        userId,
+        input,
+      });
 
     // Create execution record with schedule_id and version
     await createExecution(
@@ -322,6 +323,7 @@ async function triggerScheduledExecution(
       flowVersionId ?? undefined,
       userProfileId,
       proxyLabel ?? undefined,
+      modelLabel ?? undefined,
     );
 
     // Link execution to the schedule run lock row

@@ -2,7 +2,7 @@ import { createServer as createHttpServer, request as httpRequest } from "node:h
 import { connect as netConnect } from "node:net";
 import type { Socket } from "node:net";
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from "node:http";
-import { isBlockedHost, OUTBOUND_TIMEOUT_MS, type SidecarConfig } from "./helpers.ts";
+import { isBlockedHost, OUTBOUND_TIMEOUT_MS, HOP_BY_HOP_HEADERS, type SidecarConfig } from "./helpers.ts";
 
 export interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -27,12 +27,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const CONNECT_TIMEOUT_MS = 10_000;
   const SOCKET_IDLE_TIMEOUT_MS = 120_000; // 2 min idle → destroy tunnel
   const MAX_CONNECT_HEADER_SIZE = 16_384; // 16 KB — CONNECT response headers should be tiny
-
-  // Headers that belong to the client↔proxy hop, not forwarded to the target (RFC 7230 §6.1)
-  const HOP_BY_HOP = new Set([
-    "proxy-connection", "connection", "keep-alive", "transfer-encoding",
-    "te", "trailer", "upgrade", "proxy-authorization",
-  ]);
 
   function getUpstreamProxy(): { host: string; port: number; auth: string | null } | null {
     if (!config.proxyUrl) return null;
@@ -81,7 +75,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     const out: Record<string, string | string[] | undefined> = {};
     for (const [key, value] of Object.entries(raw)) {
       const lower = key.toLowerCase();
-      if (HOP_BY_HOP.has(lower) || connectionExtra.has(lower)) continue;
+      if (HOP_BY_HOP_HEADERS.has(lower) || connectionExtra.has(lower)) continue;
       out[key] = value;
     }
     return out;

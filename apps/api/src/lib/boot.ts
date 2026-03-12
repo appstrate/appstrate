@@ -14,6 +14,7 @@ import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
+import { initSystemModels } from "../services/model-registry.ts";
 import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
@@ -30,6 +31,10 @@ export async function boot(): Promise<void> {
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();
   logger.info("System proxies loaded");
+
+  // Load system models from SYSTEM_MODELS env var
+  initSystemModels();
+  logger.info("System models loaded");
 
   // Load all system packages (providers + skills + extensions + flows) from ZIPs
   await initSystemPackages();

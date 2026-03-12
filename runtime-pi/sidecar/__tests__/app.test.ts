@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
-import type { CredentialsResponse } from "../helpers.ts";
+import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -156,6 +156,18 @@ describe("POST /configure", () => {
       },
     });
     expect(res2.status).toBe(403);
+  });
+
+  test("rejects when preConfigured is set (fresh sidecar)", async () => {
+    const app = createApp(makeDeps({ preConfigured: true }));
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ executionToken: "new-tok" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe("Already configured");
   });
 });
 
@@ -467,7 +479,7 @@ describe("ALL /proxy — forwarding", () => {
     });
     expect(res.status).toBe(502);
     const body = await res.json() as { error: string };
-    expect(body.error).toContain("ECONNREFUSED");
+    expect(body.error).toBe("Upstream request failed");
   });
 
   test("truncates response over MAX_RESPONSE_SIZE", async () => {
@@ -581,5 +593,247 @@ describe("ALL /proxy — forwarding", () => {
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     // @ts-expect-error proxy is Bun-specific
     expect(opts.proxy).toBe("http://myproxy:8080");
+  });
+});
+
+// --- ALL /llm/* — LLM reverse proxy ---
+
+const LLM_CONFIG: LlmProxyConfig = {
+  baseUrl: "https://api.anthropic.com",
+  apiKey: "real-sk-ant-key",
+  placeholder: "sk-placeholder",
+};
+
+describe("ALL /llm/* — SSRF protection", () => {
+  test("returns 403 when baseUrl targets localhost", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "http://localhost:8000", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("blocked network range");
+  });
+
+  test("returns 403 when baseUrl targets cloud metadata", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "http://169.254.169.254/metadata", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+
+  test("returns 403 when baseUrl targets private IP", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "http://10.0.0.1:8080", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+
+  test("allows public baseUrl", async () => {
+    const fetchFn = mock(async () => new Response('{"ok":true}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = { baseUrl: "https://api.anthropic.com", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("ALL /llm/* — basic routing", () => {
+  test("returns 503 when llm config not set", async () => {
+    const app = createApp(makeDeps());
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(503);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("not configured");
+  });
+
+  test("extracts path after /llm and forwards to target", async () => {
+    const fetchFn = mock(async () => new Response('{"id":"msg_1"}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"model":"claude-sonnet-4-5-20250929"}',
+    });
+    expect(res.status).toBe(200);
+    const url = (fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+  });
+
+  test("forwards query string", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages?stream=true", { method: "POST" });
+    const url = (fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toContain("?stream=true");
+  });
+
+  test("returns 502 when target request fails", async () => {
+    const fetchFn = mock(async () => { throw new Error("ECONNREFUSED"); });
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(502);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("ECONNREFUSED");
+  });
+
+  test("forwards upstream error status transparently", async () => {
+    const fetchFn = mock(async () => new Response('{"error":"rate_limited"}', {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(429);
+  });
+});
+
+describe("ALL /llm/* — placeholder replacement", () => {
+  test("replaces placeholder in x-api-key header", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": "sk-placeholder" },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
+  });
+
+  test("replaces placeholder in Authorization Bearer header", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = {
+      baseUrl: "https://api.anthropic.com",
+      apiKey: "sk-ant-oat01-real-token",
+      placeholder: "sk-ant-oat01-placeholder",
+    };
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Authorization": "Bearer sk-ant-oat01-placeholder" },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["authorization"]).toBe("Bearer sk-ant-oat01-real-token");
+  });
+
+  test("preserves non-placeholder headers unchanged", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": "sk-placeholder",
+        "Content-Type": "application/json",
+        "X-Custom": "untouched",
+      },
+    });
+    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("real-sk-ant-key");
+    expect(headers["content-type"]).toBe("application/json");
+    expect(headers["x-custom"]).toBe("untouched");
+  });
+});
+
+describe("ALL /llm/* — streaming", () => {
+  test("streams response body through without buffering", async () => {
+    const chunks = ["data: {\"type\":\"content\"}\n\n", "data: [DONE]\n\n"];
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      },
+    });
+    const fetchFn = mock(async () => new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }));
+    const deps = makeDeps({ fetchFn });
+    deps.config.llm = LLM_CONFIG;
+    const app = createApp(deps);
+    const res = await app.request("/llm/v1/messages", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const text = await res.text();
+    expect(text).toContain("data: {\"type\":\"content\"}");
+    expect(text).toContain("data: [DONE]");
+  });
+});
+
+describe("POST /configure — llm SSRF protection", () => {
+  test("rejects llm config with blocked baseUrl", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        llm: { baseUrl: "http://169.254.169.254/metadata", apiKey: "key", placeholder: "ph" },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("blocked network range");
+    expect(deps.config.llm).toBeUndefined();
+  });
+
+  test("allows llm config with null (clear)", async () => {
+    const deps = makeDeps();
+    deps.config.llm = { baseUrl: "https://api.openai.com", apiKey: "key", placeholder: "ph" };
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({ llm: null }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect(deps.config.llm).toBeNull();
+  });
+});
+
+describe("POST /configure — llm field", () => {
+  test("updates llm config", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const res = await app.request("/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        executionToken: "tok",
+        llm: { baseUrl: "https://api.openai.com/v1", apiKey: "sk-oai", placeholder: "sk-placeholder" },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect(deps.config.llm).toEqual({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-oai",
+      placeholder: "sk-placeholder",
+    });
   });
 });

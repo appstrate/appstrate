@@ -1,15 +1,19 @@
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
   MAX_SUBSTITUTE_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
+  LLM_PROXY_TIMEOUT_MS,
+  HOP_BY_HOP_HEADERS,
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUri,
   isBlockedUrl,
   type SidecarConfig,
   type CredentialsResponse,
+  type LlmProxyConfig,
 } from "./helpers.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
@@ -21,6 +25,7 @@ export interface AppDeps {
   fetchFn?: typeof fetch;        // default: global fetch — injectable for tests
   isReady?: () => boolean;       // default: () => true — controls /health
   configSecret?: string;         // One-time config secret (from CONFIG_SECRET env var)
+  preConfigured?: boolean;       // true when credentials come via env vars (fresh sidecar)
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -40,8 +45,14 @@ export function createApp(deps: AppDeps): Hono {
 
   // Runtime configuration endpoint (used by sidecar pool for pre-warmed containers).
   // If CONFIG_SECRET is set, requires Authorization header and disables after first use.
+  // If preConfigured is set, /configure is permanently locked (fresh sidecars with env vars).
   let configUsed = false;
   app.post("/configure", async (c) => {
+    // Fresh sidecars receive credentials via env vars — /configure is permanently locked
+    if (deps.preConfigured) {
+      return c.json({ error: "Already configured" }, 403);
+    }
+
     // Enforce one-time config secret when set (pooled sidecars)
     if (deps.configSecret) {
       if (configUsed) {
@@ -53,11 +64,9 @@ export function createApp(deps: AppDeps): Hono {
       if (auth.length !== expected.length) {
         return c.json({ error: "Unauthorized" }, 403);
       }
-      let diff = 0;
-      for (let i = 0; i < auth.length; i++) {
-        diff |= auth.charCodeAt(i) ^ expected.charCodeAt(i);
-      }
-      if (diff !== 0) {
+      const authBuf = Buffer.from(auth);
+      const expBuf = Buffer.from(expected);
+      if (!timingSafeEqual(authBuf, expBuf)) {
         return c.json({ error: "Unauthorized" }, 403);
       }
     }
@@ -66,10 +75,17 @@ export function createApp(deps: AppDeps): Hono {
       executionToken?: string;
       platformApiUrl?: string;
       proxyUrl?: string;
+      llm?: LlmProxyConfig;
     }>();
     if (body.executionToken) config.executionToken = body.executionToken;
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
+    if (body.llm !== undefined) {
+      if (body.llm && isBlockedUrl(body.llm.baseUrl)) {
+        return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
+      }
+      config.llm = body.llm;
+    }
 
     configUsed = true;
 
@@ -99,6 +115,69 @@ export function createApp(deps: AppDeps): Hono {
     return c.body(body, res.status, {
       "Content-Type": res.headers.get("Content-Type") || "application/json",
     });
+  });
+
+  // LLM reverse proxy — replaces placeholder key with real API key, streams response.
+  // The SDK formats all headers (auth, beta, identity) naturally using the placeholder;
+  // we just swap the placeholder value for the real key in every header.
+  app.all("/llm/*", async (c) => {
+    if (!config.llm) {
+      return c.json({ error: "LLM proxy not configured" }, 503);
+    }
+
+    const baseUrl = config.llm.baseUrl;
+
+    // Block SSRF — baseUrl comes from user config, must not target private networks
+    if (isBlockedUrl(baseUrl)) {
+      return c.json({ error: "LLM base URL targets a blocked network range" }, 403);
+    }
+
+    // Extract path after /llm (e.g. /llm/v1/messages → /v1/messages)
+    const path = c.req.path.slice("/llm".length) || "/";
+    const qs = c.req.url.split("?")[1] || "";
+    const targetUrl = `${baseUrl}${path}${qs ? `?${qs}` : ""}`;
+
+    // Forward headers — replace placeholder with real key, strip hop-by-hop
+    const forwardedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(c.req.header())) {
+      const lower = key.toLowerCase();
+      if (lower === "host" || lower === "content-length" || HOP_BY_HOP_HEADERS.has(lower)) {
+        continue;
+      }
+      forwardedHeaders[key] = value.includes(config.llm.placeholder)
+        ? value.replace(config.llm.placeholder, config.llm.apiKey)
+        : value;
+    }
+
+    // Stream-through request body
+    const method = c.req.method;
+    const body = method !== "GET" && method !== "HEAD"
+      ? (c.req.raw.body ?? undefined)
+      : undefined;
+
+    let targetRes: Response;
+    try {
+      targetRes = await fetchFn(targetUrl, {
+        method,
+        headers: forwardedHeaders,
+        body,
+        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+        // @ts-expect-error - Bun supports duplex for streaming request bodies
+        duplex: body instanceof ReadableStream ? "half" : undefined,
+      });
+    } catch (err) {
+      return c.json(
+        { error: `LLM request failed: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    }
+
+    // Stream-through response (zero-copy — no buffering/truncation)
+    const responseHeaders: Record<string, string> = {};
+    const ct = targetRes.headers.get("content-type");
+    if (ct) responseHeaders["Content-Type"] = ct;
+
+    return c.body(targetRes.body, targetRes.status, responseHeaders);
   });
 
   // Transparent credential-injecting proxy
@@ -172,7 +251,7 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    // 5. Build forwarded headers (remove routing headers)
+    // 5. Build forwarded headers (remove routing + hop-by-hop headers)
     const forwardedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(c.req.header())) {
       const lower = key.toLowerCase();
@@ -182,9 +261,8 @@ export function createApp(deps: AppDeps): Hono {
         lower === "x-substitute-body" ||
         lower === "x-proxy" ||
         lower === "host" ||
-        lower === "connection" ||
-        lower === "transfer-encoding" ||
-        lower === "content-length"
+        lower === "content-length" ||
+        HOP_BY_HOP_HEADERS.has(lower)
       ) {
         continue;
       }
@@ -271,11 +349,9 @@ export function createApp(deps: AppDeps): Hono {
         // @ts-expect-error - Bun supports duplex for streaming request bodies
         duplex: body instanceof ReadableStream ? "half" : undefined,
       });
-    } catch (err) {
+    } catch {
       return c.json(
-        {
-          error: `Request to ${targetUrl} failed: ${err instanceof Error ? err.message : String(err)}`,
-        },
+        { error: "Upstream request failed" },
         502,
       );
     }
