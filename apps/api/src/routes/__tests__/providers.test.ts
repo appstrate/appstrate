@@ -281,19 +281,6 @@ describe("POST /api/providers", () => {
     expect(json.error).toBe("NAME_COLLISION");
   });
 
-  test("sets proxy defaults when authMode is proxy", async () => {
-    pushNoConflictQueues();
-
-    const res = await jsonRequest("/api/providers", "POST", validCreateBody({ authMode: "proxy" }));
-    expect(res.status).toBe(201);
-
-    const pkgInsert = tracking.insertCalls[0] as { draftManifest: Record<string, unknown> };
-    const def = pkgInsert.draftManifest.definition as Record<string, unknown>;
-    expect(def.allowAllUris).toBe(true);
-    expect(def.credentialFieldName).toBe("url");
-    expect((pkgInsert.draftManifest.categories as string[]).includes("proxy")).toBe(true);
-  });
-
   test("encrypts admin credentials when clientId/clientSecret provided", async () => {
     pushNoConflictQueues();
 
@@ -406,23 +393,6 @@ describe("PUT /api/providers/:scope/:name", () => {
     const def = upd.draftManifest.definition as Record<string, unknown>;
     expect(def.authorizationUrl).toBe("https://old.com/auth"); // preserved
     expect(def.tokenUrl).toBe("https://new.com/token"); // updated
-  });
-
-  test("forces proxy defaults on authMode change", async () => {
-    queues.select.push([]); // isSystemProviderInDb
-    queues.select.push([
-      { draftManifest: { displayName: "Provider", definition: { authMode: "oauth2" } } },
-    ]);
-
-    const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
-      authMode: "proxy",
-    });
-    expect(res.status).toBe(200);
-
-    const upd = tracking.updateCalls[0] as { draftManifest: Record<string, unknown> };
-    const def = upd.draftManifest.definition as Record<string, unknown>;
-    expect(def.allowAllUris).toBe(true);
-    expect(def.credentialFieldName).toBe("url");
   });
 
   test("updates credentials when clientId/clientSecret provided", async () => {

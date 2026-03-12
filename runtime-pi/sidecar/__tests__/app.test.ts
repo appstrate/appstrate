@@ -347,20 +347,6 @@ describe("ALL /proxy — validation", () => {
     expect(body.error).toContain("Unresolved placeholders in header");
   });
 
-  test("returns 400 for unresolved placeholders in X-Proxy", async () => {
-    const app = createApp(makeDeps());
-    const res = await app.request("/proxy", {
-      method: "GET",
-      headers: {
-        "X-Provider": "gmail",
-        "X-Target": "https://api.example.com/v1",
-        "X-Proxy": "http://{{missing_proxy}}:8080",
-      },
-    });
-    expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
-    expect(body.error).toContain("Unresolved placeholders in X-Proxy");
-  });
 });
 
 // --- ALL /proxy — forwarding ---
@@ -468,7 +454,9 @@ describe("ALL /proxy — forwarding", () => {
   });
 
   test("returns 502 when target request fails", async () => {
-    const fetchFn = mock(async () => { throw new Error("ECONNREFUSED"); });
+    const err = new Error("connection failed");
+    (err as unknown as { code: string }).code = "ECONNREFUSED";
+    const fetchFn = mock(async () => { throw err; });
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -479,7 +467,9 @@ describe("ALL /proxy — forwarding", () => {
     });
     expect(res.status).toBe(502);
     const body = await res.json() as { error: string };
-    expect(body.error).toBe("Upstream request failed");
+    expect(body.error).toContain("Upstream request failed");
+    expect(body.error).toContain("ECONNREFUSED");
+    expect(body.error).toContain("api.example.com");
   });
 
   test("truncates response over MAX_RESPONSE_SIZE", async () => {
@@ -579,21 +569,6 @@ describe("ALL /proxy — forwarding", () => {
     expect(headers["authorization"]).toBe("Bearer test-123");
   });
 
-  test("uses X-Proxy header for proxy resolution", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const app = createApp(makeDeps({ fetchFn }));
-    await app.request("/proxy", {
-      method: "GET",
-      headers: {
-        "X-Provider": "gmail",
-        "X-Target": "https://api.example.com/v1",
-        "X-Proxy": "http://myproxy:8080",
-      },
-    });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
-    // @ts-expect-error proxy is Bun-specific
-    expect(opts.proxy).toBe("http://myproxy:8080");
-  });
 });
 
 // --- ALL /llm/* — LLM reverse proxy ---

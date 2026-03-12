@@ -22,12 +22,23 @@ class DockerWorkloadHandle implements WorkloadHandle {
 }
 
 export class DockerOrchestrator implements ContainerOrchestrator {
+  private egressNetworkId: string | null = null;
+
   async initialize(): Promise<void> {
-    await Promise.all([sidecarPool.initSidecarPool(), docker.detectPlatformNetwork()]);
+    const [, , egressId] = await Promise.all([
+      sidecarPool.initSidecarPool(),
+      docker.detectPlatformNetwork(),
+      docker.createNetwork("appstrate-egress"),
+    ]);
+    this.egressNetworkId = egressId;
   }
 
   async shutdown(): Promise<void> {
     await sidecarPool.shutdownSidecarPool();
+    if (this.egressNetworkId) {
+      await docker.removeNetwork(this.egressNetworkId).catch(() => {});
+      this.egressNetworkId = null;
+    }
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
@@ -37,7 +48,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
   async createIsolationBoundary(executionId: string): Promise<IsolationBoundary> {
     const name = `appstrate-exec-${executionId}`;
-    const id = await docker.createNetwork(name);
+    const id = await docker.createNetwork(name, { internal: true });
     return { id, name };
   }
 
@@ -73,6 +84,10 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       platformNetwork,
     );
     if (pooled) {
+      // Connect pooled sidecar to egress network (internet access)
+      if (this.egressNetworkId) {
+        await docker.connectContainerToNetwork(this.egressNetworkId, pooled);
+      }
       return new DockerWorkloadHandle(pooled, executionId, "sidecar");
     }
 
@@ -91,17 +106,21 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       sidecarEnv.PI_PLACEHOLDER = resolvedConfig.llm.placeholder;
     }
 
+    // Create sidecar on egress network (primary) so it has DNS + internet.
+    // Then connect to execution network (internal) with "sidecar" alias for agent DNS.
     const containerId = await docker.createContainer(executionId, sidecarEnv, {
       image: SIDECAR_IMAGE,
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,
-      networkId: boundary.id,
-      networkAlias: "sidecar",
+      networkId: this.egressNetworkId!,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
       exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
+
+    // Connect to execution network (agent reaches sidecar via "sidecar" DNS alias)
+    await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
 
     if (platformNetwork) {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
