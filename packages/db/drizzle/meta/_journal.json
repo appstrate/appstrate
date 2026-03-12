@@ -57,6 +57,13 @@
       "when": 1773282291299,
       "tag": "0007_vengeful_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1773344709952,
+      "tag": "0008_big_colossus",
+      "breakpoints": true
     }
   ]
 }

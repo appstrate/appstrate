@@ -6,6 +6,7 @@ import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
+import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 
 // --- URL Masking ---
@@ -85,6 +86,7 @@ export async function createOrgProxy(
   url: string,
   userId: string,
 ): Promise<string> {
+  if (isBlockedUrl(url)) throw new Error("URL targets a blocked network");
   const urlEncrypted = encrypt(url);
   const [row] = await db
     .insert(orgProxies)
@@ -110,7 +112,10 @@ export async function updateOrgProxy(
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (data.label !== undefined) updates.label = data.label;
-  if (data.url !== undefined) updates.urlEncrypted = encrypt(data.url);
+  if (data.url !== undefined) {
+    if (isBlockedUrl(data.url)) throw new Error("URL targets a blocked network");
+    updates.urlEncrypted = encrypt(data.url);
+  }
   if (data.enabled !== undefined) updates.enabled = data.enabled;
 
   await db
@@ -239,6 +244,15 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
     return { ok: false, latency: 0, error: "PROXY_NOT_FOUND", message: "Proxy not found" };
   }
 
+  if (isBlockedUrl(proxy.url)) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+
   const start = performance.now();
   try {
     const res = await fetch("https://cloudflare.com/cdn-cgi/trace", {
@@ -259,11 +273,19 @@ export async function testProxyConnection(orgId: string, proxyId: string): Promi
     if (err instanceof DOMException && err.name === "TimeoutError") {
       return { ok: false, latency, error: "TIMEOUT", message: "Request timed out (10s)" };
     }
-    return {
-      ok: false,
-      latency,
-      error: "NETWORK_ERROR",
-      message: err instanceof Error ? err.message : "Network error",
-    };
+    const msg = err instanceof Error ? err.message : "Network error";
+    if (msg.includes("ENOTFOUND") || msg.includes("getaddrinfo")) {
+      return { ok: false, latency, error: "DNS_ERROR", message: "DNS resolution failed" };
+    }
+    if (msg.includes("ECONNREFUSED")) {
+      return { ok: false, latency, error: "CONNECTION_REFUSED", message: "Connection refused" };
+    }
+    if (msg.includes("ECONNRESET") || msg.includes("EPIPE")) {
+      return { ok: false, latency, error: "CONNECTION_RESET", message: "Connection reset" };
+    }
+    if (msg.includes("UNABLE_TO_VERIFY_LEAF_SIGNATURE") || msg.includes("CERT_")) {
+      return { ok: false, latency, error: "TLS_ERROR", message: "TLS certificate error" };
+    }
+    return { ok: false, latency, error: "NETWORK_ERROR", message: msg };
   }
 }

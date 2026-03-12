@@ -38,7 +38,7 @@ import { useConnectionTest } from "../hooks/use-connection-test";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ModelFormModal } from "../components/model-form-modal";
 import { PROVIDER_ICONS } from "../components/icons";
-import { PROVIDER_PRESETS } from "../lib/model-presets";
+import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -50,6 +50,7 @@ import type {
   ApiKeyInfo,
   OrgProxyInfo,
   OrgModelInfo,
+  TestResult,
 } from "@appstrate/shared-types";
 
 export function OrgSettingsPage() {
@@ -688,6 +689,25 @@ function CopyLinkButton({ token }: { token: string }) {
   );
 }
 
+function TestResultSpan({
+  result,
+  successKey,
+  failedKey,
+}: {
+  result: TestResult;
+  successKey: string;
+  failedKey: string;
+}) {
+  const { t } = useTranslation(["settings"]);
+  return (
+    <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
+      {result.ok
+        ? t(successKey, { latency: result.latency })
+        : t(failedKey, { message: result.message })}
+    </span>
+  );
+}
+
 function ProxiesTab({
   proxies,
   isLoading,
@@ -761,13 +781,11 @@ function ProxiesTab({
                     {testingId === p.id ? <Spinner /> : t("proxies.test")}
                   </Button>
                   {testResults[p.id] && (
-                    <span
-                      className={`text-sm ${testResults[p.id]!.ok ? "text-green-500" : "text-destructive"}`}
-                    >
-                      {testResults[p.id]!.ok
-                        ? t("proxies.testSuccess", { latency: testResults[p.id]!.latency })
-                        : t("proxies.testFailed", { message: testResults[p.id]!.message })}
-                    </span>
+                    <TestResultSpan
+                      result={testResults[p.id]!}
+                      successKey="proxies.testSuccess"
+                      failedKey="proxies.testFailed"
+                    />
                   )}
                   {p.isDefault && !isBuiltIn && (
                     <Button variant="outline" size="sm" onClick={onRemoveDefault}>
@@ -845,9 +863,7 @@ function ModelsTab({
         <div className="flex flex-col gap-3">
           {models.map((m) => {
             const isBuiltIn = m.source === "built-in";
-            const provider = PROVIDER_PRESETS.find(
-              (p) => p.api === m.api && p.baseUrl === m.baseUrl,
-            );
+            const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
               <div key={m.id} className="rounded-lg border border-border bg-card p-5">
@@ -883,13 +899,11 @@ function ModelsTab({
                     {testingId === m.id ? <Spinner /> : t("models.test")}
                   </Button>
                   {testResults[m.id] && (
-                    <span
-                      className={`text-sm ${testResults[m.id]!.ok ? "text-green-500" : "text-destructive"}`}
-                    >
-                      {testResults[m.id]!.ok
-                        ? t("models.testSuccess", { latency: testResults[m.id]!.latency })
-                        : t("models.testFailed", { message: testResults[m.id]!.message })}
-                    </span>
+                    <TestResultSpan
+                      result={testResults[m.id]!}
+                      successKey="models.testSuccess"
+                      failedKey="models.testFailed"
+                    />
                   )}
                   {m.isDefault && !isBuiltIn && (
                     <Button variant="outline" size="sm" onClick={onRemoveDefault}>

@@ -220,8 +220,8 @@ function ModelFormBody({
     if (!validateAll({ label, api, baseUrl, modelId, apiKey })) return;
 
     const inputArr = [inputText && "text", inputImage && "image"].filter(Boolean) as string[];
-    const cw = contextWindow.trim() ? parseInt(contextWindow.trim()) : undefined;
-    const mt = maxTokens.trim() ? parseInt(maxTokens.trim()) : undefined;
+    const cw = contextWindow.trim() ? parseInt(contextWindow.trim(), 10) : undefined;
+    const mt = maxTokens.trim() ? parseInt(maxTokens.trim(), 10) : undefined;
 
     onSubmit({
       label: label.trim(),
