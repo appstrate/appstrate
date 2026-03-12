@@ -102,6 +102,22 @@ export function useTestModel() {
   });
 }
 
+export function useTestModelInline() {
+  return useMutation({
+    mutationFn: (data: {
+      api: string;
+      baseUrl: string;
+      modelId: string;
+      apiKey?: string;
+      existingModelId?: string;
+    }) =>
+      api<TestResult>("/models/test", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  });
+}
+
 export function useFlowModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
