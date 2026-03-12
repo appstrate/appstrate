@@ -159,4 +159,36 @@ export const proxiesPaths = {
       },
     },
   },
+  "/api/proxies/{proxyId}/test": {
+    post: {
+      operationId: "testProxy",
+      tags: ["Proxies"],
+      summary: "Test proxy connection",
+      description:
+        "Test that the proxy is reachable by making a lightweight request through it. Rate limited to 5 requests per minute. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "proxyId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Test result",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/TestResult" },
+            },
+          },
+        },
+        "404": {
+          description: "Proxy not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/TestResult" },
+            },
+          },
+        },
+        "429": { description: "Rate limited" },
+      },
+    },
+  },
 } as const;

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { OrgProxyInfo } from "@appstrate/shared-types";
+import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 
 export function useProxies() {
   const orgId = useCurrentOrgId();
@@ -72,6 +72,12 @@ export function useSetDefaultProxy() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proxies"] });
     },
+  });
+}
+
+export function useTestProxy() {
+  return useMutation({
+    mutationFn: (id: string) => api<TestResult>(`/proxies/${id}/test`, { method: "POST" }),
   });
 }
 

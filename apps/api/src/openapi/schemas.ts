@@ -514,6 +514,36 @@ export const schemas = {
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
+  OrgModel: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      label: { type: "string" },
+      api: { type: "string" },
+      baseUrl: { type: "string" },
+      modelId: { type: "string" },
+      input: { type: "array", items: { type: "string" } },
+      contextWindow: { type: ["integer", "null"] },
+      maxTokens: { type: ["integer", "null"] },
+      reasoning: { type: ["boolean", "null"] },
+      enabled: { type: "boolean" },
+      isDefault: { type: "boolean" },
+      source: { type: "string", enum: ["built-in", "custom"] },
+      createdBy: { type: ["string", "null"] },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  TestResult: {
+    type: "object",
+    required: ["ok", "latency"],
+    properties: {
+      ok: { type: "boolean" },
+      latency: { type: "number", description: "Response time in milliseconds" },
+      error: { type: "string", description: "Error code if test failed" },
+      message: { type: "string", description: "Human-readable error message" },
+    },
+  },
   OrgProxy: {
     type: "object",
     properties: {

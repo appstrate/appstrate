@@ -95,12 +95,21 @@ const expectedEndpoints = [
   "GET /api/flows/{packageId}/proxy",
   "PUT /api/flows/{packageId}/proxy",
 
+  // Models
+  "GET /api/models",
+  "POST /api/models",
+  "PUT /api/models/default",
+  "PUT /api/models/{modelId}",
+  "DELETE /api/models/{modelId}",
+  "POST /api/models/{modelId}/test",
+
   // Proxies
   "GET /api/proxies",
   "POST /api/proxies",
   "PUT /api/proxies/default",
   "PUT /api/proxies/{proxyId}",
   "DELETE /api/proxies/{proxyId}",
+  "POST /api/proxies/{proxyId}/test",
 
   // API Keys
   "GET /api/api-keys",

@@ -275,6 +275,15 @@ export interface OrgModelInfo {
   updatedAt: string;
 }
 
+// --- Connection Test Types ---
+
+export interface TestResult {
+  ok: boolean;
+  latency: number;
+  error?: string;
+  message?: string;
+}
+
 // --- API Key Types ---
 
 export interface ApiKeyInfo {

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemModel } from "../services/model-registry.ts";
 import {
   listOrgModels,
@@ -9,6 +10,7 @@ import {
   updateOrgModel,
   deleteOrgModel,
   setDefaultModel,
+  testModelConnection,
 } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -66,19 +68,14 @@ export function createModelsRouter() {
     }
 
     try {
-      const { input, contextWindow, maxTokens, reasoning } = parsed.data;
-      const id = await createOrgModel(
-        orgId,
-        parsed.data.label,
-        parsed.data.api,
-        parsed.data.baseUrl,
-        parsed.data.modelId,
-        parsed.data.apiKey,
-        user.id,
-        input || contextWindow || maxTokens || reasoning !== undefined
-          ? { input, contextWindow, maxTokens, reasoning }
-          : undefined,
-      );
+      const { label, api, baseUrl, modelId, apiKey, input, contextWindow, maxTokens, reasoning } =
+        parsed.data;
+      const id = await createOrgModel(orgId, label, api, baseUrl, modelId, apiKey, user.id, {
+        input,
+        contextWindow,
+        maxTokens,
+        reasoning,
+      });
       return c.json({ id }, 201);
     } catch (err) {
       logger.error("Model create failed", {
@@ -107,6 +104,25 @@ export function createModelsRouter() {
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to set default model" }, 500);
+    }
+  });
+
+  // POST /api/models/:id/test — test model connection
+  router.post("/:id/test", rateLimit(5), async (c) => {
+    const orgId = c.get("orgId");
+    const modelId = c.req.param("id")!;
+    try {
+      const result = await testModelConnection(orgId, modelId);
+      return c.json(result, result.error === "MODEL_NOT_FOUND" ? 404 : 200);
+    } catch (err) {
+      logger.error("Model test failed", {
+        modelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json(
+        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
+        500,
+      );
     }
   });
 

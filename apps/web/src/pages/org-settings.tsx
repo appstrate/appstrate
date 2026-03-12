@@ -24,6 +24,7 @@ import {
   useUpdateProxy,
   useDeleteProxy,
   useSetDefaultProxy,
+  useTestProxy,
 } from "../hooks/use-proxies";
 import {
   useModels,
@@ -31,7 +32,9 @@ import {
   useUpdateModel,
   useDeleteModel,
   useSetDefaultModel,
+  useTestModel,
 } from "../hooks/use-models";
+import { useConnectionTest } from "../hooks/use-connection-test";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ModelFormModal } from "../components/model-form-modal";
 import { PROVIDER_ICONS } from "../components/icons";
@@ -705,6 +708,8 @@ function ProxiesTab({
   onRemoveDefault: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const testMutation = useTestProxy();
+  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -746,7 +751,24 @@ function ProxiesTab({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleTest(p.id)}
+                    disabled={testingId === p.id}
+                  >
+                    {testingId === p.id ? <Spinner /> : t("proxies.test")}
+                  </Button>
+                  {testResults[p.id] && (
+                    <span
+                      className={`text-sm ${testResults[p.id]!.ok ? "text-green-500" : "text-destructive"}`}
+                    >
+                      {testResults[p.id]!.ok
+                        ? t("proxies.testSuccess", { latency: testResults[p.id]!.latency })
+                        : t("proxies.testFailed", { message: testResults[p.id]!.message })}
+                    </span>
+                  )}
                   {p.isDefault && !isBuiltIn && (
                     <Button variant="outline" size="sm" onClick={onRemoveDefault}>
                       {t("proxies.removeDefault")}
@@ -801,6 +823,8 @@ function ModelsTab({
   onRemoveDefault: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const testMutation = useTestModel();
+  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -849,7 +873,24 @@ function ModelsTab({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleTest(m.id)}
+                    disabled={testingId === m.id}
+                  >
+                    {testingId === m.id ? <Spinner /> : t("models.test")}
+                  </Button>
+                  {testResults[m.id] && (
+                    <span
+                      className={`text-sm ${testResults[m.id]!.ok ? "text-green-500" : "text-destructive"}`}
+                    >
+                      {testResults[m.id]!.ok
+                        ? t("models.testSuccess", { latency: testResults[m.id]!.latency })
+                        : t("models.testFailed", { message: testResults[m.id]!.message })}
+                    </span>
+                  )}
                   {m.isDefault && !isBuiltIn && (
                     <Button variant="outline" size="sm" onClick={onRemoveDefault}>
                       {t("models.removeDefault")}

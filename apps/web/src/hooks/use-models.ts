@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { OrgModelInfo } from "@appstrate/shared-types";
+import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -93,6 +93,12 @@ export function useSetDefaultModel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["models"] });
     },
+  });
+}
+
+export function useTestModel() {
+  return useMutation({
+    mutationFn: (id: string) => api<TestResult>(`/models/${id}/test`, { method: "POST" }),
   });
 }
 

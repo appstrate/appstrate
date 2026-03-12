@@ -5,7 +5,8 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
-import type { OrgModelInfo } from "@appstrate/shared-types";
+import { isBlockedUrl } from "../lib/ssrf.ts";
+import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 
 // --- List (system + DB) ---
 
@@ -253,7 +254,7 @@ export async function resolveModel(
   return null;
 }
 
-async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
+export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check system models first
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
@@ -296,5 +297,94 @@ async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedMode
   } catch {
     logger.warn("Failed to decrypt model API key", { modelId: modelDbId });
     return null;
+  }
+}
+
+// --- Connection test ---
+
+export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
+  const model = await loadModel(orgId, modelDbId);
+  if (!model)
+    return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+
+  if (isBlockedUrl(model.baseUrl)) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+
+  // Build request based on API type
+  // Anthropic: POST /v1/messages with max_tokens:1 (GET /v1/models is not available for all key types)
+  // OpenAI/custom: GET /models (lightweight, no tokens consumed)
+  // Google: GET /models (lightweight, no tokens consumed)
+  const base = model.baseUrl.replace(/\/+$/, "");
+  let url: string;
+  let method = "GET";
+  let body: string | undefined;
+  const headers: Record<string, string> = {};
+
+  switch (model.api) {
+    case "anthropic-messages":
+      url = `${base}/v1/messages`;
+      method = "POST";
+      if (model.apiKey.startsWith("sk-ant-oat")) {
+        // OAuth tokens require Bearer auth + beta header (same as Pi SDK / Claude Code)
+        headers["Authorization"] = `Bearer ${model.apiKey}`;
+        headers["anthropic-beta"] = "oauth-2025-04-20";
+      } else {
+        headers["x-api-key"] = model.apiKey;
+      }
+      headers["anthropic-version"] = "2023-06-01";
+      headers["content-type"] = "application/json";
+      body = JSON.stringify({
+        model: model.modelId,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "hi" }],
+      });
+      break;
+    case "google-generative-ai":
+      url = `${base}/models?key=${encodeURIComponent(model.apiKey)}`;
+      break;
+    case "openai-completions":
+    default:
+      url = `${base}/models`;
+      headers["Authorization"] = `Bearer ${model.apiKey}`;
+      break;
+  }
+
+  const start = performance.now();
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(10_000),
+    });
+    const latency = Math.round(performance.now() - start);
+
+    if (res.ok) return { ok: true, latency };
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, latency, error: "AUTH_FAILED", message: "Authentication failed" };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "PROVIDER_ERROR",
+      message: `Provider returned ${res.status}`,
+    };
+  } catch (err) {
+    const latency = Math.round(performance.now() - start);
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return { ok: false, latency, error: "TIMEOUT", message: "Request timed out (10s)" };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "NETWORK_ERROR",
+      message: err instanceof Error ? err.message : "Network error",
+    };
   }
 }
