@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
-import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
+import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
 
 /**
  * Tests for the forkPackage service.
@@ -17,7 +17,6 @@ let mockPackageById: Record<string, unknown> = {};
 let mockCreatedItems: unknown[] = [];
 let mockUploadedFiles: unknown[] = [];
 let mockSyncCalls: unknown[] = [];
-let mockDownloadedFiles: Record<string, unknown> | null = null;
 let mockLatestVersionId: Record<string, number | null> = {};
 let mockVersionRows: Record<
   number,
@@ -96,10 +95,6 @@ async function syncFlowDepsJunctionTable(...args: unknown[]) {
   mockSyncCalls.push(args);
 }
 
-async function downloadPackageFiles(_storageFolder: string, _orgId: string, _packageId: string) {
-  return mockDownloadedFiles;
-}
-
 async function uploadPackageFiles(...args: unknown[]) {
   mockUploadedFiles.push(args);
 }
@@ -140,7 +135,7 @@ function buildTestZip(
   content: string,
   contentFileName = "prompt.md",
 ): Buffer {
-  const entries: Zippable = {
+  const entries: Record<string, Uint8Array> = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
     [contentFileName]: new TextEncoder().encode(content),
   };
@@ -242,22 +237,16 @@ async function forkPackage(
     sourcePackageId,
   );
 
-  // Copy storage files if they exist
-  const files = await downloadPackageFiles(cfg.storageFolder, orgId, sourcePackageId);
-  if (files && Object.keys(files).length > 0) {
-    await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, files);
-  }
-
-  // Rebuild ZIP with updated manifest
-  const newZipEntries: Zippable = {};
+  // Build draft storage files from the version ZIP entries
+  const draftFiles: Record<string, Uint8Array> = {};
   for (const [path, data] of Object.entries(zipEntries)) {
     if (path === "manifest.json") continue;
-    newZipEntries[path] = data;
+    draftFiles[path] = data;
   }
-  newZipEntries["manifest.json"] = new TextEncoder().encode(
-    JSON.stringify(updatedManifest, null, 2),
-  );
-  const newZipBuffer = Buffer.from(zipArtifact(newZipEntries, 6));
+  draftFiles["manifest.json"] = new TextEncoder().encode(JSON.stringify(updatedManifest, null, 2));
+  await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, draftFiles);
+
+  const newZipBuffer = Buffer.from(zipArtifact(draftFiles, 6));
 
   // Create local published version
   await createVersionAndUpload({
@@ -337,7 +326,6 @@ beforeEach(() => {
   mockCreatedItems = [];
   mockUploadedFiles = [];
   mockSyncCalls = [];
-  mockDownloadedFiles = null;
   mockLatestVersionId = {};
   mockVersionRows = {};
   mockVersionZips = {};
@@ -523,21 +511,30 @@ describe("forkPackage", () => {
     expect(created.type).toBe("skill");
   });
 
-  test("fork copies storage files when present", async () => {
+  test("fork populates draft storage from version ZIP entries", async () => {
     setupSourcePackage({
       packageId: "@other/cool-flow",
       type: "flow",
+      content: "# Cool flow prompt",
     });
-    mockDownloadedFiles = { "flow.md": "content" };
 
     await forkPackage("org-1", "acme", "@other/cool-flow", "user-1");
 
+    // Draft storage upload should have been called with files from the ZIP
     expect(mockUploadedFiles.length).toBe(1);
     const args = mockUploadedFiles[0] as unknown[];
     expect(args[0]).toBe("flows");
     expect(args[1]).toBe("org-1");
     expect(args[2]).toBe("@acme/cool-flow");
-    expect(args[3]).toEqual({ "flow.md": "content" });
+
+    const uploadedFiles = args[3] as Record<string, Uint8Array>;
+    // Should contain the content file from the ZIP
+    expect(uploadedFiles["prompt.md"]).toBeDefined();
+    expect(new TextDecoder().decode(uploadedFiles["prompt.md"])).toBe("# Cool flow prompt");
+    // Should contain the updated manifest
+    expect(uploadedFiles["manifest.json"]).toBeDefined();
+    const manifest = JSON.parse(new TextDecoder().decode(uploadedFiles["manifest.json"]));
+    expect(manifest.name).toBe("@acme/cool-flow");
   });
 
   test("fork with custom name uses custom name instead of source name", async () => {
