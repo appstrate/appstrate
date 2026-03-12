@@ -50,6 +50,13 @@
       "when": 1773270789421,
       "tag": "0006_optimal_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1773282291299,
+      "tag": "0007_vengeful_the_santerians",
+      "breakpoints": true
     }
   ]
 }

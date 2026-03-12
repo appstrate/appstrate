@@ -50,8 +50,8 @@ export class PiAdapter implements ExecutionAdapter {
       // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
         FLOW_PROMPT: prompt,
-        PI_API: llmConfig?.api ?? "anthropic-messages",
-        LLM_MODEL_ID: modelId,
+        MODEL_API: llmConfig?.api ?? "anthropic-messages",
+        MODEL_ID: modelId,
         SIDECAR_URL: "http://sidecar:8080",
       };
 
@@ -62,9 +62,17 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Route LLM calls through sidecar proxy (agent never sees real API keys)
       if (llmApiKey) {
-        containerEnv.LLM_BASE_URL = "http://sidecar:8080/llm";
-        containerEnv.LLM_API_KEY = llmPlaceholder;
+        containerEnv.MODEL_BASE_URL = "http://sidecar:8080/llm";
+        containerEnv.MODEL_API_KEY = llmPlaceholder;
       }
+
+      // Model capabilities (conditional — only set if defined)
+      if (llmConfig?.input) containerEnv.MODEL_INPUT = JSON.stringify(llmConfig.input);
+      if (llmConfig?.contextWindow != null)
+        containerEnv.MODEL_CONTEXT_WINDOW = String(llmConfig.contextWindow);
+      if (llmConfig?.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
+      if (llmConfig?.reasoning != null)
+        containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
       // The execution network is internal (no NAT) — clients that ignore
@@ -99,7 +107,7 @@ export class PiAdapter implements ExecutionAdapter {
             role: "agent",
             image: PI_RUNTIME_IMAGE,
             env: containerEnv,
-            resources: { memoryBytes: 1024 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+            resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
             files:
               filesToInject.length > 0
                 ? { items: filesToInject, targetDir: "/workspace" }

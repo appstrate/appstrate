@@ -263,6 +263,10 @@ export interface OrgModelInfo {
   api: string;
   baseUrl: string;
   modelId: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";

@@ -21,6 +21,10 @@ export function useCreateModel() {
       baseUrl: string;
       modelId: string;
       apiKey: string;
+      input?: string[];
+      contextWindow?: number;
+      maxTokens?: number;
+      reasoning?: boolean;
     }) => {
       return api<{ id: string }>("/models", {
         method: "POST",
@@ -48,6 +52,10 @@ export function useUpdateModel() {
         modelId?: string;
         apiKey?: string;
         enabled?: boolean;
+        input?: string[] | null;
+        contextWindow?: number | null;
+        maxTokens?: number | null;
+        reasoning?: boolean | null;
       };
     }) => {
       return api(`/models/${id}`, {

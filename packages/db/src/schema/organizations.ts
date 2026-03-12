@@ -4,6 +4,8 @@ import {
   timestamp,
   boolean,
   uuid,
+  integer,
+  jsonb,
   index,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -123,6 +125,10 @@ export const orgModels = pgTable(
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
     apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    input: jsonb("input"), // ["text", "image"] | null
+    contextWindow: integer("context_window"), // 200000 | null
+    maxTokens: integer("max_tokens"), // 16384 | null
+    reasoning: boolean("reasoning"), // true | null
     enabled: boolean("enabled").notNull().default(true),
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"

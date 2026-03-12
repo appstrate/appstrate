@@ -65,7 +65,7 @@ export function buildPromptContext(params: {
   providers?: PromptContext["providers"];
   memories?: PromptContext["memories"];
   proxyUrl?: string | null;
-  llmConfig?: { api: string; baseUrl: string; modelId: string; apiKey: string } | null;
+  llmConfig?: PromptContext["llmConfig"];
 }): PromptContext {
   return {
     rawPrompt: params.flow.prompt,
@@ -167,12 +167,16 @@ export async function buildExecutionContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult?.label ?? null;
-  const llmConfig = modelResult
+  const llmConfig: PromptContext["llmConfig"] = modelResult
     ? {
         api: modelResult.api,
         baseUrl: modelResult.baseUrl,
         modelId: modelResult.modelId,
         apiKey: modelResult.apiKey,
+        input: modelResult.input,
+        contextWindow: modelResult.contextWindow,
+        maxTokens: modelResult.maxTokens,
+        reasoning: modelResult.reasoning,
       }
     : null;
 

@@ -9,7 +9,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import type { Model, Api } from "@mariozechner/pi-ai";
+import { type Model, type Api } from "@mariozechner/pi-ai";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { emit } from "./lib/emit.ts";
 
@@ -25,7 +25,11 @@ async function run(cmd: string[]): Promise<void> {
   await proc.exited;
 }
 
-const exists = (p: string) => fs.access(p).then(() => true, () => false);
+const exists = (p: string) =>
+  fs.access(p).then(
+    () => true,
+    () => false,
+  );
 
 /** Unwrap the default export from a dynamically imported module.
  *  Some bundlers double-wrap: mod.default may be a module namespace
@@ -49,10 +53,7 @@ async function initGitWorkspace(): Promise<void> {
     await fs.mkdir(`${gitDir}/refs`, { recursive: true });
     await Promise.all([
       fs.writeFile(`${gitDir}/HEAD`, "ref: refs/heads/main\n"),
-      fs.writeFile(
-        `${gitDir}/config`,
-        "[user]\n\temail = pi@appstrate.local\n\tname = Pi\n",
-      ),
+      fs.writeFile(`${gitDir}/config`, "[user]\n\temail = pi@appstrate.local\n\tname = Pi\n"),
     ]);
   } catch {
     // Non-fatal — git dir may already exist
@@ -80,7 +81,10 @@ async function loadExtensionsFromDir(dir: string, label: string) {
         const mod = await import(path.join(dir, entry));
         const factory = resolveDefaultExport(mod);
         if (typeof factory !== "function") {
-          emit({ type: "error", message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})` });
+          emit({
+            type: "error",
+            message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})`,
+          });
           return;
         }
         extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
@@ -122,7 +126,10 @@ if (hasPackage) {
     }
 
     // Load flow-package extensions first (they take priority over runtime built-ins)
-    await loadExtensionsFromDir(path.join(WORKSPACE, ".flow-package", "extensions"), "flow-package");
+    await loadExtensionsFromDir(
+      path.join(WORKSPACE, ".flow-package", "extensions"),
+      "flow-package",
+    );
 
     // Cleanup extracted package (fire-and-forget)
     run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]).catch(() => {});
@@ -149,32 +156,31 @@ function deriveProviderFromApi(api: string): string {
   return known[api] ?? api.split("-")[0];
 }
 
-const api = process.env.PI_API || "anthropic-messages";
-const modelId = process.env.LLM_MODEL_ID || "claude-sonnet-4-5-20250929";
+const api = process.env.MODEL_API || "anthropic-messages";
+const modelId = process.env.MODEL_ID || "claude-sonnet-4-5-20250929";
 const provider = deriveProviderFromApi(api);
 
 const authStorage = new AuthStorage("/tmp/pi-auth/auth.json");
 
 // Store generic LLM API key for the active provider
-const llmApiKey = process.env.LLM_API_KEY;
+const llmApiKey = process.env.MODEL_API_KEY;
 if (llmApiKey) {
   authStorage.setRuntimeApiKey(provider, llmApiKey);
 }
 
 const modelRegistry = new ModelRegistry(authStorage);
 
-// Construct model directly from env vars — unified flow, no getModel()
 const model: Model<Api> = {
   id: modelId,
   name: modelId,
   api,
   provider,
-  baseUrl: process.env.LLM_BASE_URL || "",
-  reasoning: false,
-  input: ["text"],
+  baseUrl: process.env.MODEL_BASE_URL || "",
+  reasoning: process.env.MODEL_REASONING === "true",
+  input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) : ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 128000,
-  maxTokens: 16384,
+  contextWindow: process.env.MODEL_CONTEXT_WINDOW ? parseInt(process.env.MODEL_CONTEXT_WINDOW) : 128000,
+  maxTokens: process.env.MODEL_MAX_TOKENS ? parseInt(process.env.MODEL_MAX_TOKENS) : 16384,
 };
 
 // --- 4. Build resource loader ---
