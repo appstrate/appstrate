@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemProxy } from "../services/proxy-registry.ts";
 import {
   listOrgProxies,
@@ -9,6 +10,7 @@ import {
   updateOrgProxy,
   deleteOrgProxy,
   setDefaultProxy,
+  testProxyConnection,
 } from "../services/org-proxies.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -81,6 +83,25 @@ export function createProxiesRouter() {
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to set default proxy" }, 500);
+    }
+  });
+
+  // POST /api/proxies/:id/test — test proxy connection
+  router.post("/:id/test", rateLimit(5), async (c) => {
+    const orgId = c.get("orgId");
+    const proxyId = c.req.param("id")!;
+    try {
+      const result = await testProxyConnection(orgId, proxyId);
+      return c.json(result, result.error === "PROXY_NOT_FOUND" ? 404 : 200);
+    } catch (err) {
+      logger.error("Proxy test failed", {
+        proxyId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json(
+        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
+        500,
+      );
     }
   });
 

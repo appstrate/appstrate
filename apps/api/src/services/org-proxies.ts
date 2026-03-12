@@ -6,7 +6,7 @@ import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { getPackageConfig } from "./state.ts";
 import { logger } from "../lib/logger.ts";
-import type { OrgProxyInfo } from "@appstrate/shared-types";
+import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 
 // --- URL Masking ---
 
@@ -201,7 +201,7 @@ export async function resolveProxy(
   return envUrl ? { url: envUrl, label: "Proxy" } : null;
 }
 
-async function loadProxy(
+export async function loadProxy(
   orgId: string,
   proxyId: string,
 ): Promise<{ url: string; label: string } | null> {
@@ -228,5 +228,42 @@ async function loadProxy(
   } catch {
     logger.warn("Failed to decrypt proxy URL", { proxyId });
     return null;
+  }
+}
+
+// --- Connection test ---
+
+export async function testProxyConnection(orgId: string, proxyId: string): Promise<TestResult> {
+  const proxy = await loadProxy(orgId, proxyId);
+  if (!proxy) {
+    return { ok: false, latency: 0, error: "PROXY_NOT_FOUND", message: "Proxy not found" };
+  }
+
+  const start = performance.now();
+  try {
+    const res = await fetch("https://cloudflare.com/cdn-cgi/trace", {
+      proxy: proxy.url,
+      signal: AbortSignal.timeout(10_000),
+    } as RequestInit);
+    const latency = Math.round(performance.now() - start);
+
+    if (res.ok) return { ok: true, latency };
+    return {
+      ok: false,
+      latency,
+      error: "PROVIDER_ERROR",
+      message: `Proxy returned ${res.status}`,
+    };
+  } catch (err) {
+    const latency = Math.round(performance.now() - start);
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return { ok: false, latency, error: "TIMEOUT", message: "Request timed out (10s)" };
+    }
+    return {
+      ok: false,
+      latency,
+      error: "NETWORK_ERROR",
+      message: err instanceof Error ? err.message : "Network error",
+    };
   }
 }
