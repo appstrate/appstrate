@@ -13,11 +13,12 @@ export const queues = {
   delete: [] as unknown[][],
 };
 
-/** Tracks values passed to insert/update/delete for assertion in tests. */
+/** Tracks values passed to insert/update/delete/execute for assertion in tests. */
 export const tracking = {
   insertCalls: [] as Record<string, unknown>[],
   updateCalls: [] as Record<string, unknown>[],
   deleteCalls: [] as Record<string, unknown>[],
+  executeCalls: [] as unknown[],
 };
 
 export function resetQueues() {
@@ -28,6 +29,7 @@ export function resetQueues() {
   tracking.insertCalls.length = 0;
   tracking.updateCalls.length = 0;
   tracking.deleteCalls.length = 0;
+  tracking.executeCalls.length = 0;
 }
 
 function chainable(result: unknown[]) {
@@ -95,7 +97,10 @@ function makeDbProxy(): Record<string, unknown> {
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       return fn(makeDbProxy());
     },
-    execute: () => Promise.resolve(),
+    execute: (query: unknown) => {
+      tracking.executeCalls.push(query);
+      return Promise.resolve();
+    },
   };
 }
 
