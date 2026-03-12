@@ -158,7 +158,7 @@ function scheduleReplenish(): void {
 async function createPooledSidecar(): Promise<PooledSidecar> {
   const configSecret = crypto.randomUUID();
   const containerId = await createContainer(
-    "pool",
+    crypto.randomUUID().slice(0, 8),
     { PORT: "8080", CONFIG_SECRET: configSecret },
     {
       image: SIDECAR_IMAGE,
