@@ -1,6 +1,6 @@
 import { db } from "../lib/db.ts";
 import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, desc } from "drizzle-orm";
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -66,7 +66,7 @@ export async function getOrgInvitations(orgId: string) {
     .select()
     .from(orgInvitations)
     .where(and(eq(orgInvitations.orgId, orgId), eq(orgInvitations.status, "pending")))
-    .orderBy(orgInvitations.createdAt);
+    .orderBy(desc(orgInvitations.createdAt));
 }
 
 export async function markInvitationAccepted(invitationId: string, userId: string) {

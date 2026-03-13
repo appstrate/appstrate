@@ -17,6 +17,11 @@ import { MarketplaceConnectionPage } from "./pages/marketplace-connection";
 import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
+import { OnboardingCreateStep } from "./pages/onboarding/create-step";
+import { OnboardingModelStep } from "./pages/onboarding/model-step";
+import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
+import { OnboardingMembersStep } from "./pages/onboarding/members-step";
+import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OrgSettingsPage } from "./pages/org-settings";
 import { SkillsPage } from "./pages/skills-page";
 import { ExtensionsPage } from "./pages/extensions-page";
@@ -216,8 +221,12 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
 
-  // Allow create-org and welcome routes through without org context
-  if (location.pathname === "/create-org" || location.pathname === "/welcome") {
+  // Allow create-org, welcome, and onboarding routes through without org context
+  if (
+    location.pathname === "/create-org" ||
+    location.pathname === "/welcome" ||
+    location.pathname.startsWith("/onboarding")
+  ) {
     return <>{children}</>;
   }
 
@@ -231,9 +240,9 @@ function OrgGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // No orgs at all — redirect to create
+  // No orgs at all — redirect to onboarding
   if (orgs.length === 0) {
-    return <Navigate to="/create-org" replace />;
+    return <Navigate to="/onboarding/create" replace />;
   }
 
   // Orgs exist but none selected yet (auto-select happening)
@@ -289,6 +298,11 @@ export function App() {
             <Route path="/invite/:token" element={<InviteAcceptPage />} />
             <Route path="/create-org" element={<CreateOrgPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
+            <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
+            <Route path="/onboarding/model" element={<OnboardingModelStep />} />
+            <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
+            <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
+            <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
             <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<DashboardPage />} />

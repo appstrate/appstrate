@@ -1,9 +1,8 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRight } from "lucide-react";
 import { useFlows } from "../hooks/use-packages";
 import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ExecutionRow } from "../components/execution-row";
 import type { Execution } from "@appstrate/shared-types";
@@ -66,19 +65,9 @@ export function DashboardPage() {
 
   const recentExecutions = executions.slice(0, 15);
 
-  // Empty state
+  // No executions → redirect to flows page
   if (executions.length === 0) {
-    return (
-      <EmptyState message={t("dashboard.empty")} hint={t("dashboard.emptyHint")}>
-        <Link
-          to="/flows"
-          className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-        >
-          {t("detail.breadcrumb")}
-          <ArrowRight size={14} />
-        </Link>
-      </EmptyState>
-    );
+    return <Navigate to="/flows" replace />;
   }
 
   return (
