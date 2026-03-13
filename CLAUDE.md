@@ -57,11 +57,11 @@ appstrate/
 │   ├── components/           # UI components (modals, forms, editors)
 │   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
 │   ├── lib/                  # Utilities (auth-client, markdown, provider-status, strings)
-│   ├── styles.css            # Single CSS file (dark theme, no Tailwind/modules)
+│   ├── styles.css            # Tailwind 4 CSS (dark theme, custom @theme inline)
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (26 tables, 6 enums, indexes)
+│   ├── schema.ts             # Full schema (30 tables, 6 enums, indexes)
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (auto profile+org on signup)
 │
@@ -151,7 +151,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 ### Frontend
 
 - **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `flows`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
-- **Styling**: Single `styles.css` (dark theme). No CSS modules, no Tailwind, no CSS-in-JS.
+- **Styling**: Tailwind 4 CSS (`@tailwindcss/vite` plugin + `tailwind-merge`). Single `styles.css` with `@import "tailwindcss"` and custom `@theme inline` dark theme variables. All components use Tailwind utility classes.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
 - **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly. `useGlobalExecutionSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it.
 - **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
@@ -200,7 +200,7 @@ When working on API routes, always consult the corresponding OpenAPI path file i
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
+Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
 
 ## Environment Variables
 
