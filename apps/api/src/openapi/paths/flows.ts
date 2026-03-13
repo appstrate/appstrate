@@ -386,6 +386,76 @@ export const flowsPaths = {
       },
     },
   },
+  "/api/flows/{scope}/{name}/model": {
+    get: {
+      operationId: "getFlowModel",
+      tags: ["Flows"],
+      summary: "Get flow model configuration",
+      description: "Returns the LLM model override for a flow (null if using org default).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Flow model config",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  modelId: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "setFlowModel",
+      tags: ["Flows"],
+      summary: "Set flow model override",
+      description:
+        "Set a model override for this flow. Pass a model ID or null to revert to org default. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["modelId"],
+              properties: {
+                modelId: {
+                  type: ["string", "null"],
+                  description: "Model ID or null to use org default",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Flow model updated",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/flows/{scope}/{name}/skills": {
     put: {
       operationId: "updateFlowSkills",
