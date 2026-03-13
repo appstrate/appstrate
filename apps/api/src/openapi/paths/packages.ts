@@ -224,14 +224,9 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  skill: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                    },
-                  },
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                  message: { type: "string" },
                 },
               },
             },
@@ -512,14 +507,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  skill: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                    },
-                  },
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
                 },
               },
             },
@@ -643,14 +632,9 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  extension: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                    },
-                  },
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                  message: { type: "string" },
                 },
               },
             },
@@ -931,14 +915,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  extension: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                    },
-                  },
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
                 },
               },
             },
@@ -1116,14 +1094,7 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flow: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      name: { type: "string" },
-                      description: { type: "string" },
-                    },
-                  },
+                  packageId: { type: "string" },
                   lockVersion: { type: "integer" },
                 },
               },
@@ -1474,6 +1445,377 @@ export const packagesPaths = {
             },
           },
         },
+      },
+    },
+  },
+
+  // --- Packages — Providers ---
+
+  "/api/packages/providers": {
+    get: {
+      operationId: "listProviderPackages",
+      tags: ["Packages"],
+      summary: "List provider packages",
+      description: "List all provider packages (system + org) in the organization.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Provider package list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  providers: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    post: {
+      operationId: "createProviderPackage",
+      tags: ["Packages"],
+      summary: "Create a provider package",
+      description:
+        "Create a new provider package from manifest and content. Creates an initial version automatically. Admin only.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content"],
+              properties: {
+                manifest: { type: "object", description: "Provider manifest JSON" },
+                content: {
+                  type: "string",
+                  description: "Provider definition JSON (definition.json)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Provider package created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/providers/{providerId}/versions/info": {
+    get: {
+      operationId: "getProviderPackageVersionInfo",
+      tags: ["Packages"],
+      summary: "Get version info for a provider package (latest published + draft)",
+      description:
+        "Returns the latest published version and the current draft version from the manifest.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version info",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  latestVersion: { type: ["string", "null"] },
+                  draftVersion: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/providers/{providerId}/versions": {
+    get: {
+      operationId: "listProviderPackageVersions",
+      tags: ["Packages"],
+      summary: "List provider package versions",
+      description: "List all published versions for a provider package.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Version list",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  versions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FlowVersion" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "createProviderPackageVersion",
+      tags: ["Packages"],
+      summary: "Create a version from draft",
+      description:
+        "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                version: {
+                  type: "string",
+                  description: "Optional semver version override (e.g. from bump selector)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Version created",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/packages/providers/{providerId}/versions/{version}/restore": {
+    post: {
+      operationId: "restoreProviderPackageVersion",
+      tags: ["Packages"],
+      summary: "Restore a provider package version into the draft",
+      description:
+        "Restore a previously published version into the provider package draft. Does not create a new version. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version to restore (exact, dist-tag, or semver range)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Version restored",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                  restoredVersion: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification" },
+      },
+    },
+  },
+  "/api/packages/providers/{providerId}/versions/{version}": {
+    get: {
+      operationId: "getProviderPackageVersionDetail",
+      tags: ["Packages"],
+      summary: "Get provider package version detail",
+      description:
+        "Resolve a version query and return versioned provider data including content extracted from ZIP.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "version",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Version query — exact version, dist-tag, or semver range",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Versioned provider detail",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer" },
+                  version: { type: "string" },
+                  manifest: { type: "object" },
+                  content: { type: ["string", "null"] },
+                  yanked: { type: "boolean" },
+                  yankedReason: { type: ["string", "null"] },
+                  integrity: { type: "string" },
+                  artifactSize: { type: "integer" },
+                  createdAt: { type: ["string", "null"], format: "date-time" },
+                  distTags: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteProviderPackageVersion",
+      tags: ["Packages"],
+      summary: "Delete a provider package version",
+      description:
+        "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        { name: "version", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Version deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/providers/{providerId}": {
+    get: {
+      operationId: "getProviderPackage",
+      tags: ["Packages"],
+      summary: "Get provider package detail",
+      description: "Get a provider package's full details including content.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Provider package detail",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateProviderPackage",
+      tags: ["Packages"],
+      summary: "Update a provider package",
+      description:
+        "Update a provider package in the organization. Built-in providers cannot be modified. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lockVersion"],
+              properties: {
+                manifest: { type: "object" },
+                content: { type: "string" },
+                lockVersion: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Provider package updated",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteProviderPackage",
+      tags: ["Packages"],
+      summary: "Delete a provider package",
+      description:
+        "Delete a provider package from the organization. Built-in providers cannot be deleted. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Provider package deleted" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Provider in use by flows" },
       },
     },
   },

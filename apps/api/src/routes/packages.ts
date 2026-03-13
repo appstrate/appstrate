@@ -526,12 +526,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     return c.json(
       {
-        [rcfg.responseKey]: {
-          id: item.id,
-          name: item.id,
-          description: ((item.draftManifest ?? {}) as Partial<Manifest>).description ?? null,
-        },
+        packageId: item.id,
         lockVersion: item.lockVersion,
+        message: `${rcfg.cfg.label.slice(0, -1)} created`,
         ...(warnings.length > 0 ? { warnings } : {}),
       },
       201,
@@ -702,11 +699,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     return c.json({
-      [rcfg.responseKey]: {
-        id: updated.id,
-        name: updated.id,
-        description: ((updated.draftManifest ?? {}) as Partial<Manifest>).description ?? null,
-      },
+      packageId: updated.id,
       lockVersion: updated.lockVersion,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
