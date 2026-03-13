@@ -115,13 +115,7 @@ export function PackageList() {
       isLoading={isLoading}
       error={error}
       emptyMessage={t("list.empty")}
-      emptyHint={
-        <Trans
-          t={t}
-          i18nKey="list.emptyHint"
-          components={{ 1: <code /> }}
-        />
-      }
+      emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
       emptyIcon={Layers}
       extraActions={
         isOrgAdmin ? (
