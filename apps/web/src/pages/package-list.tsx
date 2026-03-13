@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/shared-types";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,7 @@ interface PackageTabProps {
   isLoading: boolean;
   error?: Error | null;
   emptyMessage: string;
-  emptyHint: string;
+  emptyHint: ReactNode;
   emptyIcon?: LucideIcon;
   extraActions?: ReactNode;
   emptyExtraActions?: ReactNode;
@@ -115,7 +115,13 @@ export function PackageList() {
       isLoading={isLoading}
       error={error}
       emptyMessage={t("list.empty")}
-      emptyHint={t("list.emptyHint")}
+      emptyHint={
+        <Trans
+          t={t}
+          i18nKey="list.emptyHint"
+          components={{ 1: <code /> }}
+        />
+      }
       emptyIcon={Layers}
       extraActions={
         isOrgAdmin ? (
