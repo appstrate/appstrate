@@ -22,6 +22,7 @@ import {
   updateInvitationRole,
 } from "../services/invitations.ts";
 import { provisionSystemProvidersForOrg } from "../services/system-providers.ts";
+import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -66,6 +67,9 @@ router.post("/", async (c) => {
 
   // Provision system providers for the new org (non-fatal)
   await provisionSystemProvidersForOrg(org.id).catch(() => {});
+
+  // Provision default hello-world flow for the new org (non-fatal)
+  await provisionDefaultFlowForOrg(org.id, org.slug, user.id).catch(() => {});
 
   return c.json(
     {
