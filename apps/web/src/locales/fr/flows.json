@@ -26,6 +26,7 @@
   "detail.titleReconnect": "Reconnectez les services d'abord",
   "detail.titleConnect": "Connectez tous les connecteurs d'abord",
   "detail.titleConfig": "Configurez les champs obligatoires",
+  "detail.titleModel": "Configurez un modèle pour exécuter",
   "detail.titleRun": "Lancer le flow",
   "detail.titleDeleteRunning": "Impossible de supprimer pendant une exécution",
   "detail.titleDelete": "Supprimer ce flow",

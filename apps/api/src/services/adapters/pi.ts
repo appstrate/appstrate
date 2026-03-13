@@ -23,7 +23,7 @@ export class PiAdapter implements ExecutionAdapter {
     const prompt = buildEnrichedPrompt(ctx);
 
     const llmConfig = ctx.llmConfig;
-    const modelId = llmConfig?.modelId ?? "unknown";
+    const modelId = llmConfig.modelId;
 
     const orchestrator = getOrchestrator();
     let boundary: IsolationBoundary | undefined;
@@ -34,7 +34,7 @@ export class PiAdapter implements ExecutionAdapter {
       boundary = await orchestrator.createIsolationBoundary(executionId);
 
       // Resolve LLM config for sidecar proxy
-      const llmApiKey = llmConfig?.apiKey;
+      const llmApiKey = llmConfig.apiKey;
       const llmPlaceholder = deriveKeyPlaceholder(llmApiKey);
 
       // Sidecar config (platform network resolution handled by orchestrator)
@@ -43,14 +43,14 @@ export class PiAdapter implements ExecutionAdapter {
         platformApiUrl: ctx.executionApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
         llm: llmApiKey
-          ? { baseUrl: llmConfig!.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
+          ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
           : undefined,
       };
 
       // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
         FLOW_PROMPT: prompt,
-        MODEL_API: llmConfig?.api ?? "anthropic-messages",
+        MODEL_API: llmConfig.api,
         MODEL_ID: modelId,
         SIDECAR_URL: "http://sidecar:8080",
       };
@@ -67,11 +67,11 @@ export class PiAdapter implements ExecutionAdapter {
       }
 
       // Model capabilities (conditional — only set if defined)
-      if (llmConfig?.input) containerEnv.MODEL_INPUT = JSON.stringify(llmConfig.input);
-      if (llmConfig?.contextWindow != null)
+      if (llmConfig.input) containerEnv.MODEL_INPUT = JSON.stringify(llmConfig.input);
+      if (llmConfig.contextWindow != null)
         containerEnv.MODEL_CONTEXT_WINDOW = String(llmConfig.contextWindow);
-      if (llmConfig?.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
-      if (llmConfig?.reasoning != null)
+      if (llmConfig.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
+      if (llmConfig.reasoning != null)
         containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
@@ -125,7 +125,7 @@ export class PiAdapter implements ExecutionAdapter {
         adapterName: "pi",
         executionId,
         timeout,
-        extraData: { api: llmConfig?.api ?? "anthropic-messages", model: modelId },
+        extraData: { api: llmConfig.api, model: modelId },
         signal,
         stopOnTimeout: [sidecarHandle],
         processLogs: processPiLogs,

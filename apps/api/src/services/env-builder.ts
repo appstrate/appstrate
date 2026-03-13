@@ -14,6 +14,13 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 
+export class ModelNotConfiguredError extends Error {
+  constructor() {
+    super("No LLM model configured for this organization");
+    this.name = "ModelNotConfiguredError";
+  }
+}
+
 /**
  * Resolve unique provider definitions for prompt context.
  */
@@ -65,7 +72,7 @@ export function buildPromptContext(params: {
   providers?: PromptContext["providers"];
   memories?: PromptContext["memories"];
   proxyUrl?: string | null;
-  llmConfig?: PromptContext["llmConfig"];
+  llmConfig: PromptContext["llmConfig"];
 }): PromptContext {
   return {
     rawPrompt: params.flow.prompt,
@@ -149,6 +156,10 @@ export async function buildExecutionContext(params: {
     getPackageMemories(flow.id, orgId),
   ]);
 
+  if (!modelResult) {
+    throw new ModelNotConfiguredError();
+  }
+
   // Resolve version ID: explicit override is trusted; otherwise only associate
   // the latest version if its manifest matches the live flow (dirty check).
   let flowVersionId: number | null;
@@ -166,19 +177,17 @@ export async function buildExecutionContext(params: {
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
-  const modelLabel = modelResult?.label ?? null;
-  const llmConfig: PromptContext["llmConfig"] = modelResult
-    ? {
-        api: modelResult.api,
-        baseUrl: modelResult.baseUrl,
-        modelId: modelResult.modelId,
-        apiKey: modelResult.apiKey,
-        input: modelResult.input,
-        contextWindow: modelResult.contextWindow,
-        maxTokens: modelResult.maxTokens,
-        reasoning: modelResult.reasoning,
-      }
-    : null;
+  const modelLabel = modelResult.label ?? null;
+  const llmConfig: PromptContext["llmConfig"] = {
+    api: modelResult.api,
+    baseUrl: modelResult.baseUrl,
+    modelId: modelResult.modelId,
+    apiKey: modelResult.apiKey,
+    input: modelResult.input,
+    contextWindow: modelResult.contextWindow,
+    maxTokens: modelResult.maxTokens,
+    reasoning: modelResult.reasoning,
+  };
 
   const promptContext = buildPromptContext({
     flow,

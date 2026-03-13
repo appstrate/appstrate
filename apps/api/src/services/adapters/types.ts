@@ -61,7 +61,7 @@ export interface PromptContext {
   }>;
   memories?: Array<{ id: number; content: string; createdAt: string | null }>;
   llmModel: string;
-  llmConfig?: {
+  llmConfig: {
     api: string;
     baseUrl: string;
     modelId: string;
@@ -70,7 +70,7 @@ export interface PromptContext {
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
-  } | null;
+  };
   proxyUrl?: string | null;
   timeout?: number;
   availableTools?: ToolMeta[];

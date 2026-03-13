@@ -13,7 +13,8 @@ import { createExecution, getAdminConnections } from "../services/state.ts";
 import { resolveProviderStatuses } from "../services/connection-manager.ts";
 import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
-import { buildExecutionContext } from "../services/env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
+import type { PromptContext } from "../services/adapters/types.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
@@ -139,16 +140,28 @@ export function createShareRouter() {
     const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
-      await buildExecutionContext({
-        executionId,
-        flow,
-        providerProfiles,
-        orgId,
-        userId,
-        input: parsedInput,
-        files: fileRefs,
-      });
+    let promptContext: PromptContext;
+    let flowPackage: Buffer | null;
+    let flowVersionId: number | null;
+    let proxyLabel: string | null;
+    let modelLabel: string | null;
+    try {
+      ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+        await buildExecutionContext({
+          executionId,
+          flow,
+          providerProfiles,
+          orgId,
+          userId,
+          input: parsedInput,
+          files: fileRefs,
+        }));
+    } catch (err) {
+      if (err instanceof ModelNotConfiguredError) {
+        return c.json({ error: "MODEL_NOT_CONFIGURED", message: err.message }, 400);
+      }
+      throw err;
+    }
 
     // Create execution record (using admin's user_id), then link to share token
     await createExecution(

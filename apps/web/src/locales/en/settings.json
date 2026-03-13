@@ -478,5 +478,8 @@
   "onboarding.summaryMembers": "Invited members",
   "onboarding.summaryMembersCount": "{{count}} invitation(s) sent",
   "onboarding.summaryMembersNone": "No members invited",
-  "onboarding.goToDashboard": "Go to dashboard"
+  "onboarding.goToDashboard": "Go to dashboard",
+  "models.alert.noModel": "No LLM model configured",
+  "models.alert.noModelDescription": "Configure a model in organization settings to run this flow.",
+  "models.alert.configure": "Configure a model"
 }
