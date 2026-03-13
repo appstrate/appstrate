@@ -29,7 +29,7 @@ export function EmptyState({
   children,
 }: {
   message: string;
-  hint?: string;
+  hint?: React.ReactNode;
   compact?: boolean;
   icon?: LucideIcon;
   children?: React.ReactNode;
