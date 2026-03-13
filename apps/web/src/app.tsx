@@ -14,7 +14,6 @@ import { MarketplaceDetailPage } from "./pages/marketplace-detail";
 import { MarketplaceUpdatesPage } from "./pages/marketplace-updates";
 import { MarketplacePublishPage } from "./pages/marketplace-publish";
 import { MarketplaceConnectionPage } from "./pages/marketplace-connection";
-import { CreateOrgPage } from "./pages/create-org";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OnboardingCreateStep } from "./pages/onboarding/create-step";
@@ -210,12 +209,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
 
-  // Allow create-org, welcome, and onboarding routes through without org context
-  if (
-    location.pathname === "/create-org" ||
-    location.pathname === "/welcome" ||
-    location.pathname.startsWith("/onboarding")
-  ) {
+  // Allow welcome and onboarding routes through without org context
+  if (location.pathname === "/welcome" || location.pathname.startsWith("/onboarding")) {
     return <>{children}</>;
   }
 
@@ -285,7 +280,6 @@ export function App() {
             <Route path="/register" element={<Navigate to="/" replace />} />
             <Route path="/share/:token" element={<PublicShareRunPage />} />
             <Route path="/invite/:token" element={<InviteAcceptPage />} />
-            <Route path="/create-org" element={<CreateOrgPage />} />
             <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
             <Route path="/onboarding/model" element={<OnboardingModelStep />} />

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -17,14 +17,18 @@ export function OnboardingCreateStep() {
   const queryClient = useQueryClient();
   const { switchOrg, currentOrg, loading } = useOrg();
 
+  const location = useLocation();
+  const fromSwitcher = (location.state as { fromSwitcher?: boolean })?.fromSwitcher;
+
   // If org already created (back navigation), skip to next step
   // Use currentOrg (resolved from API) instead of raw localStorage orgId
   // to avoid redirect loops with stale IDs from deleted orgs
+  // When arriving from the org switcher, let the user create a new org
   useEffect(() => {
-    if (!loading && currentOrg) {
+    if (!loading && currentOrg && !fromSwitcher) {
       navigate("/onboarding/model", { replace: true });
     }
-  }, [currentOrg, loading, navigate]);
+  }, [currentOrg, loading, navigate, fromSwitcher]);
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");

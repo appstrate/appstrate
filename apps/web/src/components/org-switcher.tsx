@@ -135,7 +135,11 @@ export function OrgSwitcher() {
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <Link to="/create-org" className="flex items-center gap-2 text-primary">
+            <Link
+              to="/onboarding/create"
+              state={{ fromSwitcher: true }}
+              className="flex items-center gap-2 text-primary"
+            >
               <Plus size={14} />
               {t("orgSwitcher.create")}
             </Link>
