@@ -38,6 +38,10 @@ export const openApiInfo = {
     { name: "Welcome", description: "Post-invite profile setup" },
     { name: "Health", description: "Health check" },
     { name: "Internal", description: "Container-to-host internal routes" },
+    { name: "Models", description: "LLM model configuration" },
+    { name: "Connection Profiles", description: "Shared connection sets across flows" },
+    { name: "Registry", description: "Registry OAuth2 connection" },
+    { name: "Proxies", description: "Org-level HTTP proxy configuration" },
     { name: "Meta", description: "API documentation and specification" },
   ],
 } as const;

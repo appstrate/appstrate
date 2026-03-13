@@ -392,7 +392,7 @@ After creating the flow files (before packaging):
 
 ## Available Providers
 
-These providers are loaded as system packages (ZIPs in `apps/api/providers/`) at boot:
+These providers are loaded as system packages (ZIPs in `system-packages/`) at boot:
 
 | Provider Key | Type | Description |
 |---|---|---|
