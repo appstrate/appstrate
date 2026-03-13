@@ -42,7 +42,6 @@ import { Spinner } from "./components/spinner";
 import {
   User,
   Settings,
-  Download,
   FileText,
   LogOut,
   ShoppingBag,
@@ -140,16 +139,6 @@ function UserMenu({
           >
             <FileText size={14} />
             {t("userMenu.apiDocs")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a
-            href="/assets/appstrate-api-guide.zip"
-            download="appstrate-api-guide.zip"
-            className="flex items-center gap-2"
-          >
-            <Download size={14} />
-            {t("nav.downloadSkill")}
           </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
