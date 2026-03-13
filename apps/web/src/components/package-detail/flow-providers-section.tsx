@@ -55,7 +55,14 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   if (!detail) return null;
 
   if (detail.requires.providers.length === 0) {
-    return <EmptyState message={t("detail.emptyConnectors")} hint={t("detail.emptyConnectorsHint")} icon={Unplug} compact />;
+    return (
+      <EmptyState
+        message={t("detail.emptyConnectors")}
+        hint={t("detail.emptyConnectorsHint")}
+        icon={Unplug}
+        compact
+      />
+    );
   }
 
   const summary = computeProvidersSummary(detail.requires.providers, t);

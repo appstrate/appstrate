@@ -973,7 +973,12 @@ function ApiKeysTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} icon={KeyRound} compact>
+        <EmptyState
+          message={t("apiKeys.empty")}
+          hint={t("apiKeys.emptyHint")}
+          icon={KeyRound}
+          compact
+        >
           <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
         </EmptyState>
       )}
