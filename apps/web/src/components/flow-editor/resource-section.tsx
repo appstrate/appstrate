@@ -6,7 +6,6 @@ import {
   usePackageList,
   useUploadPackage,
   usePackageVersions,
-  PACKAGE_CONFIG,
   type PackageType,
 } from "../../hooks/use-packages";
 import {
@@ -86,7 +85,6 @@ export function ResourceSection({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: items, isLoading } = usePackageList(type);
   const upload = useUploadPackage(type);
-  const cfg = PACKAGE_CONFIG[type];
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -110,7 +108,7 @@ export function ResourceSection({
 
     try {
       const result = await upload.mutateAsync(file);
-      const newId = (result as Record<string, { id: string }>)[cfg.detailKey].id;
+      const newId = result.packageId;
 
       if (!selectedMap.has(newId)) {
         onChange([...selectedEntries, { id: newId, version: "*" }]);

@@ -323,20 +323,16 @@ export function useCreatePackage(type: PackageType) {
       manifest: Record<string, unknown>;
       content: string;
     }) => {
-      return api<{ [key: string]: { id: string; name: string; description: string } }>(
-        `/packages/${cfg.path}`,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-      );
+      return api<{ packageId: string }>(`/packages/${cfg.path}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "flow") qc.invalidateQueries({ queryKey: ["flows"] });
-      const result = data[type];
-      if (result?.id) {
-        navigate(packageDetailPath(type, result.id));
+      if (data.packageId) {
+        navigate(packageDetailPath(type, data.packageId));
       }
     },
     onError: onMutationError,
