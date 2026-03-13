@@ -1,11 +1,13 @@
 import { defineConfig } from "drizzle-kit";
-import { getEnv } from "@appstrate/env";
 
+// Read DATABASE_URL directly from process.env to avoid importing @appstrate/env,
+// which transitively imports @appstrate/core (.ts source in node_modules) that
+// drizzle-kit's Node-based config loader cannot handle.
 export default defineConfig({
   dialect: "postgresql",
   schema: "./src/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: getEnv().DATABASE_URL,
+    url: process.env["DATABASE_URL"]!,
   },
 });
