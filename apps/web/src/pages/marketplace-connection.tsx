@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -186,7 +186,7 @@ export function MarketplaceConnectionPage() {
               ))}
             </div>
           ) : (
-            <EmptyState message={t("registry.noScopes")} compact />
+            <EmptyState message={t("registry.noScopes")} icon={ShieldCheck} compact />
           )}
 
           <div className="rounded-lg border border-border bg-card p-4 mt-4">

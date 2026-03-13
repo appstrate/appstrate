@@ -33,7 +33,7 @@ interface PackageTabProps {
   error?: Error | null;
   emptyMessage: string;
   emptyHint: ReactNode;
-  emptyIcon?: LucideIcon;
+  emptyIcon: LucideIcon;
   extraActions?: ReactNode;
   emptyExtraActions?: ReactNode;
   headerContent?: ReactNode;

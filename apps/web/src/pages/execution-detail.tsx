@@ -12,7 +12,7 @@ import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Shield } from "lucide-react";
+import { Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
@@ -322,14 +322,14 @@ export function ExecutionDetailPage() {
         (resultData ? (
           <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
         ) : (
-          <EmptyState message={t("exec.emptyResult")} compact />
+          <EmptyState message={t("exec.emptyResult")} icon={FileText} compact />
         ))}
 
       {activeTab === "state" &&
         (stateData ? (
           <JsonView data={stateData} />
         ) : (
-          <EmptyState message={t("exec.emptyState")} compact />
+          <EmptyState message={t("exec.emptyState")} icon={Database} compact />
         ))}
     </>
   );

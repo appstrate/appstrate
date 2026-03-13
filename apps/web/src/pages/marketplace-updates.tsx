@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, CheckCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable, type ColumnDef } from "../components/data-table";
 import {
@@ -118,7 +118,7 @@ export function MarketplaceUpdatesPage() {
       </div>
 
       {updates.length === 0 ? (
-        <EmptyState message={t("marketplace.upToDate")} />
+        <EmptyState message={t("marketplace.upToDate")} icon={CheckCircle} />
       ) : (
         <DataTable columns={columns} data={updates} />
       )}
