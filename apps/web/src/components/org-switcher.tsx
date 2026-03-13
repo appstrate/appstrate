@@ -133,6 +133,7 @@ export function OrgSwitcher() {
               </Link>
             </DropdownMenuItem>
           )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link to="/create-org" className="flex items-center gap-2 text-primary">
               <Plus size={14} />
