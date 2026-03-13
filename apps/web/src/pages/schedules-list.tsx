@@ -113,7 +113,7 @@ export function SchedulesListPage() {
                     : undefined
                 }
                 flowPicker={
-                  flows && flows.length > 1 ? (
+                  flows && flows.length > 0 ? (
                     <div className="space-y-2">
                       <Label htmlFor="sched-flow">{t("schedules.flowLabel")}</Label>
                       <Select value={createFlowId} onValueChange={setCreateFlowId}>
