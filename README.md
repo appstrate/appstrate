@@ -15,7 +15,7 @@ An open-source platform for executing one-shot AI flows in ephemeral Docker cont
 - **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 158 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 160 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across flows
 - **Proxy system** — Org-level and flow-level outbound HTTP proxy support
 
@@ -52,7 +52,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (158 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (160 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireFlow)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
@@ -62,7 +62,7 @@ appstrate/
 │       └── stores/           # Zustand stores (auth, org, profile)
 │
 ├── packages/
-│   ├── db/                   # @appstrate/db — Drizzle ORM (30 tables, 5 enums) + Better Auth
+│   ├── db/                   # @appstrate/db — Drizzle ORM (30 tables, 6 enums) + Better Auth
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   ├── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
@@ -137,17 +137,28 @@ Browser (React SPA)              Platform (Bun + Hono :3000)
 
 Key variables (see `.env.example` for full list):
 
-| Variable                    | Required | Default                                       | Description                                  |
-| --------------------------- | -------- | --------------------------------------------- | -------------------------------------------- |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                 |
-| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                       |
-| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials |
-| `SYSTEM_MODELS`             | No       | `[]`                                          | JSON array of system LLM model definitions   |
-| `PORT`                      | No       | `3000`                                        | Server port                                  |
-| `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks               |
-| `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins                                 |
-| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                           |
-| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers   |
+| Variable                    | Required | Default                                       | Description                                           |
+| --------------------------- | -------- | --------------------------------------------- | ----------------------------------------------------- |
+| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                          |
+| `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials          |
+| `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret                        |
+| `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                        |
+| `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                        |
+| `PORT`                      | No       | `3000`                                        | Server port                                           |
+| `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                                    |
+| `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches host (fallback: `host.docker.internal:{PORT}`) |
+| `SYSTEM_MODELS`             | No       | `[]`                                          | JSON array of system LLM model definitions            |
+| `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                |
+| `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers            |
+| `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                |
+| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                       |
+| `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)          |
+| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                            |
+| `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset) |
+| `REGISTRY_URL`              | No       | —                                             | Registry URL for marketplace features                 |
+| `REGISTRY_CLIENT_ID`        | No       | —                                             | Registry OAuth client ID                              |
+| `REGISTRY_CLIENT_SECRET`    | No       | —                                             | Registry OAuth client secret                          |
 
 ## Development
 
@@ -180,7 +191,7 @@ Tests use `bun:test` (built-in). Mocking pattern: `mock.module()` before dynamic
 - **Database**: PostgreSQL 16 + Drizzle ORM
 - **Auth**: Better Auth (cookie sessions) + API keys (`ask_*`)
 - **Frontend**: React 19 + Vite + React Router v7 + React Query v5 + Zustand
-- **Styling**: Single CSS file (dark theme, no Tailwind/CSS-in-JS)
+- **Styling**: Tailwind CSS 4 (`@tailwindcss/vite` plugin + `tailwind-merge`, dark theme via `@theme inline`)
 - **i18n**: i18next (fr default, en)
 - **Docker**: fetch() + unix socket (not dockerode)
 - **Scheduling**: croner (in-memory cron with distributed lock)

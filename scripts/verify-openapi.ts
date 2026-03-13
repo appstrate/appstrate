@@ -38,6 +38,8 @@ const expectedEndpoints = [
   "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
   "PUT /api/flows/{scope}/{name}/skills",
   "PUT /api/flows/{scope}/{name}/extensions",
+  "GET /api/flows/{scope}/{name}/model",
+  "PUT /api/flows/{scope}/{name}/model",
 
   // Executions
   "POST /api/flows/{scope}/{name}/run",
@@ -208,7 +210,7 @@ const expectedEndpoints = [
   // Notifications
   "GET /api/notifications/unread-count",
   "GET /api/notifications/unread-counts-by-flow",
-  "PUT /api/notifications/read/{id}",
+  "PUT /api/notifications/read/{executionId}",
   "PUT /api/notifications/read-all",
   "GET /api/executions",
 
