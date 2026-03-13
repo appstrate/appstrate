@@ -17,6 +17,7 @@ import { ExecutionRow } from "../execution-row";
 import { ScheduleRow } from "../schedule-row";
 import { RunFlowButton } from "../run-flow-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
+import { Ban, BrainCircuit, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { formatDateField } from "../../lib/markdown";
 
@@ -43,7 +44,7 @@ export function FlowExecutionsTab({
   return (
     <>
       {!executions || executions.length === 0 ? (
-        <EmptyState message={t("detail.emptyExec")} compact>
+        <EmptyState message={t("detail.emptyExec")} icon={Play} compact>
           <RunFlowButton
             packageId={packageId}
             detail={detail}
@@ -82,13 +83,13 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
     Object.values(detail.input.schema.properties).some((p) => p.type === "file");
 
   if (hasFileInput) {
-    return <EmptyState message={t("schedule.fileInputBlocked")} compact />;
+    return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
 
   return (
     <>
       {!schedules || schedules.length === 0 ? (
-        <EmptyState message={t("detail.emptySchedule")} compact>
+        <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
           <Button
             onClick={() => {
               setEditingSchedule(null);
@@ -137,6 +138,7 @@ export function FlowMemoriesTab({
         <EmptyState
           message={t("detail.emptyMemories")}
           hint={t("detail.emptyMemoriesHint")}
+          icon={BrainCircuit}
           compact
         />
       ) : (

@@ -40,6 +40,8 @@
   "detail.servicesSummaryAction": "{{count}} action(s) required",
   "detail.emptyExec": "No executions",
   "detail.emptySchedule": "No schedules",
+  "detail.emptyConnectors": "No connectors required",
+  "detail.emptyConnectorsHint": "This flow does not require any external connectors",
   "detail.tabConnectors": "Connectors",
   "detail.tabMemories": "Memories",
   "detail.emptyMemories": "No memories",

@@ -31,7 +31,7 @@ export function EmptyState({
   message: string;
   hint?: React.ReactNode;
   compact?: boolean;
-  icon?: LucideIcon;
+  icon: LucideIcon;
   children?: React.ReactNode;
 }) {
   return (
@@ -41,7 +41,7 @@ export function EmptyState({
         compact ? "py-8" : "py-16",
       )}
     >
-      {Icon && <Icon className="mb-3 h-10 w-10 opacity-40" />}
+      <Icon className="mb-3 h-10 w-10 opacity-40" />
       {compact ? (
         <>
           <p className="text-sm">{message}</p>

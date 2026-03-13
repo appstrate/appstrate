@@ -54,6 +54,7 @@ export function ItemTab({
       isLoading={isLoading}
       emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
       emptyHint={t(config.emptyHintKey, { type: typeLabel })}
+      emptyIcon={config.emptyIcon}
       extraActions={
         isOrgAdmin ? (
           <>

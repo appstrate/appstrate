@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ShieldAlert } from "lucide-react";
+import { BrainCircuit, Building, Globe, KeyRound, ShieldAlert, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -229,7 +229,7 @@ export function OrgSettingsPage() {
   // --- Guards ---
 
   if (!currentOrg) {
-    return <EmptyState message={t("orgSettings.noOrg")} />;
+    return <EmptyState message={t("orgSettings.noOrg")} icon={Building} />;
   }
 
   if (!isOrgAdmin) {
@@ -528,6 +528,7 @@ export function OrgSettingsPage() {
             <EmptyState
               message={t("orgSettings.noMembers")}
               hint={t("orgSettings.noMembersHint")}
+              icon={Users}
               compact
             />
           )}
@@ -754,7 +755,7 @@ function ProxiesTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("proxies.empty")} compact>
+        <EmptyState message={t("proxies.empty")} icon={Globe} compact>
           <Button onClick={onCreate}>{t("proxies.add")}</Button>
         </EmptyState>
       )}
@@ -872,7 +873,7 @@ function ModelsTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("models.empty")} compact>
+        <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
           <Button onClick={onCreate}>{t("models.add")}</Button>
         </EmptyState>
       )}
@@ -972,7 +973,7 @@ function ApiKeysTab({
           })}
         </div>
       ) : (
-        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} compact>
+        <EmptyState message={t("apiKeys.empty")} hint={t("apiKeys.emptyHint")} icon={KeyRound} compact>
           <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
         </EmptyState>
       )}

@@ -1,3 +1,5 @@
+import type { LucideIcon } from "lucide-react";
+import { Plug, Puzzle, Wrench } from "lucide-react";
 import { usePackageList } from "../hooks/use-packages";
 
 export interface ItemTabConfig {
@@ -17,6 +19,7 @@ export interface ItemTabConfig {
   };
   emptyMessageKey: string;
   emptyHintKey: string;
+  emptyIcon: LucideIcon;
 }
 
 export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
@@ -25,18 +28,21 @@ export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
     useData: () => usePackageList("skill"),
     emptyMessageKey: "packages.emptyItems",
     emptyHintKey: "packages.emptyItemsHint",
+    emptyIcon: Wrench,
   },
   {
     type: "extension",
     useData: () => usePackageList("extension"),
     emptyMessageKey: "packages.emptyItems",
     emptyHintKey: "packages.emptyItemsHint",
+    emptyIcon: Puzzle,
   },
   {
     type: "provider",
     useData: () => usePackageList("provider"),
     emptyMessageKey: "packages.emptyItems",
     emptyHintKey: "packages.emptyItemsHint",
+    emptyIcon: Plug,
   },
 ];
 

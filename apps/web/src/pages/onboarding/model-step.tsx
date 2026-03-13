@@ -8,6 +8,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useCreateModel, useSetDefaultModel } from "../../hooks/use-models";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
+import { BrainCircuit } from "lucide-react";
 import { EmptyState } from "../../components/page-states";
 
 export function OnboardingModelStep() {
@@ -59,7 +60,7 @@ export function OnboardingModelStep() {
           </Button>
         </div>
       ) : (
-        <EmptyState message={t("models.empty")} compact>
+        <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
           <Button onClick={() => setModalOpen(true)}>{t("models.add")}</Button>
         </EmptyState>
       )}

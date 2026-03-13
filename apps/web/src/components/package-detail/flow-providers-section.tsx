@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
+import { Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useOrg } from "../../hooks/use-org";
 import {
@@ -51,6 +53,10 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   };
 
   if (!detail) return null;
+
+  if (detail.requires.providers.length === 0) {
+    return <EmptyState message={t("detail.emptyConnectors")} hint={t("detail.emptyConnectorsHint")} icon={Unplug} compact />;
+  }
 
   const summary = computeProvidersSummary(detail.requires.providers, t);
 

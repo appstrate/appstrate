@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ShieldCheck, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -24,7 +25,7 @@ export function RegistrySettings() {
   if (statusLoading) return <LoadingState />;
 
   if (!status) {
-    return <EmptyState message={t("registry.notConfigured")} compact />;
+    return <EmptyState message={t("registry.notConfigured")} icon={Store} compact />;
   }
 
   if (!status.connected) {
@@ -97,7 +98,7 @@ export function RegistrySettings() {
           ))}
         </div>
       ) : (
-        <EmptyState message={t("registry.noScopes")} compact />
+        <EmptyState message={t("registry.noScopes")} icon={ShieldCheck} compact />
       )}
 
       <div className="rounded-lg border border-border bg-card p-5 mb-4 mt-4">
