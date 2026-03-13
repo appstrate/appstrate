@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { useModels, useCreateModel, useSetDefaultModel } from "../../hooks/use-models";
+import { useModels, useCreateModel } from "../../hooks/use-models";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { BrainCircuit } from "lucide-react";
@@ -19,7 +19,6 @@ export function OnboardingModelStep() {
   const [modalOpen, setModalOpen] = useState(false);
   const { data: models } = useModels();
   const createModel = useCreateModel();
-  const setDefaultModel = useSetDefaultModel();
 
   const goNext = () => navigate("/onboarding/providers");
 
@@ -72,8 +71,7 @@ export function OnboardingModelStep() {
         isPending={createModel.isPending}
         onSubmit={(data) => {
           createModel.mutate(data, {
-            onSuccess: (result) => {
-              setDefaultModel.mutate(result.id);
+            onSuccess: () => {
               setModalOpen(false);
             },
           });
