@@ -48,7 +48,7 @@ appstrate/
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
-│   │   └── paths/            # One file per route domain (138 endpoints)
+│   │   └── paths/            # One file per route domain (158 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -189,14 +189,14 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 138 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 158 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`, `registry`.
 
 ## Database
 

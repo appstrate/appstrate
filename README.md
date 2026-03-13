@@ -15,7 +15,7 @@ An open-source platform for executing one-shot AI flows in ephemeral Docker cont
 - **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 110 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 158 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across flows
 - **Proxy system** — Org-level and flow-level outbound HTTP proxy support
 
@@ -52,7 +52,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (110 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (158 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireFlow)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
@@ -81,7 +81,7 @@ appstrate/
 
 ## API Overview
 
-The API is organized into 23 route domains with 110 documented endpoints:
+The API is organized into 23 route domains with 158 documented endpoints:
 
 | Domain                  | Description                                               |
 | ----------------------- | --------------------------------------------------------- |
@@ -105,6 +105,8 @@ The API is organized into 23 route domains with 110 documented endpoints:
 | **Welcome**             | Post-invite profile setup                                 |
 | **Internal**            | Container-to-host routes (credentials, execution history) |
 | **Meta**                | OpenAPI spec + Swagger UI                                 |
+| **Models**              | Org-level LLM model configuration and testing             |
+| **Registry**            | Registry OAuth2 connection and scope management           |
 | **Health**              | Health check                                              |
 
 Full interactive docs: `GET /api/docs` (Swagger UI).
