@@ -164,7 +164,7 @@ export const modelsPaths = {
       },
     },
   },
-  "/api/models/{modelId}": {
+  "/api/models/{id}": {
     put: {
       operationId: "updateModel",
       tags: ["Models"],
@@ -173,7 +173,7 @@ export const modelsPaths = {
         "Update a custom model configuration. Built-in models cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "modelId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -216,7 +216,7 @@ export const modelsPaths = {
       description: "Delete a custom model. Built-in models cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "modelId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Model deleted" },
@@ -224,7 +224,7 @@ export const modelsPaths = {
       },
     },
   },
-  "/api/models/{modelId}/test": {
+  "/api/models/{id}/test": {
     post: {
       operationId: "testModel",
       tags: ["Models"],
@@ -233,7 +233,7 @@ export const modelsPaths = {
         "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "modelId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

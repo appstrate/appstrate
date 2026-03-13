@@ -156,7 +156,7 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/{profileId}": {
+  "/api/connection-profiles/{id}": {
     put: {
       operationId: "renameConnectionProfile",
       tags: ["Connection Profiles"],
@@ -164,7 +164,7 @@ export const connectionProfilesPaths = {
       description: "Update the name of a connection profile owned by the authenticated user.",
       parameters: [
         {
-          name: "profileId",
+          name: "id",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
@@ -204,7 +204,7 @@ export const connectionProfilesPaths = {
         "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to a flow admin connection.",
       parameters: [
         {
-          name: "profileId",
+          name: "id",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },
@@ -225,7 +225,7 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/{profileId}/connections": {
+  "/api/connection-profiles/{id}/connections": {
     get: {
       operationId: "listProfileConnections",
       tags: ["Connection Profiles"],
@@ -233,7 +233,7 @@ export const connectionProfilesPaths = {
       description: "List all service connections associated with a specific connection profile.",
       parameters: [
         {
-          name: "profileId",
+          name: "id",
           in: "path",
           required: true,
           schema: { type: "string", format: "uuid" },

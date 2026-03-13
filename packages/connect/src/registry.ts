@@ -24,7 +24,10 @@ export async function getProvider(
 
   if (rows.length === 0) return null;
   const pkg = rows[0]!;
-  return buildProviderDefinitionFromManifest(pkg.id, (pkg.draftManifest ?? {}) as Record<string, unknown>);
+  return buildProviderDefinitionFromManifest(
+    pkg.id,
+    (pkg.draftManifest ?? {}) as Record<string, unknown>,
+  );
 }
 
 /**
@@ -132,10 +135,15 @@ export async function listProviders(db: Db, orgId: string): Promise<ProviderDefi
   const rows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(and(eq(packages.type, "provider"), or(eq(packages.orgId, orgId), isNull(packages.orgId))));
+    .where(
+      and(eq(packages.type, "provider"), or(eq(packages.orgId, orgId), isNull(packages.orgId))),
+    );
 
   return rows.map((pkg) =>
-    buildProviderDefinitionFromManifest(pkg.id, (pkg.draftManifest ?? {}) as Record<string, unknown>),
+    buildProviderDefinitionFromManifest(
+      pkg.id,
+      (pkg.draftManifest ?? {}) as Record<string, unknown>,
+    ),
   );
 }
 

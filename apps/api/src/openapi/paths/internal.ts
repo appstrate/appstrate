@@ -38,14 +38,17 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/credentials/{providerId}": {
+  "/internal/credentials/{scope}/{name}": {
     get: {
       operationId: "getProviderCredentials",
       tags: ["Internal"],
       summary: "Fetch provider credentials",
       description: "Container-to-host only. Auth via Bearer execution token.",
       security: [{ bearerExecToken: [] }],
-      parameters: [{ name: "providerId", in: "path", required: true, schema: { type: "string" } }],
+      parameters: [
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
       responses: {
         "200": {
           description: "Credentials and authorized URIs",

@@ -62,7 +62,7 @@ appstrate/
 │       └── stores/           # Zustand stores (auth, org, profile)
 │
 ├── packages/
-│   ├── db/                   # @appstrate/db — Drizzle ORM (26 tables, 6 enums) + Better Auth
+│   ├── db/                   # @appstrate/db — Drizzle ORM (30 tables, 5 enums) + Better Auth
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   ├── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption

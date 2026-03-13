@@ -1,12 +1,9 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { getEnv } from "@appstrate/env";
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is required");
-  process.exit(1);
-}
+const url = getEnv().DATABASE_URL;
 
 const client = postgres(url, { max: 1 });
 const db = drizzle(client);

@@ -19,7 +19,7 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/executions/{executionId}": {
+  "/api/realtime/executions/{id}": {
     get: {
       operationId: "streamExecution",
       tags: ["Realtime"],
@@ -27,7 +27,7 @@ export const realtimePaths = {
       description: "Server-Sent Events stream for execution status + log events. Cookie auth only.",
       security: [{ cookieAuth: [] }],
       parameters: [
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/Verbose" },
       ],
@@ -39,7 +39,7 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/flows/{packageId}/executions": {
+  "/api/realtime/flows/{scope}/{name}/executions": {
     get: {
       operationId: "streamFlowExecutions",
       tags: ["Realtime"],
@@ -48,7 +48,8 @@ export const realtimePaths = {
         "Server-Sent Events stream for execution changes for a specific flow. Cookie auth only.",
       security: [{ cookieAuth: [] }],
       parameters: [
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/Verbose" },
       ],

@@ -54,7 +54,7 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/notifications/read/{executionId}": {
+  "/api/notifications/read/{id}": {
     put: {
       operationId: "markNotificationRead",
       tags: ["Notifications"],
@@ -62,7 +62,7 @@ export const notificationsPaths = {
       description: "Marks the notification for a specific execution as read.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

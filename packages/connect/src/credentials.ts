@@ -79,10 +79,7 @@ export async function getCredentials(
         })
         .from(providerCredentials)
         .where(
-          and(
-            eq(providerCredentials.providerId, providerId),
-            eq(providerCredentials.orgId, orgId),
-          ),
+          and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
         )
         .limit(1);
 
@@ -164,7 +161,9 @@ export async function resolveCredentialsForProxy(
     sidecarCredentials = result.credentials;
   }
 
-  const authorizedUris = (def.authorizedUris as string[])?.length ? (def.authorizedUris as string[]) : null;
+  const authorizedUris = (def.authorizedUris as string[])?.length
+    ? (def.authorizedUris as string[])
+    : null;
   const allowAllUris = (def.allowAllUris as boolean) ?? false;
 
   return {
@@ -233,13 +232,8 @@ export async function deleteConnection(
 /**
  * Delete a single connection by its ID.
  */
-export async function deleteConnectionById(
-  db: Db,
-  connectionId: string,
-): Promise<void> {
-  await db
-    .delete(serviceConnections)
-    .where(eq(serviceConnections.id, connectionId));
+export async function deleteConnectionById(db: Db, connectionId: string): Promise<void> {
+  await db.delete(serviceConnections).where(eq(serviceConnections.id, connectionId));
 }
 
 // --- Internal helpers ---

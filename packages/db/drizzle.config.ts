@@ -1,10 +1,11 @@
 import { defineConfig } from "drizzle-kit";
+import { getEnv } from "@appstrate/env";
 
 export default defineConfig({
   dialect: "postgresql",
   schema: "./src/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.DATABASE_URL || "postgresql://appstrate:appstrate@localhost:5432/appstrate",
+    url: getEnv().DATABASE_URL,
   },
 });
