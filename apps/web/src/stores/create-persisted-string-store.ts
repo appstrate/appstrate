@@ -1,5 +1,4 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 export interface PersistedStringState {
   id: string | null;
@@ -11,23 +10,16 @@ export interface PersistedStringState {
  * to localStorage as a raw string (not JSON-wrapped), with cross-tab sync.
  */
 export function createPersistedStringStore(storageKey: string): StoreApi<PersistedStringState> {
-  const storage: PersistStorage<PersistedStringState> = {
-    getItem: (key): StorageValue<PersistedStringState> | null => {
-      const value = localStorage.getItem(key);
-      if (value === null) return null;
-      return { state: { id: value } as PersistedStringState, version: 0 };
-    },
-    setItem: (key, stored) => {
-      const v = stored?.state?.id;
-      if (v) localStorage.setItem(key, v);
-      else localStorage.removeItem(key);
-    },
-    removeItem: (key) => localStorage.removeItem(key),
-  };
+  const initial = typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
 
-  const store = createStore<PersistedStringState>()(
-    persist((set) => ({ id: null, setId: (id) => set({ id }) }), { name: storageKey, storage }),
-  );
+  const store = createStore<PersistedStringState>()((set) => ({
+    id: initial,
+    setId: (id) => {
+      set({ id });
+      if (id) localStorage.setItem(storageKey, id);
+      else localStorage.removeItem(storageKey);
+    },
+  }));
 
   if (typeof window !== "undefined") {
     window.addEventListener("storage", (e) => {
