@@ -37,7 +37,10 @@ export function useFlowReadiness(
             Object.keys(detail.config.schema.properties).length > 0
           )
         : false,
-      hasModel: orgModels !== undefined ? !!flowModelId || orgModels.some((m) => m.enabled) : true,
+      hasModel:
+        orgModels !== undefined
+          ? !!flowModelId || orgModels.some((m) => m.isDefault && m.enabled)
+          : true,
     }),
     [detail, flowModelId, orgModels],
   );
