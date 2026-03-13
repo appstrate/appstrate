@@ -114,7 +114,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |-- Uses same executeFlowInBackground() path
      |                                |
      |            Sidecar Pool (pre-warmed):  |-- initSidecarPool() at startup
-     |            - 2 standby containers on   |-- acquireSidecar() → /configure → attach
+     |            - SIDECAR_POOL_SIZE standby  |-- acquireSidecar() → /configure → attach
      |              appstrate-sidecar-pool net |-- replenish in background after acquire
      |                                        |-- shutdownSidecarPool() on exit
      |                                |
@@ -177,7 +177,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 
-- **Sidecar pool**: `sidecar-pool.ts` pre-warms 2 sidecar containers at startup on a standby network. `acquireSidecar()` configures a pooled container via `POST /configure` (sets `executionToken`, `platformApiUrl`, `proxyUrl`), then connects it to the execution network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
+- **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `executionToken`, `platformApiUrl`, `proxyUrl`), then connects it to the execution network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
 - Agent calls `$SIDECAR_URL/proxy` with `X-Provider`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
@@ -221,6 +221,7 @@ Full schema: `packages/db/src/schema.ts` (26 tables + 6 enums, Drizzle ORM). Mig
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins, comma-separated                                                                              |
 | `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                      |
 | `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                            |
+| `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Number of pre-warmed sidecar containers (0 = disabled)                                                     |
 | `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                               |
 | `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                 |
 
