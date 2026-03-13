@@ -75,8 +75,7 @@ export const packageVersions = pgTable(
     integrity: text("integrity").notNull(),
     artifactSize: integer("artifact_size").notNull(),
     manifest: jsonb("manifest").notNull(),
-    orgId: uuid("org_id")
-      .references(() => organizations.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),

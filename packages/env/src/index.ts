@@ -54,7 +54,7 @@ const envSchema = z.object({
   // Outbound proxy
   PROXY_URL: z.string().optional(),
 
-  // Execution token signing (falls back to BETTER_AUTH_SECRET if unset)
+  // Execution token signing (optional — if unset, execution tokens are unsigned)
   EXECUTION_TOKEN_SECRET: z.string().optional(),
 });
 
@@ -66,4 +66,3 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
-

@@ -1,5 +1,5 @@
 export const executionsPaths = {
-  "/api/flows/{packageId}/run": {
+  "/api/flows/{scope}/{name}/run": {
     post: {
       operationId: "runFlow",
       tags: ["Executions"],
@@ -8,7 +8,8 @@ export const executionsPaths = {
         "Start a flow execution (fire-and-forget). Returns the execution ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "profileId",
           in: "query",
@@ -66,7 +67,7 @@ export const executionsPaths = {
       },
     },
   },
-  "/api/flows/{packageId}/executions": {
+  "/api/flows/{scope}/{name}/executions": {
     get: {
       operationId: "listFlowExecutions",
       tags: ["Executions"],
@@ -74,7 +75,8 @@ export const executionsPaths = {
       description: "List executions for a specific flow (org-scoped, default limit 50).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",
           in: "query",
@@ -102,7 +104,8 @@ export const executionsPaths = {
       description: "Delete all completed executions for a flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -120,7 +123,7 @@ export const executionsPaths = {
       },
     },
   },
-  "/api/executions/{executionId}": {
+  "/api/executions/{id}": {
     get: {
       operationId: "getExecution",
       tags: ["Executions"],
@@ -128,7 +131,7 @@ export const executionsPaths = {
       description: "Get execution details including status, result, input, and duration.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -143,7 +146,7 @@ export const executionsPaths = {
       },
     },
   },
-  "/api/executions/{executionId}/logs": {
+  "/api/executions/{id}/logs": {
     get: {
       operationId: "getExecutionLogs",
       tags: ["Executions"],
@@ -151,7 +154,7 @@ export const executionsPaths = {
       description: "Get persisted log entries for an execution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -168,7 +171,7 @@ export const executionsPaths = {
       },
     },
   },
-  "/api/executions/{executionId}/cancel": {
+  "/api/executions/{id}/cancel": {
     post: {
       operationId: "cancelExecution",
       tags: ["Executions"],
@@ -176,7 +179,7 @@ export const executionsPaths = {
       description: "Cancel a running or pending execution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

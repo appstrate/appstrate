@@ -61,7 +61,7 @@ appstrate/
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (30 tables, 6 enums, indexes)
+│   ├── schema.ts             # Full schema (30 tables, 5 enums, indexes)
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (auto profile+org on signup)
 │

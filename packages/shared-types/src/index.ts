@@ -173,7 +173,7 @@ export interface FlowDetail {
   prompt?: string;
   scope?: string | null;
   version?: string | null;
-  manifest?: Record<string, unknown>;  // Raw manifest from DB (user flows only)
+  manifest?: Record<string, unknown>; // Raw manifest from DB (user flows only)
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
@@ -323,8 +323,10 @@ import type {
 } from "@appstrate/core/validation";
 
 /** Provider config returned by the API — extends core's resolved definition with UI state. */
-export interface ProviderConfig
-  extends Omit<ResolvedProviderDefinition, "authorizationParams" | "tokenParams"> {
+export interface ProviderConfig extends Omit<
+  ResolvedProviderDefinition,
+  "authorizationParams" | "tokenParams"
+> {
   version?: string;
   description?: string;
   author?: string;

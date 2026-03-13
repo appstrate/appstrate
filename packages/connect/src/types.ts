@@ -1,7 +1,4 @@
-import type {
-  AuthMode,
-  ResolvedProviderDefinition,
-} from "@appstrate/core/validation";
+import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/validation";
 
 export type { AuthMode };
 

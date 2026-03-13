@@ -106,7 +106,7 @@ export const proxiesPaths = {
       },
     },
   },
-  "/api/proxies/{proxyId}": {
+  "/api/proxies/{id}": {
     put: {
       operationId: "updateProxy",
       tags: ["Proxies"],
@@ -115,7 +115,7 @@ export const proxiesPaths = {
         "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "proxyId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -151,7 +151,7 @@ export const proxiesPaths = {
       description: "Delete a custom proxy. Built-in proxies cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "proxyId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Proxy deleted" },
@@ -159,7 +159,7 @@ export const proxiesPaths = {
       },
     },
   },
-  "/api/proxies/{proxyId}/test": {
+  "/api/proxies/{id}/test": {
     post: {
       operationId: "testProxy",
       tags: ["Proxies"],
@@ -168,7 +168,7 @@ export const proxiesPaths = {
         "Test that the proxy is reachable by making a lightweight request through it. Rate limited to 5 requests per minute. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "proxyId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

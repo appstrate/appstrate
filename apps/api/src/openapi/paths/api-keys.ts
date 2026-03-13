@@ -84,7 +84,7 @@ export const apiKeysPaths = {
       },
     },
   },
-  "/api/api-keys/{keyId}": {
+  "/api/api-keys/{id}": {
     delete: {
       operationId: "revokeApiKey",
       tags: ["API Keys"],
@@ -93,7 +93,7 @@ export const apiKeysPaths = {
         "Revoke (soft-delete) an API key. The key will immediately stop working. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "keyId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "API key revoked" },

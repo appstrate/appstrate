@@ -102,7 +102,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/{packageId}/{version}/download": {
+  "/api/packages/{scope}/{name}/{version}/download": {
     get: {
       operationId: "downloadPackageVersion",
       tags: ["Packages"],
@@ -111,7 +111,8 @@ export const packagesPaths = {
         "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "version",
           in: "path",
@@ -237,7 +238,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/skills/{skillId}/versions/info": {
+  "/api/packages/skills/{scope}/{name}/versions/info": {
     get: {
       operationId: "getSkillVersionInfo",
       tags: ["Packages"],
@@ -246,7 +247,20 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -268,7 +282,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/skills/{skillId}/versions": {
+  "/api/packages/skills/{scope}/{name}/versions": {
     get: {
       operationId: "listSkillVersions",
       tags: ["Packages"],
@@ -276,7 +290,20 @@ export const packagesPaths = {
       description: "List all published versions for a skill.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -306,7 +333,20 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: false,
@@ -345,7 +385,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/skills/{skillId}/versions/{version}/restore": {
+  "/api/packages/skills/{scope}/{name}/versions/{version}/restore": {
     post: {
       operationId: "restoreSkillVersion",
       tags: ["Packages"],
@@ -354,7 +394,20 @@ export const packagesPaths = {
         "Restore a previously published version into the skill draft. Does not create a new version. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -385,7 +438,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/skills/{skillId}/versions/{version}": {
+  "/api/packages/skills/{scope}/{name}/versions/{version}": {
     get: {
       operationId: "getSkillVersionDetail",
       tags: ["Packages"],
@@ -394,7 +447,20 @@ export const packagesPaths = {
         "Resolve a version query and return versioned skill data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -437,7 +503,20 @@ export const packagesPaths = {
         "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -447,7 +526,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/skills/{skillId}": {
+  "/api/packages/skills/{scope}/{name}": {
     get: {
       operationId: "getSkill",
       tags: ["Packages"],
@@ -455,7 +534,20 @@ export const packagesPaths = {
       description: "Get a skill's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -477,7 +569,20 @@ export const packagesPaths = {
         "Update a skill in the organization packages. Built-in skills cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: true,
@@ -527,7 +632,20 @@ export const packagesPaths = {
         "Delete a skill from the organization packages. Built-in skills cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "skillId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "204": { description: "Skill deleted" },
@@ -645,7 +763,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{extensionId}/versions/info": {
+  "/api/packages/extensions/{scope}/{name}/versions/info": {
     get: {
       operationId: "getExtensionVersionInfo",
       tags: ["Packages"],
@@ -654,7 +772,20 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -676,7 +807,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{extensionId}/versions": {
+  "/api/packages/extensions/{scope}/{name}/versions": {
     get: {
       operationId: "listExtensionVersions",
       tags: ["Packages"],
@@ -684,7 +815,20 @@ export const packagesPaths = {
       description: "List all published versions for an extension.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -714,7 +858,20 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current extension draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: false,
@@ -753,7 +910,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{extensionId}/versions/{version}/restore": {
+  "/api/packages/extensions/{scope}/{name}/versions/{version}/restore": {
     post: {
       operationId: "restoreExtensionVersion",
       tags: ["Packages"],
@@ -762,7 +919,20 @@ export const packagesPaths = {
         "Restore a previously published version into the extension draft. Does not create a new version. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -793,7 +963,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{extensionId}/versions/{version}": {
+  "/api/packages/extensions/{scope}/{name}/versions/{version}": {
     get: {
       operationId: "getExtensionVersionDetail",
       tags: ["Packages"],
@@ -802,7 +972,20 @@ export const packagesPaths = {
         "Resolve a version query and return versioned extension data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -845,7 +1028,20 @@ export const packagesPaths = {
         "Permanently delete an extension version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -855,7 +1051,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{extensionId}": {
+  "/api/packages/extensions/{scope}/{name}": {
     get: {
       operationId: "getExtension",
       tags: ["Packages"],
@@ -863,7 +1059,20 @@ export const packagesPaths = {
       description: "Get an extension's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -885,7 +1094,20 @@ export const packagesPaths = {
         "Update an extension in the organization packages. Built-in extensions cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: true,
@@ -935,7 +1157,20 @@ export const packagesPaths = {
         "Delete an extension from the organization packages. Built-in extensions cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "extensionId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "204": { description: "Extension deleted" },
@@ -1024,7 +1259,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{flowId}": {
+  "/api/packages/flows/{scope}/{name}": {
     get: {
       operationId: "getFlowPackage",
       tags: ["Packages"],
@@ -1033,7 +1268,20 @@ export const packagesPaths = {
         "Returns flow detail including providers, config, state, skills, and extensions. Supports profileId for per-user provider status resolution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "profileId",
           in: "query",
@@ -1068,7 +1316,20 @@ export const packagesPaths = {
         "Update manifest and content of a user flow with optimistic locking. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: true,
@@ -1114,7 +1375,20 @@ export const packagesPaths = {
       description: "Delete a user flow. Built-in flows cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "204": { description: "Flow deleted" },
@@ -1123,7 +1397,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{flowId}/versions/info": {
+  "/api/packages/flows/{scope}/{name}/versions/info": {
     get: {
       operationId: "getFlowVersionInfo",
       tags: ["Packages"],
@@ -1131,7 +1405,20 @@ export const packagesPaths = {
       description: "Returns the latest published version and current draft version for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -1152,7 +1439,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{flowId}/versions": {
+  "/api/packages/flows/{scope}/{name}/versions": {
     get: {
       operationId: "listFlowVersions",
       tags: ["Packages"],
@@ -1160,7 +1447,20 @@ export const packagesPaths = {
       description: "Returns all published versions for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -1190,7 +1490,20 @@ export const packagesPaths = {
         "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running executions. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: false,
@@ -1230,7 +1543,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{flowId}/versions/{version}/restore": {
+  "/api/packages/flows/{scope}/{name}/versions/{version}/restore": {
     post: {
       operationId: "restoreFlowVersion",
       tags: ["Packages"],
@@ -1239,7 +1552,20 @@ export const packagesPaths = {
         "Restore a published version into the draft. Requires no running executions. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1264,7 +1590,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{flowId}/versions/{version}": {
+  "/api/packages/flows/{scope}/{name}/versions/{version}": {
     get: {
       operationId: "getFlowVersionDetail",
       tags: ["Packages"],
@@ -1272,7 +1598,20 @@ export const packagesPaths = {
       description: "Returns the detail of a specific flow version including manifest and content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1309,7 +1648,20 @@ export const packagesPaths = {
         "Permanently delete a flow version. Reassigns affected dist-tags to the next best stable version. Requires admin role. Blocked if executions are running.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "flowId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1523,7 +1875,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/providers/{providerId}/versions/info": {
+  "/api/packages/providers/{scope}/{name}/versions/info": {
     get: {
       operationId: "getProviderPackageVersionInfo",
       tags: ["Packages"],
@@ -1532,7 +1884,20 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -1554,7 +1919,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/providers/{providerId}/versions": {
+  "/api/packages/providers/{scope}/{name}/versions": {
     get: {
       operationId: "listProviderPackageVersions",
       tags: ["Packages"],
@@ -1562,7 +1927,20 @@ export const packagesPaths = {
       description: "List all published versions for a provider package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -1592,7 +1970,20 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: false,
@@ -1631,7 +2022,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/providers/{providerId}/versions/{version}/restore": {
+  "/api/packages/providers/{scope}/{name}/versions/{version}/restore": {
     post: {
       operationId: "restoreProviderPackageVersion",
       tags: ["Packages"],
@@ -1640,7 +2031,20 @@ export const packagesPaths = {
         "Restore a previously published version into the provider package draft. Does not create a new version. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -1671,7 +2075,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/providers/{providerId}/versions/{version}": {
+  "/api/packages/providers/{scope}/{name}/versions/{version}": {
     get: {
       operationId: "getProviderPackageVersionDetail",
       tags: ["Packages"],
@@ -1680,7 +2084,20 @@ export const packagesPaths = {
         "Resolve a version query and return versioned provider data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         {
           name: "version",
           in: "path",
@@ -1723,7 +2140,20 @@ export const packagesPaths = {
         "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1733,7 +2163,7 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/providers/{providerId}": {
+  "/api/packages/providers/{scope}/{name}": {
     get: {
       operationId: "getProviderPackage",
       tags: ["Packages"],
@@ -1741,7 +2171,20 @@ export const packagesPaths = {
       description: "Get a provider package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "200": {
@@ -1763,7 +2206,20 @@ export const packagesPaths = {
         "Update a provider package in the organization. Built-in providers cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       requestBody: {
         required: true,
@@ -1809,7 +2265,20 @@ export const packagesPaths = {
         "Delete a provider package from the organization. Built-in providers cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "providerId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package scope (e.g. @my-org)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package name",
+        },
       ],
       responses: {
         "204": { description: "Provider package deleted" },

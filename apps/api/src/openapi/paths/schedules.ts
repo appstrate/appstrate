@@ -21,7 +21,7 @@ export const schedulesPaths = {
       },
     },
   },
-  "/api/flows/{packageId}/schedules": {
+  "/api/flows/{scope}/{name}/schedules": {
     get: {
       operationId: "listFlowSchedules",
       tags: ["Schedules"],
@@ -29,7 +29,8 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -52,7 +53,8 @@ export const schedulesPaths = {
       description: "Create a cron schedule for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "packageId", in: "path", required: true, schema: { type: "string" } },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -88,7 +90,7 @@ export const schedulesPaths = {
       },
     },
   },
-  "/api/schedules/{scheduleId}": {
+  "/api/schedules/{id}": {
     put: {
       operationId: "updateSchedule",
       tags: ["Schedules"],
@@ -96,7 +98,7 @@ export const schedulesPaths = {
       description: "Update a cron schedule (expression, timezone, enabled state, or input).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scheduleId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -127,7 +129,7 @@ export const schedulesPaths = {
       description: "Permanently delete a cron schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scheduleId", in: "path", required: true, schema: { type: "string" } },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
