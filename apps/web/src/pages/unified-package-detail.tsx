@@ -120,12 +120,6 @@ function ModelRequiredAlert() {
       <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
       <AlertDescription className="flex items-center justify-between">
         <span>{t("models.alert.noModelDescription", { ns: "settings" })}</span>
-        <Link
-          to="/settings#models"
-          className="text-sm font-medium underline underline-offset-4 whitespace-nowrap ml-4"
-        >
-          {t("models.alert.configure", { ns: "settings" })}
-        </Link>
       </AlertDescription>
     </Alert>
   );
