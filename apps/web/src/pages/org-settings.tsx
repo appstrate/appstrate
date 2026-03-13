@@ -40,6 +40,7 @@ import { ModelFormModal } from "../components/model-form-modal";
 import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
+import { CopyLinkButton } from "../components/copy-link-button";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
@@ -95,9 +96,6 @@ export function OrgSettingsPage() {
 
   const orgId = currentOrg?.id;
 
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
-
   const {
     data: orgData,
     isLoading,
@@ -138,15 +136,11 @@ export function OrgSettingsPage() {
         body: JSON.stringify({ email, role }),
       });
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
       setInviteEmail("");
       setInviteRole("member");
       setInviteError(null);
-      if (data?.invited && data.token) {
-        setInviteLink(`${window.location.origin}/invite/${data.token}`);
-        setLinkCopied(false);
-      }
     },
     onError: (err: Error) => {
       setInviteError(err.message);
@@ -409,39 +403,6 @@ export function OrgSettingsPage() {
                 </Select>
               </div>
               {inviteError && <p className="text-sm text-destructive mt-1">{inviteError}</p>}
-              {inviteLink && (
-                <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5">
-                  <Input
-                    type="text"
-                    readOnly
-                    value={inviteLink}
-                    className="flex-1 border-none bg-transparent text-xs font-mono text-muted-foreground min-w-0"
-                    onFocus={(e) => e.target.select()}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 whitespace-nowrap"
-                    onClick={() => {
-                      navigator.clipboard.writeText(inviteLink);
-                      setLinkCopied(true);
-                      setTimeout(() => setLinkCopied(false), 2000);
-                    }}
-                  >
-                    {linkCopied ? t("btn.copied") : t("btn.copyLink")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="px-1 py-0.5"
-                    onClick={() => setInviteLink(null)}
-                  >
-                    &#10005;
-                  </Button>
-                </div>
-              )}
             </div>
             <Button type="submit" disabled={addMemberMutation.isPending}>
               {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
@@ -666,26 +627,6 @@ export function OrgSettingsPage() {
         }}
       />
     </>
-  );
-}
-
-function CopyLinkButton({ token }: { token: string }) {
-  const { t } = useTranslation(["common"]);
-  const [copied, setCopied] = useState(false);
-  const link = `${window.location.origin}/invite/${token}`;
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => {
-        navigator.clipboard.writeText(link);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }}
-    >
-      {copied ? t("btn.copied") : t("btn.copyLink")}
-    </Button>
   );
 }
 
