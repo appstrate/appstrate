@@ -19,7 +19,7 @@ import { resolveProviderProfiles, getEffectiveProfileId } from "../services/conn
 import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import { buildExecutionContext } from "../services/env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateConfig, validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -411,18 +411,30 @@ export function createExecutionsRouter() {
     }));
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
-      await buildExecutionContext({
-        executionId,
-        flow: effectiveFlow,
-        providerProfiles,
-        orgId,
-        userId: user.id,
-        input: parsedInput,
-        files: fileRefs,
-        config,
-        overrideVersionId,
-      });
+    let promptContext: PromptContext;
+    let flowPackage: Buffer | null;
+    let flowVersionId: number | null;
+    let proxyLabel: string | null;
+    let modelLabel: string | null;
+    try {
+      ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+        await buildExecutionContext({
+          executionId,
+          flow: effectiveFlow,
+          providerProfiles,
+          orgId,
+          userId: user.id,
+          input: parsedInput,
+          files: fileRefs,
+          config,
+          overrideVersionId,
+        }));
+    } catch (err) {
+      if (err instanceof ModelNotConfiguredError) {
+        return c.json({ error: "MODEL_NOT_CONFIGURED", message: err.message }, 400);
+      }
+      throw err;
+    }
 
     // Create execution record
     await createExecution(

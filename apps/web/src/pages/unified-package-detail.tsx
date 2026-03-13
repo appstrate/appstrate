@@ -18,12 +18,13 @@ import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
-import { Settings, CheckCircle } from "lucide-react";
+import { Settings, CheckCircle, AlertTriangle } from "lucide-react";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { VersionHistory } from "../components/version-history";
 import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
@@ -43,6 +44,7 @@ import {
 import { FlowModals } from "../components/package-detail/flow-modals";
 import { RunFlowButton } from "../components/run-flow-button";
 import { useFlowReadiness } from "../hooks/use-flow-readiness";
+import { useModels, useFlowModel } from "../hooks/use-models";
 import { computeProvidersSummary } from "../lib/provider-status";
 
 type DetailTab =
@@ -73,19 +75,23 @@ function FlowRunButtonInline({
 }) {
   const { t } = useTranslation("flows");
   const { data: detail } = usePackageDetail("flow", packageId);
-  const readiness = useFlowReadiness(detail);
+  const { data: models } = useModels();
+  const { data: flowModel } = useFlowModel(packageId);
+  const readiness = useFlowReadiness(detail, flowModel?.modelId, models);
 
   if (!detail) return null;
 
-  const { allConnected, hasReconnectionNeeded, hasRequiredConfig } = readiness;
-  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
+  const { allConnected, hasReconnectionNeeded, hasRequiredConfig, hasModel } = readiness;
+  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = hasReconnectionNeeded
     ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
     : !allConnected
       ? t("detail.titleConnect")
       : !hasRequiredConfig
         ? t("detail.titleConfig")
-        : undefined;
+        : !hasModel
+          ? t("detail.titleModel")
+          : undefined;
 
   return (
     <RunFlowButton
@@ -98,6 +104,30 @@ function FlowRunButtonInline({
       showProxy
       showModel
     />
+  );
+}
+
+function ModelRequiredAlert() {
+  const { t } = useTranslation(["settings", "flows"]);
+  const { data: models } = useModels();
+
+  const hasAnyModel = models?.some((m) => m.enabled);
+  if (hasAnyModel || hasAnyModel === undefined) return null;
+
+  return (
+    <Alert variant="destructive" className="mb-4">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
+      <AlertDescription className="flex items-center justify-between">
+        <span>{t("models.alert.noModelDescription", { ns: "settings" })}</span>
+        <Link
+          to="/settings#models"
+          className="text-sm font-medium underline underline-offset-4 whitespace-nowrap ml-4"
+        >
+          {t("models.alert.configure", { ns: "settings" })}
+        </Link>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -380,6 +410,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         latestUrl={packageDetailPath(type, packageId)}
         latestVersion={version}
       />
+
+      {type === "flow" && <ModelRequiredAlert />}
 
       {!isOwned && (
         <div className="flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 mb-4 text-sm">

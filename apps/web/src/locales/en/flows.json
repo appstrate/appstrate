@@ -26,6 +26,7 @@
   "detail.titleReconnect": "Reconnect services first",
   "detail.titleConnect": "Connect all connectors first",
   "detail.titleConfig": "Configure required fields",
+  "detail.titleModel": "Configure a model to run",
   "detail.titleRun": "Run the flow",
   "detail.titleDeleteRunning": "Cannot delete while running",
   "detail.titleDelete": "Delete this flow",

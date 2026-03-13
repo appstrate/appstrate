@@ -156,8 +156,10 @@ function deriveProviderFromApi(api: string): string {
   return known[api] ?? api.split("-")[0];
 }
 
-const api = process.env.MODEL_API || "anthropic-messages";
-const modelId = process.env.MODEL_ID || "claude-sonnet-4-5-20250929";
+const api = process.env.MODEL_API;
+if (!api) die("MODEL_API environment variable is required");
+const modelId = process.env.MODEL_ID;
+if (!modelId) die("MODEL_ID environment variable is required");
 const provider = deriveProviderFromApi(api);
 
 const authStorage = new AuthStorage("/tmp/pi-auth/auth.json");

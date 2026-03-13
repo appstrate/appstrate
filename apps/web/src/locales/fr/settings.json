@@ -478,5 +478,8 @@
   "onboarding.summaryMembers": "Membres invités",
   "onboarding.summaryMembersCount": "{{count}} invitation(s) envoyée(s)",
   "onboarding.summaryMembersNone": "Aucun membre invité",
-  "onboarding.goToDashboard": "Aller au tableau de bord"
+  "onboarding.goToDashboard": "Aller au tableau de bord",
+  "models.alert.noModel": "Aucun modèle LLM configuré",
+  "models.alert.noModelDescription": "Configurez un modèle dans les paramètres de l'organisation pour pouvoir exécuter ce flow.",
+  "models.alert.configure": "Configurer un modèle"
 }

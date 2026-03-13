@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { FlowDetail } from "@appstrate/shared-types";
+import type { FlowDetail, OrgModelInfo } from "@appstrate/shared-types";
 
 function checkRequiredConfig(detail: FlowDetail): boolean {
   const schema = detail.config?.schema;
@@ -13,7 +13,11 @@ function checkRequiredConfig(detail: FlowDetail): boolean {
   return true;
 }
 
-export function useFlowReadiness(detail: FlowDetail | undefined) {
+export function useFlowReadiness(
+  detail: FlowDetail | undefined,
+  flowModelId?: string | null,
+  orgModels?: OrgModelInfo[],
+) {
   return useMemo(
     () => ({
       allConnected: detail
@@ -33,7 +37,8 @@ export function useFlowReadiness(detail: FlowDetail | undefined) {
             Object.keys(detail.config.schema.properties).length > 0
           )
         : false,
+      hasModel: orgModels !== undefined ? !!flowModelId || orgModels.some((m) => m.enabled) : true,
     }),
-    [detail],
+    [detail, flowModelId, orgModels],
   );
 }

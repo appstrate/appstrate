@@ -9,7 +9,8 @@ import { createExecution } from "./state.ts";
 import { getConnectionStatus } from "./connection-manager.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import { buildExecutionContext } from "./env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
+import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -302,15 +303,32 @@ async function triggerScheduledExecution(
     const userProfileId = await getEffectiveProfileId(userId, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
-    const { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
-      await buildExecutionContext({
-        executionId,
-        flow,
-        providerProfiles,
-        orgId,
-        userId,
-        input,
-      });
+    let promptContext: PromptContext;
+    let flowPackage: Buffer | null;
+    let flowVersionId: number | null;
+    let proxyLabel: string | null;
+    let modelLabel: string | null;
+    try {
+      ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+        await buildExecutionContext({
+          executionId,
+          flow,
+          providerProfiles,
+          orgId,
+          userId,
+          input,
+        }));
+    } catch (err) {
+      if (err instanceof ModelNotConfiguredError) {
+        logger.warn("No model configured, skipping scheduled execution", {
+          scheduleId,
+          packageId,
+          orgId,
+        });
+        return;
+      }
+      throw err;
+    }
 
     // Create execution record with schedule_id and version
     await createExecution(

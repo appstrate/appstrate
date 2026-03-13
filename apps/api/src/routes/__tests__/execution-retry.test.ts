@@ -61,7 +61,15 @@ mock.module("../../services/connection-manager.ts", () => ({
   getConnection: mock(async () => null),
 }));
 
+class ModelNotConfiguredError extends Error {
+  constructor() {
+    super("No LLM model configured for this organization");
+    this.name = "ModelNotConfiguredError";
+  }
+}
+
 mock.module("../../services/env-builder.ts", () => ({
+  ModelNotConfiguredError,
   buildPromptContext: mock(() => makePromptContext()),
   buildExecutionApi: mock((id: string) => ({ url: "http://localhost:3000", token: id })),
   buildExecutionContext: mock(async () => ({
@@ -140,6 +148,12 @@ function makePromptContext(): PromptContext {
     schemas: {},
     providers: [],
     llmModel: "claude-sonnet-4-5-20250929",
+    llmConfig: {
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+      modelId: "claude-sonnet-4-5-20250929",
+      apiKey: "sk-test-key",
+    },
   };
 }
 
