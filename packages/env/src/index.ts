@@ -44,6 +44,7 @@ const envSchema = z.object({
 
   // Execution
   EXECUTION_ADAPTER: z.enum(["pi"]).default("pi"),
+  SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
   // Registry
   REGISTRY_URL: z.string().optional(),

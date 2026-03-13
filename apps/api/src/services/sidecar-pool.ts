@@ -1,3 +1,4 @@
+import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import {
   createContainer,
@@ -15,7 +16,6 @@ import {
   SIDECAR_EXPOSED_PORTS,
 } from "./orchestrator/constants.ts";
 export const SIDECAR_IMAGE = "appstrate-sidecar:latest";
-const POOL_SIZE = 2;
 const HEALTH_CHECK_RETRIES = 15;
 const HEALTH_CHECK_DELAYS_MS = [
   25, 50, 50, 100, 100, 200, 200, 400, 400, 400, 400, 400, 400, 400, 400,
@@ -168,7 +168,10 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
       networkId: standbyNetworkId!,
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
       exposedPorts: SIDECAR_EXPOSED_PORTS,
-      labels: { "appstrate.pool": "sidecar" },
+      labels: {
+        "appstrate.pool": "sidecar",
+        "com.docker.compose.project": "appstrate-sidecar-pool",
+      },
     },
   );
 
@@ -188,7 +191,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
 async function replenish(): Promise<void> {
   if (!standbyNetworkId) return;
 
-  const needed = POOL_SIZE - pool.length;
+  const needed = getEnv().SIDECAR_POOL_SIZE - pool.length;
   if (needed <= 0) return;
 
   const results = await Promise.allSettled(
