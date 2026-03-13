@@ -85,6 +85,15 @@ export async function createOrgModel(
   },
 ): Promise<string> {
   const apiKeyEncrypted = encrypt(apiKey);
+
+  // If this is the first model for the org, set it as default
+  const existing = await db
+    .select({ id: orgModels.id })
+    .from(orgModels)
+    .where(eq(orgModels.orgId, orgId))
+    .limit(1);
+  const isFirst = existing.length === 0;
+
   const [row] = await db
     .insert(orgModels)
     .values({
@@ -98,6 +107,7 @@ export async function createOrgModel(
       contextWindow: capabilities?.contextWindow ?? null,
       maxTokens: capabilities?.maxTokens ?? null,
       reasoning: capabilities?.reasoning ?? null,
+      isDefault: isFirst,
       source: "custom",
       createdBy: userId,
     })
