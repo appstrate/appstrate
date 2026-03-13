@@ -4,7 +4,7 @@ export const welcomePaths = {
       operationId: "welcomeSetup",
       tags: ["Welcome"],
       summary: "Post-invite profile setup",
-      description: "Set display name and/or password after invitation signup.",
+      description: "Set display name after invitation signup.",
       requestBody: {
         required: true,
         content: {
@@ -13,7 +13,6 @@ export const welcomePaths = {
               type: "object",
               properties: {
                 displayName: { type: "string" },
-                password: { type: "string", minLength: 8 },
               },
             },
           },

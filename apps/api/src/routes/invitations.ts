@@ -33,9 +33,10 @@ router.get("/:token/info", async (c) => {
     return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expired" }, 410);
   }
 
-  const [orgName, inviterName] = await Promise.all([
+  const [orgName, inviterName, [existingUser]] = await Promise.all([
     getOrgName(invitation.orgId),
     invitation.invitedBy ? getInviterName(invitation.invitedBy) : Promise.resolve("A member"),
+    db.select({ id: user.id }).from(user).where(eq(user.email, invitation.email)).limit(1),
   ]);
 
   return c.json({
@@ -44,6 +45,7 @@ router.get("/:token/info", async (c) => {
     role: invitation.role,
     inviterName,
     expiresAt: invitation.expiresAt.toISOString(),
+    isNewUser: !existingUser,
   });
 });
 
@@ -75,15 +77,27 @@ router.post("/:token/accept", async (c) => {
 
   if (!existingUser) {
     // --- NEW USER: create account via Better Auth ---
-    const randomPwd = crypto.randomUUID() + crypto.randomUUID();
+    const body = await c.req
+      .json<{ password?: string; displayName?: string }>()
+      .catch((): { password?: string; displayName?: string } => ({}));
+
+    if (!body.password || body.password.length < 8) {
+      return c.json(
+        {
+          error: "VALIDATION_ERROR",
+          message: "Password is required and must be at least 8 characters",
+        },
+        400,
+      );
+    }
 
     try {
       // Sign up — creates user + account + profile (via databaseHook)
       const signupRes = await auth.api.signUpEmail({
         body: {
           email: invitation.email,
-          password: randomPwd,
-          name: invitation.email,
+          password: body.password,
+          name: body.displayName?.trim() || invitation.email,
         },
       });
 
@@ -98,7 +112,7 @@ router.post("/:token/accept", async (c) => {
 
       // Sign in to get session cookie
       const signinRes = await auth.api.signInEmail({
-        body: { email: invitation.email, password: randomPwd },
+        body: { email: invitation.email, password: body.password },
         asResponse: true,
       });
 

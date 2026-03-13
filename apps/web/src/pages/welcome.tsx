@@ -1,13 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { AuthLayout } from "../components/auth-layout";
 
 export function WelcomePage() {
@@ -17,26 +15,8 @@ export function WelcomePage() {
   const orgId = searchParams.get("org");
 
   const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  const rules = useMemo(
-    () => ({
-      password: (v: string) => {
-        if (v && v.length < 8) return t("validation.minLength", { ns: "common", min: 8 });
-        return undefined;
-      },
-      confirmPassword: (v: string) => {
-        if (password && v !== password) return t("validation.passwordMismatch", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t, password],
-  );
-
-  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
 
   const finishAndRedirect = () => {
     if (orgId) {
@@ -49,22 +29,15 @@ export function WelcomePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setServerError(null);
-
-    if (!validateAll({ password, confirmPassword })) return;
-
     setLoading(true);
 
     try {
-      const body: Record<string, string> = {};
-      if (displayName.trim()) body.displayName = displayName.trim();
-      if (password) body.password = password;
-
-      if (Object.keys(body).length > 0) {
+      if (displayName.trim()) {
         const res = await fetch("/api/welcome/setup", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ displayName: displayName.trim() }),
         });
 
         if (!res.ok) {
@@ -105,55 +78,6 @@ export function WelcomePage() {
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="password">
-                {t("welcome.password")}{" "}
-                <span className="text-xs text-muted-foreground font-normal">
-                  ({t("welcome.optional")})
-                </span>
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  clearField("password");
-                }}
-                onBlur={() => onBlur("password", password)}
-                placeholder="••••••••"
-                minLength={8}
-                autoComplete="new-password"
-                aria-invalid={errors.password ? true : undefined}
-                className={cn(errors.password && "border-destructive")}
-              />
-              {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
-            </div>
-
-            {password && (
-              <div className="grid gap-2">
-                <Label htmlFor="confirmPassword">{t("preferences.confirmPassword")}</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    clearField("confirmPassword");
-                  }}
-                  onBlur={() => onBlur("confirmPassword", confirmPassword)}
-                  placeholder="••••••••"
-                  minLength={8}
-                  autoComplete="new-password"
-                  aria-invalid={errors.confirmPassword ? true : undefined}
-                  className={cn(errors.confirmPassword && "border-destructive")}
-                />
-                {errors.confirmPassword && (
-                  <div className="text-sm text-destructive">{errors.confirmPassword}</div>
-                )}
-              </div>
-            )}
-
             {serverError && <p className="text-sm text-destructive">{serverError}</p>}
 
             <Button className="w-full" type="submit" disabled={loading}>
@@ -161,17 +85,6 @@ export function WelcomePage() {
             </Button>
           </div>
         </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          <Button
-            type="button"
-            variant="link"
-            className="h-auto p-0 text-sm"
-            onClick={finishAndRedirect}
-          >
-            {t("welcome.skip")}
-          </Button>
-        </p>
       </div>
     </AuthLayout>
   );
