@@ -5,15 +5,14 @@ import { db } from "../lib/db.ts";
 import { packageSchedules, scheduleRuns } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
-import { createExecution } from "./state.ts";
-import { getConnectionStatus } from "./connection-manager.ts";
-import { isProviderEnabled } from "@appstrate/connect";
+import { createExecution, getPackageConfig } from "./state.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateFlowReadiness } from "./flow-readiness.ts";
 
 // In-memory map of active cron jobs
 const activeJobs = new Map<string, Cron>();
@@ -256,47 +255,26 @@ async function triggerScheduledExecution(
 
     // Resolve provider profiles for this user + package
     const manifestProviders = resolveManifestProviders(flow.manifest);
-    const providerProfiles = await resolveProviderProfiles(
-      manifestProviders,
-      userId,
-      packageId,
+    const [providerProfiles, config] = await Promise.all([
+      resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
+      getPackageConfig(orgId, packageId),
+    ]);
+
+    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    const readinessError = await validateFlowReadiness({
+      flow,
+      providerProfiles,
       orgId,
-    );
-
-    // Validate provider enabled status
-    for (const svc of manifestProviders) {
-      const enabled = await isProviderEnabled(db, orgId, svc.provider);
-      if (!enabled) {
-        logger.warn("Provider not enabled, skipping schedule", {
-          providerId: svc.provider,
-          scheduleId,
-        });
-        return;
-      }
-    }
-
-    // Validate provider dependencies — skip if not connected
-    for (const svc of manifestProviders) {
-      const profileId = providerProfiles[svc.id];
-      if (!profileId) {
-        logger.warn("Provider profile not resolved, skipping schedule", {
-          providerId: svc.id,
-          scheduleId,
-          packageId,
-        });
-        return;
-      }
-
-      const conn = await getConnectionStatus(svc.provider, profileId);
-      if (conn.status !== "connected") {
-        logger.warn("Provider not connected, skipping schedule", {
-          providerId: svc.id,
-          profileId,
-          scheduleId,
-          packageId,
-        });
-        return;
-      }
+      config,
+    });
+    if (readinessError) {
+      logger.warn("Flow readiness check failed, skipping schedule", {
+        scheduleId,
+        packageId,
+        error: readinessError.error,
+        message: readinessError.message,
+      });
+      return;
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
@@ -317,6 +295,7 @@ async function triggerScheduledExecution(
           orgId,
           userId,
           input,
+          config,
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {

@@ -14,20 +14,20 @@ import {
   listExecutionLogs,
   addPackageMemories,
 } from "../services/state.ts";
-import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
-import { validateConfig, validateOutput } from "../services/schema.ts";
+import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateFlowReadiness } from "../services/flow-readiness.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -345,28 +345,15 @@ export function createExecutionsRouter() {
       parseRequestInput(c, flow.manifest.input?.schema),
     ]);
 
-    // Validate provider dependencies (needs providerProfiles)
-    const depError = await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
-    if (depError) {
-      return c.json(depError, 400);
-    }
-
-    // Validate config
-    const configSchema = flow.manifest.config?.schema ?? {
-      type: "object" as const,
-      properties: {},
-    };
-    const configValidation = validateConfig(config, configSchema);
-    if (!configValidation.valid) {
-      const first = configValidation.errors[0]!;
-      return c.json(
-        {
-          error: "CONFIG_INCOMPLETE",
-          message: `Parameter '${first.field}' is required`,
-          configUrl: `/api/flows/${packageId}/config`,
-        },
-        400,
-      );
+    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    const readinessError = await validateFlowReadiness({
+      flow,
+      providerProfiles,
+      orgId,
+      config,
+    });
+    if (readinessError) {
+      return c.json(readinessError, 400);
     }
 
     if (!inputResult.ok) {
