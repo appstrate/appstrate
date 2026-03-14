@@ -334,33 +334,6 @@ export function createExecutionsRouter() {
     const packageId = flow.id;
     const profileIdOverride = c.req.query("profileId");
 
-    // Run independent pre-flight operations in parallel
-    const manifestProviders = resolveManifestProviders(flow.manifest);
-    const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, user.id, packageId, orgId, profileIdOverride),
-      getPackageConfig(orgId, packageId),
-      profileIdOverride
-        ? Promise.resolve(profileIdOverride)
-        : getEffectiveProfileId(user.id, packageId),
-      parseRequestInput(c, flow.manifest.input?.schema),
-    ]);
-
-    // Validate flow readiness (prompt, skills, extensions, providers, config)
-    const readinessError = await validateFlowReadiness({
-      flow,
-      providerProfiles,
-      orgId,
-      config,
-    });
-    if (readinessError) {
-      return c.json(readinessError, 400);
-    }
-
-    if (!inputResult.ok) {
-      return c.json(inputResult.error, inputResult.status);
-    }
-    const { input: parsedInput, uploadedFiles } = inputResult.data;
-
     // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
     const versionOverride = c.req.query("version");
 
@@ -376,16 +349,41 @@ export function createExecutionsRouter() {
         );
       }
       overrideVersionId = versionDetail.id;
-      // Override manifest and content on the flow object for this execution
+      // Override manifest and content — version manifest replaces draft entirely
+      // (shallow merge would keep draft keys like config.schema when the version lacks them)
       effectiveFlow = {
         ...flow,
-        manifest: {
-          ...flow.manifest,
-          ...(versionDetail.manifest as typeof flow.manifest),
-        },
+        manifest: versionDetail.manifest as typeof flow.manifest,
         prompt: versionDetail.textContent ?? flow.prompt,
       };
     }
+
+    // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
+    const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
+    const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
+      resolveProviderProfiles(manifestProviders, user.id, packageId, orgId, profileIdOverride),
+      getPackageConfig(orgId, packageId),
+      profileIdOverride
+        ? Promise.resolve(profileIdOverride)
+        : getEffectiveProfileId(user.id, packageId),
+      parseRequestInput(c, effectiveFlow.manifest.input?.schema),
+    ]);
+
+    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    const readinessError = await validateFlowReadiness({
+      flow: effectiveFlow,
+      providerProfiles,
+      orgId,
+      config,
+    });
+    if (readinessError) {
+      return c.json(readinessError, 400);
+    }
+
+    if (!inputResult.ok) {
+      return c.json(inputResult.error, inputResult.status);
+    }
+    const { input: parsedInput, uploadedFiles } = inputResult.data;
 
     const executionId = `exec_${crypto.randomUUID()}`;
 

@@ -10,7 +10,12 @@ import {
   usePackageDownload,
   useDeletePackage,
 } from "../hooks/use-packages";
-import type { FlowDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
+import type {
+  FlowDetail,
+  JSONSchemaObject,
+  OrgPackageItemDetail,
+  PackageType,
+} from "@appstrate/shared-types";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
@@ -59,20 +64,24 @@ type DetailTab =
   | "content"
   | "usedBy";
 
+const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
+
 // ─── Flow Run Button (inline, no wrapper) ────────────────────────────
 
 function FlowRunButtonInline({
   packageId,
   resolvedVersion,
+  configSchemaOverride,
 }: {
   packageId: string;
   resolvedVersion: string | undefined;
+  configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation("flows");
   const { data: detail } = usePackageDetail("flow", packageId);
   const { data: models } = useModels();
   const { data: flowModel } = useFlowModel(packageId);
-  const readiness = useFlowReadiness(detail, flowModel?.modelId, models);
+  const readiness = useFlowReadiness(detail, flowModel?.modelId, models, configSchemaOverride);
 
   if (!detail) return null;
 
@@ -217,15 +226,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "content",
     "usedBy",
   ];
-  // Configuration tab visibility
-  const hasConfigSchema = !!(
-    flowDetail?.config?.schema?.properties &&
-    Object.keys(flowDetail.config.schema.properties).length > 0
+  // Configuration tab visibility (uses draft schema — version-aware override applied after loading)
+  const draftConfigSchema = flowDetail?.config?.schema;
+  const hasDraftConfigSchema = !!(
+    draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
   );
   const hasModelsAvailable = isOrgAdmin && !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = isOrgAdmin && !!orgProxies && orgProxies.length > 0;
   const showConfigTab =
-    type === "flow" && (hasConfigSchema || hasModelsAvailable || hasProxiesAvailable);
+    type === "flow" && (hasDraftConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
   const hasDisconnectedServices =
     type === "flow" &&
@@ -234,9 +243,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     );
   const hasMissingRequiredConfig =
     type === "flow" &&
-    hasConfigSchema &&
-    flowDetail?.config?.schema?.required?.some((key) => {
-      const val = flowDetail.config?.current?.[key];
+    hasDraftConfigSchema &&
+    draftConfigSchema?.required?.some((key) => {
+      const val = flowDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
   const defaultTab: DetailTab =
@@ -277,6 +286,25 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <Navigate to={versionResult.redirect} replace />;
   }
   const { isHistoricalVersion } = versionResult;
+
+  // ── Version-aware config schema ──
+  // When viewing a historical version, use that version's config schema (or empty if none).
+  // An empty schema means "no config fields" — distinct from undefined which means "use draft".
+  const versionConfigSchema = (() => {
+    const config = (versionDetail?.manifest as Record<string, unknown> | undefined)?.config as
+      | { schema?: JSONSchemaObject }
+      | undefined;
+    return config?.schema;
+  })();
+  const effectiveConfigSchema = isHistoricalVersion
+    ? (versionConfigSchema ?? EMPTY_CONFIG_SCHEMA)
+    : flowDetail?.config?.schema;
+  const hasEffectiveConfigSchema = !!(
+    effectiveConfigSchema?.properties && Object.keys(effectiveConfigSchema.properties).length > 0
+  );
+  // Override showConfigTab for historical versions with their own config schema
+  const effectiveShowConfigTab =
+    type === "flow" && (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
   const downloadVersion = isHistoricalVersion ? versionDetail?.version : version;
 
@@ -326,7 +354,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       id: "connectors",
       label: t("detail.tabConnectors"),
     },
-    ...(showConfigTab
+    ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
     {
@@ -363,7 +391,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         isHistoricalVersion={isHistoricalVersion}
         actionsLeft={
           type === "flow" ? (
-            <FlowRunButtonInline packageId={packageId} resolvedVersion={resolvedVersion} />
+            <FlowRunButtonInline
+              packageId={packageId}
+              resolvedVersion={resolvedVersion}
+              configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+            />
           ) : undefined
         }
         actionsRight={
@@ -510,10 +542,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       </Tabs>
 
       {/* Tab content */}
-      {type === "flow" && tab === "configuration" && <FlowConfigurationTab packageId={packageId} />}
+      {type === "flow" && tab === "configuration" && (
+        <FlowConfigurationTab
+          packageId={packageId}
+          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+          isHistorical={isHistoricalVersion}
+        />
+      )}
       {type === "flow" && tab === "connectors" && <FlowConnectorsTab packageId={packageId} />}
       {type === "flow" && tab === "executions" && (
-        <FlowExecutionsTab packageId={packageId} resolvedVersion={resolvedVersion} />
+        <FlowExecutionsTab
+          packageId={packageId}
+          resolvedVersion={resolvedVersion}
+          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+        />
       )}
       {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
       {type === "flow" && tab === "memories" && (
