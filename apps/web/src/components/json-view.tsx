@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { JsonView as JsonViewLite, allExpanded } from "react-json-view-lite";
+import { JsonView as JsonViewLite, defaultStyles, allExpanded } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
 import { CopyButton } from "./result-renderer/components/copy-button";
 
@@ -8,9 +8,7 @@ interface JsonViewProps {
 }
 
 const jsonStyles = {
-  container: "json-view-container",
-  basicChildStyle: "json-view-row",
-  childFieldsContainer: "",
+  ...defaultStyles,
   label: "text-foreground font-medium",
   clickableLabel: "text-foreground font-medium cursor-pointer",
   stringValue: "text-success",

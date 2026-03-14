@@ -11,6 +11,7 @@ import {
   Trash2,
   Link2,
   Globe,
+  FileJson,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,12 +23,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { PackageType } from "@appstrate/shared-types";
 import { ShareLinkModal } from "../share-link-modal";
+import { Modal } from "../modal";
+import { JsonView } from "../json-view";
 import { api } from "../../api";
 import { packageEditPath } from "../../lib/package-paths";
 
 interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
+  manifest?: Record<string, unknown>;
   isOrgAdmin: boolean;
   isOwned: boolean;
   isBuiltIn: boolean;
@@ -64,6 +68,7 @@ interface PackageActionsDropdownProps {
 export function PackageActionsDropdown({
   packageId,
   type,
+  manifest,
   isOrgAdmin,
   isOwned,
   isBuiltIn,
@@ -91,6 +96,7 @@ export function PackageActionsDropdown({
   const navigate = useNavigate();
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareGenerating, setShareGenerating] = useState(false);
+  const [definitionOpen, setDefinitionOpen] = useState(false);
 
   const isFlow = type === "flow";
   const isMutable = !isBuiltIn && !isHistoricalVersion && isOwned;
@@ -122,8 +128,8 @@ export function PackageActionsDropdown({
     }
   };
 
-  // Nothing to show for non-admin on non-flow packages
-  if (!isOrgAdmin && !isFlow) return null;
+  // Nothing to show for non-admin on non-flow packages (unless there's a manifest to view)
+  if (!isOrgAdmin && !isFlow && !manifest) return null;
 
   return (
     <>
@@ -150,6 +156,17 @@ export function PackageActionsDropdown({
                   {shareGenerating ? t("share.generating") : t("share.publicLink")}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuSeparator />
+            </>
+          )}
+
+          {/* ── View Definition ── */}
+          {manifest && (
+            <>
+              <DropdownMenuItem onSelect={() => setDefinitionOpen(true)}>
+                <FileJson size={14} />
+                {t("viewDefinition", { ns: "common" })}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           )}
@@ -261,6 +278,16 @@ export function PackageActionsDropdown({
       </DropdownMenu>
       {isFlow && (
         <ShareLinkModal open={!!shareUrl} onClose={() => setShareUrl(null)} url={shareUrl ?? ""} />
+      )}
+      {manifest && (
+        <Modal
+          open={definitionOpen}
+          onClose={() => setDefinitionOpen(false)}
+          title={t("viewDefinition", { ns: "common" })}
+          className="max-w-2xl"
+        >
+          <JsonView data={manifest} />
+        </Modal>
       )}
     </>
   );

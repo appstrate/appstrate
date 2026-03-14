@@ -12,6 +12,7 @@ import { PackageActionsDropdown } from "./package-actions-dropdown";
 
 export function FlowActions({
   packageId,
+  manifest,
   isOrgAdmin,
   isOwned,
   isHistoricalVersion,
@@ -22,6 +23,7 @@ export function FlowActions({
   onFork,
 }: {
   packageId: string;
+  manifest?: Record<string, unknown>;
   isOrgAdmin: boolean;
   isOwned: boolean;
   isHistoricalVersion: boolean;
@@ -51,6 +53,7 @@ export function FlowActions({
     <PackageActionsDropdown
       packageId={packageId}
       type="flow"
+      manifest={manifest}
       isOrgAdmin={isOrgAdmin}
       isOwned={isOwned}
       isBuiltIn={detail.source === "system"}
