@@ -14,7 +14,7 @@ export async function saveApiKeyConnection(
 
 export async function saveCredentialsConnection(
   provider: string,
-  authMode: "basic" | "custom" | "proxy",
+  authMode: "basic" | "custom",
   credentials: Record<string, string>,
   profileId: string,
 ): Promise<void> {

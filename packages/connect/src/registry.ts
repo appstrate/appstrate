@@ -172,7 +172,7 @@ export function getDefaultAuthorizedUris(provider: ProviderDefinition): string[]
 export function getCredentialFieldName(provider: ProviderDefinition): string {
   return (
     provider.credentialFieldName ??
-    (provider.authMode === "api_key" ? "api_key" : provider.authMode === "proxy" ? "url" : "token")
+    (provider.authMode === "api_key" ? "api_key" : "token")
   );
 }
 

@@ -354,7 +354,7 @@ export const schemas = {
       displayName: { type: "string" },
       authMode: {
         type: "string",
-        enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"],
+        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       hasCredentials: {
@@ -411,7 +411,7 @@ export const schemas = {
       displayName: { type: "string" },
       authMode: {
         type: "string",
-        enum: ["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"],
+        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
       },
       clientId: { type: "string" },
       clientSecret: { type: "string" },
