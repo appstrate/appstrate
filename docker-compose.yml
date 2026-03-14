@@ -57,12 +57,12 @@ services:
   # These exit immediately — they only trigger `docker compose pull`.
   appstrate-pi:
     image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
-    command: ["true"]
+    entrypoint: ["true"]
     restart: "no"
 
   appstrate-sidecar:
     image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
-    command: ["true"]
+    entrypoint: ["true"]
     restart: "no"
 
   appstrate:
