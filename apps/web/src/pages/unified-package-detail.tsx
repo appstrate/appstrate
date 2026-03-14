@@ -30,8 +30,6 @@ import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
-import { ProfileSelector } from "../components/profile-selector";
-
 // Flow-specific components
 import { FlowActions } from "../components/package-detail/flow-actions";
 import {
@@ -61,12 +59,6 @@ type DetailTab =
   | "content"
   | "usedBy";
 
-// ─── Flow Header Extras ─────────────────────────────────────────────
-
-function FlowHeaderExtras() {
-  return <ProfileSelector />;
-}
-
 // ─── Flow Run Button (inline, no wrapper) ────────────────────────────
 
 function FlowRunButtonInline({
@@ -84,17 +76,38 @@ function FlowRunButtonInline({
 
   if (!detail) return null;
 
-  const { allConnected, hasReconnectionNeeded, hasRequiredConfig, hasModel } = readiness;
-  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig || !hasModel;
-  const runDisabledTitle = hasReconnectionNeeded
-    ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
-    : !allConnected
-      ? t("detail.titleConnect")
-      : !hasRequiredConfig
-        ? t("detail.titleConfig")
-        : !hasModel
-          ? t("detail.titleModel")
-          : undefined;
+  const {
+    allConnected,
+    hasReconnectionNeeded,
+    hasRequiredConfig,
+    hasModel,
+    hasPrompt,
+    hasRequiredSkills,
+    hasRequiredExtensions,
+  } = readiness;
+  const runDisabled =
+    !hasPrompt ||
+    !hasRequiredSkills ||
+    !hasRequiredExtensions ||
+    !allConnected ||
+    hasReconnectionNeeded ||
+    !hasRequiredConfig ||
+    !hasModel;
+  const runDisabledTitle = !hasPrompt
+    ? t("detail.titleEmptyPrompt")
+    : !hasRequiredSkills
+      ? t("detail.titleMissingSkill")
+      : !hasRequiredExtensions
+        ? t("detail.titleMissingExtension")
+        : hasReconnectionNeeded
+          ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
+          : !allConnected
+            ? t("detail.titleConnect")
+            : !hasRequiredConfig
+              ? t("detail.titleConfig")
+              : !hasModel
+                ? t("detail.titleModel")
+                : undefined;
 
   return (
     <RunFlowButton
@@ -307,12 +320,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       ? computeProvidersSummary(flowDetail.requires.providers, t)
       : null;
 
-  const flowTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
+  const flowTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "executions", label: t("detail.tabExecutions") },
     {
       id: "connectors",
       label: t("detail.tabConnectors"),
-      badge: servicesSummary?.actionCount ? String(servicesSummary.actionCount) : undefined,
     },
     ...(showConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
@@ -356,20 +368,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         }
         actionsRight={
           type === "flow" ? (
-            <>
-              <FlowHeaderExtras />
-              <FlowActions
-                packageId={packageId}
-                isOrgAdmin={isOrgAdmin}
-                isOwned={isOwned}
-                isHistoricalVersion={isHistoricalVersion}
-                hasDraftChanges={hasDraftChanges}
-                downloadVersion={downloadVersion ?? undefined}
-                downloadPackage={downloadPackage}
-                onCreateVersion={() => setCreateVersionOpen(true)}
-                onFork={() => setForkOpen(true)}
-              />
-            </>
+            <FlowActions
+              packageId={packageId}
+              isOrgAdmin={isOrgAdmin}
+              isOwned={isOwned}
+              isHistoricalVersion={isHistoricalVersion}
+              hasDraftChanges={hasDraftChanges}
+              downloadVersion={downloadVersion ?? undefined}
+              downloadPackage={downloadPackage}
+              onCreateVersion={() => setCreateVersionOpen(true)}
+              onFork={() => setForkOpen(true)}
+            />
           ) : isOrgAdmin ? (
             <>
               {type === "provider" && providerConfig && (
@@ -491,19 +500,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           {tabDefs.map((td) => (
             <TabsTrigger key={td.id} value={td.id}>
               {td.label}
-              {td.badge && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-warning/15 text-warning text-xs font-medium min-w-[1.25rem] h-5 px-1">
-                  {td.badge}
-                </span>
-              )}
             </TabsTrigger>
           ))}
-          {!isBuiltIn && (
-            <TabsTrigger value="versions">
-              {t("version.history")}
-              {versionCount ? ` (${versionCount})` : ""}
-            </TabsTrigger>
-          )}
+          {!isBuiltIn && <TabsTrigger value="versions">{t("version.history")}</TabsTrigger>}
           {hasDraftChanges && !isVersionView && (
             <TabsTrigger value="changes">{t("version.diff")}</TabsTrigger>
           )}

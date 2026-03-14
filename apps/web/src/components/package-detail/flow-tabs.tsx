@@ -38,8 +38,21 @@ export function FlowExecutionsTab({
 
   if (!detail) return null;
 
-  const { allConnected, hasReconnectionNeeded, hasRequiredConfig } = readiness;
-  const runDisabled = !allConnected || hasReconnectionNeeded || !hasRequiredConfig;
+  const {
+    allConnected,
+    hasReconnectionNeeded,
+    hasRequiredConfig,
+    hasPrompt,
+    hasRequiredSkills,
+    hasRequiredExtensions,
+  } = readiness;
+  const runDisabled =
+    !hasPrompt ||
+    !hasRequiredSkills ||
+    !hasRequiredExtensions ||
+    !allConnected ||
+    hasReconnectionNeeded ||
+    !hasRequiredConfig;
 
   return (
     <>

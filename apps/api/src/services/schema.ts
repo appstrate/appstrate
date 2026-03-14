@@ -2,6 +2,7 @@ import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
+import { normalizeConfigForValidation } from "@appstrate/core/flow-readiness";
 
 // --- AJV runtime validation ---
 
@@ -39,7 +40,9 @@ export function validateConfig(
   if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [], data };
   }
-  return validateWithAjv(data, schema);
+  // Treat empty strings as missing for required fields (aligned with frontend validation)
+  const cleaned = normalizeConfigForValidation(data, schema.required ?? []);
+  return validateWithAjv(cleaned, schema);
 }
 
 export function validateInput(
