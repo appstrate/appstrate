@@ -42,7 +42,7 @@
   "detail.emptySchedule": "Aucune planification",
   "detail.emptyConnectors": "Aucun connecteur requis",
   "detail.emptyConnectorsHint": "Ce flow ne nécessite aucun connecteur externe",
-  "detail.tabConnectors": "Connecteurs",
+  "detail.tabConnectors": "Connexions",
   "detail.tabMemories": "Mémoires",
   "detail.emptyMemories": "Aucune mémoire",
   "detail.clearMemories": "Supprimer les mémoires",
