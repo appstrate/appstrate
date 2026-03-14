@@ -58,5 +58,6 @@
   "orgSwitcher.import": "Importer un package",
   "btn.install": "Installer",
   "btn.installing": "Installation...",
-  "btn.download": "Télécharger"
+  "btn.download": "Télécharger",
+  "viewDefinition": "Voir la définition"
 }

@@ -402,6 +402,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           type === "flow" ? (
             <FlowActions
               packageId={packageId}
+              manifest={
+                (isHistoricalVersion ? versionDetail?.manifest : flowDetail?.manifest) as
+                  | Record<string, unknown>
+                  | undefined
+              }
               isOrgAdmin={isOrgAdmin}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
@@ -426,6 +431,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               <PackageActionsDropdown
                 packageId={packageId}
                 type={type}
+                manifest={
+                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
+                    | Record<string, unknown>
+                    | undefined
+                }
                 isOrgAdmin={isOrgAdmin}
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
