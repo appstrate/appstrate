@@ -8,7 +8,6 @@ import {
 import { useCreateSchedule, useUpdateSchedule, useDeleteSchedule } from "../../hooks/use-schedules";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
-import { ConfigModal } from "../config-modal";
 import { ScheduleModal } from "../schedule-modal";
 import { ApiKeyModal } from "../api-key-modal";
 import { CustomCredentialsModal } from "../custom-credentials-modal";
@@ -27,8 +26,6 @@ export function FlowModals({ packageId }: { packageId: string }) {
   const deleteSchedule = useDeleteSchedule();
 
   const {
-    configOpen,
-    setConfigOpen,
     scheduleOpen,
     setScheduleOpen,
     editingSchedule,
@@ -49,7 +46,6 @@ export function FlowModals({ packageId }: { packageId: string }) {
 
   return (
     <>
-      <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} flow={detail} />
       <ScheduleModal
         open={scheduleOpen}
         onClose={() => {

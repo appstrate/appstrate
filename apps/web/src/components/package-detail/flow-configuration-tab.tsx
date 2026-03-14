@@ -1,0 +1,188 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { FormField } from "../form-field";
+import { PROVIDER_ICONS } from "../icons";
+import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
+import { useOrg } from "../../hooks/use-org";
+import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models";
+import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
+import { usePackageDetail } from "../../hooks/use-packages";
+import { useSaveConfig } from "../../hooks/use-mutations";
+
+// ─── Config Section ─────────────────────────────────────────────────
+
+function ConfigSection({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["flows", "common"]);
+  const { data: detail } = usePackageDetail("flow", packageId);
+
+  const schema = detail?.config?.schema;
+  const current = detail?.config?.current || {};
+  const mutation = useSaveConfig(detail?.id ?? "");
+
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (schema?.properties) {
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        initial[key] = String(current[key] ?? prop.default ?? "");
+      }
+    }
+    return initial;
+  });
+
+  if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
+
+  const handleSave = () => {
+    const config: Record<string, unknown> = {};
+    if (schema.properties) {
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        let value: unknown = values[key];
+        if (prop.type === "number" && value) value = Number(value);
+        config[key] = value || null;
+      }
+    }
+    mutation.mutate(config);
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <h3 className="text-sm font-medium">{t("editor.configTitle")}</h3>
+      {Object.entries(schema.properties).map(([key, prop]) => (
+        <FormField
+          key={key}
+          id={`config-${key}`}
+          label={key}
+          required={schema.required?.includes(key)}
+          type={prop.type === "number" ? "number" : "text"}
+          value={values[key] || ""}
+          onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
+          placeholder={prop.description}
+          description={prop.description}
+          enumValues={prop.enum as string[] | undefined}
+        />
+      ))}
+      <div className="flex justify-end pt-2">
+        <Button onClick={handleSave} disabled={mutation.isPending} size="sm">
+          {mutation.isPending ? "..." : t("btn.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Model Section ──────────────────────────────────────────────────
+
+function ModelSection({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["settings"]);
+  const { data: orgModels } = useModels();
+  const { data: flowModel } = useFlowModel(packageId);
+  const setFlowModel = useSetFlowModel(packageId);
+  const { isOrgAdmin } = useOrg();
+
+  if (!isOrgAdmin || !orgModels || orgModels.length === 0) return null;
+
+  const flowModelId = flowModel?.modelId;
+  const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <h3 className="text-sm font-medium">{t("models.tabTitle", { ns: "settings" })}</h3>
+      <Select
+        value={flowModelId ?? "__inherit__"}
+        onValueChange={(v) => setFlowModel.mutate(v === "__inherit__" ? null : v)}
+        disabled={setFlowModel.isPending}
+      >
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__inherit__">
+            {orgDefaultModel
+              ? t("models.flow.inherit", { ns: "settings", name: orgDefaultModel.label })
+              : t("models.flow.inheritNoDefault", { ns: "settings" })}
+          </SelectItem>
+          {orgModels.map((m) => {
+            const mp = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
+            const MIcon = mp ? PROVIDER_ICONS[mp.id] : undefined;
+            return (
+              <SelectItem key={m.id} value={m.id}>
+                <span className="inline-flex items-center gap-1.5">
+                  {MIcon && <MIcon className="size-3.5" />}
+                  {m.label}
+                </span>
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ─── Proxy Section ──────────────────────────────────────────────────
+
+function ProxySection({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["flows", "settings"]);
+  const { data: orgProxies } = useProxies();
+  const { data: flowProxy } = useFlowProxy(packageId);
+  const setFlowProxy = useSetFlowProxy(packageId);
+  const { isOrgAdmin } = useOrg();
+
+  if (!isOrgAdmin || !orgProxies || orgProxies.length === 0) return null;
+
+  const flowProxyId = flowProxy?.proxyId;
+  const orgDefaultProxy = orgProxies.find((p) => p.isDefault && p.enabled);
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <h3 className="text-sm font-medium">{t("detail.configSectionProxy")}</h3>
+      <Select
+        value={flowProxyId ?? "__inherit__"}
+        onValueChange={(v) => setFlowProxy.mutate(v === "__inherit__" ? null : v)}
+        disabled={setFlowProxy.isPending}
+      >
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__inherit__">
+            {orgDefaultProxy
+              ? t("proxies.flow.inherit", { ns: "settings", name: orgDefaultProxy.label })
+              : t("proxies.flow.inheritNoDefault", { ns: "settings" })}
+          </SelectItem>
+          <SelectItem value="none">{t("proxies.flow.none", { ns: "settings" })}</SelectItem>
+          {orgProxies.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ─── Main Tab ───────────────────────────────────────────────────────
+
+export function FlowConfigurationTab({ packageId }: { packageId: string }) {
+  const { data: detail } = usePackageDetail("flow", packageId);
+
+  const hasConfigSchema = !!(
+    detail?.config?.schema?.properties && Object.keys(detail.config.schema.properties).length > 0
+  );
+
+  return (
+    <div className="space-y-4">
+      <ModelSection packageId={packageId} />
+      <ProxySection packageId={packageId} />
+      {hasConfigSchema && <ConfigSection packageId={packageId} />}
+    </div>
+  );
+}

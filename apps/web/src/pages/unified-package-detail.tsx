@@ -42,14 +42,17 @@ import {
   FlowApiTab,
 } from "../components/package-detail/flow-tabs";
 import { FlowModals } from "../components/package-detail/flow-modals";
+import { FlowConfigurationTab } from "../components/package-detail/flow-configuration-tab";
 import { RunFlowButton } from "../components/run-flow-button";
 import { useFlowReadiness } from "../hooks/use-flow-readiness";
 import { useModels, useFlowModel } from "../hooks/use-models";
+import { useProxies } from "../hooks/use-proxies";
 import { computeProvidersSummary } from "../lib/provider-status";
 
 type DetailTab =
   | "connectors"
   | "executions"
+  | "configuration"
   | "schedules"
   | "memories"
   | "api"
@@ -101,8 +104,6 @@ function FlowRunButtonInline({
       disabled={runDisabled}
       disabledTitle={runDisabledTitle}
       showLabel
-      showProxy
-      showModel
     />
   );
 }
@@ -148,6 +149,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
 
+  // Configuration tab data (must be before early returns — hooks rule)
+  const { data: orgProxies } = useProxies();
+  const { data: orgModels } = useModels();
+
   // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
   const providersQuery = useProviders();
   const providerConfig =
@@ -190,6 +195,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const allValidTabs: DetailTab[] = [
     "connectors",
     "executions",
+    "configuration",
     "schedules",
     "memories",
     "api",
@@ -198,13 +204,36 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "content",
     "usedBy",
   ];
+  // Configuration tab visibility
+  const hasConfigSchema = !!(
+    flowDetail?.config?.schema?.properties &&
+    Object.keys(flowDetail.config.schema.properties).length > 0
+  );
+  const hasModelsAvailable = isOrgAdmin && !!orgModels && orgModels.length > 0;
+  const hasProxiesAvailable = isOrgAdmin && !!orgProxies && orgProxies.length > 0;
+  const showConfigTab =
+    type === "flow" && (hasConfigSchema || hasModelsAvailable || hasProxiesAvailable);
+
   const hasDisconnectedServices =
     type === "flow" &&
     flowDetail?.requires.providers.some(
       (s) => s.status !== "connected" || s.scopesSufficient === false,
     );
+  const hasMissingRequiredConfig =
+    type === "flow" &&
+    hasConfigSchema &&
+    flowDetail?.config?.schema?.required?.some((key) => {
+      const val = flowDetail.config?.current?.[key];
+      return val === undefined || val === null || val === "";
+    });
   const defaultTab: DetailTab =
-    type === "flow" ? (hasDisconnectedServices ? "connectors" : "executions") : "content";
+    type === "flow"
+      ? hasDisconnectedServices
+        ? "connectors"
+        : hasMissingRequiredConfig && showConfigTab
+          ? "configuration"
+          : "executions"
+      : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
@@ -285,6 +314,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       label: t("detail.tabConnectors"),
       badge: servicesSummary?.actionCount ? String(servicesSummary.actionCount) : undefined,
     },
+    ...(showConfigTab
+      ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
+      : []),
     {
       id: "schedules",
       label: t("detail.tabSchedules"),
@@ -472,6 +504,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       </Tabs>
 
       {/* Tab content */}
+      {type === "flow" && tab === "configuration" && <FlowConfigurationTab packageId={packageId} />}
       {type === "flow" && tab === "connectors" && <FlowConnectorsTab packageId={packageId} />}
       {type === "flow" && tab === "executions" && (
         <FlowExecutionsTab packageId={packageId} resolvedVersion={resolvedVersion} />

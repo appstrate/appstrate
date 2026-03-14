@@ -15,8 +15,6 @@ interface CustomCredServiceState {
 }
 
 interface FlowDetailUIState {
-  configOpen: boolean;
-  setConfigOpen: (v: boolean) => void;
   scheduleOpen: boolean;
   setScheduleOpen: (v: boolean) => void;
   editingSchedule: Schedule | null;
@@ -29,7 +27,6 @@ interface FlowDetailUIState {
 }
 
 const initialState = {
-  configOpen: false,
   scheduleOpen: false,
   editingSchedule: null as Schedule | null,
   apiKeyService: null as ApiKeyServiceState | null,
@@ -38,7 +35,6 @@ const initialState = {
 
 export const useFlowDetailUI = create<FlowDetailUIState>()((set) => ({
   ...initialState,
-  setConfigOpen: (configOpen) => set({ configOpen }),
   setScheduleOpen: (scheduleOpen) => set({ scheduleOpen }),
   setEditingSchedule: (editingSchedule) => set({ editingSchedule }),
   setApiKeyService: (apiKeyService) => set({ apiKeyService }),
