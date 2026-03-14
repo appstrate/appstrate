@@ -121,10 +121,10 @@ export function ProvidersPage() {
       if (connectButton || configButton) {
         actionsMap.set(
           p.id,
-          <>
+          <div className="flex items-center gap-2 ml-auto">
             {connectButton}
             {configButton}
-          </>,
+          </div>,
         );
       }
     }
