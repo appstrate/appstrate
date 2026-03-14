@@ -180,8 +180,10 @@ export function FlowConfigurationTab({ packageId }: { packageId: string }) {
 
   return (
     <div className="space-y-4">
-      <ModelSection packageId={packageId} />
-      <ProxySection packageId={packageId} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ModelSection packageId={packageId} />
+        <ProxySection packageId={packageId} />
+      </div>
       {hasConfigSchema && <ConfigSection packageId={packageId} />}
     </div>
   );
