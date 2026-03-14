@@ -271,6 +271,28 @@ describe("validateConfig", () => {
     expect(result.errors.some((e) => e.field === "max_emails")).toBe(true);
   });
 
+  test("empty string on required field fails (aligned with frontend)", () => {
+    const data = { clickup_list_id: "", max_emails: 20 };
+    const result = validateConfig(data, CONFIG_SCHEMA);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.field === "clickup_list_id")).toBe(true);
+  });
+
+  test("empty string on optional field is accepted", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["name"],
+    };
+    const data = { name: "test", notes: "" };
+    const result = validateConfig(data, schema);
+    // notes is not in required, so "" is kept and valid
+    expect(result.valid).toBe(true);
+  });
+
   test("schema without required array treats all fields as optional", () => {
     const schema: JSONSchemaObject = {
       type: "object",

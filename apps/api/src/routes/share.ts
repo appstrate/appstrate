@@ -9,11 +9,11 @@ import {
   linkExecutionToToken,
 } from "../services/share-tokens.ts";
 import { getPackage } from "../services/flow-service.ts";
-import { createExecution, getAdminConnections } from "../services/state.ts";
+import { createExecution, getAdminConnections, getPackageConfig } from "../services/state.ts";
 import { resolveProviderStatuses } from "../services/connection-manager.ts";
-import { validateFlowDependencies } from "../services/dependency-validation.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
+import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import type { PromptContext } from "../services/adapters/types.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -122,19 +122,22 @@ export function createShareRouter() {
       size: f.size,
     }));
 
-    // Resolve provider profiles
+    // Resolve provider profiles and config
     const manifestProviders = resolveManifestProviders(flow.manifest);
-    const providerProfiles = await resolveProviderProfiles(
-      manifestProviders,
-      userId,
-      packageId,
-      orgId,
-    );
+    const [providerProfiles, config] = await Promise.all([
+      resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
+      getPackageConfig(orgId, packageId),
+    ]);
 
-    // Validate provider dependencies before execution
-    const depError = await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
-    if (depError) {
-      return c.json(depError, 400);
+    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    const readinessError = await validateFlowReadiness({
+      flow,
+      providerProfiles,
+      orgId,
+      config,
+    });
+    if (readinessError) {
+      return c.json(readinessError, 400);
     }
 
     const userProfileId = await getEffectiveProfileId(userId, packageId);
@@ -155,6 +158,7 @@ export function createShareRouter() {
           userId,
           input: parsedInput,
           files: fileRefs,
+          config,
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {

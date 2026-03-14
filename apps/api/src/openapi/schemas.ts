@@ -12,6 +12,42 @@ export const schemas = {
       message: { type: "string", description: "Human-readable error message" },
     },
   },
+  FlowReadinessError: {
+    type: "object",
+    description:
+      "Pre-execution validation error. Returned when a flow is misconfigured and cannot be executed.",
+    required: ["error", "message"],
+    properties: {
+      error: {
+        type: "string",
+        enum: [
+          "EMPTY_PROMPT",
+          "MISSING_SKILL",
+          "MISSING_EXTENSION",
+          "PROVIDER_NOT_ENABLED",
+          "DEPENDENCY_NOT_SATISFIED",
+          "NEEDS_RECONNECTION",
+          "SCOPE_INSUFFICIENT",
+          "CONFIG_INCOMPLETE",
+        ],
+        description: "Specific readiness check that failed",
+      },
+      message: { type: "string", description: "Human-readable error message" },
+      providerId: {
+        type: "string",
+        description: "Provider ID (present for provider-related errors)",
+      },
+      connectUrl: {
+        type: "string",
+        description: "URL to connect the missing provider (present for provider errors)",
+      },
+      configUrl: {
+        type: "string",
+        description: "URL to the flow config endpoint (present for CONFIG_INCOMPLETE)",
+      },
+      details: { type: "object", description: "Additional error context" },
+    },
+  },
   User: {
     type: "object",
     properties: {
