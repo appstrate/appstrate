@@ -64,15 +64,15 @@ export function PreferencesPage() {
         </TabsList>
       </Tabs>
 
-      {tab === "general" && (
-        <GeneralTab
+      {tab === "general" && <GeneralTab />}
+
+      {tab === "appearance" && (
+        <AppearanceTab
           language={i18n.language}
           onLanguageChange={(lng) => updateLanguage.mutate(lng)}
           languagePending={updateLanguage.isPending}
         />
       )}
-
-      {tab === "appearance" && <AppearanceTab />}
 
       {tab === "security" && <SecurityTab />}
 
@@ -83,38 +83,11 @@ export function PreferencesPage() {
   );
 }
 
-function GeneralTab({
-  language,
-  onLanguageChange,
-  languagePending,
-}: {
-  language: string;
-  onLanguageChange: (lng: string) => void;
-  languagePending: boolean;
-}) {
+function GeneralTab() {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
     <>
-      <div className="text-sm font-medium text-muted-foreground mb-4">
-        {t("preferences.language")}
-      </div>
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <Select value={language} onValueChange={onLanguageChange} disabled={languagePending}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
-                <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
       <div className="text-sm font-medium text-muted-foreground mb-4">
         {t("preferences.account")}
       </div>
@@ -124,7 +97,15 @@ function GeneralTab({
   );
 }
 
-function AppearanceTab() {
+function AppearanceTab({
+  language,
+  onLanguageChange,
+  languagePending,
+}: {
+  language: string;
+  onLanguageChange: (lng: string) => void;
+  languagePending: boolean;
+}) {
   const { t } = useTranslation(["settings", "common"]);
   const { theme, setTheme } = useTheme();
 
@@ -142,6 +123,25 @@ function AppearanceTab() {
                 <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
                 <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
                 <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.language")}
+      </div>
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <Select value={language} onValueChange={onLanguageChange} disabled={languagePending}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
+                <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
