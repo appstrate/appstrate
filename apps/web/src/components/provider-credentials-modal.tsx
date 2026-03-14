@@ -34,7 +34,10 @@ export function ProviderCredentialsModal({
   const fieldKeys = Object.keys(properties);
   const hasSchemaFields = fieldKeys.length > 0;
 
-  const allRequiredFilled = !hasSchemaFields || required.every((key) => values[key]?.trim());
+  const allRequiredFilled =
+    !hasSchemaFields ||
+    provider.hasCredentials ||
+    required.every((key) => values[key]?.trim());
 
   const guide = provider.setupGuide;
   const resolvedCallbackHint = guide?.callbackUrlHint?.replace(
@@ -53,8 +56,7 @@ export function ProviderCredentialsModal({
     setVisibleFields((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = () => {
     if (hasSchemaFields && !allRequiredFilled) return;
 
     const payload: {
@@ -84,7 +86,7 @@ export function ProviderCredentialsModal({
       onClose={onClose}
       title={t("providers.form.title.configure") + " — " + provider.displayName}
     >
-      <form onSubmit={handleSubmit}>
+      <div>
         <div className="space-y-4">
           {/* Enabled toggle */}
           <label
@@ -200,13 +202,14 @@ export function ProviderCredentialsModal({
             {t("common:btn.cancel")}
           </Button>
           <Button
-            type="submit"
+            type="button"
             disabled={mutation.isPending || (hasSchemaFields && !allRequiredFilled)}
+            onClick={handleSubmit}
           >
             {mutation.isPending ? <Spinner /> : t("common:btn.save")}
           </Button>
         </div>
-      </form>
+      </div>
     </Modal>
   );
 }
