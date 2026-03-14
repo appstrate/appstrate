@@ -15,6 +15,7 @@ import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { computeProvidersSummary } from "../../lib/provider-status";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderConfigureButton } from "../provider-configure-button";
+import { ProviderCard } from "../provider-card";
 
 export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common", "settings"]);
@@ -235,35 +236,28 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
           }
 
           return (
-            <div key={svc.id} className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  {iconUrl && (
-                    <img src={iconUrl} alt="" className="h-5 w-5 shrink-0 rounded object-contain" />
-                  )}
-                  <span className="text-sm font-medium text-foreground truncate">
-                    {displayName}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+            <ProviderCard
+              key={svc.id}
+              displayName={displayName}
+              description={svc.description}
+              iconUrl={iconUrl}
+              badges={
+                isOrgAdmin && providerConfig ? (
+                  <ProviderConfigBadge enabled={providerConfig.enabled} />
+                ) : undefined
+              }
+              actions={
+                <>
+                  {actionButtons}
                   {isOrgAdmin && providerConfig && (
-                    <ProviderConfigBadge enabled={providerConfig.enabled} />
+                    <ProviderConfigureButton
+                      provider={providerConfig}
+                      callbackUrl={detail?.callbackUrl}
+                    />
                   )}
-                </div>
-              </div>
-              {svc.description && (
-                <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{svc.description}</p>
-              )}
-              <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
-                {actionButtons}
-                {isOrgAdmin && providerConfig && (
-                  <ProviderConfigureButton
-                    provider={providerConfig}
-                    callbackUrl={detail?.callbackUrl}
-                  />
-                )}
-              </div>
-            </div>
+                </>
+              }
+            />
           );
         })}
       </div>
