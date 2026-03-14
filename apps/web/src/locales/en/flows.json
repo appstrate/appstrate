@@ -315,6 +315,8 @@
   "result.items": "{{count}} item(s)",
   "result.noData": "No data",
   "ownership.forkedFrom": "Forked from ",
+  "detail.tabConfiguration": "Configuration",
+  "detail.configSectionProxy": "Proxy",
   "detail.tabApi": "API",
   "api.title": "Execute this flow via API",
   "api.noKey": "No API key found.",

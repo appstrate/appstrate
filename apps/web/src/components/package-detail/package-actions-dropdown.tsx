@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import {
   MoreHorizontal,
   Download,
-  Settings,
   GitBranchPlus,
   GitFork,
   Pencil,
@@ -39,8 +38,6 @@ interface PackageActionsDropdownProps {
   onCreateVersion?: () => void;
   onFork?: () => void;
   // Flow-specific
-  hasConfigSchema?: boolean;
-  onConfigure?: () => void;
   runningExecutions?: number;
   hasExecutions?: boolean;
   hasMemories?: boolean;
@@ -76,8 +73,6 @@ export function PackageActionsDropdown({
   onDownload,
   onCreateVersion,
   onFork,
-  hasConfigSchema,
-  onConfigure,
   runningExecutions = 0,
   hasExecutions,
   hasMemories,
@@ -157,14 +152,6 @@ export function PackageActionsDropdown({
               )}
               <DropdownMenuSeparator />
             </>
-          )}
-
-          {/* ── Configure (flow-only, if configSchema) ── */}
-          {isFlow && hasConfigSchema && onConfigure && (
-            <DropdownMenuItem onSelect={onConfigure}>
-              <Settings size={14} />
-              {t("detail.configure")}
-            </DropdownMenuItem>
           )}
 
           {/* ── Download ── */}

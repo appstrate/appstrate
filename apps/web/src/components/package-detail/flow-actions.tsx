@@ -7,7 +7,6 @@ import {
   useDeleteFlowExecutions,
   useDeleteAllMemories,
 } from "../../hooks/use-mutations";
-import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 
@@ -39,14 +38,10 @@ export function FlowActions({
   const deleteFlow = useDeleteFlow();
   const deleteExecutions = useDeleteFlowExecutions(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const setConfigOpen = useFlowDetailUI((s) => s.setConfigOpen);
   const setScheduleOpen = useFlowDetailUI((s) => s.setScheduleOpen);
   const setEditingSchedule = useFlowDetailUI((s) => s.setEditingSchedule);
-  const readiness = useFlowReadiness(detail);
 
   if (!detail) return null;
-
-  const { hasConfigSchema } = readiness;
 
   const hasFileInput =
     detail.input?.schema?.properties &&
@@ -65,8 +60,6 @@ export function FlowActions({
       onDownload={downloadPackage}
       onCreateVersion={onCreateVersion}
       onFork={onFork}
-      hasConfigSchema={hasConfigSchema}
-      onConfigure={() => setConfigOpen(true)}
       runningExecutions={detail.runningExecutions}
       hasExecutions={!!executions && executions.length > 0}
       hasMemories={!!memories && memories.length > 0}
