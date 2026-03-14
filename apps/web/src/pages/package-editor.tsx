@@ -3,7 +3,6 @@ import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
 import type { OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
@@ -24,6 +23,7 @@ import { ProviderEditorInner } from "../components/provider-editor/provider-edit
 import { Spinner } from "../components/spinner";
 import { JsonView } from "../components/json-view";
 import { EmptyState } from "../components/page-states";
+import { EditorShell } from "../components/editor-shell";
 import { useProviders } from "../hooks/use-providers";
 
 import type { FlowFormState } from "../components/flow-editor/types";
@@ -133,48 +133,20 @@ function FlowEditorInner({
   ];
 
   return (
-    <div className="space-y-4">
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/flows" className="text-muted-foreground hover:text-foreground">
-          {t("detail.breadcrumb")}
-        </Link>
-        <span className="opacity-50">/</span>
-        {isEdit && detail ? (
-          <>
-            <Link
-              to={`/flows/${packageId}`}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {form.metadata.displayName || packageId}
-            </Link>
-            <span className="opacity-50">/</span>
-            <span>{t("editor.breadcrumbEdit")}</span>
-          </>
-        ) : (
-          <span>{t("editor.breadcrumbNew")}</span>
-        )}
-      </nav>
-
-      {error && (
-        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as GenericEditorTab)}
-        className="mb-4"
-      >
-        <TabsList className="overflow-x-auto">
-          {flowTabs.map((tab) => (
-            <TabsTrigger key={tab.id} value={tab.id}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-
+    <EditorShell
+      type="flow"
+      packageId={packageId}
+      isEdit={isEdit}
+      displayName={form.metadata.displayName || packageId}
+      tabs={flowTabs}
+      activeTab={activeTab}
+      onTabChange={(v) => setActiveTab(v as GenericEditorTab)}
+      error={error}
+      isPending={isPending}
+      onSubmit={handleSubmit}
+      onCancel={() => navigate(isEdit ? `/flows/${packageId}` : "/")}
+      hideSubmitBar={activeTab === "json"}
+    >
       {activeTab === "general" && (
         <>
           <MetadataSection
@@ -241,22 +213,7 @@ function FlowEditorInner({
         />
       )}
       {activeTab === "json" && <JsonEditor form={form} onApply={handleJsonApply} />}
-
-      {activeTab !== "json" && (
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
-          <Button
-            variant="outline"
-            type="button"
-            onClick={() => navigate(isEdit ? `/flows/${packageId}` : "/")}
-          >
-            {t("btn.cancel")}
-          </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isPending}>
-            {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
-          </Button>
-        </div>
-      )}
-    </div>
+    </EditorShell>
   );
 }
 
@@ -322,48 +279,22 @@ function PackageEditorInner({
   const language = type === "skill" ? "markdown" : "typescript";
 
   return (
-    <div className="space-y-4">
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to={packageListPath(type)} className="text-muted-foreground hover:text-foreground">
-          {t(`packages.type.${type}s`, { ns: "settings" })}
-        </Link>
-        <span className="opacity-50">/</span>
-        {isEdit && packageId ? (
-          <>
-            <Link
-              to={packageDetailPath(type, packageId)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {form.metadata.displayName || packageId}
-            </Link>
-            <span className="opacity-50">/</span>
-            <span>{t("editor.breadcrumbEdit")}</span>
-          </>
-        ) : (
-          <span>{t("editor.breadcrumbNew")}</span>
-        )}
-      </nav>
-
-      {error && (
-        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as GenericEditorTab)}
-        className="mb-4"
-      >
-        <TabsList className="overflow-x-auto">
-          {pkgTabs.map((tab) => (
-            <TabsTrigger key={tab.id} value={tab.id}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-
+    <EditorShell
+      type={type}
+      packageId={packageId}
+      isEdit={isEdit}
+      displayName={form.metadata.displayName || packageId}
+      tabs={pkgTabs}
+      activeTab={activeTab}
+      onTabChange={(v) => setActiveTab(v as GenericEditorTab)}
+      error={error}
+      isPending={isPending}
+      onSubmit={handleSubmit}
+      onCancel={() =>
+        navigate(isEdit ? packageDetailPath(type, packageId!) : packageListPath(type))
+      }
+      hideSubmitBar={activeTab === "json"}
+    >
       {activeTab === "general" && (
         <MetadataSection
           value={form.metadata}
@@ -385,24 +316,7 @@ function PackageEditorInner({
           <JsonView data={form} />
         </div>
       )}
-
-      {activeTab !== "json" && (
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
-          <Button
-            variant="outline"
-            type="button"
-            onClick={() =>
-              navigate(isEdit ? packageDetailPath(type, packageId!) : packageListPath(type))
-            }
-          >
-            {t("btn.cancel")}
-          </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isPending}>
-            {isPending ? <Spinner /> : isEdit ? t("btn.save") : t("btn.create")}
-          </Button>
-        </div>
-      )}
-    </div>
+    </EditorShell>
   );
 }
 

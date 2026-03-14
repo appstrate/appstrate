@@ -1,12 +1,10 @@
 import { useState, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useCreateProvider, useUpdateProvider } from "../../hooks/use-mutations";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -14,11 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Spinner } from "../spinner";
+import { Button } from "@/components/ui/button";
 import { JsonView } from "../json-view";
 import { MetadataSection } from "../flow-editor/metadata-section";
 import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "../flow-editor/utils";
+import { EditorShell } from "../editor-shell";
 import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "json";
@@ -290,49 +289,20 @@ export function ProviderEditorInner({
   ];
 
   return (
-    <div className="space-y-4">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/providers" className="text-muted-foreground hover:text-foreground">
-          {t("packages.type.providers")}
-        </Link>
-        <span className="opacity-50">/</span>
-        {isEdit && packageId ? (
-          <>
-            <Link
-              to={`/providers/${packageId}`}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {metadata.displayName || packageId}
-            </Link>
-            <span className="opacity-50">/</span>
-            <span>{t("editor.breadcrumbEdit", { ns: "flows" })}</span>
-          </>
-        ) : (
-          <span>{t("providers.form.title.create")}</span>
-        )}
-      </nav>
-
-      {error && (
-        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as ProviderEditorTab)}
-        className="mb-4"
-      >
-        <TabsList className="overflow-x-auto">
-          {tabs.map((tab) => (
-            <TabsTrigger key={tab.id} value={tab.id}>
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-
+    <EditorShell
+      type="provider"
+      packageId={packageId}
+      isEdit={isEdit}
+      displayName={metadata.displayName || packageId}
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={(v) => setActiveTab(v as ProviderEditorTab)}
+      error={error}
+      isPending={isPending}
+      onSubmit={handleSubmit}
+      onCancel={() => navigate(isEdit ? `/providers/${packageId}` : "/providers")}
+      hideSubmitBar={activeTab === "json"}
+    >
       {/* ── General Tab ── */}
       {activeTab === "general" && (
         <>
@@ -782,28 +752,6 @@ export function ProviderEditorInner({
           />
         </div>
       )}
-
-      {/* Submit bar */}
-      {activeTab !== "json" && (
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
-          <Button
-            variant="outline"
-            type="button"
-            onClick={() => navigate(isEdit ? `/providers/${packageId}` : "/providers")}
-          >
-            {t("btn.cancel", { ns: "flows" })}
-          </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isPending}>
-            {isPending ? (
-              <Spinner />
-            ) : isEdit ? (
-              t("btn.save", { ns: "flows" })
-            ) : (
-              t("btn.create", { ns: "flows" })
-            )}
-          </Button>
-        </div>
-      )}
-    </div>
+    </EditorShell>
   );
 }
