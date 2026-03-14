@@ -12,7 +12,9 @@ import {
 } from "../../hooks/use-mutations";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
-import { computeProvidersSummary } from "../../lib/provider-status";
+import { computeProvidersSummary, connectedLabelWithProfile } from "../../lib/provider-status";
+import { useConnectionProfiles } from "../../hooks/use-connection-profiles";
+import { ProfileSelector } from "../profile-selector";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderConfigureButton } from "../provider-configure-button";
 import { ProviderCard } from "../provider-card";
@@ -23,6 +25,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("flow", packageId);
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
+  const { data: profiles } = useConnectionProfiles();
 
   const connectMutation = useConnect();
   const bindAdmin = useBindAdminProvider(packageId);
@@ -70,18 +73,23 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
 
   return (
     <>
-      {summary && (
-        <div className="text-sm text-muted-foreground mb-2">
-          {summary.connectedCount > 0 &&
-            t("detail.servicesSummaryOk", { connected: summary.connectedCount })}
-          {summary.connectedCount > 0 && summary.actionCount > 0 && " — "}
-          {summary.actionCount > 0 && (
-            <span className="text-warning font-medium">
-              {t("detail.servicesSummaryAction", { count: summary.actionCount })}
-            </span>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm text-muted-foreground">
+          {summary && (
+            <>
+              {summary.connectedCount > 0 &&
+                t("detail.servicesSummaryOk", { connected: summary.connectedCount })}
+              {summary.connectedCount > 0 && summary.actionCount > 0 && " — "}
+              {summary.actionCount > 0 && (
+                <span className="text-warning font-medium">
+                  {t("detail.servicesSummaryAction", { count: summary.actionCount })}
+                </span>
+              )}
+            </>
           )}
         </div>
-      )}
+        <ProfileSelector />
+      </div>
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
         {detail.requires.providers.map((svc) => {
           const isConnected = svc.status === "connected";
@@ -194,7 +202,9 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
           } else if (isConnected) {
             actionButtons = (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-emerald-500">{t("settings:services.connected")}</span>
+                <span className="text-xs text-emerald-500">
+                  {connectedLabelWithProfile(t("settings:services.connected"), profiles, profileId)}
+                </span>
                 {hasScopeIssue && svc.scopesMissing && (
                   <Button
                     variant="outline"

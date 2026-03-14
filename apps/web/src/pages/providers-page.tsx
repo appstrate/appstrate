@@ -12,6 +12,10 @@ import {
   useConnectCredentials,
   useDisconnect,
 } from "../hooks/use-mutations";
+import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
+import { useConnectionProfiles } from "../hooks/use-connection-profiles";
+import { ProfileSelector } from "../components/profile-selector";
+import { connectedLabelWithProfile } from "../lib/provider-status";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
 import { Modal } from "../components/modal";
@@ -28,6 +32,9 @@ export function ProvidersPage() {
   const { data: providersData } = useProviders();
   const { data: integrations } = useServices();
   const { isOrgAdmin } = useOrg();
+  const profileId = useCurrentProfileId();
+  const pParam = profileIdParam(profileId);
+  const { data: profiles } = useConnectionProfiles();
 
   const connectMutation = useConnect();
   const connectApiKeyMutation = useConnectApiKey();
@@ -65,12 +72,12 @@ export function ProvidersPage() {
         schema: provider.credentialSchema as unknown as JSONSchemaObject,
       });
     } else {
-      connectMutation.mutate({ provider: provider.id });
+      connectMutation.mutate({ provider: provider.id, ...pParam });
     }
   };
 
   const handleDisconnect = (providerId: string) => {
-    disconnectMutation.mutate({ provider: providerId });
+    disconnectMutation.mutate({ provider: providerId, ...pParam });
   };
 
   const isPending =
@@ -94,7 +101,9 @@ export function ProvidersPage() {
         p.authMode !== "proxy" ? (
           isConnected ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-emerald-500">{t("services.connected")}</span>
+              <span className="text-xs text-emerald-500">
+                {connectedLabelWithProfile(t("services.connected"), profiles, profileId)}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -145,12 +154,15 @@ export function ProvidersPage() {
   const allProviders = providersData?.providers ?? [];
 
   const filterToggle = (
-    <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
-      <TabsList>
-        <TabsTrigger value="enabled">{t("providers.filterEnabled")}</TabsTrigger>
-        <TabsTrigger value="all">{t("providers.filterAll")}</TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <div className="flex items-center gap-3">
+      <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
+        <TabsList>
+          <TabsTrigger value="enabled">{t("providers.filterEnabled")}</TabsTrigger>
+          <TabsTrigger value="all">{t("providers.filterAll")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <ProfileSelector />
+    </div>
   );
 
   const configureButton = isOrgAdmin ? (
@@ -184,7 +196,7 @@ export function ProvidersPage() {
         onSubmit={(apiKey) => {
           if (!apiKeyProvider) return;
           connectApiKeyMutation.mutate(
-            { provider: apiKeyProvider.id, apiKey },
+            { provider: apiKeyProvider.id, apiKey, ...pParam },
             { onSuccess: () => setApiKeyProvider(null) },
           );
         }}
@@ -199,7 +211,7 @@ export function ProvidersPage() {
           isPending={connectCredentialsMutation.isPending}
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(
-              { provider: customCredProvider.id, credentials },
+              { provider: customCredProvider.id, credentials, ...pParam },
               { onSuccess: () => setCustomCredProvider(null) },
             );
           }}
