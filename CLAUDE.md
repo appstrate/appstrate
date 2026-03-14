@@ -5,18 +5,17 @@ Appstrate is an open-source platform for executing one-shot AI flows in ephemera
 ## Quick Start
 
 ```sh
-# 1. Start infrastructure
-docker compose up -d          # PostgreSQL 16
+# 1. Setup dev Docker Compose override
+cp docker-compose.override.example.yml docker-compose.override.yml
 
-# 2. Run database migrations
+# 2. Start infrastructure + build runtime images
+docker compose up -d          # PostgreSQL 16 + builds appstrate-pi & appstrate-sidecar images
+
+# 3. Configure .env (copy .env.example, set Pi adapter keys + DB URL + Better Auth secret)
+
+# 4. Run database migrations
 bun run db:generate           # Generate Drizzle migrations from schema
 bun run db:migrate            # Apply migrations to PostgreSQL
-
-# 3. Build runtime images
-bun run build-runtime         # docker build -t appstrate-pi ./runtime-pi
-bun run build-sidecar         # docker build -t appstrate-sidecar ./runtime-pi/sidecar
-
-# 4. Configure .env (copy .env.example, set Pi adapter keys + DB URL + Better Auth secret)
 
 # 5. Build everything (shared-types + frontend)
 bun run build                 # turbo build → apps/web/dist/
@@ -26,6 +25,14 @@ bun run dev                   # turbo dev → Hono on :3000
 
 # 7. First signup creates an organization automatically
 ```
+
+### Docker Compose Structure
+
+- **`docker-compose.yml`** — Self-hosting file (images from GHCR). Also the base for dev.
+- **`docker-compose.override.yml`** — Dev override (gitignored, auto-merged by Compose). Copy from `docker-compose.override.example.yml`. Adds local image builds, disables migrate/appstrate services (run manually via `bun run db:migrate` / `bun run dev`).
+- **`docker:dev`** script — `docker compose up -d` (postgres + runtime image builds with override).
+- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack built locally, for testing).
+- **Self-hosting** — Without override: `docker compose up -d` pulls GHCR images and starts everything.
 
 ## Stack — Critical Constraints
 
@@ -222,6 +229,8 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 | `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                      |
 | `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                            |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Number of pre-warmed sidecar containers (0 = disabled)                                                     |
+| `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (override for GHCR / custom registries)                              |
+| `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy (override for GHCR / custom registries)                                 |
 | `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                               |
 | `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                 |
 

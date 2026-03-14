@@ -10,7 +10,7 @@ import type {
 } from "./types.ts";
 import * as docker from "../docker.ts";
 import * as sidecarPool from "../sidecar-pool.ts";
-import { SIDECAR_IMAGE } from "../sidecar-pool.ts";
+import { getSidecarImage } from "../sidecar-pool.ts";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS, SIDECAR_EXPOSED_PORTS } from "./constants.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
@@ -109,7 +109,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to execution network (internal) with "sidecar" alias for agent DNS.
     const containerId = await docker.createContainer(executionId, sidecarEnv, {
-      image: SIDECAR_IMAGE,
+      image: getSidecarImage(),
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,

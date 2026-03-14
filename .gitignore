@@ -46,3 +46,6 @@ flows/*
 claudedocs/
 
 .tasks
+
+# Docker Compose dev override (auto-merged, local only)
+docker-compose.override.yml
