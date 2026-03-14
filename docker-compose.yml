@@ -3,6 +3,8 @@ name: appstrate
 services:
   appstrate-postgres:
     image: postgres:16-alpine
+    ports:
+      - "5432:5432"
     restart: unless-stopped
     mem_limit: 1g
     command:
@@ -34,6 +36,7 @@ services:
       retries: 5
 
   appstrate-redis:
+    profiles: [prod]
     image: redis:7.2-alpine
     restart: unless-stopped
     mem_limit: 256m
@@ -70,6 +73,7 @@ services:
         condition: service_healthy
 
   appstrate:
+    profiles: [prod]
     build:
       context: .
     ports:
