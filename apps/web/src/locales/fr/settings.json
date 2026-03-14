@@ -25,7 +25,7 @@
   "createOrg.submit": "Créer l'organisation",
   "orgSettings.pageTitle": "Paramètres de l'organisation",
   "orgSettings.tabGeneral": "Général",
-  "orgSettings.tabMembers": "Membres ({{count}})",
+  "orgSettings.tabMembers": "Membres",
   "orgSettings.orgTitle": "Organisation",
   "orgSettings.dangerZone": "Zone de danger",
   "orgSettings.deleteOrg": "Supprimer l'organisation",
