@@ -9,9 +9,7 @@ import {
   uuid,
   index,
   uniqueIndex,
-  primaryKey,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { executionStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";

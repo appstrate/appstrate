@@ -11,8 +11,7 @@
     "./notify": "./src/notify.ts"
   },
   "scripts": {
-    "check": "tsc --noEmit",
-    "lint:fix": "prettier --write src/",
+    "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push"
