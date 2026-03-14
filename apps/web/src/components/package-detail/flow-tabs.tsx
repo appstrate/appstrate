@@ -10,6 +10,7 @@ import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 import { useOrg } from "../../hooks/use-org";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { FlowProvidersSection } from "./flow-providers-section";
@@ -24,9 +25,11 @@ import { formatDateField } from "../../lib/markdown";
 export function FlowExecutionsTab({
   packageId,
   resolvedVersion,
+  configSchemaOverride,
 }: {
   packageId: string;
   resolvedVersion: string | undefined;
+  configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = usePackageDetail("flow", packageId);
@@ -34,7 +37,7 @@ export function FlowExecutionsTab({
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
-  const readiness = useFlowReadiness(detail);
+  const readiness = useFlowReadiness(detail, undefined, undefined, configSchemaOverride);
 
   if (!detail) return null;
 

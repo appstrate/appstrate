@@ -16,14 +16,22 @@ import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
-function ConfigSection({ packageId }: { packageId: string }) {
+function ConfigSection({
+  packageId,
+  schema,
+  isHistorical,
+}: {
+  packageId: string;
+  schema: JSONSchemaObject;
+  isHistorical?: boolean;
+}) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = usePackageDetail("flow", packageId);
 
-  const schema = detail?.config?.schema;
   const current = detail?.config?.current || {};
   const mutation = useSaveConfig(detail?.id ?? "");
 
@@ -69,7 +77,7 @@ function ConfigSection({ packageId }: { packageId: string }) {
         />
       ))}
       <div className="flex justify-end pt-2">
-        <Button onClick={handleSave} disabled={mutation.isPending} size="sm">
+        <Button onClick={handleSave} disabled={mutation.isPending || isHistorical} size="sm">
           {mutation.isPending ? "..." : t("btn.save")}
         </Button>
       </div>
@@ -171,12 +179,21 @@ function ProxySection({ packageId }: { packageId: string }) {
 
 // ─── Main Tab ───────────────────────────────────────────────────────
 
-export function FlowConfigurationTab({ packageId }: { packageId: string }) {
+export function FlowConfigurationTab({
+  packageId,
+  configSchemaOverride,
+  isHistorical,
+}: {
+  packageId: string;
+  configSchemaOverride?: JSONSchemaObject;
+  isHistorical?: boolean;
+}) {
   const { data: detail } = usePackageDetail("flow", packageId);
 
-  const hasConfigSchema = !!(
-    detail?.config?.schema?.properties && Object.keys(detail.config.schema.properties).length > 0
-  );
+  const schema = isHistorical
+    ? configSchemaOverride
+    : (configSchemaOverride ?? detail?.config?.schema);
+  const hasConfigSchema = !!(schema?.properties && Object.keys(schema.properties).length > 0);
 
   return (
     <div className="space-y-4">
@@ -184,7 +201,9 @@ export function FlowConfigurationTab({ packageId }: { packageId: string }) {
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
       </div>
-      {hasConfigSchema && <ConfigSection packageId={packageId} />}
+      {hasConfigSchema && schema && (
+        <ConfigSection packageId={packageId} schema={schema} isHistorical={isHistorical} />
+      )}
     </div>
   );
 }
