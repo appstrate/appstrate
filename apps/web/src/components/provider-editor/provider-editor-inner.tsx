@@ -265,7 +265,7 @@ export function ProviderEditorInner({
 
     if (isEdit && packageId) {
       updateProvider.mutate(
-        { id: packageId, data },
+        { id: packageId, ...data },
         {
           onSuccess: () => navigate(`/providers/${packageId}`),
           onError: (err) => setError(err.message),

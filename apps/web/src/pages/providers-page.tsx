@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders } from "../hooks/use-providers";
@@ -13,6 +14,8 @@ import {
 } from "../hooks/use-mutations";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { CustomCredentialsModal } from "../components/custom-credentials-modal";
+import { Modal } from "../components/modal";
+import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
 import { ProviderConfigBadge } from "../components/provider-config-badge";
 import { ProviderConfigureButton } from "../components/provider-configure-button";
 import { ItemTab } from "./item-tab";
@@ -40,6 +43,8 @@ export function ProvidersPage() {
     name: string;
     schema: JSONSchemaObject;
   } | null>(null);
+  const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
+  const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
 
   const connectedProviders = new Set<string>();
   if (integrations) {
@@ -137,6 +142,7 @@ export function ProvidersPage() {
       if (p.enabled) enabledIds.add(p.id);
     }
   }
+  const allProviders = providersData?.providers ?? [];
 
   const filterToggle = (
     <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
@@ -147,6 +153,17 @@ export function ProvidersPage() {
     </Tabs>
   );
 
+  const configureButton = isOrgAdmin ? (
+    <Button
+      variant="outline"
+      onClick={() => setConfigurePickerOpen(true)}
+      disabled={allProviders.length === 0}
+    >
+      <Settings size={14} />
+      {t("providers.configureProvider")}
+    </Button>
+  ) : null;
+
   return (
     <>
       <ItemTab
@@ -156,6 +173,8 @@ export function ProvidersPage() {
         iconMap={iconMap}
         filterIds={showAll ? undefined : enabledIds}
         headerContent={filterToggle}
+        extraActions={configureButton}
+        emptyExtraActions={configureButton}
       />
       <ApiKeyModal
         open={!!apiKeyProvider}
@@ -184,6 +203,51 @@ export function ProvidersPage() {
               { onSuccess: () => setCustomCredProvider(null) },
             );
           }}
+        />
+      )}
+      <Modal
+        open={configurePickerOpen}
+        onClose={() => setConfigurePickerOpen(false)}
+        title={t("providers.configureProvider")}
+      >
+        <p className="text-sm text-muted-foreground mb-4">{t("providers.selectProvider")}</p>
+        {allProviders.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            {t("providers.allConfigured")}
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {allProviders.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                onClick={() => {
+                  setConfigurePickerOpen(false);
+                  setConfigureProvider(p);
+                }}
+              >
+                {p.iconUrl ? (
+                  <img src={p.iconUrl} alt="" className="w-6 h-6 rounded" />
+                ) : (
+                  <div className="w-6 h-6 rounded bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
+                    {p.displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{p.displayName}</span>
+                </div>
+                <ProviderConfigBadge enabled={p.enabled} />
+              </button>
+            ))}
+          </div>
+        )}
+      </Modal>
+      {configureProvider && (
+        <ProviderCredentialsModal
+          provider={configureProvider}
+          callbackUrl={providersData?.callbackUrl}
+          onClose={() => setConfigureProvider(null)}
         />
       )}
     </>
