@@ -109,7 +109,7 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
 
     // Resolve the auth mode from the provider
     const authMode = await getProviderAuthMode(provider, orgId);
-    const mode = authMode === "basic" ? "basic" : authMode === "proxy" ? "proxy" : "custom";
+    const mode = authMode === "basic" ? "basic" : "custom";
 
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
     await saveCredentialsConnection(provider, mode, body.credentials, profileId);

@@ -706,8 +706,8 @@ function ProviderFormBody({
           />
         )}
 
-        {/* Authorized URIs section (hidden for proxy — backend forces allowAllUris) */}
-        {!isBuiltIn && form.authMode !== "proxy" && (
+        {/* Authorized URIs section */}
+        {!isBuiltIn && (
           <>
             <div className="text-sm font-medium text-muted-foreground mb-4 mt-4">
               {t("providers.form.sectionUris")}

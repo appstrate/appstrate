@@ -33,7 +33,7 @@ const createProviderSchema = z.object({
   description: z.string().optional(),
   author: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom", "proxy"]),
+  authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom"]),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
   authorizationUrl: z.string().optional(),

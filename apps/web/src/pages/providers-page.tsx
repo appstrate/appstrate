@@ -97,36 +97,33 @@ export function ProvidersPage() {
       badgeMap.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
       const isConnected = connectedProviders.has(p.id);
-      const connectButton =
-        p.authMode !== "proxy" ? (
-          isConnected ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-emerald-500">
-                {connectedLabelWithProfile(t("services.connected"), profiles, profileId)}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => handleDisconnect(p.id)}
-                disabled={isPending}
-              >
-                {t("detail.disconnect", { ns: "flows" })}
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={() => handleConnect(p)}
-              disabled={!p.enabled || isPending}
-              title={!p.enabled ? t("providers.notConfigured") : undefined}
-            >
-              {t("detail.connect", { ns: "flows" })}
-            </Button>
-          )
-        ) : null;
+      const connectButton = isConnected ? (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-emerald-500">
+            {connectedLabelWithProfile(t("services.connected"), profiles, profileId)}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => handleDisconnect(p.id)}
+            disabled={isPending}
+          >
+            {t("detail.disconnect", { ns: "flows" })}
+          </Button>
+        </div>
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => handleConnect(p)}
+          disabled={!p.enabled || isPending}
+          title={!p.enabled ? t("providers.notConfigured") : undefined}
+        >
+          {t("detail.connect", { ns: "flows" })}
+        </Button>
+      );
 
       const configButton = isOrgAdmin ? (
         <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />

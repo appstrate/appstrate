@@ -688,59 +688,43 @@ export function ProviderEditorInner({
               })}
             </div>
           )}
-
-          {/* Proxy — auto-configured */}
-          {fields.authMode === "proxy" && (
-            <div className="text-sm text-muted-foreground py-4">
-              {t("providers.authMode.proxy")} —{" "}
-              {t("providers.form.allowAllUrisHint", {
-                defaultValue: "Auto-configured by backend.",
-              })}
-            </div>
-          )}
         </div>
       )}
 
       {/* ── Authorization Tab ── */}
       {activeTab === "uris" && (
         <div className="space-y-4">
-          {fields.authMode === "proxy" ? (
-            <div className="text-sm text-muted-foreground py-4">
-              {t("providers.form.allowAllUrisHint")}
+          <>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={fields.allowAllUris}
+                  onChange={(e) => setField("allowAllUris", e.target.checked)}
+                />
+                {t("providers.form.allowAllUris")}
+              </Label>
+              <div className="text-sm text-muted-foreground">
+                {t("providers.form.allowAllUrisHint")}
+              </div>
             </div>
-          ) : (
-            <>
+
+            {!fields.allowAllUris && (
               <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={fields.allowAllUris}
-                    onChange={(e) => setField("allowAllUris", e.target.checked)}
-                  />
-                  {t("providers.form.allowAllUris")}
-                </Label>
+                <Label htmlFor="pe-uris">{t("providers.form.authorizedUris")}</Label>
+                <Textarea
+                  id="pe-uris"
+                  value={fields.authorizedUris}
+                  onChange={(e) => setField("authorizedUris", e.target.value)}
+                  rows={5}
+                  placeholder="https://api.example.com/*"
+                />
                 <div className="text-sm text-muted-foreground">
-                  {t("providers.form.allowAllUrisHint")}
+                  {t("providers.form.authorizedUrisHint")}
                 </div>
               </div>
-
-              {!fields.allowAllUris && (
-                <div className="space-y-2">
-                  <Label htmlFor="pe-uris">{t("providers.form.authorizedUris")}</Label>
-                  <Textarea
-                    id="pe-uris"
-                    value={fields.authorizedUris}
-                    onChange={(e) => setField("authorizedUris", e.target.value)}
-                    rows={5}
-                    placeholder="https://api.example.com/*"
-                  />
-                  <div className="text-sm text-muted-foreground">
-                    {t("providers.form.authorizedUrisHint")}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+            )}
+          </>
         </div>
       )}
 

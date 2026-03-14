@@ -4,7 +4,6 @@ const AUTH_MODE_I18N: Record<string, string> = {
   api_key: "providers.authMode.apiKey",
   basic: "providers.authMode.basic",
   custom: "providers.authMode.custom",
-  proxy: "providers.authMode.proxy",
 };
 
 /** Return the i18n key for a given authMode (settings namespace). */
