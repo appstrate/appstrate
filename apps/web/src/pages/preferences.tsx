@@ -28,7 +28,6 @@ import {
   useRenameConnectionProfile,
   useDeleteConnectionProfile,
 } from "../hooks/use-connection-profiles";
-import { useCurrentProfileId } from "../hooks/use-current-profile";
 import { ProfileSelector } from "../components/profile-selector";
 import { formatDateField } from "../lib/markdown";
 import { Unplug } from "lucide-react";
@@ -414,18 +413,18 @@ function groupByProvider(connections: UserConnectionItem[] | undefined) {
 
 function ConnectorsTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const profileId = useCurrentProfileId();
   const { data: userConns, isLoading } = useAllUserConnections();
   const disconnectMutation = useDisconnect();
   const deleteAllMutation = useDeleteAllConnections();
 
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
+  const [filterProfileId, setFilterProfileId] = useState<string | null>(null);
 
   const filteredConnections = useMemo(() => {
     if (!userConns?.connections) return undefined;
-    if (!profileId) return userConns.connections;
-    return userConns.connections.filter((c) => c.profile.id === profileId);
-  }, [userConns, profileId]);
+    if (!filterProfileId) return userConns.connections;
+    return userConns.connections.filter((c) => c.profile.id === filterProfileId);
+  }, [userConns, filterProfileId]);
 
   const grouped = useMemo(() => groupByProvider(filteredConnections), [filteredConnections]);
 
@@ -449,7 +448,7 @@ function ConnectorsTab() {
         <div className="text-sm font-medium text-muted-foreground">
           {t("connectors.myConnections")}
         </div>
-        <ProfileSelector />
+        <ProfileSelector showAllOption value={filterProfileId} onChange={setFilterProfileId} />
       </div>
 
       <div className="rounded-lg border border-border bg-card p-5 mb-4">
@@ -537,7 +536,7 @@ function ConnectorsTab() {
                       >
                         <div className="flex flex-col gap-0.5">
                           <span>
-                            {conn.profile.name}
+                            {t("connectors.profileLabel")} : {conn.profile.name}
                             {conn.profile.isDefault && (
                               <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
                                 {t("profiles.default")}
