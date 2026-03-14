@@ -317,6 +317,7 @@
   "ownership.forkedFrom": "Dupliqué depuis ",
   "detail.tabConfiguration": "Configuration",
   "detail.configSectionProxy": "Proxy",
+  "detail.configAlert": "Des champs de configuration obligatoires ne sont pas remplis.",
   "detail.tabApi": "API",
   "api.title": "Exécuter ce flow via l'API",
   "api.noKey": "Aucune clé API trouvée.",

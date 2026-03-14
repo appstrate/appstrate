@@ -317,6 +317,7 @@
   "ownership.forkedFrom": "Forked from ",
   "detail.tabConfiguration": "Configuration",
   "detail.configSectionProxy": "Proxy",
+  "detail.configAlert": "Required configuration fields are not filled in.",
   "detail.tabApi": "API",
   "api.title": "Execute this flow via API",
   "api.noKey": "No API key found.",
