@@ -131,7 +131,7 @@
   "providers.allConfigured": "Tous les fournisseurs sont configurés.",
   "providers.filterUsed": "Utilisés",
   "providers.filterEnabled": "Activés",
-  "providers.filterAll": "Tous",
+  "providers.filterAll": "Installés",
   "providers.builtIn": "Intégré",
   "providers.custom": "Personnalisé",
   "providers.reset": "Réinitialiser",
