@@ -9,7 +9,7 @@ import {
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
 
-const PI_RUNTIME_IMAGE = "appstrate-pi:latest";
+import { getEnv } from "@appstrate/env";
 
 export class PiAdapter implements ExecutionAdapter {
   async *execute(
@@ -105,7 +105,7 @@ export class PiAdapter implements ExecutionAdapter {
           {
             executionId,
             role: "agent",
-            image: PI_RUNTIME_IMAGE,
+            image: getEnv().PI_IMAGE,
             env: containerEnv,
             resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
             files:

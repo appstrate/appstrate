@@ -15,7 +15,7 @@ import {
   SIDECAR_NANO_CPUS,
   SIDECAR_EXPOSED_PORTS,
 } from "./orchestrator/constants.ts";
-export const SIDECAR_IMAGE = "appstrate-sidecar:latest";
+export const getSidecarImage = () => getEnv().SIDECAR_IMAGE;
 const HEALTH_CHECK_RETRIES = 15;
 const HEALTH_CHECK_DELAYS_MS = [
   25, 50, 50, 100, 100, 200, 200, 400, 400, 400, 400, 400, 400, 400, 400,
@@ -161,7 +161,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
     crypto.randomUUID().slice(0, 8),
     { PORT: "8080", CONFIG_SECRET: configSecret },
     {
-      image: SIDECAR_IMAGE,
+      image: getSidecarImage(),
       adapterName: "sidecar-pool",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,

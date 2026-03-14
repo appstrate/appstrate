@@ -46,6 +46,10 @@ const envSchema = z.object({
   EXECUTION_ADAPTER: z.enum(["pi"]).default("pi"),
   SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
+  // Docker images (override for GHCR / custom registries)
+  PI_IMAGE: z.string().default("appstrate-pi:latest"),
+  SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
+
   // Registry
   REGISTRY_URL: z.string().optional(),
   REGISTRY_CLIENT_ID: z.string().optional(),

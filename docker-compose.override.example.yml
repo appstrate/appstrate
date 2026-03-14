@@ -1,0 +1,39 @@
+# Appstrate — Development Override
+#
+# Copy this file to docker-compose.override.yml (gitignored).
+# Compose auto-merges it with docker-compose.yml.
+#
+# Usage:
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   docker compose up -d        # starts postgres + builds runtime images
+#   bun run db:migrate           # run migrations manually
+#   bun run dev                  # start API + frontend on :3000
+
+services:
+  # ── Build runtime images locally ────────────────────────────────
+  appstrate-pi:
+    build:
+      context: ./runtime-pi
+    image: appstrate-pi:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo 'runtime image built'"]
+
+  appstrate-sidecar:
+    build:
+      context: ./runtime-pi/sidecar
+    image: appstrate-sidecar:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
+
+  # ── Disable services handled manually in dev ────────────────────
+  # Migrations: bun run db:migrate
+  appstrate-migrate:
+    profiles: [prod]
+    build:
+      context: .
+
+  # Platform: bun run dev
+  appstrate:
+    profiles: [prod]
+    build:
+      context: .
