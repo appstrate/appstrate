@@ -35,9 +35,7 @@ export function ProviderCredentialsModal({
   const hasSchemaFields = fieldKeys.length > 0;
 
   const allRequiredFilled =
-    !hasSchemaFields ||
-    provider.hasCredentials ||
-    required.every((key) => values[key]?.trim());
+    !hasSchemaFields || provider.hasCredentials || required.every((key) => values[key]?.trim());
 
   const guide = provider.setupGuide;
   const resolvedCallbackHint = guide?.callbackUrlHint?.replace(

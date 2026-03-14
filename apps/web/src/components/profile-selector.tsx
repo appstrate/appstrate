@@ -31,9 +31,7 @@ export function ProfileSelector({ showAllOption, value, onChange }: ProfileSelec
   // Hide when only 1 profile exists
   if (!profiles || profiles.length <= 1) return null;
 
-  const selectValue = isControlled
-    ? (value === null ? ALL_VALUE : value)
-    : (globalProfileId ?? "");
+  const selectValue = isControlled ? (value === null ? ALL_VALUE : value) : (globalProfileId ?? "");
 
   const handleChange = (val: string) => {
     if (isControlled) {
@@ -51,9 +49,7 @@ export function ProfileSelector({ showAllOption, value, onChange }: ProfileSelec
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {showAllOption && (
-            <SelectItem value={ALL_VALUE}>{t("profiles.all")}</SelectItem>
-          )}
+          {showAllOption && <SelectItem value={ALL_VALUE}>{t("profiles.all")}</SelectItem>}
           {profiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
