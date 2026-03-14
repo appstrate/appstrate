@@ -9,11 +9,11 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "turbo lint",
-    "lint:fix": "turbo lint:fix",
-    "format": "turbo format",
-    "format:check": "turbo format:check",
-    "check": "turbo check && bun scripts/verify-openapi.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
+    "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
+    "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
+    "check": "turbo typecheck && eslint . && prettier --check \"apps/*/src/**\" \"packages/*/src/**\" && bun scripts/verify-openapi.ts",
     "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
     "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
     "db:generate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit generate",
@@ -26,11 +26,18 @@
     "@appstrate/core": "^2.5.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^5.5.0",
     "@redocly/openapi-core": "^2.19.1",
     "@types/bun": "latest",
+    "eslint": "^10.0.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.0",
+    "globals": "^17.4.0",
     "prettier": "^3.8.1",
-    "turbo": "^2"
+    "turbo": "^2",
+    "typescript-eslint": "^8.55.0"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -10,10 +10,8 @@
       "persistent": true,
       "cache": false
     },
-    "lint": { "dependsOn": ["^build"] },
-    "lint:fix": { "dependsOn": ["^build"] },
-    "format": {},
-    "format:check": {},
-    "check": { "dependsOn": ["^build"] }
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
   }
 }

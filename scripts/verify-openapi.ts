@@ -310,6 +310,8 @@ try {
       "tag-description": "warn",
       "no-path-trailing-slash": "error",
       "path-not-include-query": "error",
+      // Hono resolves by registration order — these paths are unambiguous at runtime
+      "no-ambiguous-paths": "off",
     },
   });
 

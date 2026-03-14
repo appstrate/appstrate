@@ -170,10 +170,7 @@ export function getDefaultAuthorizedUris(provider: ProviderDefinition): string[]
  * Get the credential field name for a provider.
  */
 export function getCredentialFieldName(provider: ProviderDefinition): string {
-  return (
-    provider.credentialFieldName ??
-    (provider.authMode === "api_key" ? "api_key" : "token")
-  );
+  return provider.credentialFieldName ?? (provider.authMode === "api_key" ? "api_key" : "token");
 }
 
 /**
