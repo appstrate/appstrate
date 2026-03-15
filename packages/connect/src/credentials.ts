@@ -6,12 +6,13 @@ import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { refreshIfNeeded } from "./token-refresh.ts";
 
 /**
- * Get a connection by profile + provider.
+ * Get a connection by profile + provider + org.
  */
 export async function getConnection(
   db: Db,
   profileId: string,
   providerId: string,
+  orgId: string,
 ): Promise<ConnectionRecord | null> {
   const rows = await db
     .select()
@@ -20,6 +21,7 @@ export async function getConnection(
       and(
         eq(serviceConnections.profileId, profileId),
         eq(serviceConnections.providerId, providerId),
+        eq(serviceConnections.orgId, orgId),
       ),
     )
     .limit(1);
@@ -29,35 +31,23 @@ export async function getConnection(
 }
 
 /**
- * List all connections for a profile.
+ * List all connections for a profile within an org.
  */
-export async function listConnections(db: Db, profileId: string): Promise<ConnectionRecord[]> {
+export async function listConnections(
+  db: Db,
+  profileId: string,
+  orgId: string,
+): Promise<ConnectionRecord[]> {
   const rows = await db
     .select()
     .from(serviceConnections)
-    .where(eq(serviceConnections.profileId, profileId));
+    .where(and(eq(serviceConnections.profileId, profileId), eq(serviceConnections.orgId, orgId)));
 
   return rows.map(rowToConnection);
 }
 
-/**
- * Get decrypted credentials for a service.
- * Handles token refresh for OAuth2 connections by looking up provider
- * definition and credentials from the DB.
- * Pass orgId to enable token refresh for OAuth2 connections.
- */
-export async function getCredentials(
-  db: Db,
-  profileId: string,
-  providerId: string,
-  orgId?: string,
-): Promise<{ credentials: Record<string, string>; connection: ConnectionRecord } | null> {
-  const connection = await getConnection(db, profileId, providerId);
-  if (!connection) return null;
-
-  let decrypted: DecryptedCredentials;
-
-  // Look up the provider definition from packages.manifest.definition
+/** Fetch provider definition from packages.draftManifest.definition. */
+async function getProviderDefinition(db: Db, providerId: string): Promise<Record<string, unknown>> {
   const [pkg] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
@@ -65,14 +55,36 @@ export async function getCredentials(
     .limit(1);
 
   const manifest = (pkg?.draftManifest ?? {}) as Record<string, unknown>;
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  return (manifest.definition ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * Get decrypted credentials for a service.
+ * Handles token refresh for OAuth2 connections by looking up provider
+ * definition and credentials from the DB.
+ */
+export async function getCredentials(
+  db: Db,
+  profileId: string,
+  providerId: string,
+  orgId: string,
+): Promise<{
+  credentials: Record<string, string>;
+  connection: ConnectionRecord;
+  definition: Record<string, unknown>;
+} | null> {
+  const connection = await getConnection(db, profileId, providerId, orgId);
+  if (!connection) return null;
+
+  const def = await getProviderDefinition(db, providerId);
   const authMode = def.authMode as string | undefined;
 
+  let decrypted: DecryptedCredentials;
+
   if (authMode === "oauth2") {
-    // Build refresh context from manifest.definition + providerCredentials
     let refreshContext;
     const tokenUrl = (def.refreshUrl as string) ?? (def.tokenUrl as string);
-    if (tokenUrl && orgId) {
+    if (tokenUrl) {
       const [cred] = await db
         .select({
           credentialsEncrypted: providerCredentials.credentialsEncrypted,
@@ -116,7 +128,7 @@ export async function getCredentials(
     }
   }
 
-  return { credentials, connection };
+  return { credentials, connection, definition: def };
 }
 
 /**
@@ -127,7 +139,7 @@ export async function resolveCredentialsForProxy(
   db: Db,
   profileId: string,
   providerId: string,
-  orgId?: string,
+  orgId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
@@ -136,15 +148,7 @@ export async function resolveCredentialsForProxy(
   const result = await getCredentials(db, profileId, providerId, orgId);
   if (!result) return null;
 
-  // Look up provider definition from packages.draftManifest.definition
-  const [pkg] = await db
-    .select({ draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(eq(packages.id, providerId))
-    .limit(1);
-
-  const manifest = (pkg?.draftManifest ?? {}) as Record<string, unknown>;
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const def = result.definition;
   const authMode = def.authMode as string | undefined;
 
   let sidecarCredentials: Record<string, string>;
@@ -174,12 +178,13 @@ export async function resolveCredentialsForProxy(
 }
 
 /**
- * Save a connection (upsert on profileId + providerId).
+ * Save a connection (upsert on profileId + providerId + orgId).
  */
 export async function saveConnection(
   db: Db,
   profileId: string,
   providerId: string,
+  orgId: string,
   credentials: Record<string, unknown>,
   options?: {
     scopesGranted?: string[];
@@ -193,6 +198,7 @@ export async function saveConnection(
     .values({
       profileId,
       providerId,
+      orgId,
       credentialsEncrypted: encrypted,
       scopesGranted: options?.scopesGranted ?? [],
       expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
@@ -200,7 +206,11 @@ export async function saveConnection(
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [serviceConnections.profileId, serviceConnections.providerId],
+      target: [
+        serviceConnections.profileId,
+        serviceConnections.providerId,
+        serviceConnections.orgId,
+      ],
       set: {
         credentialsEncrypted: encrypted,
         scopesGranted: options?.scopesGranted ?? [],
@@ -212,12 +222,13 @@ export async function saveConnection(
 }
 
 /**
- * Delete all connections for a provider on a profile.
+ * Delete all connections for a provider on a profile within an org.
  */
 export async function deleteConnection(
   db: Db,
   profileId: string,
   providerId: string,
+  orgId: string,
 ): Promise<void> {
   await db
     .delete(serviceConnections)
@@ -225,6 +236,7 @@ export async function deleteConnection(
       and(
         eq(serviceConnections.profileId, profileId),
         eq(serviceConnections.providerId, providerId),
+        eq(serviceConnections.orgId, orgId),
       ),
     );
 }
@@ -243,6 +255,7 @@ function rowToConnection(row: typeof serviceConnections.$inferSelect): Connectio
     id: row.id,
     profileId: row.profileId,
     providerId: row.providerId,
+    orgId: row.orgId,
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,

@@ -89,25 +89,25 @@ export function getOrderedKeys(schema: JSONSchemaObject): string[] {
 
 // --- User Connection Types ---
 
-export interface UserConnectionOrg {
-  id: string;
-  name: string;
-  status: "valid" | "needs_reconnection";
-}
-
-export interface UserConnectionItem {
+export interface UserConnectionEntry {
   connectionId: string;
-  providerId: string;
-  authMode: string;
   scopesGranted: string[];
   connectedAt: string;
   profile: { id: string; name: string; isDefault: boolean };
-  orgs: UserConnectionOrg[];
 }
 
-export interface ProviderDisplayInfo {
+export interface UserConnectionOrgGroup {
+  orgId: string;
+  orgName: string;
+  connections: UserConnectionEntry[];
+}
+
+export interface UserConnectionProviderGroup {
+  providerId: string;
   displayName: string;
   logo: string;
+  totalConnections: number;
+  orgs: UserConnectionOrgGroup[];
 }
 
 export interface ProviderStatus {

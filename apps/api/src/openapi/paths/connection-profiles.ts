@@ -107,43 +107,56 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "List all user connections",
       description:
-        "List all service connections across all profiles for the authenticated user, grouped with provider display info.",
+        "List all service connections across all profiles and organizations for the authenticated user, grouped by provider then by organization.",
       responses: {
         "200": {
-          description: "User connections with provider info",
+          description: "User connections grouped by provider and organization",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  connections: {
+                  providers: {
                     type: "array",
                     items: {
                       type: "object",
                       properties: {
-                        connectionId: { type: "string", format: "uuid" },
                         providerId: { type: "string" },
-                        authMode: { type: "string" },
-                        scopesGranted: { type: "array", items: { type: "string" } },
-                        connectedAt: { type: "string", format: "date-time" },
-                        profile: {
-                          type: "object",
-                          properties: {
-                            id: { type: "string", format: "uuid" },
-                            name: { type: "string" },
-                            isDefault: { type: "boolean" },
-                          },
-                        },
-                      },
-                    },
-                  },
-                  providerInfo: {
-                    type: "object",
-                    additionalProperties: {
-                      type: "object",
-                      properties: {
                         displayName: { type: "string" },
                         logo: { type: "string" },
+                        totalConnections: { type: "integer" },
+                        orgs: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            properties: {
+                              orgId: { type: "string", format: "uuid" },
+                              orgName: { type: "string" },
+                              connections: {
+                                type: "array",
+                                items: {
+                                  type: "object",
+                                  properties: {
+                                    connectionId: { type: "string", format: "uuid" },
+                                    scopesGranted: {
+                                      type: "array",
+                                      items: { type: "string" },
+                                    },
+                                    connectedAt: { type: "string", format: "date-time" },
+                                    profile: {
+                                      type: "object",
+                                      properties: {
+                                        id: { type: "string", format: "uuid" },
+                                        name: { type: "string" },
+                                        isDefault: { type: "boolean" },
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
                       },
                     },
                   },
@@ -230,8 +243,10 @@ export const connectionProfilesPaths = {
       operationId: "listProfileConnections",
       tags: ["Connection Profiles"],
       summary: "List connections for a profile",
-      description: "List all service connections associated with a specific connection profile.",
+      description:
+        "List all service connections associated with a specific connection profile in the current organization.",
       parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
         {
           name: "id",
           in: "path",
@@ -253,10 +268,12 @@ export const connectionProfilesPaths = {
                       type: "object",
                       properties: {
                         id: { type: "string", format: "uuid" },
+                        profileId: { type: "string", format: "uuid" },
                         providerId: { type: "string" },
-                        authMode: { type: "string" },
+                        orgId: { type: "string", format: "uuid" },
                         scopesGranted: { type: "array", items: { type: "string" } },
                         createdAt: { type: "string", format: "date-time" },
+                        updatedAt: { type: "string", format: "date-time" },
                       },
                     },
                   },

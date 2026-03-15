@@ -38,6 +38,7 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     db,
     result.profileId,
     result.providerId,
+    result.orgId,
     {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
@@ -63,7 +64,7 @@ export async function handleOAuth1CallbackAndSave(
 ): Promise<OAuth1CallbackResult> {
   const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
 
-  await saveConnection(db, result.profileId, result.providerId, {
+  await saveConnection(db, result.profileId, result.providerId, result.orgId, {
     consumer_key: result.consumerKey,
     access_token: result.accessToken,
     access_token_secret: result.accessTokenSecret,

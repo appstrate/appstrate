@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,7 +32,7 @@ import { formatDateField } from "../lib/markdown";
 import { Unplug } from "lucide-react";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
-import type { UserConnectionItem } from "@appstrate/shared-types";
+import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
 
 export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
@@ -402,13 +401,24 @@ function PasswordChangeForm() {
   );
 }
 
-function groupByProvider(connections: UserConnectionItem[] | undefined) {
-  if (!connections) return {};
-  const grouped: Record<string, UserConnectionItem[]> = {};
-  for (const conn of connections) {
-    (grouped[conn.providerId] ??= []).push(conn);
-  }
-  return grouped;
+function filterProviders(
+  providers: UserConnectionProviderGroup[] | undefined,
+  profileId: string | null,
+): UserConnectionProviderGroup[] {
+  if (!providers) return [];
+  if (!profileId) return providers;
+  return providers
+    .map((pg) => {
+      const orgs = pg.orgs
+        .map((og) => ({
+          ...og,
+          connections: og.connections.filter((c) => c.profile.id === profileId),
+        }))
+        .filter((og) => og.connections.length > 0);
+      const totalConnections = orgs.reduce((sum, og) => sum + og.connections.length, 0);
+      return { ...pg, orgs, totalConnections };
+    })
+    .filter((pg) => pg.totalConnections > 0);
 }
 
 function ConnectorsTab() {
@@ -420,13 +430,10 @@ function ConnectorsTab() {
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [filterProfileId, setFilterProfileId] = useState<string | null>(null);
 
-  const filteredConnections = useMemo(() => {
-    if (!userConns?.connections) return undefined;
-    if (!filterProfileId) return userConns.connections;
-    return userConns.connections.filter((c) => c.profile.id === filterProfileId);
-  }, [userConns, filterProfileId]);
-
-  const grouped = useMemo(() => groupByProvider(filteredConnections), [filteredConnections]);
+  const providers = useMemo(
+    () => filterProviders(userConns?.providers, filterProfileId),
+    [userConns, filterProfileId],
+  );
 
   if (isLoading) return <LoadingState />;
 
@@ -439,8 +446,7 @@ function ConnectorsTab() {
     });
   };
 
-  const providerIds = Object.keys(grouped);
-  const totalConnections = filteredConnections?.length ?? 0;
+  const totalConnections = providers.reduce((sum, pg) => sum + pg.totalConnections, 0);
 
   return (
     <>
@@ -477,7 +483,7 @@ function ConnectorsTab() {
         </div>
       </div>
 
-      {providerIds.length === 0 ? (
+      {providers.length === 0 ? (
         <EmptyState
           message={t("connectors.noConnections")}
           hint={t("connectors.noConnectionsHint")}
@@ -489,31 +495,27 @@ function ConnectorsTab() {
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
-          {providerIds.map((providerId) => {
-            const conns = grouped[providerId];
-            const info = userConns?.providerInfo[providerId];
-            const expanded = expandedProviders.has(providerId);
+          {providers.map((pg) => {
+            const expanded = expandedProviders.has(pg.providerId);
 
             return (
-              <div key={providerId} className="rounded-lg border border-border bg-card p-5">
+              <div key={pg.providerId} className="rounded-lg border border-border bg-card p-5">
                 <div
                   className="flex items-center justify-between cursor-pointer"
-                  onClick={() => toggleExpand(providerId)}
+                  onClick={() => toggleExpand(pg.providerId)}
                 >
                   <div className="flex items-center gap-3">
-                    {info?.logo && (
+                    {pg.logo && (
                       <img
                         className="h-8 w-8 rounded-md object-contain"
-                        src={info.logo}
-                        alt={info?.displayName ?? providerId}
+                        src={pg.logo}
+                        alt={pg.displayName}
                       />
                     )}
                     <div className="flex-1">
-                      <h3 className="text-[0.95rem] font-semibold">
-                        {info?.displayName ?? providerId}
-                      </h3>
+                      <h3 className="text-[0.95rem] font-semibold">{pg.displayName}</h3>
                       <span className="text-sm text-muted-foreground">
-                        {t("connectors.connectionCount", { count: conns.length })}
+                        {t("connectors.connectionCount", { count: pg.totalConnections })}
                       </span>
                     </div>
                   </div>
@@ -528,74 +530,58 @@ function ConnectorsTab() {
                 </div>
 
                 {expanded && (
-                  <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2">
-                    {conns.map((conn) => (
-                      <div
-                        key={conn.connectionId}
-                        className="flex items-center justify-between py-2 text-sm"
-                      >
-                        <div className="flex flex-col gap-0.5">
-                          <span>
-                            {t("connectors.profileLabel")} : {conn.profile.name}
-                            {conn.profile.isDefault && (
-                              <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
-                                {t("profiles.default")}
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {t(`connectors.authMode.${conn.authMode}`, {
-                              defaultValue: conn.authMode,
-                            })}
-                            {conn.scopesGranted.length > 0 &&
-                              ` \u00b7 ${conn.scopesGranted.join(", ")}`}
-                            {conn.connectedAt && ` \u00b7 ${formatDateField(conn.connectedAt)}`}
-                          </span>
-                          {(() => {
-                            const validOrgs = conn.orgs?.filter((o) => o.status === "valid") ?? [];
-                            return validOrgs.length > 0 ? (
-                              <span className="flex flex-wrap gap-1 mt-1">
-                                {validOrgs.map((org) => (
-                                  <Badge
-                                    key={org.id}
-                                    variant="success"
-                                    title={t("connectors.orgValid", { org: org.name })}
-                                  >
-                                    {org.name}
-                                  </Badge>
-                                ))}
-                              </span>
-                            ) : (
-                              <span className="flex flex-wrap gap-1 mt-1">
-                                <Badge variant="secondary" title={t("connectors.unusedHint")}>
-                                  {t("connectors.unused")}
-                                </Badge>
-                              </span>
-                            );
-                          })()}
+                  <div className="mt-3 pt-3 border-t border-border flex flex-col gap-3">
+                    {pg.orgs.map((og) => (
+                      <div key={og.orgId}>
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          {og.orgName}
                         </div>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => {
-                            if (
-                              confirm(
-                                t("connectors.deleteConfirm", {
-                                  provider: info?.displayName ?? providerId,
-                                  profile: conn.profile.name,
-                                }),
-                              )
-                            ) {
-                              disconnectMutation.mutate({
-                                provider: providerId,
-                                connectionId: conn.connectionId,
-                              });
-                            }
-                          }}
-                          disabled={disconnectMutation.isPending}
-                        >
-                          {t("btn.disconnect")}
-                        </Button>
+                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-border">
+                          {og.connections.map((conn) => (
+                            <div
+                              key={conn.connectionId}
+                              className="flex items-center justify-between py-2 text-sm"
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <span>
+                                  {conn.profile.name}
+                                  {conn.profile.isDefault && (
+                                    <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
+                                      {t("profiles.default")}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {conn.scopesGranted.length > 0 &&
+                                    `${conn.scopesGranted.join(", ")} \u00b7 `}
+                                  {conn.connectedAt && formatDateField(conn.connectedAt)}
+                                </span>
+                              </div>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      t("connectors.deleteConfirm", {
+                                        provider: pg.displayName,
+                                        profile: conn.profile.name,
+                                      }),
+                                    )
+                                  ) {
+                                    disconnectMutation.mutate({
+                                      provider: pg.providerId,
+                                      connectionId: conn.connectionId,
+                                    });
+                                  }
+                                }}
+                                disabled={disconnectMutation.isPending}
+                              >
+                                {t("btn.disconnect")}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>

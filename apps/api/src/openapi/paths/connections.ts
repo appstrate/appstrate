@@ -133,13 +133,28 @@ export const connectionsPaths = {
               required: ["apiKey"],
               properties: {
                 apiKey: { type: "string", description: "API key value" },
+                profileId: {
+                  type: "string",
+                  format: "uuid",
+                  description: "Connection profile ID (defaults to user's default profile)",
+                },
               },
             },
           },
         },
       },
       responses: {
-        "200": { description: "API key saved" },
+        "200": {
+          description: "API key saved",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { success: { type: "boolean" } },
+              },
+            },
+          },
+        },
         "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
@@ -161,14 +176,35 @@ export const connectionsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              additionalProperties: true,
-              description: "Credential fields matching the provider's credential schema",
+              required: ["credentials"],
+              properties: {
+                credentials: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description: "Credential fields matching the provider's credential schema",
+                },
+                profileId: {
+                  type: "string",
+                  format: "uuid",
+                  description: "Connection profile ID (defaults to user's default profile)",
+                },
+              },
             },
           },
         },
       },
       responses: {
-        "200": { description: "Credentials saved" },
+        "200": {
+          description: "Credentials saved",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { success: { type: "boolean" } },
+              },
+            },
+          },
+        },
         "400": { $ref: "#/components/responses/ValidationError" },
       },
     },

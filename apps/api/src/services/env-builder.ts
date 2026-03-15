@@ -54,7 +54,7 @@ export async function resolveProviderDefs(
  */
 export function buildExecutionApi(executionId: string): { url: string; token: string } {
   const apiEnv = getEnv();
-  const url = apiEnv.PLATFORM_API_URL ?? `http://localhost:${apiEnv.PORT}`;
+  const url = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
   return { url, token: signExecutionToken(executionId) };
 }
 

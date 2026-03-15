@@ -23,8 +23,9 @@ const router = new Hono<AppEnv>();
 // GET /auth/connections — list connections for current user's profile
 router.get("/connections", async (c) => {
   const user = c.get("user");
+  const orgId = c.get("orgId");
   const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
-  const connections = await listUserConnections(profileId);
+  const connections = await listUserConnections(profileId, orgId);
   return c.json({ connections });
 });
 
@@ -80,7 +81,7 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
       return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
     }
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
-    await saveApiKeyConnection(provider, body.apiKey.trim(), profileId);
+    await saveApiKeyConnection(provider, body.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to create API key connection";
@@ -112,7 +113,7 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
     const mode = authMode === "basic" ? "basic" : "custom";
 
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
-    await saveCredentialsConnection(provider, mode, body.credentials, profileId);
+    await saveCredentialsConnection(provider, mode, body.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to save credentials";
@@ -195,7 +196,8 @@ router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {
       await disconnectConnectionById(connectionId, user.id);
     } else {
       const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
-      await disconnectProvider(provider, profileId);
+      const orgId = c.get("orgId");
+      await disconnectProvider(provider, profileId, orgId);
     }
     return c.json({ success: true });
   } catch (err) {
