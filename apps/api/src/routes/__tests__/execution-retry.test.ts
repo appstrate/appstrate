@@ -192,7 +192,7 @@ function makeFlow(overrides: {
       dependencies: { providers: {}, skills: {}, tools: {} },
       output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
       timeout: overrides.timeout ?? 300,
-      outputRetries: overrides.outputRetries,
+      "x-outputRetries": overrides.outputRetries,
     } as unknown as LoadedFlow["manifest"],
   };
 }

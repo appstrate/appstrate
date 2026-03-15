@@ -136,7 +136,7 @@ export async function executeFlowInBackground(
       // Validate against output schema and retry if invalid
       const outputSchema = flow.manifest.output?.schema;
       if (outputSchema) {
-        const maxRetries = (flow.manifest.outputRetries as number | undefined) ?? 2;
+        const maxRetries = (flow.manifest["x-outputRetries"] as number | undefined) ?? 2;
         const timeoutMs = timeout * 1000;
         let retriesLeft = maxRetries;
         let outputValidation = validateOutput(result, outputSchema);
