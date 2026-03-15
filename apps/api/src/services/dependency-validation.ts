@@ -62,7 +62,7 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((svc) => getConnectionStatus(svc.provider, providerProfiles[svc.id]!)),
+    providers.map((svc) => getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId)),
   );
 
   for (let i = 0; i < providers.length; i++) {

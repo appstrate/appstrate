@@ -1,6 +1,6 @@
 import { db } from "../../lib/db.ts";
-import type { UserConnectionItem, ProviderDisplayInfo } from "@appstrate/shared-types";
-import { eq, and, or, isNull } from "drizzle-orm";
+import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
+import { eq, inArray } from "drizzle-orm";
 import {
   serviceConnections,
   connectionProfiles,
@@ -39,7 +39,7 @@ export async function getIntegrationsWithStatus(
 ): Promise<IntegrationWithStatus[]> {
   const [providers, connections] = await Promise.all([
     listProviders(db, orgId),
-    listConnectionsRaw(db, profileId),
+    listConnectionsRaw(db, profileId, orgId),
   ]);
 
   return providers.map((provider) => {
@@ -67,15 +67,15 @@ export async function getIntegrationsWithStatus(
   });
 }
 
-export async function listAllUserConnections(userId: string): Promise<{
-  connections: UserConnectionItem[];
-  providerInfo: Record<string, ProviderDisplayInfo>;
-}> {
-  // 1. Fetch connections
+export async function listAllUserConnections(
+  userId: string,
+): Promise<{ providers: UserConnectionProviderGroup[] }> {
+  // 1. Fetch all user connections with org info
   const rows = await db
     .select({
       connectionId: serviceConnections.id,
       providerId: serviceConnections.providerId,
+      orgId: serviceConnections.orgId,
       scopesGranted: serviceConnections.scopesGranted,
       connectedAt: serviceConnections.createdAt,
       profileId: connectionProfiles.id,
@@ -86,7 +86,9 @@ export async function listAllUserConnections(userId: string): Promise<{
     .innerJoin(connectionProfiles, eq(serviceConnections.profileId, connectionProfiles.id))
     .where(eq(connectionProfiles.userId, userId));
 
-  // 2. Fetch user's orgs
+  if (rows.length === 0) return { providers: [] };
+
+  // 2. Fetch org names
   const userOrgs = await db
     .select({
       orgId: organizationMembers.orgId,
@@ -96,76 +98,69 @@ export async function listAllUserConnections(userId: string): Promise<{
     .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
     .where(eq(organizationMembers.userId, userId));
 
-  // 3. For each org, get provider IDs from packages table
-  const orgProviders = new Map<string, { name: string; providerIds: Set<string> }>();
-  for (const org of userOrgs) {
-    const pkgRows = await db
-      .select({ id: packages.id })
-      .from(packages)
-      .where(
-        and(
-          or(eq(packages.orgId, org.orgId), isNull(packages.orgId)),
-          eq(packages.type, "provider"),
-        ),
-      );
-    const providerIds = new Set(pkgRows.map((r) => r.id));
-    orgProviders.set(org.orgId, { name: org.orgName, providerIds });
-  }
+  const orgNameMap = new Map(userOrgs.map((o) => [o.orgId, o.orgName]));
 
-  // 4. Build connections with org matching
-  const connections: UserConnectionItem[] = rows.map((r) => {
-    const orgs: UserConnectionItem["orgs"] = [];
-    for (const [orgId, { name, providerIds }] of orgProviders) {
-      if (providerIds.has(r.providerId)) {
-        orgs.push({
-          id: orgId,
-          name,
-          status: "valid",
-        });
-      }
-    }
-    return {
-      connectionId: r.connectionId,
-      providerId: r.providerId,
-      authMode: "",
-      scopesGranted: r.scopesGranted ?? [],
-      connectedAt: r.connectedAt?.toISOString() ?? "",
-      profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
-      orgs,
-    };
-  });
-
-  // 5. Provider display info from packages table
+  // 3. Fetch provider display info in a single query
   const uniqueProviderIds = [...new Set(rows.map((r) => r.providerId))];
-  const providerInfo: Record<string, ProviderDisplayInfo> = {};
-  if (uniqueProviderIds.length > 0) {
-    for (const org of userOrgs) {
-      const pkgRows = await db
-        .select({ id: packages.id, draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(
-          and(
-            or(eq(packages.orgId, org.orgId), isNull(packages.orgId)),
-            eq(packages.type, "provider"),
-          ),
-        );
-      for (const pkg of pkgRows) {
-        if (!providerInfo[pkg.id]) {
-          const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
-          providerInfo[pkg.id] = {
-            displayName: (manifest.displayName as string) ?? pkg.id,
-            logo: (manifest.iconUrl as string) ?? "",
-          };
-        }
-      }
-    }
-    // Fill in any missing providers
-    for (const pid of uniqueProviderIds) {
-      if (!providerInfo[pid]) {
-        providerInfo[pid] = { displayName: pid, logo: "" };
-      }
-    }
+  const providerPkgs = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(inArray(packages.id, uniqueProviderIds));
+
+  const providerInfo = new Map<string, { displayName: string; logo: string }>();
+  for (const pkg of providerPkgs) {
+    const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
+    providerInfo.set(pkg.id, {
+      displayName: (manifest.displayName as string) ?? pkg.id,
+      logo: (manifest.iconUrl as string) ?? "",
+    });
   }
 
-  return { connections, providerInfo };
+  // 4. Group by provider → org → connections
+  const providerMap = new Map<
+    string,
+    { orgMap: Map<string, typeof rows>; totalConnections: number }
+  >();
+
+  for (const row of rows) {
+    let pg = providerMap.get(row.providerId);
+    if (!pg) {
+      pg = { orgMap: new Map(), totalConnections: 0 };
+      providerMap.set(row.providerId, pg);
+    }
+    pg.totalConnections++;
+
+    let orgConns = pg.orgMap.get(row.orgId);
+    if (!orgConns) {
+      orgConns = [];
+      pg.orgMap.set(row.orgId, orgConns);
+    }
+    orgConns.push(row);
+  }
+
+  // 5. Build the response
+  const providers: UserConnectionProviderGroup[] = [];
+  for (const [providerId, pg] of providerMap) {
+    const info = providerInfo.get(providerId);
+    const orgs = [...pg.orgMap.entries()].map(([orgId, conns]) => ({
+      orgId,
+      orgName: orgNameMap.get(orgId) ?? orgId,
+      connections: conns.map((r) => ({
+        connectionId: r.connectionId,
+        scopesGranted: (r.scopesGranted as string[]) ?? [],
+        connectedAt: r.connectedAt?.toISOString() ?? "",
+        profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
+      })),
+    }));
+
+    providers.push({
+      providerId,
+      displayName: info?.displayName ?? providerId,
+      logo: info?.logo ?? "",
+      totalConnections: pg.totalConnections,
+      orgs,
+    });
+  }
+
+  return { providers };
 }

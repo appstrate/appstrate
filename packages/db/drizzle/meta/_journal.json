@@ -64,6 +64,13 @@
       "when": 1773344709952,
       "tag": "0008_big_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1773546622489,
+      "tag": "0009_blue_silvermane",
+      "breakpoints": true
     }
   ]
 }

@@ -1,10 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type {
-  ConnectionProfile,
-  UserConnectionItem,
-  ProviderDisplayInfo,
-} from "@appstrate/shared-types";
+import type { ConnectionProfile, UserConnectionProviderGroup } from "@appstrate/shared-types";
 
 interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;
@@ -22,10 +18,7 @@ export function useAllUserConnections() {
   return useQuery({
     queryKey: ["user-connections"],
     queryFn: () =>
-      api<{
-        connections: UserConnectionItem[];
-        providerInfo: Record<string, ProviderDisplayInfo>;
-      }>("/connection-profiles/connections"),
+      api<{ providers: UserConnectionProviderGroup[] }>("/connection-profiles/connections"),
   });
 }
 

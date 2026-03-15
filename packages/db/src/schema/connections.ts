@@ -91,7 +91,7 @@ export const providerCredentials = pgTable(
   (table) => [primaryKey({ columns: [table.providerId, table.orgId] })],
 );
 
-// ─── Service connections (user-level OAuth/API tokens) ──────────────
+// ─── Service connections (user-level OAuth/API tokens, org-scoped) ──
 export const serviceConnections = pgTable(
   "service_connections",
   {
@@ -100,6 +100,9 @@ export const serviceConnections = pgTable(
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     scopesGranted: text("scopes_granted")
       .array()
@@ -111,8 +114,13 @@ export const serviceConnections = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("idx_service_connections_unique").on(table.profileId, table.providerId),
+    uniqueIndex("idx_service_connections_unique").on(
+      table.profileId,
+      table.providerId,
+      table.orgId,
+    ),
     index("idx_service_connections_profile").on(table.profileId),
+    index("idx_service_connections_org_id").on(table.orgId),
   ],
 );
 

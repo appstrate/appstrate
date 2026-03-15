@@ -16,8 +16,9 @@ export interface ConnectionStatus {
 export async function getConnectionStatus(
   provider: string,
   profileId: string,
+  orgId: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, profileId, provider);
+  const conn = await getConnection(db, profileId, provider, orgId);
   if (conn) {
     return {
       provider,
@@ -74,7 +75,7 @@ export async function resolveProviderStatuses(
       if (mode === "admin") {
         const adminProfileId = adminConns[svc.id];
         if (adminProfileId) {
-          const conn = await getConnectionStatus(svc.provider, adminProfileId);
+          const conn = await getConnectionStatus(svc.provider, adminProfileId, orgId);
           return {
             ...base,
             status: conn.status,
@@ -95,7 +96,7 @@ export async function resolveProviderStatuses(
       }
 
       const conn = userProfileId
-        ? await getConnectionStatus(svc.provider, userProfileId)
+        ? await getConnectionStatus(svc.provider, userProfileId, orgId)
         : { status: "not_connected" as const };
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {

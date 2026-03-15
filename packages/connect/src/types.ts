@@ -9,6 +9,7 @@ export interface ConnectionRecord {
   id: string;
   profileId: string;
   providerId: string;
+  orgId: string;
   credentialsEncrypted: string;
   scopesGranted: string[];
   expiresAt: string | null;

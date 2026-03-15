@@ -91,7 +91,8 @@ export function createConnectionProfilesRouter() {
     if (!profile) {
       return c.json({ error: "NOT_FOUND", message: "Profile not found" }, 404);
     }
-    const connections = await listConnections(db, profileId);
+    const orgId = c.get("orgId");
+    const connections = await listConnections(db, profileId, orgId);
     return c.json({ connections });
   });
 

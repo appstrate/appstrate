@@ -10,8 +10,11 @@ import {
 } from "@appstrate/connect";
 import type { ConnectionStatus } from "./status.ts";
 
-export async function listUserConnections(profileId: string): Promise<ConnectionStatus[]> {
-  const connections = await listConnectionsRaw(db, profileId);
+export async function listUserConnections(
+  profileId: string,
+  orgId: string,
+): Promise<ConnectionStatus[]> {
+  const connections = await listConnectionsRaw(db, profileId, orgId);
   return connections.map((c) => ({
     provider: c.providerId,
     status: "connected" as const,
@@ -21,9 +24,13 @@ export async function listUserConnections(profileId: string): Promise<Connection
   }));
 }
 
-export async function disconnectProvider(provider: string, profileId: string): Promise<void> {
-  await deleteConnectionRaw(db, profileId, provider);
-  logger.info("Connection deleted", { provider, profileId });
+export async function disconnectProvider(
+  provider: string,
+  profileId: string,
+  orgId: string,
+): Promise<void> {
+  await deleteConnectionRaw(db, profileId, provider, orgId);
+  logger.info("Connection deleted", { provider, profileId, orgId });
 }
 
 export async function disconnectConnectionById(

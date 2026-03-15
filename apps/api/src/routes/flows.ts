@@ -135,7 +135,7 @@ export function createFlowsRouter() {
 
       // Verify the profile has a connection for this provider
       const orgId = c.get("orgId");
-      const conn = await getConnectionStatus(svc.provider, effectiveProfileId);
+      const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
       if (conn.status !== "connected") {
         return c.json(
           {

@@ -166,6 +166,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: standbyNetworkId!,
+      extraHosts: ["host.docker.internal:host-gateway"],
       portBindings: { "8080/tcp": [{ HostPort: "0" }] },
       exposedPorts: SIDECAR_EXPOSED_PORTS,
       labels: {
