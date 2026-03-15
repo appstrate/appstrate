@@ -60,7 +60,7 @@ async function initGitWorkspace(): Promise<void> {
   }
 }
 
-// --- 2. Load extensions ---
+// --- 2. Load tools ---
 
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
@@ -112,7 +112,7 @@ await Promise.all([
     : Promise.resolve(),
 ]);
 
-// --- 2b. Phase B: load extensions (depends on extraction) ---
+// --- 2b. Phase B: load tools (depends on extraction) ---
 
 if (hasPackage) {
   try {
@@ -125,9 +125,9 @@ if (hasPackage) {
       emit({ type: "text_delta", text: "Installed skills from flow package\n" });
     }
 
-    // Load flow-package extensions first (they take priority over runtime built-ins)
+    // Load flow-package tools first (they take priority over runtime built-ins)
     await loadExtensionsFromDir(
-      path.join(WORKSPACE, ".flow-package", "extensions"),
+      path.join(WORKSPACE, ".flow-package", "tools"),
       "flow-package",
     );
 

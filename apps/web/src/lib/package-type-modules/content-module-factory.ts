@@ -51,17 +51,26 @@ export function makeContentPackageModule(
       const scopedName = state.metadata.scope
         ? `@${state.metadata.scope}/${state.metadata.id}`
         : undefined;
-      return {
-        manifest: {
-          ...state._manifestBase,
-          type: state._type,
-          version: state.metadata.version,
-          displayName: state.metadata.displayName,
-          description: state.metadata.description,
-          ...(scopedName ? { name: scopedName } : {}),
-        },
-        content: state.content,
+      const manifest: Record<string, unknown> = {
+        ...state._manifestBase,
+        type: state._type,
+        version: state.metadata.version,
+        displayName: state.metadata.displayName,
+        description: state.metadata.description,
+        ...(scopedName ? { name: scopedName } : {}),
       };
+
+      // Tool packages require entrypoint + tool interface in manifest
+      if (type === "tool") {
+        manifest.entrypoint = "tool.ts";
+        manifest.tool = {
+          name: state.metadata.id || "my_tool",
+          description: state.metadata.description || state.metadata.displayName || "Tool",
+          inputSchema: { type: "object", properties: {} },
+        };
+      }
+
+      return { manifest, content: state.content };
     },
   };
 }
