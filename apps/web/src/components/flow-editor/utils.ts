@@ -160,9 +160,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     },
   );
 
-  // Execution: read from raw manifest (preserves maxTokens, etc.)
-  const rawExecution = (m.execution ?? {}) as Record<string, unknown>;
-
   return {
     metadata: {
       id: bareName,
@@ -181,8 +178,8 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
     execution: {
-      timeout: (rawExecution.timeout as number) ?? 300,
-      outputRetries: (rawExecution.outputRetries as number) ?? 2,
+      timeout: (m.timeout as number) ?? 300,
+      outputRetries: (m.outputRetries as number) ?? 2,
     },
     _manifestBase: { ...m },
   };
@@ -305,21 +302,16 @@ export function assemblePayload(state: FlowFormState) {
     delete manifest.config;
   }
 
-  // Merge execution with base to preserve custom fields (maxTokens, etc.)
-  // Only write if present in original or user changed from defaults
-  if (
-    "execution" in state._manifestBase ||
-    state.execution.timeout !== 300 ||
-    state.execution.outputRetries !== 2
-  ) {
-    const baseExecution = (state._manifestBase.execution ?? {}) as Record<string, unknown>;
-    manifest.execution = {
-      ...baseExecution,
-      timeout: state.execution.timeout,
-      outputRetries: state.execution.outputRetries,
-    };
+  // Write timeout/outputRetries at top level (only if non-default or present in base)
+  if ("timeout" in state._manifestBase || state.execution.timeout !== 300) {
+    manifest.timeout = state.execution.timeout;
   } else {
-    delete manifest.execution;
+    delete manifest.timeout;
+  }
+  if ("outputRetries" in state._manifestBase || state.execution.outputRetries !== 2) {
+    manifest.outputRetries = state.execution.outputRetries;
+  } else {
+    delete manifest.outputRetries;
   }
 
   return {
@@ -337,8 +329,6 @@ export function payloadToFormState(payload: {
   const rawProvidersRecord = (dependencies.providers ?? {}) as Record<string, string>;
   const rawProvidersConfig = ((manifest as Record<string, unknown>).providersConfiguration ??
     {}) as Record<string, Record<string, unknown>>;
-  const execution = (manifest.execution as Record<string, unknown>) || {};
-
   const providers: ProviderEntry[] = Object.entries(rawProvidersRecord).map(
     ([providerId, version]) => {
       const cfg = rawProvidersConfig[providerId] ?? {};
@@ -382,8 +372,8 @@ export function payloadToFormState(payload: {
     outputSchema: schemaToFields(outputObj?.schema, "output"),
     configSchema: schemaToFields(configObj?.schema, "config"),
     execution: {
-      timeout: (execution.timeout as number) ?? 300,
-      outputRetries: (execution.outputRetries as number) ?? 2,
+      timeout: (manifest.timeout as number) ?? 300,
+      outputRetries: (manifest.outputRetries as number) ?? 2,
     },
     _manifestBase: { ...manifest },
   };

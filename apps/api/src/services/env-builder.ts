@@ -92,7 +92,7 @@ export function buildPromptContext(params: {
     llmModel: params.llmConfig?.modelId ?? "unknown",
     llmConfig: params.llmConfig,
     proxyUrl: params.proxyUrl,
-    timeout: params.flow.manifest.execution?.timeout ?? 300,
+    timeout: (params.flow.manifest.timeout as number | undefined) ?? 300,
     availableTools: params.flow.tools.map((e) => ({
       id: e.id,
       name: e.name,

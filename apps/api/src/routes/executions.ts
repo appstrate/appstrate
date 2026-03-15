@@ -62,7 +62,7 @@ export async function executeFlowInBackground(
     // Execute via adapter
     const adapter = getAdapter();
 
-    const timeout = flow.manifest.execution?.timeout ?? 300;
+    const timeout = (flow.manifest.timeout as number | undefined) ?? 300;
     let result: Record<string, unknown> | null = null;
     let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
@@ -136,7 +136,7 @@ export async function executeFlowInBackground(
       // Validate against output schema and retry if invalid
       const outputSchema = flow.manifest.output?.schema;
       if (outputSchema) {
-        const maxRetries = flow.manifest.execution?.outputRetries ?? 2;
+        const maxRetries = (flow.manifest.outputRetries as number | undefined) ?? 2;
         const timeoutMs = timeout * 1000;
         let retriesLeft = maxRetries;
         let outputValidation = validateOutput(result, outputSchema);

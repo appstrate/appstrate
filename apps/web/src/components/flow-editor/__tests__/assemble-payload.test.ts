@@ -199,40 +199,42 @@ describe("assemblePayload", () => {
     expect(provCfg["@my-org/slack"]).toBeUndefined(); // default values, no config needed
   });
 
-  test("omits execution when defaults and not in base", () => {
+  test("omits timeout and outputRetries when defaults and not in base", () => {
     const state = makeState({
       execution: { timeout: 300, outputRetries: 2 },
     });
 
     const result = assemblePayload(state);
 
-    expect(result.manifest).not.toHaveProperty("execution");
+    expect(result.manifest).not.toHaveProperty("timeout");
+    expect(result.manifest).not.toHaveProperty("outputRetries");
   });
 
-  test("includes execution when values differ from defaults", () => {
+  test("includes timeout and outputRetries when values differ from defaults", () => {
     const state = makeState({
       execution: { timeout: 600, outputRetries: 3 },
     });
 
     const result = assemblePayload(state);
 
-    expect(result.manifest.execution).toEqual({ timeout: 600, outputRetries: 3 });
+    expect(result.manifest.timeout).toBe(600);
+    expect(result.manifest.outputRetries).toBe(3);
   });
 
-  test("preserves execution when present in base manifest", () => {
+  test("preserves timeout and outputRetries when present in base manifest", () => {
     const state = makeState({
       execution: { timeout: 300, outputRetries: 2 },
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",
-        execution: { timeout: 300, outputRetries: 2, maxTokens: 4096 },
+        timeout: 300,
+        outputRetries: 2,
       },
     });
 
     const result = assemblePayload(state);
-    const execution = result.manifest.execution as Record<string, unknown>;
 
-    expect(execution.timeout).toBe(300);
-    expect(execution.maxTokens).toBe(4096);
+    expect(result.manifest.timeout).toBe(300);
+    expect(result.manifest.outputRetries).toBe(2);
   });
 });
