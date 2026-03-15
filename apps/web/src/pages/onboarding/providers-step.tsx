@@ -96,9 +96,7 @@ export function OnboardingProvidersStep() {
             return (
               <div key={provider.id} className="rounded-lg border border-border bg-card p-4">
                 <div className="flex items-center gap-3">
-                  {provider.iconUrl && (
-                    <ProviderIcon src={provider.iconUrl} className="size-8" />
-                  )}
+                  {provider.iconUrl && <ProviderIcon src={provider.iconUrl} className="size-8" />}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold truncate">{provider.displayName}</h3>
