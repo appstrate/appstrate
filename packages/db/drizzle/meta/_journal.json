@@ -71,6 +71,13 @@
       "when": 1773546622489,
       "tag": "0009_blue_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773592800000,
+      "tag": "0010_rename_extension_to_tool",
+      "breakpoints": true
     }
   ]
 }
