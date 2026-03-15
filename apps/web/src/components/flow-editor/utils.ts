@@ -179,7 +179,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     configSchema: schemaToFields(detail.config?.schema, "config"),
     execution: {
       timeout: (m.timeout as number) ?? 300,
-      outputRetries: (m.outputRetries as number) ?? 2,
+      outputRetries: (m["x-outputRetries"] as number) ?? 2,
     },
     _manifestBase: { ...m },
   };
@@ -308,10 +308,10 @@ export function assemblePayload(state: FlowFormState) {
   } else {
     delete manifest.timeout;
   }
-  if ("outputRetries" in state._manifestBase || state.execution.outputRetries !== 2) {
-    manifest.outputRetries = state.execution.outputRetries;
+  if ("x-outputRetries" in state._manifestBase || state.execution.outputRetries !== 2) {
+    manifest["x-outputRetries"] = state.execution.outputRetries;
   } else {
-    delete manifest.outputRetries;
+    delete manifest["x-outputRetries"];
   }
 
   return {
@@ -373,7 +373,7 @@ export function payloadToFormState(payload: {
     configSchema: schemaToFields(configObj?.schema, "config"),
     execution: {
       timeout: (manifest.timeout as number) ?? 300,
-      outputRetries: (manifest.outputRetries as number) ?? 2,
+      outputRetries: (manifest["x-outputRetries"] as number) ?? 2,
     },
     _manifestBase: { ...manifest },
   };

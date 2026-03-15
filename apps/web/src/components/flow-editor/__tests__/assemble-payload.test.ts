@@ -207,7 +207,7 @@ describe("assemblePayload", () => {
     const result = assemblePayload(state);
 
     expect(result.manifest).not.toHaveProperty("timeout");
-    expect(result.manifest).not.toHaveProperty("outputRetries");
+    expect(result.manifest).not.toHaveProperty("x-outputRetries");
   });
 
   test("includes timeout and outputRetries when values differ from defaults", () => {
@@ -218,7 +218,7 @@ describe("assemblePayload", () => {
     const result = assemblePayload(state);
 
     expect(result.manifest.timeout).toBe(600);
-    expect(result.manifest.outputRetries).toBe(3);
+    expect(result.manifest["x-outputRetries"]).toBe(3);
   });
 
   test("preserves timeout and outputRetries when present in base manifest", () => {
@@ -228,13 +228,13 @@ describe("assemblePayload", () => {
         schemaVersion: "1.0",
         type: "flow",
         timeout: 300,
-        outputRetries: 2,
+        "x-outputRetries": 2,
       },
     });
 
     const result = assemblePayload(state);
 
     expect(result.manifest.timeout).toBe(300);
-    expect(result.manifest.outputRetries).toBe(2);
+    expect(result.manifest["x-outputRetries"]).toBe(2);
   });
 });
