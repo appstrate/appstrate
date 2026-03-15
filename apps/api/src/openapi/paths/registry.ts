@@ -225,7 +225,7 @@ export const registryPaths = {
                       required: ["packageId", "type", "displayName", "version", "status"],
                       properties: {
                         packageId: { type: "string" },
-                        type: { type: "string", enum: ["flow", "skill", "extension", "provider"] },
+                        type: { type: "string", enum: ["flow", "skill", "tool", "provider"] },
                         displayName: { type: "string" },
                         version: { type: ["string", "null"] },
                         status: {
@@ -261,7 +261,7 @@ export const registryPaths = {
       tags: ["Packages"],
       summary: "Publish a package to the registry",
       description:
-        "Publish a local package (flow, skill, extension, or provider) to the Appstrate registry. Requires registry connection. Admin only.",
+        "Publish a local package (flow, skill, tool, or provider) to the Appstrate registry. Requires registry connection. Admin only.",
       parameters: [
         {
           name: "scope",

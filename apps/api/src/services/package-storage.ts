@@ -76,17 +76,17 @@ export async function getPackageZip(flow: LoadedFlow, orgId: string): Promise<Bu
 
 /** Build a flow package ZIP on-the-fly from DB-backed packages. */
 async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer> {
-  const { getFlowItemFiles, SKILL_CONFIG, EXTENSION_CONFIG } = await import("./package-items.ts");
+  const { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG } = await import("./package-items.ts");
 
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(flow.prompt),
   };
 
-  // Fetch skill files and extension files in parallel
-  const [skillFiles, extFiles] = await Promise.all([
+  // Fetch skill files and tool files in parallel
+  const [skillFiles, toolFiles] = await Promise.all([
     getFlowItemFiles(flow.id, orgId, SKILL_CONFIG),
-    getFlowItemFiles(flow.id, orgId, EXTENSION_CONFIG),
+    getFlowItemFiles(flow.id, orgId, TOOL_CONFIG),
   ]);
 
   for (const [skillId, files] of skillFiles) {
@@ -95,9 +95,9 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
     }
   }
 
-  for (const [, files] of extFiles) {
+  for (const [, files] of toolFiles) {
     for (const [filePath, content] of Object.entries(files)) {
-      entries[`extensions/${filePath}`] = content;
+      entries[`tools/${filePath}`] = content;
     }
   }
 

@@ -1,13 +1,15 @@
-import type { PackageType } from "@appstrate/core/validation";
+import type { packageTypeEnum } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 
 // ─────────────────────────────────────────────
 // Package type configuration
 // ─────────────────────────────────────────────
 
+export type PackageType = (typeof packageTypeEnum.enumValues)[number];
+
 export interface PackageTypeConfig {
   type: PackageType;
-  storageFolder: "flows" | "skills" | "extensions" | "providers";
+  storageFolder: "flows" | "skills" | "tools" | "providers";
   label: string;
 }
 
@@ -17,10 +19,10 @@ export const SKILL_CONFIG: PackageTypeConfig = {
   label: "Skills",
 };
 
-export const EXTENSION_CONFIG: PackageTypeConfig = {
-  type: "extension",
-  storageFolder: "extensions",
-  label: "Extensions",
+export const TOOL_CONFIG: PackageTypeConfig = {
+  type: "tool",
+  storageFolder: "tools",
+  label: "Tools",
 };
 
 export const FLOW_CONFIG: PackageTypeConfig = {

@@ -129,7 +129,7 @@ export function createShareRouter() {
       getPackageConfig(orgId, packageId),
     ]);
 
-    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    // Validate flow readiness (prompt, skills, tools, providers, config)
     const readinessError = await validateFlowReadiness({
       flow,
       providerProfiles,

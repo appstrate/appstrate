@@ -17,7 +17,7 @@ const VALID_MANIFEST = {
   requires: {
     providers: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    extensions: { "@appstrate/web-search": "*" },
+    tools: { "@appstrate/web-search": "*" },
   },
   config: {
     schema: {

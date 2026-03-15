@@ -789,7 +789,7 @@ describe("replaceVersionContent", () => {
   });
 });
 
-describe("createVersionFromDraft — skill/extension error on missing files", () => {
+describe("createVersionFromDraft — skill/tool error on missing files", () => {
   beforeEach(() => {
     resetQueues();
     // Ensure downloadPackageFiles returns null (no stored files)
@@ -817,13 +817,13 @@ describe("createVersionFromDraft — skill/extension error on missing files", ()
     );
   });
 
-  test("throws error for extension when storage files are missing", async () => {
+  test("throws error for tool when storage files are missing", async () => {
     queues.select = [
       [
         {
           draftManifest: { version: "1.0.0", name: "@acme/my-ext" },
           draftContent: "ext content",
-          type: "extension",
+          type: "tool",
         },
       ],
     ];

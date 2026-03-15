@@ -1,15 +1,15 @@
 import type { Manifest } from "@appstrate/core/validation";
 import type { FlowProviderRequirement } from "../types/index.ts";
 
-/** Extract skill, extension, and provider IDs from a manifest's requires section. */
+/** Extract skill, tool, and provider IDs from a manifest's requires section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {
   const requires = (manifest.requires ?? {}) as Record<string, unknown>;
   const skillsMap = (requires.skills ?? {}) as Record<string, string>;
-  const extensionsMap = (requires.extensions ?? {}) as Record<string, string>;
+  const toolsMap = (requires.tools ?? {}) as Record<string, string>;
   const providersMap = (requires.providers ?? {}) as Record<string, string>;
   return {
     skillIds: Object.keys(skillsMap).filter(Boolean),
-    extensionIds: Object.keys(extensionsMap).filter(Boolean),
+    toolIds: Object.keys(toolsMap).filter(Boolean),
     providerIds: Object.keys(providersMap).filter(Boolean),
   };
 }

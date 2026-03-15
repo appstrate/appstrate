@@ -25,7 +25,7 @@ export interface ReadinessError {
  *
  * 1. Empty prompt
  * 2. Missing required skills
- * 3. Missing required extensions
+ * 3. Missing required tools
  * 4. Provider dependencies (delegates to validateFlowDependencies)
  * 5. Config validation (if config provided)
  */
@@ -59,16 +59,16 @@ export async function validateFlowReadiness(params: {
     };
   }
 
-  // 3. Missing extensions
-  const missingExtensions = findMissingDependencies(
-    manifest.requires?.extensions ?? {},
-    flow.extensions.map((e) => e.id),
+  // 3. Missing tools
+  const missingTools = findMissingDependencies(
+    (manifest.requires?.tools ?? {}) as Record<string, string>,
+    flow.tools.map((e) => e.id),
   );
-  if (missingExtensions.length > 0) {
+  if (missingTools.length > 0) {
     return {
-      error: "MISSING_EXTENSION",
-      message: `Required extension '${missingExtensions[0]}' is not installed`,
-      details: { extensionId: missingExtensions[0] },
+      error: "MISSING_TOOL",
+      message: `Required tool '${missingTools[0]}' is not installed`,
+      details: { toolId: missingTools[0] },
     };
   }
 

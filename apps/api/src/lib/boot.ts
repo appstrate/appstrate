@@ -36,7 +36,7 @@ export async function boot(): Promise<void> {
   initSystemModels();
   logger.info("System models loaded");
 
-  // Load all system packages (providers + skills + extensions + flows) from ZIPs
+  // Load all system packages (providers + skills + tools + flows) from ZIPs
   await initSystemPackages();
 
   // Sync system packages to DB for all orgs (with registry-grade versioning)

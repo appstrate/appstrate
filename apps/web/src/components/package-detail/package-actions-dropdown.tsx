@@ -53,7 +53,7 @@ interface PackageActionsDropdownProps {
   // Provider-specific
   hasCredentials?: boolean;
   onDeleteCredentials?: () => void;
-  // Skill/Extension-specific
+  // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
   // Share (flow-only)

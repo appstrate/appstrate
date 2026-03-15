@@ -16,14 +16,14 @@ import type {
 const PACKAGE_CONFIG = {
   flow: { path: "flows", listKey: "flows", detailKey: "flow" },
   skill: { path: "skills", listKey: "skills", detailKey: "skill" },
-  extension: { path: "extensions", listKey: "extensions", detailKey: "extension" },
+  tool: { path: "tools", listKey: "tools", detailKey: "tool" },
   provider: { path: "providers", listKey: "providers", detailKey: "provider" },
 } as const;
 
 type PackageDetailMap = {
   flow: FlowDetail;
   skill: OrgPackageItemDetail;
-  extension: OrgPackageItemDetail;
+  tool: OrgPackageItemDetail;
   provider: OrgPackageItemDetail;
 };
 

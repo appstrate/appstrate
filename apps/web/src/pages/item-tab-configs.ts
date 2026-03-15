@@ -3,7 +3,7 @@ import { Plug, Puzzle, Wrench } from "lucide-react";
 import { usePackageList } from "../hooks/use-packages";
 
 export interface ItemTabConfig {
-  type: "skill" | "extension" | "provider";
+  type: "skill" | "tool" | "provider";
   useData: () => {
     data:
       | {
@@ -31,8 +31,8 @@ export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
     emptyIcon: Wrench,
   },
   {
-    type: "extension",
-    useData: () => usePackageList("extension"),
+    type: "tool",
+    useData: () => usePackageList("tool"),
     emptyMessageKey: "packages.emptyItems",
     emptyHintKey: "packages.emptyItemsHint",
     emptyIcon: Puzzle,
@@ -47,5 +47,5 @@ export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
 ];
 
 export const skillTabConfig = ITEM_TAB_CONFIGS[0];
-export const extensionTabConfig = ITEM_TAB_CONFIGS[1];
+export const toolTabConfig = ITEM_TAB_CONFIGS[1];
 export const providerTabConfig = ITEM_TAB_CONFIGS[2];

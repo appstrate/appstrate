@@ -37,7 +37,7 @@ const expectedEndpoints = [
   "DELETE /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
   "PUT /api/flows/{scope}/{name}/skills",
-  "PUT /api/flows/{scope}/{name}/extensions",
+  "PUT /api/flows/{scope}/{name}/tools",
   "GET /api/flows/{scope}/{name}/model",
   "PUT /api/flows/{scope}/{name}/model",
 
@@ -132,18 +132,18 @@ const expectedEndpoints = [
   "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
   "GET /api/packages/skills/{scope}/{name}/versions/{version}",
 
-  // Packages — Extensions
-  "GET /api/packages/extensions",
-  "POST /api/packages/extensions",
-  "GET /api/packages/extensions/{scope}/{name}",
-  "PUT /api/packages/extensions/{scope}/{name}",
-  "DELETE /api/packages/extensions/{scope}/{name}",
-  "GET /api/packages/extensions/{scope}/{name}/versions",
-  "GET /api/packages/extensions/{scope}/{name}/versions/info",
-  "POST /api/packages/extensions/{scope}/{name}/versions",
-  "POST /api/packages/extensions/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/extensions/{scope}/{name}/versions/{version}",
-  "GET /api/packages/extensions/{scope}/{name}/versions/{version}",
+  // Packages — Tools
+  "GET /api/packages/tools",
+  "POST /api/packages/tools",
+  "GET /api/packages/tools/{scope}/{name}",
+  "PUT /api/packages/tools/{scope}/{name}",
+  "DELETE /api/packages/tools/{scope}/{name}",
+  "GET /api/packages/tools/{scope}/{name}/versions",
+  "GET /api/packages/tools/{scope}/{name}/versions/info",
+  "POST /api/packages/tools/{scope}/{name}/versions",
+  "POST /api/packages/tools/{scope}/{name}/versions/{version}/restore",
+  "DELETE /api/packages/tools/{scope}/{name}/versions/{version}",
+  "GET /api/packages/tools/{scope}/{name}/versions/{version}",
 
   // Packages — Providers (package CRUD)
   "GET /api/packages/providers",

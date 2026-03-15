@@ -18,5 +18,5 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
   "cancelled",
 ]);
 
-export const packageTypeEnum = pgEnum("package_type", ["flow", "skill", "extension", "provider"]);
+export const packageTypeEnum = pgEnum("package_type", ["flow", "skill", "tool", "provider"]);
 export const packageSourceEnum = pgEnum("package_source", ["local", "system"]);

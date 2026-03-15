@@ -47,7 +47,7 @@ export function createFlowsRouter() {
         requires: {
           providers: resolveManifestProviders(f.manifest).map((s) => s.id),
           skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),
-          extensions: Object.fromEntries(f.extensions.map((e) => [e.id, e.version ?? "*"])),
+          tools: Object.fromEntries(f.tools.map((e) => [e.id, e.version ?? "*"])),
         },
         runningExecutions: runningCounts[f.id] ?? 0,
         source: f.source,

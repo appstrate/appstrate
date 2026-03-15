@@ -11,7 +11,7 @@ import { PACKAGE_ITEMS_BUCKET } from "./config.ts";
 
 /** Upload a package item's full normalized files to Storage. Returns SHA256 SRI integrity hash. */
 export async function uploadPackageFiles(
-  type: "flows" | "skills" | "extensions" | "providers",
+  type: "flows" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
   normalizedFiles: Record<string, Uint8Array>,
@@ -32,7 +32,7 @@ export async function uploadPackageFiles(
 /** Download a package item's full files from Storage. Returns normalized file map or null.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
-  type: "flows" | "skills" | "extensions" | "providers",
+  type: "flows" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
   expectedIntegrity?: string | null,
@@ -57,7 +57,7 @@ export async function downloadPackageFiles(
 
 /** Delete a package item's files from Storage. */
 export async function deletePackageFiles(
-  type: "flows" | "skills" | "extensions" | "providers",
+  type: "flows" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
 ): Promise<void> {

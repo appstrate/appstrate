@@ -37,6 +37,6 @@ export async function getVersionDependencies(versionId: number): Promise<DepEntr
     .from(packageVersionDependencies)
     .where(eq(packageVersionDependencies.versionId, versionId));
 
-  // Safe: extractDependencies() only produces "skill" | "extension" deps
+  // Safe: extractDependencies() only produces "skill" | "tool" deps
   return rows as DepEntry[];
 }

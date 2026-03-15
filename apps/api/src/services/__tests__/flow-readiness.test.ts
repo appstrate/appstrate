@@ -46,7 +46,7 @@ function makeFlow(overrides: Partial<LoadedFlow> = {}): LoadedFlow {
     id: "@test/my-flow",
     prompt: "Do something useful",
     skills: [],
-    extensions: [],
+    tools: [],
     source: "local",
     manifest: makeManifest(),
     ...overrides,
@@ -147,28 +147,28 @@ describe("validateFlowReadiness", () => {
     });
   });
 
-  // --- Missing extensions ---
+  // --- Missing tools ---
 
-  describe("missing extensions check", () => {
-    test("returns MISSING_EXTENSION when required extension is not installed", async () => {
+  describe("missing tools check", () => {
+    test("returns MISSING_TOOL when required tool is not installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { extensions: { "@test/ext-a": "^1.0.0" } },
+          requires: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
-        extensions: [],
+        tools: [],
       });
       const result = await validateFlowReadiness(makeParams({ flow }));
       expect(result).not.toBeNull();
-      expect(result!.error).toBe("MISSING_EXTENSION");
+      expect(result!.error).toBe("MISSING_TOOL");
       expect(result!.message).toContain("@test/ext-a");
     });
 
-    test("passes when required extension is installed", async () => {
+    test("passes when required tool is installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { extensions: { "@test/ext-a": "^1.0.0" } },
+          requires: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
-        extensions: [{ id: "@test/ext-a", description: "Ext A" }],
+        tools: [{ id: "@test/ext-a", description: "Ext A" }],
       });
       const result = await validateFlowReadiness(makeParams({ flow }));
       expect(result).toBeNull();
@@ -253,22 +253,22 @@ describe("validateFlowReadiness", () => {
       expect(result!.error).toBe("EMPTY_PROMPT");
     });
 
-    test("missing skill takes priority over missing extension", async () => {
+    test("missing skill takes priority over missing tool", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
           requires: {
             skills: { "@test/skill-a": "^1.0.0" },
-            extensions: { "@test/ext-a": "^1.0.0" },
+            tools: { "@test/ext-a": "^1.0.0" },
           },
         }),
         skills: [],
-        extensions: [],
+        tools: [],
       });
       const result = await validateFlowReadiness(makeParams({ flow }));
       expect(result!.error).toBe("MISSING_SKILL");
     });
 
-    test("missing extension takes priority over provider error", async () => {
+    test("missing tool takes priority over provider error", async () => {
       mockDepError = {
         error: "PROVIDER_NOT_ENABLED",
         message: "Provider 'gmail' is not configured",
@@ -276,12 +276,12 @@ describe("validateFlowReadiness", () => {
       };
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { extensions: { "@test/ext-a": "^1.0.0" } },
+          requires: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
-        extensions: [],
+        tools: [],
       });
       const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result!.error).toBe("MISSING_EXTENSION");
+      expect(result!.error).toBe("MISSING_TOOL");
     });
 
     test("provider error takes priority over config error", async () => {

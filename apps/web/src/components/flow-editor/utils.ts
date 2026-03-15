@@ -26,7 +26,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
     prompt: "",
     providers: [],
     skills: [],
-    extensions: [],
+    tools: [],
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
@@ -176,7 +176,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     prompt: detail.prompt || "",
     providers,
     skills: (detail.requires.skills ?? []).map(toResourceEntry),
-    extensions: (detail.requires.extensions ?? []).map(toResourceEntry),
+    tools: (detail.requires.tools ?? []).map(toResourceEntry),
     inputSchema: schemaToFields(detail.input?.schema, "input"),
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
@@ -216,9 +216,9 @@ export function assemblePayload(state: FlowFormState) {
   for (const s of state.skills) {
     if (s.id) filteredSkills[s.id] = s.version;
   }
-  const filteredExtensions: Record<string, string> = {};
-  for (const e of state.extensions) {
-    if (e.id) filteredExtensions[e.id] = e.version;
+  const filteredTools: Record<string, string> = {};
+  for (const e of state.tools) {
+    if (e.id) filteredTools[e.id] = e.version;
   }
 
   // Build providers Record and providersConfiguration
@@ -243,10 +243,10 @@ export function assemblePayload(state: FlowFormState) {
   } else {
     delete requires.skills;
   }
-  if ("extensions" in baseRequires || Object.keys(filteredExtensions).length > 0) {
-    requires.extensions = filteredExtensions;
+  if ("tools" in baseRequires || Object.keys(filteredTools).length > 0) {
+    requires.tools = filteredTools;
   } else {
-    delete requires.extensions;
+    delete requires.tools;
   }
 
   const manifest: Record<string, unknown> = {
@@ -354,10 +354,8 @@ export function payloadToFormState(payload: {
   const rawSkills = (requires.skills ?? {}) as Record<string, string>;
   const skills = Object.entries(rawSkills).map(([id, version]) => toResourceEntry({ id, version }));
 
-  const rawExtensions = (requires.extensions ?? {}) as Record<string, string>;
-  const extensions = Object.entries(rawExtensions).map(([id, version]) =>
-    toResourceEntry({ id, version }),
-  );
+  const rawTools = (requires.tools ?? {}) as Record<string, string>;
+  const tools = Object.entries(rawTools).map(([id, version]) => toResourceEntry({ id, version }));
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;
   const outputObj = manifest.output as { schema?: JSONSchemaObject } | undefined;
@@ -379,7 +377,7 @@ export function payloadToFormState(payload: {
     prompt,
     providers,
     skills,
-    extensions,
+    tools,
     inputSchema: schemaToFields(inputObj?.schema, "input"),
     outputSchema: schemaToFields(outputObj?.schema, "output"),
     configSchema: schemaToFields(configObj?.schema, "config"),

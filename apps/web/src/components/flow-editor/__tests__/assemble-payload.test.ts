@@ -18,7 +18,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
     prompt: "Do something useful",
     providers: [],
     skills: [],
-    extensions: [],
+    tools: [],
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
@@ -31,20 +31,20 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
 // --- Tests ---
 
 describe("assemblePayload", () => {
-  test("returns only manifest and prompt (no skillIds/extensionIds)", () => {
+  test("returns only manifest and prompt (no skillIds/toolIds)", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
         { id: "@my-org/skill-b", version: "2.0.0" },
       ],
-      extensions: [{ id: "@my-org/ext-1", version: "0.1.0" }],
+      tools: [{ id: "@my-org/ext-1", version: "0.1.0" }],
     });
 
     const result = assemblePayload(state);
 
     expect(Object.keys(result)).toEqual(["manifest", "prompt"]);
     expect(result).not.toHaveProperty("skillIds");
-    expect(result).not.toHaveProperty("extensionIds");
+    expect(result).not.toHaveProperty("toolIds");
   });
 
   test("includes skills in manifest.requires as record", () => {
@@ -61,9 +61,9 @@ describe("assemblePayload", () => {
     expect(requires.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
   });
 
-  test("includes extensions in manifest.requires as record", () => {
+  test("includes tools in manifest.requires as record", () => {
     const state = makeState({
-      extensions: [
+      tools: [
         { id: "@my-org/ext-1", version: "0.1.0" },
         { id: "@my-org/ext-2", version: "1.0.0" },
       ],
@@ -72,7 +72,7 @@ describe("assemblePayload", () => {
     const result = assemblePayload(state);
     const requires = result.manifest.requires as Record<string, unknown>;
 
-    expect(requires.extensions).toEqual({ "@my-org/ext-1": "0.1.0", "@my-org/ext-2": "1.0.0" });
+    expect(requires.tools).toEqual({ "@my-org/ext-1": "0.1.0", "@my-org/ext-2": "1.0.0" });
   });
 
   test("omits skills from manifest.requires when empty and not in base", () => {
@@ -84,13 +84,13 @@ describe("assemblePayload", () => {
     expect(requires).not.toHaveProperty("skills");
   });
 
-  test("omits extensions from manifest.requires when empty and not in base", () => {
-    const state = makeState({ extensions: [] });
+  test("omits tools from manifest.requires when empty and not in base", () => {
+    const state = makeState({ tools: [] });
 
     const result = assemblePayload(state);
     const requires = result.manifest.requires as Record<string, unknown>;
 
-    expect(requires).not.toHaveProperty("extensions");
+    expect(requires).not.toHaveProperty("tools");
   });
 
   test("preserves empty skills object when present in base manifest", () => {
@@ -109,14 +109,14 @@ describe("assemblePayload", () => {
     expect(requires.skills).toEqual({});
   });
 
-  test("filters out empty skill/extension IDs", () => {
+  test("filters out empty skill/tool IDs", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
         { id: "", version: "*" },
         { id: "@my-org/skill-b", version: "2.0.0" },
       ],
-      extensions: [
+      tools: [
         { id: "", version: "*" },
         { id: "@my-org/ext-1", version: "0.1.0" },
       ],
@@ -126,7 +126,7 @@ describe("assemblePayload", () => {
     const requires = result.manifest.requires as Record<string, unknown>;
 
     expect(requires.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
-    expect(requires.extensions).toEqual({ "@my-org/ext-1": "0.1.0" });
+    expect(requires.tools).toEqual({ "@my-org/ext-1": "0.1.0" });
   });
 
   test("builds correct manifest name from scope and id", () => {

@@ -1,9 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import { validateExtensionSource } from "@appstrate/core/validation";
+import { validateToolSource } from "@appstrate/core/validation";
 
 // --- Fixtures ---
 
-const VALID_EXTENSION = `
+const VALID_TOOL = `
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function(pi: ExtensionAPI) {
@@ -18,7 +18,7 @@ export default function(pi: ExtensionAPI) {
 }
 `;
 
-const VALID_EXTENSION_TWO_PARAMS = `
+const VALID_TOOL_TWO_PARAMS = `
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function(pi: ExtensionAPI) {
@@ -114,26 +114,26 @@ export default function(pi: ExtensionAPI) {
 `;
 
 // =====================================================
-// validateExtensionSource
+// validateToolSource
 // =====================================================
 
-describe("validateExtensionSource", () => {
-  test("accepts a valid extension with 3 params", () => {
-    const result = validateExtensionSource(VALID_EXTENSION);
+describe("validateToolSource", () => {
+  test("accepts a valid tool with 3 params", () => {
+    const result = validateToolSource(VALID_TOOL);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
   });
 
-  test("accepts a valid extension with 2 params (no signal)", () => {
-    const result = validateExtensionSource(VALID_EXTENSION_TWO_PARAMS);
+  test("accepts a valid tool with 2 params (no signal)", () => {
+    const result = validateToolSource(VALID_TOOL_TWO_PARAMS);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
     expect(result.warnings).toHaveLength(0);
   });
 
   test("rejects execute(args) with 1 param", () => {
-    const result = validateExtensionSource(WRONG_SIGNATURE_ONE_PARAM);
+    const result = validateToolSource(WRONG_SIGNATURE_ONE_PARAM);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.some((e) => e.includes("execute"))).toBe(true);
@@ -141,44 +141,44 @@ describe("validateExtensionSource", () => {
   });
 
   test("rejects missing export default", () => {
-    const result = validateExtensionSource(NO_EXPORT_DEFAULT);
+    const result = validateToolSource(NO_EXPORT_DEFAULT);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("export default"))).toBe(true);
   });
 
   test("warns when registerTool is not called", () => {
-    const result = validateExtensionSource(NO_REGISTER_TOOL);
+    const result = validateToolSource(NO_REGISTER_TOOL);
     expect(result.valid).toBe(true); // warning only, not blocking
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings.some((w) => w.includes("registerTool"))).toBe(true);
   });
 
   test("rejects empty content", () => {
-    const result = validateExtensionSource("");
+    const result = validateToolSource("");
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 
   test("rejects whitespace-only content", () => {
-    const result = validateExtensionSource("   \n\t  ");
+    const result = validateToolSource("   \n\t  ");
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 
   test("rejects unbalanced braces", () => {
-    const result = validateExtensionSource(UNBALANCED_BRACES);
+    const result = validateToolSource(UNBALANCED_BRACES);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("braces"))).toBe(true);
   });
 
   test("handles complex TS types without false positives on param count", () => {
-    const result = validateExtensionSource(COMPLEX_TS_TYPES);
+    const result = validateToolSource(COMPLEX_TS_TYPES);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   test("handles Typebox parameters without issues", () => {
-    const result = validateExtensionSource(TYPEBOX_PARAMS);
+    const result = validateToolSource(TYPEBOX_PARAMS);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
@@ -194,7 +194,7 @@ export default function(pi: any) {
   });
 }
 `;
-    const result = validateExtensionSource(source);
+    const result = validateToolSource(source);
     expect(result.valid).toBe(true);
     expect(result.warnings.some((w) => w.includes("content"))).toBe(true);
   });
@@ -211,7 +211,7 @@ export default function(pi: any) {
   });
 }
 `;
-    const result = validateExtensionSource(source);
+    const result = validateToolSource(source);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
@@ -226,7 +226,7 @@ function broken(pi: any) {
     },
   })
 `;
-    const result = validateExtensionSource(source);
+    const result = validateToolSource(source);
     expect(result.valid).toBe(false);
     // Should have: no export default + 1-param execute + unbalanced braces
     expect(result.errors.length).toBeGreaterThanOrEqual(2);

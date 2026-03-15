@@ -35,10 +35,10 @@ interface PackageTypeConfig {
 
 const FLOW_CONFIG: PackageTypeConfig = { type: "flow", label: "Flow", storageFolder: "flows" };
 const SKILL_CONFIG: PackageTypeConfig = { type: "skill", label: "Skill", storageFolder: "skills" };
-const EXTENSION_CONFIG: PackageTypeConfig = {
-  type: "extension",
-  label: "Extension",
-  storageFolder: "extensions",
+const TOOL_CONFIG: PackageTypeConfig = {
+  type: "tool",
+  label: "Tool",
+  storageFolder: "tools",
 };
 const PROVIDER_CONFIG: PackageTypeConfig = {
   type: "provider",
@@ -49,7 +49,7 @@ const PROVIDER_CONFIG: PackageTypeConfig = {
 const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
   flow: FLOW_CONFIG,
   skill: SKILL_CONFIG,
-  extension: EXTENSION_CONFIG,
+  tool: TOOL_CONFIG,
   provider: PROVIDER_CONFIG,
 };
 
@@ -100,7 +100,7 @@ async function uploadPackageFiles(...args: unknown[]) {
 }
 
 function extractDepsFromManifest(_manifest: unknown) {
-  return { skillIds: [] as string[], extensionIds: [] as string[], providerIds: [] as string[] };
+  return { skillIds: [] as string[], toolIds: [] as string[], providerIds: [] as string[] };
 }
 
 async function getLatestVersionId(packageId: string): Promise<number | null> {
@@ -260,8 +260,8 @@ async function forkPackage(
 
   // Sync flow dependencies if it's a flow
   if (cfg.type === "flow") {
-    const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(updatedManifest);
-    await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, extensionIds, providerIds);
+    const { skillIds, toolIds, providerIds } = extractDepsFromManifest(updatedManifest);
+    await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, toolIds, providerIds);
   }
 
   return {

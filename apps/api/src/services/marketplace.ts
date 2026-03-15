@@ -19,7 +19,8 @@ import { getLatestVersionId } from "./package-versions.ts";
 import { syncFlowDepsJunctionTable } from "./package-items/dependencies.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { packageVersions } from "@appstrate/db/schema";
-import type { Manifest, PackageType } from "@appstrate/core/validation";
+import type { Manifest } from "@appstrate/core/validation";
+import type { PackageType } from "./package-items/config.ts";
 
 // --- Status ---
 
@@ -66,7 +67,7 @@ export async function searchMarketplace(opts: MarketplaceSearchOpts, accessToken
     ? new RegistryClient({ baseUrl: getEnv().REGISTRY_URL!, accessToken })
     : client;
 
-  return authedClient.search(opts);
+  return authedClient.search(opts as Parameters<typeof authedClient.search>[0]);
 }
 
 // --- Package detail ---
@@ -368,10 +369,10 @@ export async function installFromMarketplace(
   // Phase D — sync flow dependency junction table (providers included)
   for (const pkg of ctx.collected) {
     if (pkg.type === "flow") {
-      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
         pkg.manifest as Partial<Manifest>,
       );
-      await syncFlowDepsJunctionTable(pkg.packageId, orgId, skillIds, extensionIds, providerIds);
+      await syncFlowDepsJunctionTable(pkg.packageId, orgId, skillIds, toolIds, providerIds);
     }
   }
 

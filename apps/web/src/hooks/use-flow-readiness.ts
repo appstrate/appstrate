@@ -43,11 +43,11 @@ export function useFlowReadiness(
             detail.requires.skills.map((s: { id: string }) => s.id),
           ).length === 0
         : true,
-      hasRequiredExtensions: detail
+      hasRequiredTools: detail
         ? findMissingDependencies(
             (detail.manifest?.requires as Record<string, Record<string, string>> | undefined)
-              ?.extensions ?? {},
-            detail.requires.extensions.map((e: { id: string }) => e.id),
+              ?.tools ?? {},
+            detail.requires.tools.map((e: { id: string }) => e.id),
           ).length === 0
         : true,
     };

@@ -8,12 +8,12 @@ import {
   getOrgItem,
   uploadPackageFiles,
   SKILL_CONFIG,
-  EXTENSION_CONFIG,
+  TOOL_CONFIG,
   type PackageTypeConfig,
   type CreateItemInput,
 } from "./package-items.ts";
 import { isValidVersion } from "@appstrate/core/semver";
-import type { PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "./package-items/config.ts";
 
 /** Parse manifest.json from normalized ZIP files. Throws if not found. */
 function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<string, unknown> {
@@ -37,7 +37,7 @@ function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<strin
   }
 }
 
-/** Insert or update a skill/extension during post-install (marketplace install). */
+/** Insert or update a skill/tool during post-install (marketplace install). */
 async function upsertItem(
   orgId: string,
   packageId: string,
@@ -57,8 +57,8 @@ async function upsertItem(
 
 /**
  * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (flow, skill, extension, provider),
- * handles skill/extension upsert + storage.
+ * Creates a version in packageVersions for ALL types (flow, skill, tool, provider),
+ * handles skill/tool upsert + storage.
  */
 export async function postInstallPackage(params: {
   packageType: PackageType;
@@ -102,8 +102,8 @@ export async function postInstallPackage(params: {
     }
   }
 
-  if (packageType === "skill" || packageType === "extension") {
-    const cfg = packageType === "skill" ? SKILL_CONFIG : EXTENSION_CONFIG;
+  if (packageType === "skill" || packageType === "tool") {
+    const cfg = packageType === "skill" ? SKILL_CONFIG : TOOL_CONFIG;
     const item: CreateItemInput = { id: packageId, content, createdBy: userId };
     await upsertItem(orgId, packageId, item, cfg, manifest);
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);

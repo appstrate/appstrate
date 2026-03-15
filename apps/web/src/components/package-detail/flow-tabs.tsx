@@ -47,12 +47,12 @@ export function FlowExecutionsTab({
     hasRequiredConfig,
     hasPrompt,
     hasRequiredSkills,
-    hasRequiredExtensions,
+    hasRequiredTools,
   } = readiness;
   const runDisabled =
     !hasPrompt ||
     !hasRequiredSkills ||
-    !hasRequiredExtensions ||
+    !hasRequiredTools ||
     !allConnected ||
     hasReconnectionNeeded ||
     !hasRequiredConfig;

@@ -137,7 +137,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
           ...(s.name ? { name: s.name } : {}),
           ...(s.description ? { description: s.description } : {}),
         })),
-        extensions: flow.extensions.map((e) => ({
+        tools: flow.tools.map((e) => ({
           id: e.id,
           version: e.version ?? "*",
           ...(e.name ? { name: e.name } : {}),

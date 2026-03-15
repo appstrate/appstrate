@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
 import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/system-packages";
-import type { PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "./package-items/config.ts";
 
 export type { SystemPackageEntry };
 
