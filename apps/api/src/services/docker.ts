@@ -19,6 +19,34 @@ async function dockerFetch(
   });
 }
 
+/**
+ * Pull an image from registry. Waits for the pull to complete.
+ * Docker pull API streams JSON progress — we consume it fully before resolving.
+ */
+export async function pullImage(image: string): Promise<void> {
+  logger.info("Pulling Docker image", { image });
+
+  const res = await dockerFetch(
+    `/images/create?fromImage=${encodeURIComponent(image)}`,
+    { method: "POST" },
+    120_000, // pulls can be slow
+  );
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Failed to pull image ${image}: ${res.status} ${error}`);
+  }
+
+  // Consume the stream fully (Docker streams progress as JSON lines)
+  if (res.body) {
+    for await (const _ of res.body) {
+      // drain
+    }
+  }
+
+  logger.info("Docker image pulled", { image });
+}
+
 export interface CreateContainerOptions {
   image: string;
   adapterName: string;
