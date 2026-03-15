@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
 import { Spinner } from "./spinner";
 import { RunFlowButton } from "./run-flow-button";
+import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
 
 interface PackageCardProps {
@@ -46,9 +47,7 @@ export function PackageCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {iconUrl && (
-            <img src={iconUrl} alt="" className="h-5 w-5 shrink-0 rounded object-contain" />
-          )}
+          {iconUrl && <ProviderIcon src={iconUrl} className="h-5 w-5" />}
           <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

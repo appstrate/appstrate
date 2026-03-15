@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProviderIcon } from "../provider-icon";
 import { useProviders } from "../../hooks/use-providers";
 import { useOrg } from "../../hooks/use-org";
 import type { ProviderEntry } from "./types";
@@ -226,11 +227,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
               <div key={i} className="border border-border rounded-lg p-3 mb-2 bg-card">
                 <div className="flex items-center gap-2.5 mb-2">
                   {providerDef?.iconUrl && (
-                    <img
-                      src={providerDef.iconUrl}
-                      alt=""
-                      className="h-6 w-6 rounded object-contain"
-                    />
+                    <ProviderIcon src={providerDef.iconUrl} className="h-6 w-6" />
                   )}
                   <div className="flex flex-col min-w-0 flex-1">
                     <strong className="text-sm">{providerDef?.displayName ?? svc.id}</strong>
@@ -326,9 +323,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                 onClick={() => addFromProvider(p.id)}
                 disabled={isSelected}
               >
-                {p.iconUrl && (
-                  <img src={p.iconUrl} alt="" className="h-6 w-6 rounded object-contain" />
-                )}
+                {p.iconUrl && <ProviderIcon src={p.iconUrl} className="h-6 w-6" />}
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-medium truncate">{p.displayName}</span>
                   <span className="text-xs text-muted-foreground">{p.id}</span>
