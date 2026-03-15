@@ -13,6 +13,7 @@ import { ProviderConfigBadge } from "../../components/provider-config-badge";
 import { ProviderConfigureButton } from "../../components/provider-configure-button";
 import { Spinner } from "../../components/spinner";
 import { CheckCircle2 } from "lucide-react";
+import { ProviderIcon } from "../../components/provider-icon";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 
 export function OnboardingProvidersStep() {
@@ -96,7 +97,7 @@ export function OnboardingProvidersStep() {
               <div key={provider.id} className="rounded-lg border border-border bg-card p-4">
                 <div className="flex items-center gap-3">
                   {provider.iconUrl && (
-                    <img src={provider.iconUrl} alt="" className="size-8 rounded object-contain" />
+                    <ProviderIcon src={provider.iconUrl} className="size-8" />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">

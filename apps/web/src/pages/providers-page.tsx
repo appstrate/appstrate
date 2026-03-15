@@ -24,6 +24,7 @@ import { ProviderConfigBadge } from "../components/provider-config-badge";
 import { ProviderConfigureButton } from "../components/provider-configure-button";
 import { ItemTab } from "./item-tab";
 import { providerTabConfig } from "./item-tab-configs";
+import { ProviderIcon } from "../components/provider-icon";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 
 export function ProvidersPage() {
@@ -237,7 +238,7 @@ export function ProvidersPage() {
                 }}
               >
                 {p.iconUrl ? (
-                  <img src={p.iconUrl} alt="" className="w-6 h-6 rounded" />
+                  <ProviderIcon src={p.iconUrl} className="w-6 h-6" />
                 ) : (
                   <div className="w-6 h-6 rounded bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
                     {p.displayName.charAt(0).toUpperCase()}
