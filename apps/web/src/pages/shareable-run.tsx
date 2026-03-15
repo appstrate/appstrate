@@ -61,7 +61,7 @@ export function ShareableRunPage() {
 
   useExecutionRealtime(executionId, handleStatusChange);
 
-  const providers = flow?.requires?.providers ?? [];
+  const providers = flow?.dependencies?.providers ?? [];
   const allConnected = providers.every((s) => s.status === "connected");
 
   const handleRun = async () => {

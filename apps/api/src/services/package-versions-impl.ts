@@ -19,8 +19,8 @@ import {
 } from "@appstrate/core/semver";
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
-import { buildRegistryDependencies } from "./package-items/dependencies.ts";
-import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
+import { buildDependencies } from "./package-items/dependencies.ts";
+import { prepareManifestForPublish } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 
 // ─────────────────────────────────────────────
@@ -580,13 +580,13 @@ export async function createVersionFromDraft(params: {
 
   const manifest = { ...baseManifest, version };
 
-  // Enrich manifest with registryDependencies so the version ZIP
+  // Enrich manifest with dependencies so the version ZIP
   // matches what would be published to the registry (same integrity).
   // Now that providers are in packageDependencies, the join query picks them up automatically.
-  const registryDeps = await buildRegistryDependencies(packageId, orgId);
+  const deps = await buildDependencies(packageId, orgId);
   const parsed = parseScopedName(baseManifest.name as string);
   const finalManifest = parsed
-    ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, registryDeps)
+    ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, deps)
     : manifest;
 
   // Build ZIP depending on package type

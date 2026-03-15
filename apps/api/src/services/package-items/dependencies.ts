@@ -2,10 +2,7 @@ import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { parseScopedName } from "@appstrate/core/naming";
-import {
-  buildRegistryDepsFromRows,
-  type RegistryDependencies,
-} from "@appstrate/core/registry-deps";
+import { buildDependenciesFromRows, type Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 
@@ -94,12 +91,12 @@ export async function syncFlowDepsJunctionTable(
   await setFlowItems(packageId, orgId, providerIds, PROVIDER_CONFIG);
 }
 
-/** Build registryDependencies object from a flow's current dependency links.
+/** Build dependencies object from a flow's current dependency links.
  *  Now that providers are in packageDependencies, the join query picks them up automatically. */
-export async function buildRegistryDependencies(
+export async function buildDependencies(
   packageId: string,
   orgId: string,
-): Promise<RegistryDependencies | null> {
+): Promise<Dependencies | null> {
   const deps = await db
     .select({
       dependencyId: packageDependencies.dependencyId,
@@ -121,7 +118,7 @@ export async function buildRegistryDependencies(
     };
   });
 
-  return buildRegistryDepsFromRows(rows);
+  return buildDependenciesFromRows(rows);
 }
 
 /** Get all files for a flow's referenced items of a type. Returns Map<itemId, files>. */

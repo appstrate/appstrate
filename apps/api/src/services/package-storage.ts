@@ -1,5 +1,5 @@
 import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
-import { verifyArtifactIntegrity } from "@appstrate/core/download";
+import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";

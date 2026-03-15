@@ -107,7 +107,7 @@ describe("validateFlowReadiness", () => {
     test("returns MISSING_SKILL when required skill is not installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { skills: { "@test/skill-a": "^1.0.0" } },
+          dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
         }),
         skills: [],
       });
@@ -120,7 +120,7 @@ describe("validateFlowReadiness", () => {
     test("passes when required skill is installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { skills: { "@test/skill-a": "^1.0.0" } },
+          dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
         }),
         skills: [{ id: "@test/skill-a", description: "Skill A" }],
       });
@@ -131,7 +131,7 @@ describe("validateFlowReadiness", () => {
     test("returns error for first missing skill when multiple required", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: {
+          dependencies: {
             skills: {
               "@test/skill-a": "^1.0.0",
               "@test/skill-b": "^1.0.0",
@@ -153,7 +153,7 @@ describe("validateFlowReadiness", () => {
     test("returns MISSING_TOOL when required tool is not installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { tools: { "@test/ext-a": "^1.0.0" } },
+          dependencies: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
         tools: [],
       });
@@ -166,7 +166,7 @@ describe("validateFlowReadiness", () => {
     test("passes when required tool is installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { tools: { "@test/ext-a": "^1.0.0" } },
+          dependencies: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
         tools: [{ id: "@test/ext-a", description: "Ext A" }],
       });
@@ -245,7 +245,7 @@ describe("validateFlowReadiness", () => {
       const flow = makeFlow({
         prompt: "",
         manifest: makeManifest({
-          requires: { skills: { "@test/skill-a": "^1.0.0" } },
+          dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
         }),
         skills: [],
       });
@@ -256,7 +256,7 @@ describe("validateFlowReadiness", () => {
     test("missing skill takes priority over missing tool", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: {
+          dependencies: {
             skills: { "@test/skill-a": "^1.0.0" },
             tools: { "@test/ext-a": "^1.0.0" },
           },
@@ -276,7 +276,7 @@ describe("validateFlowReadiness", () => {
       };
       const flow = makeFlow({
         manifest: makeManifest({
-          requires: { tools: { "@test/ext-a": "^1.0.0" } },
+          dependencies: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
         tools: [],
       });

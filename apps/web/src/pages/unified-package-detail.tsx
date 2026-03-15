@@ -238,7 +238,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const hasDisconnectedServices =
     type === "flow" &&
-    flowDetail?.requires.providers.some(
+    flowDetail?.dependencies.providers.some(
       (s) => s.status !== "connected" || s.scopesSufficient === false,
     );
   const hasMissingRequiredConfig =
@@ -345,7 +345,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Determine available tabs based on type
   const servicesSummary =
     type === "flow" && flowDetail
-      ? computeProvidersSummary(flowDetail.requires.providers, t)
+      ? computeProvidersSummary(flowDetail.dependencies.providers, t)
       : null;
 
   const flowTabs: Array<{ id: DetailTab; label: string }> = [

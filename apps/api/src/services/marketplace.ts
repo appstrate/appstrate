@@ -13,7 +13,7 @@ import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
 import { normalizeScope, buildPackageId } from "@appstrate/core/naming";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { resolveLatestVersion, versionGt, compareVersionsDesc } from "@appstrate/core/semver";
-import { checkUpdateAvailable } from "@appstrate/core/update-check";
+import { checkUpdateAvailable } from "@appstrate/core/semver";
 import { postInstallPackage } from "./post-install-package.ts";
 import { getLatestVersionId } from "./package-versions.ts";
 import { syncFlowDepsJunctionTable } from "./package-items/dependencies.ts";

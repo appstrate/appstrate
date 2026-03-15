@@ -44,7 +44,7 @@ mock.module("../package-version-deps.ts", () => ({
 mock.module("../package-items/storage.ts", () => packageItemsStorageStub);
 
 mock.module("../package-items/dependencies.ts", () => ({
-  buildRegistryDependencies: async () => null,
+  buildDependencies: async () => null,
 }));
 
 const {
@@ -654,7 +654,7 @@ describe("createVersionAndUpload", () => {
       createdBy: "user-1",
       zipBuffer: Buffer.from([1, 2, 3]),
       manifest: {
-        registryDependencies: { skills: { "@acme/helper": "*" } },
+        dependencies: { skills: { "@acme/helper": "*" } },
       },
     });
     expect(result).toEqual({ id: 1, version: "1.0.0" });
@@ -739,7 +739,7 @@ describe("replaceVersionContent", () => {
       version: "1.0.0",
       zipBuffer: Buffer.from([1, 2, 3]),
       manifest: {
-        registryDependencies: { skills: { "@acme/helper": "*" } },
+        dependencies: { skills: { "@acme/helper": "*" } },
       },
     });
 
@@ -764,7 +764,7 @@ describe("replaceVersionContent", () => {
       packageId: "@acme/flow-1",
       version: "1.0.0",
       zipBuffer: Buffer.from([4, 5]),
-      manifest: { name: "test" }, // no registryDependencies
+      manifest: { name: "test" }, // no dependencies
     });
 
     expect(depsTracking.clearCalls).toEqual([{ versionId: 7 }]);

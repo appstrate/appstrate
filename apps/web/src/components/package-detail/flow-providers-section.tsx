@@ -58,7 +58,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
 
   if (!detail) return null;
 
-  if (detail.requires.providers.length === 0) {
+  if (detail.dependencies.providers.length === 0) {
     return (
       <EmptyState
         message={t("detail.emptyConnectors")}
@@ -69,7 +69,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
     );
   }
 
-  const summary = computeProvidersSummary(detail.requires.providers, t);
+  const summary = computeProvidersSummary(detail.dependencies.providers, t);
 
   return (
     <>
@@ -91,7 +91,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
         <ProfileSelector />
       </div>
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
-        {detail.requires.providers.map((svc) => {
+        {detail.dependencies.providers.map((svc) => {
           const isConnected = svc.status === "connected";
           const isAdminMode = svc.connectionMode === "admin";
           const authMode = getProviderAuthMode(svc);

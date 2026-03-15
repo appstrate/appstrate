@@ -129,7 +129,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       source: flow.source,
       scope: parsed?.scope ?? null,
       version: m.version ?? null,
-      requires: {
+      dependencies: {
         providers: providerStatuses,
         skills: flow.skills.map((s) => ({
           id: s.id,

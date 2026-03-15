@@ -355,7 +355,7 @@ export const marketplacePaths = {
       tags: ["Marketplace"],
       summary: "Install a package from marketplace",
       description:
-        "Downloads and installs a package from the Appstrate [registry] into the organization. Admin only. Missing registryDependencies are automatically installed and marked as auto-installed.",
+        "Downloads and installs a package from the Appstrate [registry] into the organization. Admin only. Missing dependencies are automatically installed and marked as auto-installed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,

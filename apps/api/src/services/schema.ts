@@ -2,7 +2,7 @@ import Ajv from "ajv";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { normalizeConfigForValidation } from "@appstrate/core/flow-readiness";
+import { normalizeConfigForValidation } from "../lib/flow-readiness.ts";
 
 // --- AJV runtime validation ---
 

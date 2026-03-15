@@ -14,7 +14,7 @@ const VALID_MANIFEST = {
   displayName: "Test Flow",
   description: "A test flow",
   author: "test",
-  requires: {
+  dependencies: {
     providers: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
     tools: { "@appstrate/web-search": "*" },
@@ -110,7 +110,7 @@ describe("validateManifest", () => {
       displayName: "Minimal",
       description: "Minimal flow",
       author: "test",
-      requires: { providers: {} },
+      dependencies: { providers: {} },
     };
     const result = validateManifest(minimal);
     expect(result.valid).toBe(true);
@@ -143,7 +143,7 @@ describe("validateManifest", () => {
       name: "@test-org/test",
       version: "1.0.0",
       type: "flow",
-      requires: { providers: {} },
+      dependencies: { providers: {} },
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);

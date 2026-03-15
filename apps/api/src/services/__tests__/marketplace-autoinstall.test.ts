@@ -170,7 +170,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     registryPackages.set("@acme/solo", makeRegistryPkg("@acme", "solo"));
     zipQueue.push(makeZipResult("skill", { displayName: "Solo Skill" }));
 
-    // No registryDependencies → extractDependencies returns [] → no SELECT for deps
+    // No dependencies → extractDependencies returns [] → no SELECT for deps
     // Only 1 SELECT: existing check → not installed
     queues.select = [
       [], // integrity conflict guard → not installed
@@ -204,7 +204,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Parent",
-        registryDependencies: { skills: { "@acme/helper": "*" } },
+        dependencies: { skills: { "@acme/helper": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Helper" }));
@@ -250,13 +250,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "A",
-        registryDependencies: { skills: { "@acme/b": "*" } },
+        dependencies: { skills: { "@acme/b": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "B",
-        registryDependencies: { skills: { "@acme/c": "*" } },
+        dependencies: { skills: { "@acme/c": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "C" }));
@@ -305,13 +305,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "A",
-        registryDependencies: { skills: { "@acme/b": "*" } },
+        dependencies: { skills: { "@acme/b": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "B",
-        registryDependencies: { skills: { "@acme/a": "*" } },
+        dependencies: { skills: { "@acme/a": "*" } },
       }),
     );
 
@@ -343,7 +343,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Parent",
-        registryDependencies: { skills: { "@acme/dep": "*" } },
+        dependencies: { skills: { "@acme/dep": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Dep" }));
@@ -420,7 +420,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Parent",
-        registryDependencies: { skills: { "@acme/dep": "*" } },
+        dependencies: { skills: { "@acme/dep": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Dep" }));
@@ -451,13 +451,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Root",
-        registryDependencies: { skills: { "@acme/mid": "*" } },
+        dependencies: { skills: { "@acme/mid": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Mid",
-        registryDependencies: { skills: { "@acme/leaf": "*" } },
+        dependencies: { skills: { "@acme/leaf": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Leaf" }));
@@ -501,7 +501,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("flow", {
         displayName: "Flow",
-        registryDependencies: { tools: { "@acme/ext": "^1.0" } },
+        dependencies: { tools: { "@acme/ext": "^1.0" } },
       }),
     );
     zipQueue.push(makeZipResult("tool", { displayName: "Ext" }));
@@ -541,7 +541,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("flow", {
         displayName: "My Flow",
-        registryDependencies: {
+        dependencies: {
           skills: { "@acme/skill-a": "*" },
           tools: { "@acme/ext-b": "^1.0" },
         },
@@ -593,7 +593,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Parent",
-        registryDependencies: {
+        dependencies: {
           skills: { "@acme/b": "*", "@acme/c": "*" },
         },
       }),
@@ -639,20 +639,20 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "A",
-        registryDependencies: { skills: { "@acme/b": "*", "@acme/c": "*" } },
+        dependencies: { skills: { "@acme/b": "*", "@acme/c": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "B",
-        registryDependencies: { skills: { "@acme/d": "*" } },
+        dependencies: { skills: { "@acme/d": "*" } },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "D" }));
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "C",
-        registryDependencies: { skills: { "@acme/d": "*" } },
+        dependencies: { skills: { "@acme/d": "*" } },
       }),
     );
 
@@ -699,19 +699,19 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "A",
-        registryDependencies: { skills: { "@acme/b": "*" } },
+        dependencies: { skills: { "@acme/b": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "B",
-        registryDependencies: { skills: { "@acme/c": "*" } },
+        dependencies: { skills: { "@acme/c": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "C",
-        registryDependencies: { skills: { "@acme/a": "*" } },
+        dependencies: { skills: { "@acme/a": "*" } },
       }),
     );
 
@@ -745,7 +745,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Parent",
-        registryDependencies: { skills: { "@acme/ghost": "*" } },
+        dependencies: { skills: { "@acme/ghost": "*" } },
       }),
     );
 
@@ -773,13 +773,13 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("flow", {
         displayName: "My Flow",
-        registryDependencies: { skills: { "@acme/my-skill": "*" } },
+        dependencies: { skills: { "@acme/my-skill": "*" } },
       }),
     );
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "My Skill",
-        registryDependencies: { tools: { "@acme/my-ext": "^1.0" } },
+        dependencies: { tools: { "@acme/my-ext": "^1.0" } },
       }),
     );
     zipQueue.push(makeZipResult("tool", { displayName: "My Ext" }));
@@ -839,7 +839,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "Root",
-        registryDependencies: { skills: depsMap },
+        dependencies: { skills: depsMap },
       }),
     );
     for (const name of depNames) {

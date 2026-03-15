@@ -165,7 +165,7 @@ export const schemas = {
         enum: ["flow", "skill", "tool", "provider"],
       },
       runningExecutions: { type: "integer" },
-      requires: {
+      dependencies: {
         type: "object",
         properties: {
           providers: { type: "array", items: { type: "string" } },
@@ -214,7 +214,7 @@ export const schemas = {
           schema: { type: "object" },
         },
       },
-      requires: {
+      dependencies: {
         type: "object",
         properties: {
           providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
