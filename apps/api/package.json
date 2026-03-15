@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
-    "@appstrate/core": "file:/Users/pierrecabriere/appstrate/core",
+    "@appstrate/core": "^2.7.0",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/registry-client": "workspace:*",

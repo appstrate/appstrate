@@ -97,7 +97,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
           id: "@acme/parent",
           draftManifest: {
             displayName: "Parent Pkg",
-            registryDependencies: { skills: { "@acme/target": "*" } },
+            dependencies: { skills: { "@acme/target": "*" } },
           },
         },
       ],
@@ -134,7 +134,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
           id: "@acme/target",
           draftManifest: {
             displayName: "Self",
-            registryDependencies: { skills: { "@acme/target": "*" } },
+            dependencies: { skills: { "@acme/target": "*" } },
           },
         },
       ],
@@ -189,7 +189,7 @@ describe("deleteOrgItem — findRegistryDependents guard", () => {
         {
           id: "@acme/dep",
           draftManifest: {
-            registryDependencies: { skills: { "@acme/target": "*" } },
+            dependencies: { skills: { "@acme/target": "*" } },
           },
         },
       ],

@@ -58,7 +58,7 @@ mock.module("../flow-service.ts", () => ({
 }));
 
 mock.module("../package-items/dependencies.ts", () => ({
-  buildRegistryDependencies: async () => null,
+  buildDependencies: async () => null,
 }));
 
 mock.module("@appstrate/core/zip", () => ({

@@ -86,7 +86,7 @@ export function FlowActions({
           deleteAllMemories.mutate();
         }
       }}
-      shareServices={detail.requires.providers}
+      shareServices={detail.dependencies.providers}
     />
   );
 }

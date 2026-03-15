@@ -143,9 +143,9 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       ? detail.id.split("--").slice(1).join("--")
       : detail.id;
 
-  // Providers: read from requires.providers Record + providersConfiguration
-  const rawRequires = (m.requires ?? {}) as Record<string, unknown>;
-  const rawProvidersRecord = (rawRequires.providers ?? {}) as Record<string, string>;
+  // Providers: read from dependencies.providers Record + providersConfiguration
+  const rawDependencies = (m.dependencies ?? {}) as Record<string, unknown>;
+  const rawProvidersRecord = (rawDependencies.providers ?? {}) as Record<string, string>;
   const rawProvidersConfig = ((m as Record<string, unknown>).providersConfiguration ??
     {}) as Record<string, Record<string, unknown>>;
   const providers: ProviderEntry[] = Object.entries(rawProvidersRecord).map(
@@ -175,8 +175,8 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     },
     prompt: detail.prompt || "",
     providers,
-    skills: (detail.requires.skills ?? []).map(toResourceEntry),
-    tools: (detail.requires.tools ?? []).map(toResourceEntry),
+    skills: (detail.dependencies.skills ?? []).map(toResourceEntry),
+    tools: (detail.dependencies.tools ?? []).map(toResourceEntry),
     inputSchema: schemaToFields(detail.input?.schema, "input"),
     outputSchema: schemaToFields(detail.output?.schema, "output"),
     configSchema: schemaToFields(detail.config?.schema, "config"),
@@ -210,7 +210,7 @@ function mergeSchemaWithBase(
 }
 
 export function assemblePayload(state: FlowFormState) {
-  const baseRequires = (state._manifestBase.requires ?? {}) as Record<string, unknown>;
+  const baseDependencies = (state._manifestBase.dependencies ?? {}) as Record<string, unknown>;
 
   const filteredSkills: Record<string, string> = {};
   for (const s of state.skills) {
@@ -234,19 +234,19 @@ export function assemblePayload(state: FlowFormState) {
     if (Object.keys(cfg).length > 0) providersConfiguration[s.id] = cfg;
   }
 
-  const requires: Record<string, unknown> = {
-    ...baseRequires, // Preserve unknown fields in requires
+  const dependencies: Record<string, unknown> = {
+    ...baseDependencies, // Preserve unknown fields in dependencies
     providers: filteredProviders,
   };
-  if ("skills" in baseRequires || Object.keys(filteredSkills).length > 0) {
-    requires.skills = filteredSkills;
+  if ("skills" in baseDependencies || Object.keys(filteredSkills).length > 0) {
+    dependencies.skills = filteredSkills;
   } else {
-    delete requires.skills;
+    delete dependencies.skills;
   }
-  if ("tools" in baseRequires || Object.keys(filteredTools).length > 0) {
-    requires.tools = filteredTools;
+  if ("tools" in baseDependencies || Object.keys(filteredTools).length > 0) {
+    dependencies.tools = filteredTools;
   } else {
-    delete requires.tools;
+    delete dependencies.tools;
   }
 
   const manifest: Record<string, unknown> = {
@@ -256,7 +256,7 @@ export function assemblePayload(state: FlowFormState) {
     displayName: state.metadata.displayName,
     description: state.metadata.description,
     author: state.metadata.author,
-    requires,
+    dependencies,
   };
 
   // keywords: write only if present in original or non-empty
@@ -333,8 +333,8 @@ export function payloadToFormState(payload: {
   prompt: string;
 }): FlowFormState {
   const { manifest, prompt } = payload;
-  const requires = (manifest.requires as Record<string, unknown>) || {};
-  const rawProvidersRecord = (requires.providers ?? {}) as Record<string, string>;
+  const dependencies = (manifest.dependencies as Record<string, unknown>) || {};
+  const rawProvidersRecord = (dependencies.providers ?? {}) as Record<string, string>;
   const rawProvidersConfig = ((manifest as Record<string, unknown>).providersConfiguration ??
     {}) as Record<string, Record<string, unknown>>;
   const execution = (manifest.execution as Record<string, unknown>) || {};
@@ -351,10 +351,10 @@ export function payloadToFormState(payload: {
     },
   );
 
-  const rawSkills = (requires.skills ?? {}) as Record<string, string>;
+  const rawSkills = (dependencies.skills ?? {}) as Record<string, string>;
   const skills = Object.entries(rawSkills).map(([id, version]) => toResourceEntry({ id, version }));
 
-  const rawTools = (requires.tools ?? {}) as Record<string, string>;
+  const rawTools = (dependencies.tools ?? {}) as Record<string, string>;
   const tools = Object.entries(rawTools).map(([id, version]) => toResourceEntry({ id, version }));
 
   const inputObj = manifest.input as { schema?: JSONSchemaObject } | undefined;

@@ -134,7 +134,7 @@ export interface FlowListItem {
   schemaVersion: string;
   author: string;
   keywords: string[];
-  requires: {
+  dependencies: {
     providers: string[];
     skills: Record<string, string>;
     tools: Record<string, string>;
@@ -152,7 +152,7 @@ export interface FlowDetail {
   displayName: string;
   description: string;
   source: "system" | "local";
-  requires: {
+  dependencies: {
     providers: ProviderStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
     tools: { id: string; version: string; name?: string; description?: string }[];

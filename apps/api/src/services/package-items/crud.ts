@@ -41,7 +41,7 @@ async function getPackageDisplayNames(
   });
 }
 
-/** Find registry packages that depend on the target package (via manifest registryDependencies). */
+/** Find registry packages that depend on the target package (via manifest dependencies). */
 async function findRegistryDependents(
   orgId: string,
   targetPackageId: string,
@@ -258,9 +258,9 @@ export async function deleteOrgItem(
     return { ok: false, error: "IN_USE", flows: flowList };
   }
 
-  const registryDeps = await findRegistryDependents(orgId, itemId);
-  if (registryDeps.length > 0) {
-    return { ok: false, error: "DEPENDED_ON", dependents: registryDeps };
+  const dependents = await findRegistryDependents(orgId, itemId);
+  if (dependents.length > 0) {
+    return { ok: false, error: "DEPENDED_ON", dependents };
   }
 
   await db

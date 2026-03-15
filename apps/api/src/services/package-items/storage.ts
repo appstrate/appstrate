@@ -1,6 +1,6 @@
 import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { verifyArtifactIntegrity } from "@appstrate/core/download";
+import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../../lib/logger.ts";
 import { PACKAGE_ITEMS_BUCKET } from "./config.ts";

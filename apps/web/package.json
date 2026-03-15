@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appstrate/core": "file:/Users/pierrecabriere/appstrate/core",
+    "@appstrate/core": "^2.7.0",
     "@appstrate/shared-types": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

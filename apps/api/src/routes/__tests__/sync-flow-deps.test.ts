@@ -2,9 +2,9 @@ import { describe, test, expect } from "bun:test";
 import { extractDepsFromManifest, resolveManifestProviders } from "../../lib/manifest-utils.ts";
 
 describe("extractDepsFromManifest", () => {
-  test("extracts skills, tools, and providers from manifest.requires", () => {
+  test("extracts skills, tools, and providers from manifest.dependencies", () => {
     const result = extractDepsFromManifest({
-      requires: {
+      dependencies: {
         providers: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
         skills: { "skill-a": "1.0.0", "skill-b": "2.0.0" },
         tools: { "ext-1": "0.1.0" },
@@ -16,7 +16,7 @@ describe("extractDepsFromManifest", () => {
     expect(result.providerIds).toEqual(["@acme/gmail", "@acme/slack"]);
   });
 
-  test("returns empty arrays when manifest.requires is absent", () => {
+  test("returns empty arrays when manifest.dependencies is absent", () => {
     const result = extractDepsFromManifest({});
 
     expect(result.skillIds).toEqual([]);
@@ -26,7 +26,7 @@ describe("extractDepsFromManifest", () => {
 
   test("returns empty arrays when skills/tools/services keys are absent", () => {
     const result = extractDepsFromManifest({
-      requires: {},
+      dependencies: {},
     });
 
     expect(result.skillIds).toEqual([]);
@@ -36,7 +36,7 @@ describe("extractDepsFromManifest", () => {
 
   test("filters out empty keys from skill/tool records", () => {
     const result = extractDepsFromManifest({
-      requires: {
+      dependencies: {
         skills: { "skill-a": "1.0.0", "": "*", "skill-b": "2.0.0" },
         tools: { "": "*", "ext-1": "0.1.0" },
       },
@@ -48,7 +48,7 @@ describe("extractDepsFromManifest", () => {
 
   test("handles skills-only manifest (no tools key)", () => {
     const result = extractDepsFromManifest({
-      requires: { skills: { "skill-a": "1.0.0" } },
+      dependencies: { skills: { "skill-a": "1.0.0" } },
     });
 
     expect(result.skillIds).toEqual(["skill-a"]);
@@ -58,7 +58,7 @@ describe("extractDepsFromManifest", () => {
 
   test("handles tools-only manifest (no skills key)", () => {
     const result = extractDepsFromManifest({
-      requires: { tools: { "ext-1": "0.1.0" } },
+      dependencies: { tools: { "ext-1": "0.1.0" } },
     });
 
     expect(result.skillIds).toEqual([]);
@@ -67,9 +67,9 @@ describe("extractDepsFromManifest", () => {
 });
 
 describe("resolveManifestProviders", () => {
-  test("merges requires.providers with providersConfiguration", () => {
+  test("merges dependencies.providers with providersConfiguration", () => {
     const result = resolveManifestProviders({
-      requires: {
+      dependencies: {
         providers: { "@acme/gmail": "1.0.0", "@acme/slack": "2.0.0" },
       },
       providersConfiguration: {

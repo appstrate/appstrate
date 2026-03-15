@@ -47,7 +47,7 @@ describe("assemblePayload", () => {
     expect(result).not.toHaveProperty("toolIds");
   });
 
-  test("includes skills in manifest.requires as record", () => {
+  test("includes skills in manifest.dependencies as record", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
@@ -56,12 +56,12 @@ describe("assemblePayload", () => {
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
+    expect(deps.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
   });
 
-  test("includes tools in manifest.requires as record", () => {
+  test("includes tools in manifest.dependencies as record", () => {
     const state = makeState({
       tools: [
         { id: "@my-org/ext-1", version: "0.1.0" },
@@ -70,27 +70,27 @@ describe("assemblePayload", () => {
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires.tools).toEqual({ "@my-org/ext-1": "0.1.0", "@my-org/ext-2": "1.0.0" });
+    expect(deps.tools).toEqual({ "@my-org/ext-1": "0.1.0", "@my-org/ext-2": "1.0.0" });
   });
 
-  test("omits skills from manifest.requires when empty and not in base", () => {
+  test("omits skills from manifest.dependencies when empty and not in base", () => {
     const state = makeState({ skills: [] });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires).not.toHaveProperty("skills");
+    expect(deps).not.toHaveProperty("skills");
   });
 
-  test("omits tools from manifest.requires when empty and not in base", () => {
+  test("omits tools from manifest.dependencies when empty and not in base", () => {
     const state = makeState({ tools: [] });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires).not.toHaveProperty("tools");
+    expect(deps).not.toHaveProperty("tools");
   });
 
   test("preserves empty skills object when present in base manifest", () => {
@@ -99,14 +99,14 @@ describe("assemblePayload", () => {
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",
-        requires: { skills: {}, providers: {} },
+        dependencies: { skills: {}, providers: {} },
       },
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires.skills).toEqual({});
+    expect(deps.skills).toEqual({});
   });
 
   test("filters out empty skill/tool IDs", () => {
@@ -123,10 +123,10 @@ describe("assemblePayload", () => {
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
 
-    expect(requires.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
-    expect(requires.tools).toEqual({ "@my-org/ext-1": "0.1.0" });
+    expect(deps.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
+    expect(deps.tools).toEqual({ "@my-org/ext-1": "0.1.0" });
   });
 
   test("builds correct manifest name from scope and id", () => {
@@ -145,14 +145,14 @@ describe("assemblePayload", () => {
     expect(result.prompt).toBe("My custom prompt");
   });
 
-  test("includes providers in manifest.requires as record", () => {
+  test("includes providers in manifest.dependencies as record", () => {
     const state = makeState({
       providers: [{ id: "@my-org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" }],
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
-    const providers = requires.providers as Record<string, string>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
+    const providers = deps.providers as Record<string, string>;
 
     expect(providers).toEqual({ "@my-org/gmail": "1.0.0" });
   });
@@ -166,8 +166,8 @@ describe("assemblePayload", () => {
     });
 
     const result = assemblePayload(state);
-    const requires = result.manifest.requires as Record<string, unknown>;
-    const providers = requires.providers as Record<string, string>;
+    const deps = result.manifest.dependencies as Record<string, unknown>;
+    const providers = deps.providers as Record<string, string>;
 
     expect(Object.keys(providers)).toHaveLength(1);
     expect(providers["@my-org/gmail"]).toBe("1.0.0");

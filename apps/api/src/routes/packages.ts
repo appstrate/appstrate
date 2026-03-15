@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
-import { buildDownloadHeaders } from "@appstrate/core/download";
+import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";

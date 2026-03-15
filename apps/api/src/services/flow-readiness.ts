@@ -8,7 +8,7 @@ import { validateFlowDependencies } from "./dependency-validation.ts";
 import type { DependencyError } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/flow-readiness";
+import { isPromptEmpty, findMissingDependencies } from "../lib/flow-readiness.ts";
 
 export interface ReadinessError {
   error: string;
@@ -48,7 +48,7 @@ export async function validateFlowReadiness(params: {
 
   // 2. Missing skills
   const missingSkills = findMissingDependencies(
-    manifest.requires?.skills ?? {},
+    manifest.dependencies?.skills ?? {},
     flow.skills.map((s) => s.id),
   );
   if (missingSkills.length > 0) {
@@ -61,7 +61,7 @@ export async function validateFlowReadiness(params: {
 
   // 3. Missing tools
   const missingTools = findMissingDependencies(
-    (manifest.requires?.tools ?? {}) as Record<string, string>,
+    (manifest.dependencies?.tools ?? {}) as Record<string, string>,
     flow.tools.map((e) => e.id),
   );
   if (missingTools.length > 0) {

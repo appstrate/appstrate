@@ -26,12 +26,12 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
     displayName: row.id,
     description: "",
     author: "",
-    requires: { providers: {} },
+    dependencies: { providers: {} },
   }) as FlowManifest;
 
   // Read version maps from the flow's manifest
-  const manifestSkillsMap = (manifest.requires?.skills ?? {}) as Record<string, string>;
-  const manifestToolsMap = (manifest.requires?.tools ?? {}) as Record<string, string>;
+  const manifestSkillsMap = (manifest.dependencies?.skills ?? {}) as Record<string, string>;
+  const manifestToolsMap = (manifest.dependencies?.tools ?? {}) as Record<string, string>;
 
   // Dependencies from packageDependencies joined with packages
   const depSkills = (row.depRefs ?? [])

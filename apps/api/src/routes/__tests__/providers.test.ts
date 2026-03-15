@@ -188,7 +188,7 @@ describe("GET /api/providers", () => {
 
   test("returns system + custom providers with usage count", async () => {
     queues.select.push([makePackageRow()]); // packages
-    mockFlows = [{ manifest: { requires: { providers: { "@test/provider": "1.0.0" } } } }];
+    mockFlows = [{ manifest: { dependencies: { providers: { "@test/provider": "1.0.0" } } } }];
     queues.select.push([makeCredRow()]); // providerCredentials
 
     const res = await app.request("/api/providers");
@@ -449,7 +449,7 @@ describe("DELETE /api/providers/:scope/:name", () => {
 
   test("returns 409 when provider in use by 1 flow", async () => {
     queues.select.push([]); // isSystemProviderInDb → not system
-    mockFlows = [{ manifest: { requires: { providers: { "@test/provider": "1.0.0" } } } }];
+    mockFlows = [{ manifest: { dependencies: { providers: { "@test/provider": "1.0.0" } } } }];
 
     const res = await app.request("/api/providers/@test/provider", { method: "DELETE" });
     expect(res.status).toBe(409);
@@ -461,9 +461,9 @@ describe("DELETE /api/providers/:scope/:name", () => {
   test("returns 409 with correct count for multiple flows", async () => {
     queues.select.push([]); // isSystemProviderInDb → not system
     mockFlows = [
-      { manifest: { requires: { providers: { "@test/provider": "1.0.0" } } } },
-      { manifest: { requires: { providers: { "@test/provider": "2.0.0" } } } },
-      { manifest: { requires: { providers: { "@other/provider": "1.0.0" } } } },
+      { manifest: { dependencies: { providers: { "@test/provider": "1.0.0" } } } },
+      { manifest: { dependencies: { providers: { "@test/provider": "2.0.0" } } } },
+      { manifest: { dependencies: { providers: { "@other/provider": "1.0.0" } } } },
     ];
 
     const res = await app.request("/api/providers/@test/provider", { method: "DELETE" });

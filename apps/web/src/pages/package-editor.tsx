@@ -55,7 +55,7 @@ function FlowEditorInner({
   isEdit,
 }: {
   initialState: FlowFormState;
-  detail: { requires: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
+  detail: { dependencies: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -74,7 +74,7 @@ function FlowEditorInner({
     setForm((prev) => ({
       ...prev,
       skills: (
-        detail.requires.skills as {
+        detail.dependencies.skills as {
           id: string;
           version?: string;
           name?: string;
@@ -82,7 +82,7 @@ function FlowEditorInner({
         }[]
       ).map(toResourceEntry),
       tools: (
-        detail.requires.tools as {
+        detail.dependencies.tools as {
           id: string;
           version?: string;
           name?: string;

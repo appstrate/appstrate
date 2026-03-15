@@ -1,14 +1,14 @@
 import { describe, test, expect } from "bun:test";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { prepareManifestForPublish } from "@appstrate/core/publish-manifest";
+import { prepareManifestForPublish } from "@appstrate/core/dependencies";
 
 /**
  * Proves that when both createVersionFromDraft and publishPackage produce ZIPs
  * from the same enriched manifest, their integrity hashes match.
  *
  * Before the fix, createVersionFromDraft did NOT call prepareManifestForPublish,
- * so the version ZIP had no registryDependencies, while publishPackage rebuilt the
+ * so the version ZIP had no dependencies, while publishPackage rebuilt the
  * ZIP with them — causing integrity mismatches.
  */
 
@@ -22,7 +22,7 @@ const scope = "test";
 const name = "my-flow";
 const version = "1.0.0";
 
-const registryDeps = {
+const deps = {
   skills: { "@test/skill-a": "^1.0.0" },
 };
 
@@ -44,7 +44,7 @@ describe("publish integrity", () => {
       scope,
       name,
       version,
-      registryDeps,
+      deps,
     );
     const localZip = buildZip(localManifest, content);
     const localIntegrity = computeIntegrity(localZip);
@@ -55,7 +55,7 @@ describe("publish integrity", () => {
       scope,
       name,
       version,
-      registryDeps,
+      deps,
     );
     const publishZip = buildZip(publishManifest, content);
     const publishIntegrity = computeIntegrity(publishZip);
@@ -71,7 +71,7 @@ describe("publish integrity", () => {
       scope,
       name,
       version,
-      registryDeps,
+      deps,
     );
 
     const zip1 = buildZip(enrichedManifest, content);
@@ -80,7 +80,7 @@ describe("publish integrity", () => {
     expect(computeIntegrity(zip1)).toBe(computeIntegrity(zip2));
   });
 
-  test("null registryDependencies produces same manifest as base", () => {
+  test("null dependencies produces same manifest as base", () => {
     const manifest = { ...baseManifest, version };
     const prepared = prepareManifestForPublish(manifest, scope, name, version, null);
 
@@ -90,6 +90,6 @@ describe("publish integrity", () => {
       type: baseManifest.type,
       version,
     });
-    expect("registryDependencies" in prepared).toBe(false);
+    expect("dependencies" in prepared).toBe(false);
   });
 });
