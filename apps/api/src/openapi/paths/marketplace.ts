@@ -318,7 +318,6 @@ export const marketplacePaths = {
                     description: "Human-readable display name",
                   },
                   description: { type: "string" },
-                  readme: { type: "string" },
                   versions: { type: "array", items: { type: "object" } },
                   installedVersion: {
                     type: ["string", "null"],

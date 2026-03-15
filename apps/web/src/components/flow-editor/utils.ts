@@ -21,7 +21,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
       displayName: "",
       description: "",
       author: userEmail ?? "",
-      tags: [],
+      keywords: [],
     },
     prompt: "",
     providers: [],
@@ -171,7 +171,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
       displayName: (m.displayName as string) ?? "",
       description: (m.description as string) ?? "",
       author: (m.author as string) ?? "",
-      tags: (m.tags as string[]) ?? [],
+      keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
     },
     prompt: detail.prompt || "",
     providers,
@@ -259,18 +259,18 @@ export function assemblePayload(state: FlowFormState) {
     requires,
   };
 
+  // keywords: write only if present in original or non-empty
+  if ("keywords" in state._manifestBase || state.metadata.keywords.length > 0) {
+    manifest.keywords = state.metadata.keywords;
+  } else {
+    delete manifest.keywords;
+  }
+
   // providersConfiguration: write only if non-empty
   if (Object.keys(providersConfiguration).length > 0) {
     manifest.providersConfiguration = providersConfiguration;
   } else {
     delete manifest.providersConfiguration;
-  }
-
-  // tags: write only if present in original or non-empty
-  if ("tags" in state._manifestBase || state.metadata.tags.length > 0) {
-    manifest.tags = state.metadata.tags;
-  } else {
-    delete manifest.tags;
   }
 
   // Override or delete input/output/config based on form state
@@ -374,7 +374,7 @@ export function payloadToFormState(payload: {
       displayName: (manifest.displayName as string) || "",
       description: (manifest.description as string) || "",
       author: (manifest.author as string) || "",
-      tags: Array.isArray(manifest.tags) ? (manifest.tags as string[]) : [],
+      keywords: Array.isArray(manifest.keywords) ? (manifest.keywords as string[]) : [],
     },
     prompt,
     providers,

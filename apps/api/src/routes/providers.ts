@@ -32,7 +32,6 @@ const createProviderSchema = z.object({
   version: z.string().optional(),
   description: z.string().optional(),
   author: z.string().optional(),
-  tags: z.array(z.string()).optional(),
   authMode: z.enum(["oauth2", "oauth1", "api_key", "basic", "custom"]),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
@@ -200,7 +199,6 @@ export function createProvidersRouter() {
               displayName: data.displayName,
               description: data.description,
               author: data.author,
-              tags: data.tags,
               iconUrl: data.iconUrl,
               categories: data.categories,
               docsUrl: data.docsUrl,
@@ -248,7 +246,6 @@ export function createProvidersRouter() {
       displayName: data.displayName,
       description: data.description,
       author: data.author,
-      tags: data.tags,
       definition,
     };
     const versionStr = manifest.version;
@@ -365,7 +362,6 @@ export function createProvidersRouter() {
               ...(data.version !== undefined ? { version: data.version } : {}),
               ...(data.description !== undefined ? { description: data.description } : {}),
               ...(data.author !== undefined ? { author: data.author } : {}),
-              ...(data.tags !== undefined ? { tags: data.tags } : {}),
               ...(data.iconUrl !== undefined ? { iconUrl: data.iconUrl } : {}),
               ...(data.categories ? { categories: data.categories } : {}),
               ...(data.docsUrl !== undefined ? { docsUrl: data.docsUrl } : {}),

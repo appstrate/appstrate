@@ -27,7 +27,6 @@ export function packageToProviderConfig(
     version: (manifest.version as string) ?? undefined,
     description: (manifest.description as string) ?? undefined,
     author: (manifest.author as string) ?? undefined,
-    tags: (manifest.tags as string[]) ?? undefined,
     source: isSystem ? "built-in" : "custom",
     hasCredentials: !!credRow?.credentialsEncrypted,
     enabled: !!credRow?.enabled,

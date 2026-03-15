@@ -14,7 +14,7 @@ interface MetadataState {
   displayName: string;
   description: string;
   author: string;
-  tags: string[];
+  keywords: string[];
 }
 
 interface MetadataSectionProps {
@@ -28,28 +28,28 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
   const [nameEdited, setNameEdited] = useState(isEdit);
 
+  const handleKeywordInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      const input = e.currentTarget;
+      const keyword = input.value.trim().replace(/,$/g, "");
+      if (keyword && !value.keywords.includes(keyword)) {
+        update({ keywords: [...value.keywords, keyword] });
+      }
+      input.value = "";
+    }
+  };
+
+  const removeKeyword = (keyword: string) => {
+    update({ keywords: value.keywords.filter((k) => k !== keyword) });
+  };
+
   const handleDisplayNameChange = (v: string) => {
     if (nameEdited) {
       update({ displayName: v });
     } else {
       update({ displayName: v, id: toSlug(v) });
     }
-  };
-
-  const handleTagInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      const input = e.currentTarget;
-      const tag = input.value.trim().replace(/,$/g, "");
-      if (tag && !value.tags.includes(tag)) {
-        update({ tags: [...value.tags, tag] });
-      }
-      input.value = "";
-    }
-  };
-
-  const removeTag = (tag: string) => {
-    update({ tags: value.tags.filter((t) => t !== tag) });
   };
 
   return (
@@ -107,20 +107,20 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           />
         </div>
         <div className="space-y-2">
-          <Label>{t("editor.metaTags")}</Label>
+          <Label>{t("editor.metaKeywords")}</Label>
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {value.tags.map((tag) => (
+            {value.keywords.map((keyword) => (
               <span
-                key={tag}
+                key={keyword}
                 className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs text-muted-foreground"
               >
-                {tag}
+                {keyword}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   className="h-auto w-auto p-0 text-muted-foreground hover:text-destructive text-sm leading-none"
-                  onClick={() => removeTag(tag)}
+                  onClick={() => removeKeyword(keyword)}
                 >
                   &times;
                 </Button>
@@ -129,8 +129,8 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
           </div>
           <Input
             type="text"
-            placeholder={t("editor.metaTagPlaceholder")}
-            onKeyDown={handleTagInput}
+            placeholder={t("editor.metaKeywordPlaceholder")}
+            onKeyDown={handleKeywordInput}
           />
         </div>
       </div>

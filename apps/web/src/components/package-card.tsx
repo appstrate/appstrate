@@ -12,7 +12,7 @@ interface PackageCardProps {
   type: PackageType;
   source?: "system" | "local";
   runningExecutions?: number;
-  tags?: string[];
+  keywords?: string[];
   usedByFlows?: number;
   unreadCount?: number;
   statusBadge?: React.ReactNode;
@@ -28,7 +28,7 @@ export function PackageCard({
   type,
   source,
   runningExecutions,
-  tags,
+  keywords,
   usedByFlows,
   unreadCount,
   statusBadge,
@@ -92,15 +92,14 @@ export function PackageCard({
       </div>
       <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
       <div className="mt-2 flex flex-wrap gap-1">
-        {type === "flow" &&
-          tags?.map((tag) => (
-            <span
-              key={tag}
-              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border"
-            >
-              {tag}
-            </span>
-          ))}
+        {keywords?.map((kw) => (
+          <span
+            key={kw}
+            className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border"
+          >
+            {kw}
+          </span>
+        ))}
         {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
           <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border">
             {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
