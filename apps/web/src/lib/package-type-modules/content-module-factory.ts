@@ -1,12 +1,12 @@
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
 
 /**
- * Factory for skill/extension modules — they share identical logic
+ * Factory for skill/tool modules — they share identical logic
  * for detailToFormState and assemblePayload.
  * Only the default content template and _manifestBase differ.
  */
 export function makeContentPackageModule(
-  type: "skill" | "extension",
+  type: "skill" | "tool",
   defaultContent: string,
 ): PackageTypeModule {
   return {

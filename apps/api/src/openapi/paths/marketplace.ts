@@ -49,7 +49,7 @@ export const marketplacePaths = {
         {
           name: "type",
           in: "query",
-          schema: { type: "string", enum: ["flow", "skill", "extension", "provider"] },
+          schema: { type: "string", enum: ["flow", "skill", "tool", "provider"] },
           description: "Filter by package type",
         },
         {

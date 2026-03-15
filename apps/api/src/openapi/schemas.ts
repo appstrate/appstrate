@@ -23,7 +23,7 @@ export const schemas = {
         enum: [
           "EMPTY_PROMPT",
           "MISSING_SKILL",
-          "MISSING_EXTENSION",
+          "MISSING_TOOL",
           "PROVIDER_NOT_ENABLED",
           "DEPENDENCY_NOT_SATISFIED",
           "NEEDS_RECONNECTION",
@@ -135,7 +135,7 @@ export const schemas = {
       description: { type: "string" },
     },
   },
-  FlowExtensionRef: {
+  FlowToolRef: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -162,7 +162,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["flow", "skill", "extension", "provider"],
+        enum: ["flow", "skill", "tool", "provider"],
       },
       runningExecutions: { type: "integer" },
       requires: {
@@ -170,7 +170,7 @@ export const schemas = {
         properties: {
           providers: { type: "array", items: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
-          extensions: { type: "object", additionalProperties: { type: "string" } },
+          tools: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -219,7 +219,7 @@ export const schemas = {
         properties: {
           providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/FlowSkillRef" } },
-          extensions: { type: "array", items: { $ref: "#/components/schemas/FlowExtensionRef" } },
+          tools: { type: "array", items: { $ref: "#/components/schemas/FlowToolRef" } },
         },
       },
       lastExecution: {

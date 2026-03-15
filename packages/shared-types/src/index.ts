@@ -6,6 +6,7 @@ export type {
   ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";
+import type { PackageType } from "@appstrate/core/validation";
 
 import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
@@ -136,7 +137,7 @@ export interface FlowListItem {
   requires: {
     providers: string[];
     skills: Record<string, string>;
-    extensions: Record<string, string>;
+    tools: Record<string, string>;
   };
   runningExecutions: number;
   source: "system" | "local";
@@ -154,7 +155,7 @@ export interface FlowDetail {
   requires: {
     providers: ProviderStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
-    extensions: { id: string; version: string; name?: string; description?: string }[];
+    tools: { id: string; version: string; name?: string; description?: string }[];
   };
   input?: {
     schema: JSONSchemaObject;
@@ -317,7 +318,6 @@ export interface Integration {
 import type {
   AuthMode as _AuthMode,
   AvailableScope as _AvailableScope,
-  PackageType,
   ProviderSetupGuide as _ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";

@@ -613,10 +613,10 @@ export async function createVersionFromDraft(params: {
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
   } else {
-    // For skills/extensions, build ZIP from storage files or content
+    // For skills/tools, build ZIP from storage files or content
     const { downloadPackageFiles } = await import("./package-items/storage.ts");
     const files = await downloadPackageFiles(
-      pkg.type === "skill" ? "skills" : "extensions",
+      pkg.type === "skill" ? "skills" : "tools",
       orgId,
       packageId,
     );

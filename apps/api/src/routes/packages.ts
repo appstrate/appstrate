@@ -25,12 +25,12 @@ import {
   downloadPackageFiles,
   syncFlowDepsJunctionTable,
   SKILL_CONFIG,
-  EXTENSION_CONFIG,
+  TOOL_CONFIG,
   FLOW_CONFIG,
   PROVIDER_CONFIG,
   type PackageTypeConfig,
 } from "../services/package-items.ts";
-import { validateExtensionSource, validateManifest } from "@appstrate/core/validation";
+import { validateToolSource, validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
 import { parseScopedName } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
@@ -303,11 +303,11 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
   },
-  extensions: {
-    cfg: EXTENSION_CONFIG,
+  tools: {
+    cfg: TOOL_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
-    responseKey: "extension",
-    validateContent: validateExtensionSource,
+    responseKey: "tool",
+    validateContent: validateToolSource,
     storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
   },
   flows: {
@@ -319,16 +319,16 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     requireMutableForVersionOps: true,
     getHandler: flowDetailHandler,
     afterCreate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
         manifest as Partial<Manifest>,
       );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
     },
     afterUpdate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
         manifest as Partial<Manifest>,
       );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
     },
   },
   providers: {
@@ -437,7 +437,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     }
 
-    // Skill/Extension create — uses parsePackageUpload (ZIP or JSON body)
+    // Skill/Tool create — uses parsePackageUpload (ZIP or JSON body)
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
     if (parsed instanceof Response) return parsed;
 
@@ -648,7 +648,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       return c.json({ error: "VALIDATION_ERROR", message: "Content cannot be empty" }, 400);
     }
 
-    // Content validation (extensions)
+    // Content validation (tools)
     let warnings: string[] = [];
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
@@ -1050,7 +1050,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Package CRUD routes (skills, extensions, flows) ---
+  // --- Package CRUD routes (skills, tools, flows) ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
     router.get(`/${path}`, makeListHandler(rcfg));
     router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
@@ -1310,10 +1310,10 @@ export function createPackagesRouter() {
 
     // Sync flow dependency junction table after import (providers included)
     if (packageType === "flow") {
-      const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(
+      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
         manifest as Partial<Manifest>,
       );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, extensionIds, providerIds);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
     }
 
     // Force import: replace existing version content if integrity differs

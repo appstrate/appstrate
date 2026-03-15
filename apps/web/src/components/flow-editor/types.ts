@@ -1,14 +1,7 @@
 import type { SchemaField } from "./schema-section";
 import type { ExecutionSettings } from "./execution-section";
 
-export type EditorTab =
-  | "general"
-  | "prompt"
-  | "providers"
-  | "schema"
-  | "skills"
-  | "extensions"
-  | "json";
+export type EditorTab = "general" | "prompt" | "providers" | "schema" | "skills" | "tools" | "json";
 
 export interface ProviderEntry {
   id: string;
@@ -37,7 +30,7 @@ export interface FlowFormState {
   prompt: string;
   providers: ProviderEntry[];
   skills: ResourceEntry[];
-  extensions: ResourceEntry[];
+  tools: ResourceEntry[];
   inputSchema: SchemaField[];
   outputSchema: SchemaField[];
   configSchema: SchemaField[];

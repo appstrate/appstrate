@@ -1,7 +1,8 @@
 import { eq, and, or, isNull, count, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
-import type { Manifest, PackageType } from "@appstrate/core/validation";
+import type { Manifest } from "@appstrate/core/validation";
+import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
 interface DbPackageRow {
@@ -30,7 +31,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
 
   // Read version maps from the flow's manifest
   const manifestSkillsMap = (manifest.requires?.skills ?? {}) as Record<string, string>;
-  const manifestExtensionsMap = (manifest.requires?.extensions ?? {}) as Record<string, string>;
+  const manifestToolsMap = (manifest.requires?.tools ?? {}) as Record<string, string>;
 
   // Dependencies from packageDependencies joined with packages
   const depSkills = (row.depRefs ?? [])
@@ -45,13 +46,13 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
       };
     });
 
-  const depExtensions = (row.depRefs ?? [])
-    .filter((d) => d.type === "extension")
+  const depTools = (row.depRefs ?? [])
+    .filter((d) => d.type === "tool")
     .map((d) => {
       const m = (d.draftManifest ?? {}) as Partial<Manifest>;
       return {
         id: d.dependencyId,
-        version: manifestExtensionsMap[d.dependencyId] ?? "*",
+        version: manifestToolsMap[d.dependencyId] ?? "*",
         name: m.displayName ?? undefined,
         description: m.description ?? undefined,
       };
@@ -62,7 +63,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
     manifest,
     prompt: row.draftContent,
     skills: depSkills,
-    extensions: depExtensions,
+    tools: depTools,
     source: (row.source as "system" | "local") ?? "local",
   };
 }

@@ -311,7 +311,7 @@ export function useDeleteAllMemories(packageId: string) {
   });
 }
 
-// --- Package (skill/extension) create/update mutations ---
+// --- Package (skill/tool) create/update mutations ---
 
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();

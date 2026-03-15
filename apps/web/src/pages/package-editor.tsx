@@ -42,7 +42,7 @@ type GenericEditorTab =
   | "providers"
   | "schema"
   | "skills"
-  | "extensions"
+  | "tools"
   | "content"
   | "json";
 
@@ -55,7 +55,7 @@ function FlowEditorInner({
   isEdit,
 }: {
   initialState: FlowFormState;
-  detail: { requires: { skills: unknown[]; extensions: unknown[] }; lockVersion?: number } | null;
+  detail: { requires: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -81,8 +81,8 @@ function FlowEditorInner({
           description?: string;
         }[]
       ).map(toResourceEntry),
-      extensions: (
-        detail.requires.extensions as {
+      tools: (
+        detail.requires.tools as {
           id: string;
           version?: string;
           name?: string;
@@ -128,7 +128,7 @@ function FlowEditorInner({
     { id: "providers", label: t("editor.tabServices") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
-    { id: "extensions", label: t("editor.tabExtensions") },
+    { id: "tools", label: t("editor.tabTools") },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -203,13 +203,13 @@ function FlowEditorInner({
           onChange={(entries) => setForm((s) => ({ ...s, skills: entries }))}
         />
       )}
-      {activeTab === "extensions" && (
+      {activeTab === "tools" && (
         <ResourceSection
-          type="extension"
-          title={t("editor.tabExtensions")}
-          emptyLabel={t("editor.extensionsEmpty")}
-          selectedEntries={form.extensions}
-          onChange={(entries) => setForm((s) => ({ ...s, extensions: entries }))}
+          type="tool"
+          title={t("editor.tabTools")}
+          emptyLabel={t("editor.toolsEmpty")}
+          selectedEntries={form.tools}
+          onChange={(entries) => setForm((s) => ({ ...s, tools: entries }))}
         />
       )}
       {activeTab === "json" && <JsonEditor form={form} onApply={handleJsonApply} />}
@@ -217,7 +217,7 @@ function FlowEditorInner({
   );
 }
 
-// ─── Package (Skill/Extension) Editor Inner Form ────────────────────
+// ─── Package (Skill/Tool) Editor Inner Form ─────────────────────────
 
 function PackageEditorInner({
   type,
@@ -225,7 +225,7 @@ function PackageEditorInner({
   packageId,
   isEdit,
 }: {
-  type: "skill" | "extension";
+  type: "skill" | "tool";
   initialState: PackageFormState;
   packageId: string | undefined;
   isEdit: boolean;
@@ -239,7 +239,7 @@ function PackageEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
 
-  if (form._type !== "skill" && form._type !== "extension") return null;
+  if (form._type !== "skill" && form._type !== "tool") return null;
 
   const handleSubmit = () => {
     setError(null);
@@ -421,7 +421,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     );
   }
 
-  // Skill/Extension editor (flow/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
+  // Skill/Tool editor (flow/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
   const module = getPackageTypeModule(type);
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 

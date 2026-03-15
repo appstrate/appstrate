@@ -181,7 +181,7 @@ function makeFlow(overrides: {
     id: "test-flow",
     prompt: "test prompt",
     skills: [],
-    extensions: [],
+    tools: [],
     source: "system",
     manifest: {
       schemaVersion: "1.0.0",
@@ -189,7 +189,7 @@ function makeFlow(overrides: {
       displayName: "Test Flow",
       description: "A test flow",
       author: "test",
-      requires: { providers: {}, skills: {}, extensions: {} },
+      requires: { providers: {}, skills: {}, tools: {} },
       output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
       execution: {
         timeout: overrides.timeout ?? 300,

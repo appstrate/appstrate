@@ -54,7 +54,7 @@
   "validation.emailFormat": "Invalid email address",
   "orgSwitcher.marketplace": "Marketplace",
   "orgSwitcher.skills": "Skills",
-  "orgSwitcher.extensions": "Extensions",
+  "orgSwitcher.tools": "Tools",
   "orgSwitcher.import": "Import package",
   "btn.install": "Install",
   "btn.installing": "Installing...",

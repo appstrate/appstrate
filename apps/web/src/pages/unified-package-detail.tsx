@@ -92,12 +92,12 @@ function FlowRunButtonInline({
     hasModel,
     hasPrompt,
     hasRequiredSkills,
-    hasRequiredExtensions,
+    hasRequiredTools,
   } = readiness;
   const runDisabled =
     !hasPrompt ||
     !hasRequiredSkills ||
-    !hasRequiredExtensions ||
+    !hasRequiredTools ||
     !allConnected ||
     hasReconnectionNeeded ||
     !hasRequiredConfig ||
@@ -106,8 +106,8 @@ function FlowRunButtonInline({
     ? t("detail.titleEmptyPrompt")
     : !hasRequiredSkills
       ? t("detail.titleMissingSkill")
-      : !hasRequiredExtensions
-        ? t("detail.titleMissingExtension")
+      : !hasRequiredTools
+        ? t("detail.titleMissingTool")
         : hasReconnectionNeeded
           ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
           : !allConnected

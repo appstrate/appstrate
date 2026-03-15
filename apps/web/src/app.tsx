@@ -23,7 +23,7 @@ import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OrgSettingsPage } from "./pages/org-settings";
 import { SkillsPage } from "./pages/skills-page";
-import { ExtensionsPage } from "./pages/extensions-page";
+import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
@@ -307,7 +307,7 @@ export function App() {
               <Route path="/executions" element={<ExecutionsPage />} />
               <Route path="/schedules" element={<SchedulesListPage />} />
               <Route path="/skills" element={<SkillsPage />} />
-              <Route path="/extensions" element={<ExtensionsPage />} />
+              <Route path="/tools" element={<ToolsPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
               <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
               <Route
@@ -322,18 +322,15 @@ export function App() {
                 path="/skills/:scope/:name/:version"
                 element={<UnifiedPackageDetailPage type="skill" />}
               />
-              <Route path="/extensions/new" element={<PackageEditorPage type="extension" />} />
+              <Route path="/tools/new" element={<PackageEditorPage type="tool" />} />
+              <Route path="/tools/:scope/:name/edit" element={<PackageEditorPage type="tool" />} />
               <Route
-                path="/extensions/:scope/:name/edit"
-                element={<PackageEditorPage type="extension" />}
+                path="/tools/:scope/:name"
+                element={<UnifiedPackageDetailPage type="tool" />}
               />
               <Route
-                path="/extensions/:scope/:name"
-                element={<UnifiedPackageDetailPage type="extension" />}
-              />
-              <Route
-                path="/extensions/:scope/:name/:version"
-                element={<UnifiedPackageDetailPage type="extension" />}
+                path="/tools/:scope/:name/:version"
+                element={<UnifiedPackageDetailPage type="tool" />}
               />
               <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
               <Route

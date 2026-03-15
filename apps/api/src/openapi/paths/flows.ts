@@ -509,12 +509,12 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{scope}/{name}/extensions": {
+  "/api/flows/{scope}/{name}/tools": {
     put: {
-      operationId: "updateFlowExtensions",
+      operationId: "updateFlowTools",
       tags: ["Flows"],
-      summary: "Update linked extensions",
-      description: "Set the extension references for a user flow. Admin only.",
+      summary: "Update linked tools",
+      description: "Set the tool references for a user flow. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -526,9 +526,9 @@ export const flowsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["extensionIds"],
+              required: ["toolIds"],
               properties: {
-                extensionIds: {
+                toolIds: {
                   type: "array",
                   items: {
                     type: "string",
@@ -542,14 +542,14 @@ export const flowsPaths = {
       },
       responses: {
         "200": {
-          description: "Extensions updated",
+          description: "Tools updated",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  extensionIds: { type: "array", items: { type: "string" } },
+                  toolIds: { type: "array", items: { type: "string" } },
                   message: { type: "string" },
                 },
               },

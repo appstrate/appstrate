@@ -10,14 +10,14 @@ import { packageDetailPath, packageListPath } from "../lib/package-paths";
 const breadcrumbNewKeys: Record<PackageType, string> = {
   flow: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
-  extension: "editor.breadcrumbNewExtension",
+  tool: "editor.breadcrumbNewTool",
   provider: "editor.breadcrumbNewProvider",
 };
 
 const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
   flow: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
-  extension: { key: "packages.type.extensions", ns: "settings" },
+  tool: { key: "packages.type.tools", ns: "settings" },
   provider: { key: "packages.type.providers", ns: "settings" },
 };
 

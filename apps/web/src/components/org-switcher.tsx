@@ -107,9 +107,9 @@ export function OrgSwitcher() {
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link to="/extensions" className="flex items-center gap-2">
+            <Link to="/tools" className="flex items-center gap-2">
               <Puzzle size={14} />
-              {t("orgSwitcher.extensions")}
+              {t("orgSwitcher.tools")}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>

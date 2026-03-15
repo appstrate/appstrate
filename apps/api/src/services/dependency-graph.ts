@@ -1,7 +1,7 @@
 import { eq, and, or, isNull } from "drizzle-orm";
 import { isValidVersion, versionGt } from "@appstrate/core/semver";
 import { parseScopedName } from "@appstrate/core/naming";
-import type { PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "./package-items/config.ts";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { getRegistryClient } from "./registry-provider.ts";

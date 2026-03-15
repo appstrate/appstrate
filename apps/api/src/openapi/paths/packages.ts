@@ -5,7 +5,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (flow, skill, extension, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (flow, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -47,7 +47,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (flow/skill/extension/provider)",
+                    description: "Package type (flow/skill/tool/provider)",
                   },
                 },
               },
@@ -689,22 +689,22 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions": {
+  "/api/packages/tools": {
     get: {
-      operationId: "listExtensions",
+      operationId: "listTools",
       tags: ["Packages"],
-      summary: "List extensions",
-      description: "List all extensions (system + org) in the organization.",
+      summary: "List tools",
+      description: "List all tools (system + org) in the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
-          description: "Extension list",
+          description: "Tool list",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  extensions: {
+                  tools: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgPackageItem" },
                   },
@@ -716,10 +716,10 @@ export const packagesPaths = {
       },
     },
     post: {
-      operationId: "createExtension",
+      operationId: "createTool",
       tags: ["Packages"],
-      summary: "Create an extension",
-      description: "Create a new extension in the organization packages. Admin only.",
+      summary: "Create a tool",
+      description: "Create a new tool in the organization packages. Admin only.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -729,13 +729,13 @@ export const packagesPaths = {
               type: "object",
               required: ["id", "content"],
               properties: {
-                id: { type: "string", description: "Unique extension ID (kebab-case)" },
+                id: { type: "string", description: "Unique tool ID (kebab-case)" },
                 name: { type: "string", description: "Display name (optional)" },
-                description: { type: "string", description: "Extension description (optional)" },
+                description: { type: "string", description: "Tool description (optional)" },
                 content: {
                   type: "string",
                   description:
-                    "Extension TypeScript source (Pi SDK ExtensionFactory: export default function(pi: ExtensionAPI) { pi.registerTool(...) })",
+                    "Tool TypeScript source (Pi SDK ExtensionFactory: export default function(pi: ExtensionAPI) { pi.registerTool(...) })",
                 },
               },
             },
@@ -744,7 +744,7 @@ export const packagesPaths = {
       },
       responses: {
         "201": {
-          description: "Extension created",
+          description: "Tool created",
           content: {
             "application/json": {
               schema: {
@@ -763,11 +763,11 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{scope}/{name}/versions/info": {
+  "/api/packages/tools/{scope}/{name}/versions/info": {
     get: {
-      operationId: "getExtensionVersionInfo",
+      operationId: "getToolVersionInfo",
       tags: ["Packages"],
-      summary: "Get version info for an extension (latest published + draft)",
+      summary: "Get version info for a tool (latest published + draft)",
       description:
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
@@ -807,12 +807,12 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{scope}/{name}/versions": {
+  "/api/packages/tools/{scope}/{name}/versions": {
     get: {
-      operationId: "listExtensionVersions",
+      operationId: "listToolVersions",
       tags: ["Packages"],
-      summary: "List extension versions",
-      description: "List all published versions for an extension.",
+      summary: "List tool versions",
+      description: "List all published versions for a tool.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -851,11 +851,11 @@ export const packagesPaths = {
       },
     },
     post: {
-      operationId: "createExtensionVersion",
+      operationId: "createToolVersion",
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current extension draft. Version is determined by the manifest version field unless overridden. Admin only.",
+        "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -910,13 +910,13 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{scope}/{name}/versions/{version}/restore": {
+  "/api/packages/tools/{scope}/{name}/versions/{version}/restore": {
     post: {
-      operationId: "restoreExtensionVersion",
+      operationId: "restoreToolVersion",
       tags: ["Packages"],
-      summary: "Restore an extension version into the draft",
+      summary: "Restore a tool version into the draft",
       description:
-        "Restore a previously published version into the extension draft. Does not create a new version. Admin only.",
+        "Restore a previously published version into the tool draft. Does not create a new version. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -963,13 +963,13 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{scope}/{name}/versions/{version}": {
+  "/api/packages/tools/{scope}/{name}/versions/{version}": {
     get: {
-      operationId: "getExtensionVersionDetail",
+      operationId: "getToolVersionDetail",
       tags: ["Packages"],
-      summary: "Get extension version detail",
+      summary: "Get tool version detail",
       description:
-        "Resolve a version query and return versioned extension data including content extracted from ZIP.",
+        "Resolve a version query and return versioned tool data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -996,7 +996,7 @@ export const packagesPaths = {
       ],
       responses: {
         "200": {
-          description: "Versioned extension detail",
+          description: "Versioned tool detail",
           content: {
             "application/json": {
               schema: {
@@ -1021,11 +1021,11 @@ export const packagesPaths = {
       },
     },
     delete: {
-      operationId: "deleteExtensionVersion",
+      operationId: "deleteToolVersion",
       tags: ["Packages"],
-      summary: "Delete an extension version",
+      summary: "Delete a tool version",
       description:
-        "Permanently delete an extension version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+        "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1051,12 +1051,12 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/extensions/{scope}/{name}": {
+  "/api/packages/tools/{scope}/{name}": {
     get: {
-      operationId: "getExtension",
+      operationId: "getTool",
       tags: ["Packages"],
-      summary: "Get extension detail",
-      description: "Get an extension's full details including content.",
+      summary: "Get tool detail",
+      description: "Get a tool's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1076,7 +1076,7 @@ export const packagesPaths = {
       ],
       responses: {
         "200": {
-          description: "Extension detail",
+          description: "Tool detail",
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -1087,11 +1087,11 @@ export const packagesPaths = {
       },
     },
     put: {
-      operationId: "updateExtension",
+      operationId: "updateTool",
       tags: ["Packages"],
-      summary: "Update an extension",
+      summary: "Update a tool",
       description:
-        "Update an extension in the organization packages. Built-in extensions cannot be modified. Admin only.",
+        "Update a tool in the organization packages. Built-in tools cannot be modified. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1131,7 +1131,7 @@ export const packagesPaths = {
       },
       responses: {
         "200": {
-          description: "Extension updated",
+          description: "Tool updated",
           content: {
             "application/json": {
               schema: {
@@ -1150,11 +1150,11 @@ export const packagesPaths = {
       },
     },
     delete: {
-      operationId: "deleteExtension",
+      operationId: "deleteTool",
       tags: ["Packages"],
-      summary: "Delete an extension",
+      summary: "Delete a tool",
       description:
-        "Delete an extension from the organization packages. Built-in extensions cannot be deleted. Admin only.",
+        "Delete a tool from the organization packages. Built-in tools cannot be deleted. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1173,11 +1173,11 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Extension deleted" },
+        "204": { description: "Tool deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Extension is referenced by flows or required by marketplace packages",
+          description: "Tool is referenced by flows or required by marketplace packages",
           content: {
             "application/json": {
               schema: {
@@ -1196,7 +1196,7 @@ export const packagesPaths = {
                       type: "object",
                       properties: { id: { type: "string" }, displayName: { type: "string" } },
                     },
-                    description: "Flows referencing this extension (for IN_USE)",
+                    description: "Flows referencing this tool (for IN_USE)",
                   },
                   dependents: {
                     type: "array",
@@ -1204,8 +1204,7 @@ export const packagesPaths = {
                       type: "object",
                       properties: { id: { type: "string" }, displayName: { type: "string" } },
                     },
-                    description:
-                      "Marketplace packages depending on this extension (for DEPENDED_ON)",
+                    description: "Marketplace packages depending on this tool (for DEPENDED_ON)",
                   },
                 },
               },
@@ -1265,7 +1264,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get flow detail",
       description:
-        "Returns flow detail including providers, config, state, skills, and extensions. Supports profileId for per-user provider status resolution.",
+        "Returns flow detail including providers, config, state, skills, and tools. Supports profileId for per-user provider status resolution.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1739,7 +1738,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["flow", "skill", "extension", "provider"],
+                    enum: ["flow", "skill", "tool", "provider"],
                   },
                   forkedFrom: { type: "string", description: "Source package ID" },
                 },

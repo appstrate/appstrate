@@ -48,12 +48,12 @@ mock.module("../package-items/index.ts", () => ({
   getFlowItemFiles: async () => new Map(),
   downloadPackageFiles: async () => null,
   SKILL_CONFIG: {},
-  EXTENSION_CONFIG: {},
+  TOOL_CONFIG: {},
   FLOW_CONFIG: {},
 }));
 
 mock.module("../flow-service.ts", () => ({
-  getPackage: async () => ({ prompt: "test", skills: [], extensions: [] }),
+  getPackage: async () => ({ prompt: "test", skills: [], tools: [] }),
   getAllPackageIds: async () => [],
 }));
 
@@ -263,11 +263,11 @@ describe("publishPackage", () => {
     expect(mockRegistryClient!.publish).toHaveBeenCalledTimes(1);
   });
 
-  test("publishes extension type", async () => {
+  test("publishes tool type", async () => {
     queues.select = [
       [
         makePackageRow({
-          type: "extension",
+          type: "tool",
           manifest: { name: "@acme/my-ext", version: "1.0.0" },
         }),
       ],

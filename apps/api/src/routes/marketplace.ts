@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "../services/package-items/config.ts";
 import type { AppEnv } from "../types/index.ts";
 import {
   getMarketplaceStatus,

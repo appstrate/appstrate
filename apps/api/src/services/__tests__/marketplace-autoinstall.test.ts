@@ -146,7 +146,7 @@ function makeRegistryPkg(scope: string, name: string, description?: string) {
   };
 }
 
-function makeZipResult(type: "skill" | "extension" | "flow", manifest: Record<string, unknown>) {
+function makeZipResult(type: "skill" | "tool" | "flow", manifest: Record<string, unknown>) {
   return {
     manifest: { displayName: manifest.displayName ?? "Test Package", ...manifest },
     content: "content-placeholder",
@@ -494,17 +494,17 @@ describe("installFromMarketplace — auto-install deps", () => {
     }
   });
 
-  test("extension deps are also auto-installed", async () => {
+  test("tool deps are also auto-installed", async () => {
     registryPackages.set("@acme/flow-pkg", makeRegistryPkg("@acme", "flow-pkg"));
     registryPackages.set("@acme/ext", makeRegistryPkg("@acme", "ext"));
 
     zipQueue.push(
       makeZipResult("flow", {
         displayName: "Flow",
-        registryDependencies: { extensions: { "@acme/ext": "^1.0" } },
+        registryDependencies: { tools: { "@acme/ext": "^1.0" } },
       }),
     );
-    zipQueue.push(makeZipResult("extension", { displayName: "Ext" }));
+    zipQueue.push(makeZipResult("tool", { displayName: "Ext" }));
 
     // flow: findMissingDeps → ext missing
     // ext: no deps; existing check → INSERT
@@ -530,10 +530,10 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
     expect(result.autoInstalledDeps).toHaveLength(1);
     expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/ext");
-    expect(result.autoInstalledDeps![0]!.type).toBe("extension");
+    expect(result.autoInstalledDeps![0]!.type).toBe("tool");
   });
 
-  test("flow with mixed skill + extension deps at same level", async () => {
+  test("flow with mixed skill + tool deps at same level", async () => {
     registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
     registryPackages.set("@acme/skill-a", makeRegistryPkg("@acme", "skill-a"));
     registryPackages.set("@acme/ext-b", makeRegistryPkg("@acme", "ext-b"));
@@ -543,12 +543,12 @@ describe("installFromMarketplace — auto-install deps", () => {
         displayName: "My Flow",
         registryDependencies: {
           skills: { "@acme/skill-a": "*" },
-          extensions: { "@acme/ext-b": "^1.0" },
+          tools: { "@acme/ext-b": "^1.0" },
         },
       }),
     );
     zipQueue.push(makeZipResult("skill", { displayName: "Skill A" }));
-    zipQueue.push(makeZipResult("extension", { displayName: "Ext B" }));
+    zipQueue.push(makeZipResult("tool", { displayName: "Ext B" }));
 
     // flow: findMissingDeps → skill-a and ext-b both missing
     // skill-a: no deps; existing check → INSERT
@@ -582,7 +582,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(result.autoInstalledDeps).toHaveLength(2);
     const types = result.autoInstalledDeps!.map((d) => d.type);
     expect(types).toContain("skill");
-    expect(types).toContain("extension");
+    expect(types).toContain("tool");
   });
 
   test("parallel deps — A depends on B and C without nesting", async () => {
@@ -765,7 +765,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     expect(postInstallCalls).toHaveLength(0);
   });
 
-  test("flow → skill → extension — nested cross-type deps", async () => {
+  test("flow → skill → tool — nested cross-type deps", async () => {
     registryPackages.set("@acme/my-flow", makeRegistryPkg("@acme", "my-flow"));
     registryPackages.set("@acme/my-skill", makeRegistryPkg("@acme", "my-skill"));
     registryPackages.set("@acme/my-ext", makeRegistryPkg("@acme", "my-ext"));
@@ -779,10 +779,10 @@ describe("installFromMarketplace — auto-install deps", () => {
     zipQueue.push(
       makeZipResult("skill", {
         displayName: "My Skill",
-        registryDependencies: { extensions: { "@acme/my-ext": "^1.0" } },
+        registryDependencies: { tools: { "@acme/my-ext": "^1.0" } },
       }),
     );
-    zipQueue.push(makeZipResult("extension", { displayName: "My Ext" }));
+    zipQueue.push(makeZipResult("tool", { displayName: "My Ext" }));
 
     queues.select = [
       [], // integrity conflict guard → not installed
@@ -804,7 +804,7 @@ describe("installFromMarketplace — auto-install deps", () => {
 
     expect(tracking.insertCalls).toHaveLength(3);
     expect(tracking.insertCalls[0]!.id).toBe("@acme/my-ext");
-    expect(tracking.insertCalls[0]!.type).toBe("extension");
+    expect(tracking.insertCalls[0]!.type).toBe("tool");
     expect(tracking.insertCalls[0]!.autoInstalled).toBe(true);
     expect(tracking.insertCalls[1]!.id).toBe("@acme/my-skill");
     expect(tracking.insertCalls[1]!.type).toBe("skill");
@@ -816,7 +816,7 @@ describe("installFromMarketplace — auto-install deps", () => {
     // autoInstalledDeps: collect phase pushes deepest deps first (ext, then skill)
     expect(result.autoInstalledDeps).toHaveLength(2);
     expect(result.autoInstalledDeps![0]!.packageId).toBe("@acme/my-ext");
-    expect(result.autoInstalledDeps![0]!.type).toBe("extension");
+    expect(result.autoInstalledDeps![0]!.type).toBe("tool");
     expect(result.autoInstalledDeps![1]!.packageId).toBe("@acme/my-skill");
     expect(result.autoInstalledDeps![1]!.type).toBe("skill");
   });

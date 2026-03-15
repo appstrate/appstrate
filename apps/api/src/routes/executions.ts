@@ -369,7 +369,7 @@ export function createExecutionsRouter() {
       parseRequestInput(c, effectiveFlow.manifest.input?.schema),
     ]);
 
-    // Validate flow readiness (prompt, skills, extensions, providers, config)
+    // Validate flow readiness (prompt, skills, tools, providers, config)
     const readinessError = await validateFlowReadiness({
       flow: effectiveFlow,
       providerProfiles,

@@ -6,12 +6,7 @@ import {
   buildRegistryDepsFromRows,
   type RegistryDependencies,
 } from "@appstrate/core/registry-deps";
-import {
-  type PackageTypeConfig,
-  SKILL_CONFIG,
-  EXTENSION_CONFIG,
-  PROVIDER_CONFIG,
-} from "./config.ts";
+import { type PackageTypeConfig, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 
 // ─────────────────────────────────────────────
@@ -91,11 +86,11 @@ export async function syncFlowDepsJunctionTable(
   packageId: string,
   orgId: string,
   skillIds: string[],
-  extensionIds: string[],
+  toolIds: string[],
   providerIds: string[],
 ): Promise<void> {
   await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
-  await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+  await setFlowItems(packageId, orgId, toolIds, TOOL_CONFIG);
   await setFlowItems(packageId, orgId, providerIds, PROVIDER_CONFIG);
 }
 

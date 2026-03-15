@@ -26,7 +26,7 @@ export interface SkillMeta {
   description?: string;
 }
 
-export interface ExtensionMeta {
+export interface ToolMeta {
   id: string;
   version?: string;
   name?: string;
@@ -38,7 +38,7 @@ export interface LoadedFlow {
   manifest: FlowManifest;
   prompt: string;
   skills: SkillMeta[];
-  extensions: ExtensionMeta[];
+  tools: ToolMeta[];
   source: "system" | "local";
 }
 

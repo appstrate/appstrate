@@ -6,7 +6,7 @@ export interface PackageTypeModule {
   assemblePayload: (state: PackageFormState) => Record<string, unknown>;
 }
 
-/** Fields needed by module.detailToFormState() for skill/extension packages. */
+/** Fields needed by module.detailToFormState() for skill/tool packages. */
 export interface ContentPackageInput {
   id: string;
   displayName: string;
@@ -33,7 +33,7 @@ export interface PackageMetadata {
 }
 
 export interface PackageFormState {
-  _type: "skill" | "extension";
+  _type: "skill" | "tool";
   metadata: PackageMetadata;
   content: string;
   _manifestBase: Record<string, unknown>;
@@ -43,13 +43,13 @@ export interface PackageFormState {
 // --- Module registry ---
 
 import { skillModule } from "./skill-module";
-import { extensionModule } from "./extension-module";
+import { toolModule } from "./tool-module";
 
-const modules: Record<"skill" | "extension", PackageTypeModule> = {
+const modules: Record<"skill" | "tool", PackageTypeModule> = {
   skill: skillModule,
-  extension: extensionModule,
+  tool: toolModule,
 };
 
-export function getPackageTypeModule(type: "skill" | "extension"): PackageTypeModule {
+export function getPackageTypeModule(type: "skill" | "tool"): PackageTypeModule {
   return modules[type];
 }

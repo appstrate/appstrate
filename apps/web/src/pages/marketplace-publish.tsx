@@ -105,11 +105,11 @@ export function MarketplacePublishPage() {
 
   const { data: flows, isLoading: flowsLoading } = useFlows();
   const { data: skills, isLoading: skillsLoading } = usePackageList("skill");
-  const { data: extensions, isLoading: extensionsLoading } = usePackageList("extension");
+  const { data: tools, isLoading: toolsLoading } = usePackageList("tool");
   const { data: providers, isLoading: providersLoading } = usePackageList("provider");
 
   const isLoading =
-    statusLoading || flowsLoading || skillsLoading || extensionsLoading || providersLoading;
+    statusLoading || flowsLoading || skillsLoading || toolsLoading || providersLoading;
 
   // Build publishable items list (exclude system packages)
   const publishableItems: PublishableItem[] = [];
@@ -129,7 +129,7 @@ export function MarketplacePublishPage() {
 
   const nonFlowData = [
     { items: skills, type: "skill" as const },
-    { items: extensions, type: "extension" as const },
+    { items: tools, type: "tool" as const },
     { items: providers, type: "provider" as const },
   ];
 

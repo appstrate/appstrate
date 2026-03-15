@@ -10,7 +10,7 @@ import {
   type PackageTypeConfig,
   FLOW_CONFIG,
   SKILL_CONFIG,
-  EXTENSION_CONFIG,
+  TOOL_CONFIG,
   PROVIDER_CONFIG,
 } from "./package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
@@ -23,7 +23,7 @@ import { eq } from "drizzle-orm";
 const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
   flow: FLOW_CONFIG,
   skill: SKILL_CONFIG,
-  extension: EXTENSION_CONFIG,
+  tool: TOOL_CONFIG,
   provider: PROVIDER_CONFIG,
 };
 
@@ -171,8 +171,8 @@ async function forkWithConfig(
   // Sync flow dependencies if it's a flow
   if (cfg.type === "flow") {
     const manifest = updatedManifest as Partial<Manifest>;
-    const { skillIds, extensionIds, providerIds } = extractDepsFromManifest(manifest);
-    await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, extensionIds, providerIds);
+    const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
+    await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, toolIds, providerIds);
   }
 
   return {

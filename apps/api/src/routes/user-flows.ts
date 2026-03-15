@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { setFlowItems, SKILL_CONFIG, EXTENSION_CONFIG } from "../services/package-items.ts";
+import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 
 export function createUserFlowsRouter() {
@@ -49,9 +49,9 @@ export function createUserFlowsRouter() {
     },
   );
 
-  // PUT /api/flows/:scope/:name/extensions — set extension references for a flow
+  // PUT /api/flows/:scope/:name/tools — set tool references for a flow
   router.put(
-    "/:scope{@[^/]+}/:name/extensions",
+    "/:scope{@[^/]+}/:name/tools",
     requireFlow(),
     requireAdmin(),
     requireMutableFlow(),
@@ -60,26 +60,26 @@ export function createUserFlowsRouter() {
       const orgId = c.get("orgId");
       const packageId = flow.id;
 
-      const body = await c.req.json<{ extensionIds: string[] }>();
-      const { extensionIds } = body;
+      const body = await c.req.json<{ toolIds: string[] }>();
+      const { toolIds } = body;
 
-      if (!Array.isArray(extensionIds)) {
-        return c.json({ error: "VALIDATION_ERROR", message: "extensionIds must be an array" }, 400);
+      if (!Array.isArray(toolIds)) {
+        return c.json({ error: "VALIDATION_ERROR", message: "toolIds must be an array" }, 400);
       }
 
-      const invalidIds = extensionIds.filter((id) => !scopedNameRegex.test(id));
+      const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {
         return c.json(
           {
             error: "VALIDATION_ERROR",
-            message: `Invalid extension IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+            message: `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
           },
           400,
         );
       }
 
       try {
-        await setFlowItems(packageId, orgId, extensionIds, EXTENSION_CONFIG);
+        await setFlowItems(packageId, orgId, toolIds, TOOL_CONFIG);
       } catch (err) {
         return c.json(
           { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
@@ -87,7 +87,7 @@ export function createUserFlowsRouter() {
         );
       }
 
-      return c.json({ packageId, extensionIds, message: "Extension references updated" });
+      return c.json({ packageId, toolIds, message: "Tool references updated" });
     },
   );
 
