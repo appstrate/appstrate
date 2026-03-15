@@ -72,9 +72,7 @@ export function OnboardingMembersStep() {
       title={t("onboarding.membersTitle")}
       subtitle={t("onboarding.membersSubtitle")}
       onNext={goNext}
-      onSkip={goNext}
       onBack={() => navigate("/onboarding/providers")}
-      showSkip
     >
       <div className="flex flex-col gap-4">
         {/* Invite form — fixed above scroll */}

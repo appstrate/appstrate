@@ -48,9 +48,7 @@ interface OnboardingLayoutProps {
   subtitle?: string;
   children: React.ReactNode;
   onNext?: () => void;
-  onSkip?: () => void;
   onBack?: () => void;
-  showSkip?: boolean;
   nextDisabled?: boolean;
   nextPending?: boolean;
   nextLabel?: string;
@@ -62,9 +60,7 @@ export function OnboardingLayout({
   subtitle,
   children,
   onNext,
-  onSkip,
   onBack,
-  showSkip = false,
   nextDisabled = false,
   nextPending = false,
   nextLabel,
@@ -125,11 +121,6 @@ export function OnboardingLayout({
             <div />
           )}
           <div className="ml-auto flex items-center gap-2">
-            {showSkip && onSkip && (
-              <Button variant="ghost" size="sm" onClick={onSkip}>
-                {t("onboarding.skip")}
-              </Button>
-            )}
             {onNext && (
               <Button onClick={onNext} disabled={nextDisabled || nextPending}>
                 {nextPending ? t("onboarding.saving") : nextLabel || t("onboarding.next")}

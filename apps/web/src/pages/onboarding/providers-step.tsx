@@ -75,9 +75,7 @@ export function OnboardingProvidersStep() {
       title={t("onboarding.providersTitle")}
       subtitle={t("onboarding.providersSubtitle")}
       onNext={goNext}
-      onSkip={goNext}
       onBack={() => navigate("/onboarding/model")}
-      showSkip
     >
       {providersLoading ? (
         <div className="flex justify-center py-8">
