@@ -13,7 +13,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
       displayName: "Test Flow",
       description: "A test flow",
       author: "test@test.com",
-      tags: [],
+      keywords: [],
     },
     prompt: "Do something useful",
     providers: [],

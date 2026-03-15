@@ -368,7 +368,6 @@
   "marketplace.install": "Install",
   "marketplace.versions": "Versions",
   "marketplace.downloadVersion": "Download",
-  "marketplace.readme": "Description",
   "marketplace.installSuccess": "Package installed successfully",
   "marketplace.backToMarketplace": "Back to marketplace",
   "marketplace.prevPage": "Previous",

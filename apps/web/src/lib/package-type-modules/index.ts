@@ -29,7 +29,7 @@ export interface PackageMetadata {
   displayName: string;
   description: string;
   author: string;
-  tags: string[];
+  keywords: string[];
 }
 
 export interface PackageFormState {

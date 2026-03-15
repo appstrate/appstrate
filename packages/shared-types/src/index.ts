@@ -132,7 +132,7 @@ export interface FlowListItem {
   description: string;
   schemaVersion: string;
   author: string;
-  tags: string[];
+  keywords: string[];
   requires: {
     providers: string[];
     skills: Record<string, string>;
@@ -330,7 +330,6 @@ export interface ProviderConfig extends Omit<
   version?: string;
   description?: string;
   author?: string;
-  tags?: string[];
   source: "built-in" | "custom";
   hasCredentials: boolean;
   enabled: boolean;

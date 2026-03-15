@@ -17,7 +17,7 @@ export interface CardItem {
   type: PackageType;
   source?: "system" | "local";
   runningExecutions?: number;
-  tags?: string[];
+  keywords?: string[];
   usedByFlows?: number;
   unreadCount?: number;
   statusBadge?: ReactNode;
@@ -104,7 +104,7 @@ export function PackageList() {
     type: "flow",
     source: f.source,
     runningExecutions: f.runningExecutions,
-    tags: f.tags,
+    keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
   }));
 

@@ -29,7 +29,7 @@ interface ProviderMetadata {
   displayName: string;
   description: string;
   author: string;
-  tags: string[];
+  keywords: string[];
 }
 
 interface ProviderFields {
@@ -67,7 +67,7 @@ function getInitialMetadata(
       displayName: "",
       description: "",
       author: "",
-      tags: [],
+      keywords: [],
     };
   }
   const scopeMatch = provider.id.match(/^@([^/]+)\/(.+)$/);
@@ -78,7 +78,7 @@ function getInitialMetadata(
     displayName: provider.displayName,
     description: provider.description ?? "",
     author: provider.author ?? "",
-    tags: provider.tags ?? [],
+    keywords: [],
   };
 }
 
@@ -143,7 +143,6 @@ function buildPayload(
     version: metadata.version,
     description: metadata.description,
     author: metadata.author,
-    tags: metadata.tags,
     authMode: fields.authMode,
   };
 

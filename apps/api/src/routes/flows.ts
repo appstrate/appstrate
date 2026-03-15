@@ -43,7 +43,7 @@ export function createFlowsRouter() {
         description: f.manifest.description,
         schemaVersion: f.manifest.schemaVersion,
         author: f.manifest.author,
-        tags: f.manifest.tags ?? [],
+        keywords: f.manifest.keywords ?? [],
         requires: {
           providers: resolveManifestProviders(f.manifest).map((s) => s.id),
           skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),

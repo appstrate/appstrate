@@ -14,7 +14,6 @@ const VALID_MANIFEST = {
   displayName: "Test Flow",
   description: "A test flow",
   author: "test",
-  tags: ["test"],
   requires: {
     providers: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },

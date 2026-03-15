@@ -32,7 +32,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { TypeBadge } from "../components/type-badge";
 import { Spinner } from "../components/spinner";
 import { PublishPlanModal } from "../components/publish-plan-modal";
-import { Markdown, InlineMarkdown } from "../components/markdown";
+import { InlineMarkdown } from "../components/markdown";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -303,15 +303,6 @@ export function MarketplaceDetailPage() {
           </p>
         )}
       </div>
-
-      {pkg.readme && (
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-2">
-            {t("marketplace.readme")}
-          </h3>
-          <Markdown className="text-sm leading-relaxed max-w-none">{pkg.readme}</Markdown>
-        </div>
-      )}
 
       {pkg.versions.length > 0 && (
         <div className="mb-6">

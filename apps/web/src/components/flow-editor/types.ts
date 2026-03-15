@@ -32,7 +32,7 @@ export interface FlowFormState {
     displayName: string;
     description: string;
     author: string;
-    tags: string[];
+    keywords: string[];
   };
   prompt: string;
   providers: ProviderEntry[];

@@ -39,7 +39,6 @@ interface MarketplacePackageDetail {
   displayName: string | null;
   description: string;
   keywords: string[];
-  readme: string | null;
   repositoryUrl: string | null;
   license: string | null;
   versions: Array<{

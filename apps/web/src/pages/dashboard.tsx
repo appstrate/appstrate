@@ -29,7 +29,7 @@ export function DashboardPage() {
       displayName: string;
       description?: string | null;
       source?: string;
-      tags?: string[];
+      keywords?: string[];
       runningExecutions?: number;
     }
   >();
@@ -39,7 +39,7 @@ export function DashboardPage() {
         displayName: f.displayName,
         description: f.description,
         source: f.source,
-        tags: f.tags,
+        keywords: f.keywords,
         runningExecutions: f.runningExecutions,
       });
     }
@@ -98,7 +98,7 @@ export function DashboardPage() {
                     type="flow"
                     source={flow?.source as "system" | "local" | undefined}
                     runningExecutions={flow?.runningExecutions}
-                    tags={flow?.tags}
+                    keywords={flow?.keywords}
                     unreadCount={unreadCounts?.[flowId]}
                   />
                 </div>

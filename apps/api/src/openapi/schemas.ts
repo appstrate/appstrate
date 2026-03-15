@@ -152,7 +152,7 @@ export const schemas = {
       description: { type: "string" },
       schemaVersion: { type: "string" },
       author: { type: "string" },
-      tags: { type: "array", items: { type: "string" } },
+      keywords: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["system", "local"] },
       scope: {
         type: ["string", "null"],

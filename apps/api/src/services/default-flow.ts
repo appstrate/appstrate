@@ -9,7 +9,7 @@ const HELLO_WORLD_MANIFEST = {
   displayName: "Hello World",
   author: "Appstrate",
   description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",
-  tags: ["demo", "hello-world", "getting-started"],
+  keywords: ["demo", "example", "getting-started"],
 };
 
 const HELLO_WORLD_PROMPT = `# Hello World

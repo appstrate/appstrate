@@ -71,7 +71,6 @@ export interface RegistryPackageDetail {
   type: PackageType;
   description: string;
   keywords: string[];
-  readme: string | null;
   repositoryUrl: string | null;
   license: string | null;
   createdBy: string;
