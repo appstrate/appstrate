@@ -32,9 +32,6 @@ export function OnboardingModelStep() {
       title={t("onboarding.modelTitle")}
       subtitle={t("onboarding.modelSubtitle")}
       onNext={goNext}
-      onSkip={goNext}
-      showSkip
-      nextDisabled={!hasModels}
     >
       {hasModels ? (
         <div className="flex flex-col gap-3">
