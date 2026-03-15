@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "file:../core",
+        "@appstrate/core": "^2.7.0",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -157,7 +157,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@file:../core", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "devDependencies": { "@eslint/js": "^10.0.1", "@types/bun": "latest", "@types/semver": "^7.5.8", "eslint": "^10.0.0", "eslint-config-prettier": "^10.1.8", "globals": "^17.3.0", "prettier": "^3.8.1", "typescript-eslint": "^8.55.0" }, "peerDependencies": { "typescript": "^5" } }],
+    "@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 
@@ -1462,18 +1462,6 @@
     "zustand": ["zustand@5.0.11", "", { "peerDependencies": { "@types/react": ">=18.0.0", "immer": ">=9.0.6", "react": ">=18.0.0", "use-sync-external-store": ">=1.2.0" }, "optionalPeers": ["@types/react", "immer", "react", "use-sync-external-store"] }, "sha512-fdZY+dk7zn/vbWNCYmzZULHRrss0jx5pPFiOuMZ/5HJN6Yv3u+1Wswy/4MpZEkEGhtNH+pwxZB8OKgUBPzYAGg=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
-
-    "@appstrate/api/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
-
-    "@appstrate/db/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
-
-    "@appstrate/env/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
-
-    "@appstrate/registry-client/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
-
-    "@appstrate/shared-types/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
-
-    "@appstrate/web/@appstrate/core": ["@appstrate/core@2.7.0", "", { "dependencies": { "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-TKc7kEfe+Li6JfkAVOkoO0uCvaVOUkJUukqz/zwKfGAUV4zv8xc+7Gl5E8HD0clsf4u+0ER5Gd1o5eA7S9cbEQ=="],
 
     "@babel/core/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
