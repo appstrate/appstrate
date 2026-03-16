@@ -1,8 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://afps.appstrate.dev/schema/v1/flow.schema.json",
-  "title": "AFPS Flow Manifest",
-  "description": "Manifest schema for AFPS flow packages. A flow declares dependencies, input/output/config schemas, a timeout hint, and provider configuration.",
+  "title": "Appstrate Flow Manifest",
+  "description": "Appstrate flow manifest — extends AFPS flow with x-outputRetries.",
   "type": "object",
   "properties": {
     "name": {
@@ -127,22 +126,51 @@
                     "type": "string",
                     "enum": ["string", "number", "boolean", "array", "object", "file"]
                   },
-                  "description": { "type": "string" },
+                  "description": {
+                    "type": "string"
+                  },
                   "default": {},
-                  "enum": { "type": "array", "items": {} },
-                  "format": { "type": "string" },
-                  "placeholder": { "type": "string" },
-                  "accept": { "type": "string" },
-                  "maxSize": { "type": "number", "exclusiveMinimum": 0 },
-                  "multiple": { "type": "boolean" },
-                  "maxFiles": { "type": "number", "exclusiveMinimum": 0 }
+                  "enum": {
+                    "type": "array",
+                    "items": {}
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "accept": {
+                    "type": "string"
+                  },
+                  "maxSize": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "multiple": {
+                    "type": "boolean"
+                  },
+                  "maxFiles": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
                 },
                 "required": ["type"],
                 "additionalProperties": {}
               }
             },
-            "required": { "type": "array", "items": { "type": "string" } },
-            "propertyOrder": { "type": "array", "items": { "type": "string" } }
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyOrder": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
           "required": ["type", "properties"],
           "additionalProperties": {}
@@ -173,22 +201,51 @@
                     "type": "string",
                     "enum": ["string", "number", "boolean", "array", "object", "file"]
                   },
-                  "description": { "type": "string" },
+                  "description": {
+                    "type": "string"
+                  },
                   "default": {},
-                  "enum": { "type": "array", "items": {} },
-                  "format": { "type": "string" },
-                  "placeholder": { "type": "string" },
-                  "accept": { "type": "string" },
-                  "maxSize": { "type": "number", "exclusiveMinimum": 0 },
-                  "multiple": { "type": "boolean" },
-                  "maxFiles": { "type": "number", "exclusiveMinimum": 0 }
+                  "enum": {
+                    "type": "array",
+                    "items": {}
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "accept": {
+                    "type": "string"
+                  },
+                  "maxSize": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "multiple": {
+                    "type": "boolean"
+                  },
+                  "maxFiles": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
                 },
                 "required": ["type"],
                 "additionalProperties": {}
               }
             },
-            "required": { "type": "array", "items": { "type": "string" } },
-            "propertyOrder": { "type": "array", "items": { "type": "string" } }
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyOrder": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
           "required": ["type", "properties"],
           "additionalProperties": {}
@@ -219,22 +276,51 @@
                     "type": "string",
                     "enum": ["string", "number", "boolean", "array", "object", "file"]
                   },
-                  "description": { "type": "string" },
+                  "description": {
+                    "type": "string"
+                  },
                   "default": {},
-                  "enum": { "type": "array", "items": {} },
-                  "format": { "type": "string" },
-                  "placeholder": { "type": "string" },
-                  "accept": { "type": "string" },
-                  "maxSize": { "type": "number", "exclusiveMinimum": 0 },
-                  "multiple": { "type": "boolean" },
-                  "maxFiles": { "type": "number", "exclusiveMinimum": 0 }
+                  "enum": {
+                    "type": "array",
+                    "items": {}
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "accept": {
+                    "type": "string"
+                  },
+                  "maxSize": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "multiple": {
+                    "type": "boolean"
+                  },
+                  "maxFiles": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
                 },
                 "required": ["type"],
                 "additionalProperties": {}
               }
             },
-            "required": { "type": "array", "items": { "type": "string" } },
-            "propertyOrder": { "type": "array", "items": { "type": "string" } }
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyOrder": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
           "required": ["type", "properties"],
           "additionalProperties": {}
@@ -246,6 +332,11 @@
     "timeout": {
       "type": "number",
       "exclusiveMinimum": 0
+    },
+    "x-outputRetries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     }
   },
   "required": ["name", "version", "type", "displayName", "schemaVersion", "author"],

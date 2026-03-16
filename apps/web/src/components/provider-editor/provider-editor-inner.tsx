@@ -13,12 +13,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { JsonView } from "../json-view";
+import { JsonEditor } from "../json-editor";
 import { MetadataSection } from "../flow-editor/metadata-section";
 import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "../flow-editor/utils";
 import { EditorShell } from "../editor-shell";
 import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import providerSchema from "../../lib/schemas/provider.schema.json";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "json";
 
@@ -729,11 +731,63 @@ export function ProviderEditorInner({
 
       {/* ── JSON Tab ── */}
       {activeTab === "json" && (
-        <div className="my-4">
-          <JsonView
-            data={buildPayload(metadata, fields, isEdit, availableScopes, credentialFields)}
-          />
-        </div>
+        <JsonEditor
+          value={buildPayload(metadata, fields, isEdit, availableScopes, credentialFields)}
+          onApply={(parsed) => {
+            const idStr = parsed.id as string | undefined;
+            const scopeMatch = idStr?.match(/^@([^/]+)\/(.+)$/);
+            setMetadata((prev) => ({
+              ...prev,
+              displayName: (parsed.displayName as string) ?? prev.displayName,
+              description: (parsed.description as string) ?? prev.description,
+              version: (parsed.version as string) ?? prev.version,
+              author: (parsed.author as string) ?? prev.author,
+              ...(scopeMatch ? { scope: scopeMatch[1], id: scopeMatch[2] } : {}),
+            }));
+            setFields((prev) => ({
+              ...prev,
+              authMode: (parsed.authMode as string) ?? prev.authMode,
+              iconUrl: (parsed.iconUrl as string) ?? "",
+              docsUrl: (parsed.docsUrl as string) ?? "",
+              categories: Array.isArray(parsed.categories)
+                ? (parsed.categories as string[]).join(", ")
+                : prev.categories,
+              authorizationUrl: (parsed.authorizationUrl as string) ?? "",
+              tokenUrl: (parsed.tokenUrl as string) ?? "",
+              refreshUrl: (parsed.refreshUrl as string) ?? "",
+              requestTokenUrl: (parsed.requestTokenUrl as string) ?? "",
+              accessTokenUrl: (parsed.accessTokenUrl as string) ?? "",
+              clientId: (parsed.clientId as string) ?? "",
+              clientSecret: (parsed.clientSecret as string) ?? "",
+              defaultScopes: Array.isArray(parsed.defaultScopes)
+                ? (parsed.defaultScopes as string[]).join("\n")
+                : prev.defaultScopes,
+              scopeSeparator: (parsed.scopeSeparator as string) ?? prev.scopeSeparator,
+              pkceEnabled: (parsed.pkceEnabled as boolean) ?? prev.pkceEnabled,
+              tokenAuthMethod: (parsed.tokenAuthMethod as string) ?? prev.tokenAuthMethod,
+              credentialFieldName: (parsed.credentialFieldName as string) ?? "",
+              credentialHeaderName: (parsed.credentialHeaderName as string) ?? "",
+              credentialHeaderPrefix: (parsed.credentialHeaderPrefix as string) ?? "",
+              authorizedUris: Array.isArray(parsed.authorizedUris)
+                ? (parsed.authorizedUris as string[]).join("\n")
+                : prev.authorizedUris,
+              allowAllUris: (parsed.allowAllUris as boolean) ?? false,
+            }));
+            if (Array.isArray(parsed.availableScopes)) {
+              setAvailableScopes(parsed.availableScopes as AvailableScope[]);
+            }
+            if (parsed.credentialSchema) {
+              setCredentialFields(
+                schemaToFields(
+                  parsed.credentialSchema as unknown as JSONSchemaObject,
+                  "credentials",
+                ),
+              );
+            }
+            setActiveTab("general");
+          }}
+          schema={{ uri: AFPS_SCHEMA_URLS.provider, schema: providerSchema }}
+        />
       )}
     </EditorShell>
   );

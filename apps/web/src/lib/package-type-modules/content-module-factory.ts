@@ -54,6 +54,7 @@ export function makeContentPackageModule(
         : undefined;
       const manifest: Record<string, unknown> = {
         $schema: AFPS_SCHEMA_URLS[type],
+        schemaVersion: "1.0",
         ...state._manifestBase,
         type: state._type,
         version: state.metadata.version,
