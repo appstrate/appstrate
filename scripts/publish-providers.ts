@@ -1,7 +1,7 @@
 /**
- * Publish system provider ZIPs to the Appstrate registry.
+ * Publish system provider AFPS packages to the Appstrate registry.
  *
- * For each apps/api/providers/{name}/{name}-{version}.zip:
+ * For each apps/api/providers/{name}/{name}-{version}.afps:
  *   1. Read the pre-built ZIP
  *   2. Compute SHA256 SRI integrity
  *   3. Parse manifest from ZIP
@@ -35,7 +35,7 @@ async function main() {
   for (const entry of entries.sort()) {
     const entryDir = join(PROVIDERS_DIR, entry);
     const files = await readdir(entryDir);
-    const zipFile = files.find((f) => f.endsWith(".zip"));
+    const zipFile = files.find((f) => f.endsWith(".afps"));
     if (!zipFile) continue;
 
     const zipBuffer = await readFile(join(entryDir, zipFile));
@@ -69,7 +69,7 @@ async function main() {
 
     // Publish
     const formData = new FormData();
-    formData.append("artifact", new Blob([zipBuffer]), `${name}-${version}.zip`);
+    formData.append("artifact", new Blob([zipBuffer]), `${name}-${version}.afps`);
 
     const publishRes = await fetch(`${registryUrl}/api/packages/${scope}/${name}/publish`, {
       method: "POST",

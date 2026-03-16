@@ -16,7 +16,7 @@ export async function downloadVersionZip(
   version: string,
   expectedIntegrity?: string | null,
 ): Promise<Buffer | null> {
-  const path = `${packageId}/${version}.zip`;
+  const path = `${packageId}/${version}.afps`;
   const data = await storage.downloadFile(BUCKET, path);
   if (!data) return null;
 
@@ -38,7 +38,7 @@ export async function downloadVersionZip(
 
 /** Delete a versioned package ZIP from Storage. Swallows errors (best-effort cleanup). */
 export async function deleteVersionZip(packageId: string, version: string): Promise<void> {
-  const path = `${packageId}/${version}.zip`;
+  const path = `${packageId}/${version}.afps`;
   try {
     await storage.deleteFile(BUCKET, path);
   } catch (error) {
@@ -56,7 +56,7 @@ export async function uploadPackageZip(
   version: string,
   zipBuffer: Buffer,
 ): Promise<void> {
-  const path = `${packageId}/${version}.zip`;
+  const path = `${packageId}/${version}.afps`;
   try {
     await storage.uploadFile(BUCKET, path, zipBuffer);
   } catch (error) {

@@ -122,7 +122,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${scope.replace(/^@/, "")}-${name}-${version}.zip`;
+        a.download = `${scope.replace(/^@/, "")}-${name}-${version}.afps`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

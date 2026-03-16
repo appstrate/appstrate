@@ -102,7 +102,7 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
 // --- 2a. Phase A: git init + extract flow package in parallel ---
 
-const packagePath = path.join(WORKSPACE, "flow-package.zip");
+const packagePath = path.join(WORKSPACE, "flow-package.afps");
 const hasPackage = await exists(packagePath);
 
 await Promise.all([

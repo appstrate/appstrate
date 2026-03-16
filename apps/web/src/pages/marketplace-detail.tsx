@@ -109,7 +109,7 @@ export function MarketplaceDetailPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${scope}-${name}-${version}.zip`;
+      a.download = `${scope}-${name}-${version}.afps`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

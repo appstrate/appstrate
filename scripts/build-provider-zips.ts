@@ -1,14 +1,14 @@
 /**
- * Build pre-built ZIP artifacts for system providers.
+ * Build pre-built AFPS artifacts for system providers.
  *
  * Two modes per provider:
- *   - If a {name}.json source file exists → validate, create ZIP, delete old ZIPs
- *   - If only a ZIP exists → extract manifest, revalidate, rebuild ZIP
+ *   - If a {name}.json source file exists → validate, create AFPS, delete old archives
+ *   - If only an AFPS exists → extract manifest, revalidate, rebuild AFPS
  *
  * New providers: create a {name}.json file in apps/api/providers/ and run this script.
- * The source file is deleted after successful build (the ZIP is the artifact).
+ * The source file is deleted after successful build (the AFPS archive is the artifact).
  *
- * Output: apps/api/providers/{name}-{version}.zip
+ * Output: apps/api/providers/{name}-{version}.afps
  *
  * Usage: bun run scripts/build-provider-zips.ts
  */
@@ -41,11 +41,11 @@ async function main() {
 
     const manifest = result.manifest;
     const version = manifest.version as string;
-    const zipName = `${name}-${version}.zip`;
+    const zipName = `${name}-${version}.afps`;
 
     // Delete old ZIPs for this provider
     for (const f of entries) {
-      if (f.endsWith(".zip") && f.startsWith(`${name}-`) && f !== zipName) {
+      if (f.endsWith(".afps") && f.startsWith(`${name}-`) && f !== zipName) {
         await unlink(join(PROVIDERS_DIR, f));
         console.log(`  Deleted old: ${f}`);
       }
@@ -66,9 +66,9 @@ async function main() {
   }
 
   // Phase 2: Rebuild existing ZIPs (revalidate)
-  const zipFiles = entries.filter((f) => f.endsWith(".zip"));
+  const zipFiles = entries.filter((f) => f.endsWith(".afps"));
   for (const zipFile of zipFiles.sort()) {
-    const name = zipFile.replace(/-\d+\.\d+\.\d+\.zip$/, "");
+    const name = zipFile.replace(/-\d+\.\d+\.\d+\.afps$/, "");
     if (processedNames.has(name)) continue;
 
     const buf = await readFile(join(PROVIDERS_DIR, zipFile));
@@ -86,7 +86,7 @@ async function main() {
     built++;
   }
 
-  console.log(`\n${built} provider ZIPs ready`);
+  console.log(`\n${built} provider AFPS packages ready`);
 }
 
 main().catch((err) => {

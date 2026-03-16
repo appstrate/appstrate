@@ -268,7 +268,7 @@ export class RegistryClient {
     const url = `${this.baseUrl}/api/v1/publish`;
     const formData = new FormData();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    formData.append("artifact", new Blob([artifact as any]), "artifact.zip");
+    formData.append("artifact", new Blob([artifact as any]), "artifact.afps");
 
     const headers: Record<string, string> = {};
     if (this.accessToken) {

@@ -4,7 +4,7 @@ import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
-import type { Manifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 
@@ -94,6 +94,7 @@ export async function createOrgItem(
     ? { ...manifest }
     : { version: "1.0.0", name: packageId };
 
+  finalManifest.$schema = AFPS_SCHEMA_URLS[cfg.type];
   finalManifest.type = cfg.type;
   if (!finalManifest.name) finalManifest.name = packageId;
   if (item.name) finalManifest.displayName = item.name;
