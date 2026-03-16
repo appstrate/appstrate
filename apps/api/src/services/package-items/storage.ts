@@ -18,7 +18,7 @@ export async function uploadPackageFiles(
 ): Promise<string> {
   const zip = zipArtifact(normalizedFiles, 6);
   const integrity = computeIntegrity(zip);
-  const path = `${orgId}/${type}/${itemId}.zip`;
+  const path = `${orgId}/${type}/${itemId}.afps`;
   try {
     await storage.uploadFile(PACKAGE_ITEMS_BUCKET, path, zip);
   } catch (err) {
@@ -37,7 +37,7 @@ export async function downloadPackageFiles(
   itemId: string,
   expectedIntegrity?: string | null,
 ): Promise<Record<string, Uint8Array> | null> {
-  const path = `${orgId}/${type}/${itemId}.zip`;
+  const path = `${orgId}/${type}/${itemId}.afps`;
   const data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, path);
   if (!data) {
     logger.warn("Failed to download package files", { type, orgId, itemId });
@@ -61,6 +61,6 @@ export async function deletePackageFiles(
   orgId: string,
   itemId: string,
 ): Promise<void> {
-  const path = `${orgId}/${type}/${itemId}.zip`;
+  const path = `${orgId}/${type}/${itemId}.afps`;
   await storage.deleteFile(PACKAGE_ITEMS_BUCKET, path);
 }

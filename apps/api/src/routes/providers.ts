@@ -13,6 +13,7 @@ import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 
@@ -193,6 +194,7 @@ export function createProvidersRouter() {
             type: "provider",
             source: "local",
             draftManifest: {
+              $schema: AFPS_SCHEMA_URLS.provider,
               name: data.id,
               type: "provider",
               version: data.version ?? "1.0.0",
@@ -240,6 +242,7 @@ export function createProvidersRouter() {
 
     // Create initial version (non-fatal)
     const manifest = {
+      $schema: AFPS_SCHEMA_URLS.provider,
       name: data.id,
       type: "provider" as const,
       version: data.version ?? "1.0.0",

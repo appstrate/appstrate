@@ -1,4 +1,5 @@
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 /**
  * Factory for skill/tool modules — they share identical logic
@@ -42,7 +43,7 @@ export function makeContentPackageModule(
           keywords: [],
         },
         content: defaultContent,
-        _manifestBase: { schemaVersion: "1.0", type },
+        _manifestBase: { $schema: AFPS_SCHEMA_URLS[type], schemaVersion: "1.0", type },
       };
     },
 
@@ -52,6 +53,7 @@ export function makeContentPackageModule(
         ? `@${state.metadata.scope}/${state.metadata.id}`
         : undefined;
       const manifest: Record<string, unknown> = {
+        $schema: AFPS_SCHEMA_URLS[type],
         ...state._manifestBase,
         type: state._type,
         version: state.metadata.version,

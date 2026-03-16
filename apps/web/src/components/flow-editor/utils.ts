@@ -2,6 +2,7 @@ import type { FlowFormState, ProviderEntry, ResourceEntry } from "./types";
 import type { SchemaField } from "./schema-section";
 import type { FlowDetail, JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { getOrderedKeys } from "@appstrate/shared-types";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 export function toResourceEntry(r: {
   id: string;
@@ -31,7 +32,11 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
     outputSchema: [],
     configSchema: [],
     execution: { timeout: 300, outputRetries: 2 },
-    _manifestBase: { schemaVersion: "1.0", type: "flow" },
+    _manifestBase: {
+      $schema: AFPS_SCHEMA_URLS.flow,
+      schemaVersion: "1.0",
+      type: "flow",
+    },
   };
 }
 
@@ -247,6 +252,7 @@ export function assemblePayload(state: FlowFormState) {
   }
 
   const manifest: Record<string, unknown> = {
+    $schema: AFPS_SCHEMA_URLS.flow,
     ...state._manifestBase,
     name: `@${state.metadata.scope}/${state.metadata.id}`,
     version: state.metadata.version,

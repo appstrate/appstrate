@@ -128,7 +128,7 @@ export function ResourceSection({
           {upload.isPending ? <Spinner /> : t("editor.importZip")}
           <input
             type="file"
-            accept=".zip"
+            accept=".afps"
             ref={fileInputRef}
             onChange={handleUpload}
             className="hidden"

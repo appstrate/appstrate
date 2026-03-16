@@ -1,7 +1,7 @@
 import { eq, and, or, isNull, count, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
-import type { Manifest } from "@appstrate/core/validation";
+import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
@@ -19,6 +19,7 @@ interface DbPackageRow {
 
 function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const manifest = (row.draftManifest ?? {
+    $schema: AFPS_SCHEMA_URLS.flow,
     schemaVersion: "1.0",
     name: row.id,
     version: "0.0.0",

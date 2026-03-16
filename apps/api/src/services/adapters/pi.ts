@@ -87,7 +87,7 @@ export class PiAdapter implements ExecutionAdapter {
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
       if (flowPackage) {
-        filesToInject.push({ name: "flow-package.zip", content: flowPackage });
+        filesToInject.push({ name: "flow-package.afps", content: flowPackage });
       }
       if (inputFiles) {
         for (const f of inputFiles) {
