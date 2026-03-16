@@ -131,27 +131,21 @@ export class PiAdapter implements ExecutionAdapter {
         processLogs: processPiLogs,
       });
     } finally {
-      // Cleanup sidecar + boundary in parallel (idempotent — 404 is OK)
-      const cleanups: Promise<void>[] = [];
+      // Cleanup sidecar first, then boundary (network requires all containers disconnected)
       if (sidecarHandle) {
-        cleanups.push(
-          orchestrator.removeWorkload(sidecarHandle).catch((err) => {
-            logger.error("Failed to remove sidecar", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }),
-        );
+        await orchestrator.removeWorkload(sidecarHandle).catch((err) => {
+          logger.error("Failed to remove sidecar", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
       if (boundary) {
-        cleanups.push(
-          orchestrator.removeIsolationBoundary(boundary).catch((err) => {
-            logger.error("Failed to remove network", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }),
-        );
+        await orchestrator.removeIsolationBoundary(boundary).catch((err) => {
+          logger.error("Failed to remove network", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
-      await Promise.all(cleanups);
     }
   }
 }
