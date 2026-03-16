@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Appstrate Provider Manifest",
+  "description": "Appstrate provider manifest — AFPS provider with no extensions.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "provider"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "license": {
+      "type": "string"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9]\\d*)$"
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "providers": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": {}
+    },
+    "iconUrl": {
+      "type": "string"
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "docsUrl": {
+      "type": "string"
+    },
+    "definition": {
+      "type": "object",
+      "properties": {
+        "authMode": {
+          "type": "string",
+          "enum": ["oauth2", "oauth1", "api_key", "basic", "custom"]
+        },
+        "authorizationUrl": {
+          "type": "string"
+        },
+        "tokenUrl": {
+          "type": "string"
+        },
+        "refreshUrl": {
+          "type": "string"
+        },
+        "defaultScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scopeSeparator": {
+          "type": "string"
+        },
+        "pkceEnabled": {
+          "type": "boolean"
+        },
+        "tokenAuthMethod": {
+          "type": "string"
+        },
+        "authorizationParams": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "tokenParams": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "requestTokenUrl": {
+          "type": "string"
+        },
+        "accessTokenUrl": {
+          "type": "string"
+        },
+        "credentialSchema": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "credentialFieldName": {
+          "type": "string"
+        },
+        "credentialHeaderName": {
+          "type": "string"
+        },
+        "credentialHeaderPrefix": {
+          "type": "string"
+        },
+        "authorizedUris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowAllUris": {
+          "type": "boolean"
+        },
+        "availableScopes": {
+          "type": "array",
+          "items": {}
+        }
+      },
+      "required": ["authMode"],
+      "additionalProperties": {}
+    },
+    "setupGuide": {
+      "type": "object",
+      "properties": {
+        "callbackUrlHint": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["label"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["name", "version", "type", "definition"],
+  "additionalProperties": {}
+}

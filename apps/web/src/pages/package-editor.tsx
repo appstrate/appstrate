@@ -17,11 +17,10 @@ import { ExecutionSection } from "../components/flow-editor/execution-section";
 import { ResourceSection } from "../components/flow-editor/resource-section";
 import { PromptEditor } from "../components/flow-editor/prompt-editor";
 import { ProviderPicker } from "../components/flow-editor/provider-picker";
-import { JsonEditor } from "../components/flow-editor/json-editor";
+import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
-import { JsonView } from "../components/json-view";
 import { EmptyState } from "../components/page-states";
 import { EditorShell } from "../components/editor-shell";
 import { useProviders } from "../hooks/use-providers";
@@ -31,10 +30,21 @@ import {
   defaultFormState as flowDefaultFormState,
   detailToFormState as flowDetailToFormState,
   assemblePayload as flowAssemblePayload,
+  payloadToFormState as flowPayloadToFormState,
   toResourceEntry,
 } from "../components/flow-editor/utils";
+import flowSchema from "../lib/schemas/flow.schema.json";
+import skillSchema from "../lib/schemas/skill.schema.json";
+import toolSchema from "../lib/schemas/tool.schema.json";
 import type { PackageFormState } from "../lib/package-type-modules";
 import { getPackageTypeModule } from "../lib/package-type-modules";
+import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+
+const PACKAGE_SCHEMAS: Record<string, object> = {
+  flow: flowSchema,
+  skill: skillSchema,
+  tool: toolSchema,
+};
 
 type GenericEditorTab =
   | "general"
@@ -117,8 +127,8 @@ function FlowEditorInner({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
-  const handleJsonApply = (newState: FlowFormState) => {
-    setForm(newState);
+  const handleJsonApply = (parsed: Record<string, unknown>) => {
+    setForm(flowPayloadToFormState({ manifest: parsed, prompt: form.prompt }));
     setActiveTab("general");
   };
 
@@ -212,7 +222,13 @@ function FlowEditorInner({
           onChange={(entries) => setForm((s) => ({ ...s, tools: entries }))}
         />
       )}
-      {activeTab === "json" && <JsonEditor form={form} onApply={handleJsonApply} />}
+      {activeTab === "json" && (
+        <JsonEditor
+          value={flowAssemblePayload(form).manifest}
+          onApply={handleJsonApply}
+          schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow }}
+        />
+      )}
     </EditorShell>
   );
 }
@@ -312,9 +328,31 @@ function PackageEditorInner({
       )}
 
       {activeTab === "json" && (
-        <div className="my-4">
-          <JsonView data={form} />
-        </div>
+        <JsonEditor
+          value={
+            (
+              getPackageTypeModule(type).assemblePayload(form) as {
+                manifest: Record<string, unknown>;
+              }
+            ).manifest
+          }
+          onApply={(parsed) => {
+            const scopeMatch = (parsed.name as string)?.match(/^@([^/]+)\/(.+)$/);
+            setForm((s) => ({
+              ...s,
+              metadata: {
+                ...s.metadata,
+                displayName: (parsed.displayName as string) ?? s.metadata.displayName,
+                description: (parsed.description as string) ?? s.metadata.description,
+                version: (parsed.version as string) ?? s.metadata.version,
+                ...(scopeMatch ? { scope: scopeMatch[1], id: scopeMatch[2] } : {}),
+              },
+              _manifestBase: parsed,
+            }));
+            setActiveTab("general");
+          }}
+          schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] }}
+        />
       )}
     </EditorShell>
   );

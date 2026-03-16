@@ -2,25 +2,20 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
-import { useTheme } from "../../hooks/use-theme";
-import type { FlowFormState } from "./types";
-import { assemblePayload, payloadToFormState } from "./utils";
-import flowSchema from "./flow-schema.json";
-
-const FLOW_SCHEMA_URI = "https://afps.appstrate.dev/schema/v1/flow.schema.json";
+import { useTheme } from "../hooks/use-theme";
 
 interface JsonEditorProps {
-  form: FlowFormState;
-  onApply: (newState: FlowFormState) => void;
+  value: Record<string, unknown>;
+  onApply: (parsed: Record<string, unknown>) => void;
+  schema?: { uri: string; schema: object };
 }
 
-export function JsonEditor({ form, onApply }: JsonEditorProps) {
+export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
   const { t } = useTranslation(["flows", "common"]);
   const { resolvedTheme } = useTheme();
 
   const initialJson = useMemo(() => {
-    const { manifest } = assemblePayload(form);
-    return JSON.stringify(manifest, null, 2);
+    return JSON.stringify(value, null, 2);
     // Only compute once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -35,12 +30,8 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
         setParseError(t("editor.jsonErrorStructure"));
         return;
       }
-      const newState = payloadToFormState({
-        manifest: parsed,
-        prompt: form.prompt,
-      });
       setParseError(null);
-      onApply(newState);
+      onApply(parsed);
     } catch {
       setParseError(t("editor.jsonInvalid"));
     }
@@ -63,9 +54,9 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
             validate: true,
             schemas: [
               {
-                uri: FLOW_SCHEMA_URI,
+                uri: schema?.uri ?? "https://afps.appstrate.dev/schema/v1/any.schema.json",
                 fileMatch: ["*"],
-                schema: flowSchema,
+                schema: schema?.schema ?? {},
               },
             ],
           });
