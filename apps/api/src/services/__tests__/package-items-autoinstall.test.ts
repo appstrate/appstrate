@@ -213,8 +213,7 @@ describe("createOrgItem", () => {
     queues.insert = [[{ id: "@acme/my-skill", orgId: "org-1" }]];
     const result = await createOrgItem(
       "org-1",
-      "acme",
-      { id: "my-skill", content: "test content", createdBy: "user-1" },
+      { id: "@acme/my-skill", content: "test content", createdBy: "user-1" },
       SKILL_CONFIG,
     );
     expect(result).toBeDefined();
@@ -227,8 +226,7 @@ describe("createOrgItem", () => {
     queues.insert = [[{ id: "@acme/custom", orgId: "org-1" }]];
     await createOrgItem(
       "org-1",
-      "acme",
-      { id: "custom", content: "code", name: "Custom Skill", createdBy: "user-1" },
+      { id: "@acme/custom", content: "code", name: "Custom Skill", createdBy: "user-1" },
       SKILL_CONFIG,
       { version: "2.0.0", customField: true },
     );
@@ -237,17 +235,6 @@ describe("createOrgItem", () => {
     expect(manifest.version).toBe("2.0.0");
     expect(manifest.displayName).toBe("Custom Skill");
     expect(manifest.type).toBe("skill");
-  });
-
-  test("uses full item.id as packageId when orgSlug is null", async () => {
-    queues.insert = [[{ id: "bare-id", orgId: "org-1" }]];
-    await createOrgItem(
-      "org-1",
-      null,
-      { id: "bare-id", content: "test", createdBy: "user-1" },
-      SKILL_CONFIG,
-    );
-    expect(tracking.insertCalls[0]!.id).toBe("bare-id");
   });
 });
 

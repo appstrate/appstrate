@@ -70,14 +70,13 @@ async function getPackageById(id: string) {
 
 async function createOrgItem(
   orgId: string,
-  orgSlug: string,
   item: { id: string; name?: string; description?: string; content: string; createdBy?: string },
   cfg: PackageTypeConfig,
   manifest: unknown,
   forkedFrom: string,
 ) {
   const row = {
-    id: `@${orgSlug}/${item.id}`,
+    id: item.id,
     orgId,
     type: cfg.type,
     forkedFrom,
@@ -224,9 +223,8 @@ async function forkPackage(
   // Create the fork
   const newPkg = await createOrgItem(
     orgId,
-    orgSlug,
     {
-      id: forkName,
+      id: targetId,
       name: (versionManifest.displayName as string) ?? undefined,
       description: (versionManifest.description as string) ?? undefined,
       content,

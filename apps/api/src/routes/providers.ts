@@ -14,6 +14,7 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { checkScopeMatch } from "../middleware/guards.ts";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 
@@ -132,6 +133,9 @@ export function createProvidersRouter() {
     }
 
     const data = parsed.data;
+
+    const scopeErr = checkScopeMatch(c, data.id);
+    if (scopeErr) return scopeErr;
 
     // Block creation if ID matches a system provider
     if (await isSystemProviderInDb(data.id)) {

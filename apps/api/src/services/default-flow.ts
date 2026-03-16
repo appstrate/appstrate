@@ -50,9 +50,8 @@ export async function provisionDefaultFlowForOrg(
 
     await createOrgItem(
       orgId,
-      orgSlug,
       {
-        id: "hello-world",
+        id: packageId,
         name: "Hello World",
         description: HELLO_WORLD_MANIFEST.description,
         content: HELLO_WORLD_PROMPT,
