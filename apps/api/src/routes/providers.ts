@@ -6,15 +6,15 @@ import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 import { getEnv } from "@appstrate/env";
-import { requireAdmin } from "../middleware/guards.ts";
+import { requireAdmin, checkScopeMatch } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
+import { zipArtifact } from "@appstrate/core/zip";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { checkScopeMatch } from "../middleware/guards.ts";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 
@@ -258,7 +258,6 @@ export function createProvidersRouter() {
     const versionStr = manifest.version;
     if (versionStr && isValidVersion(versionStr)) {
       try {
-        const { zipArtifact } = await import("@appstrate/core/zip");
         const entries: Record<string, Uint8Array> = {
           "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
         };

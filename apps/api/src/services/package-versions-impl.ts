@@ -7,6 +7,7 @@ import {
   downloadVersionZip,
   deleteVersionZip,
   unzipAndNormalize,
+  buildMinimalZip,
 } from "./package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies } from "@appstrate/core/dependencies";
@@ -22,6 +23,8 @@ import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import { buildDependencies } from "./package-items/dependencies.ts";
 import { prepareManifestForPublish } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
+import { zipArtifact } from "@appstrate/core/zip";
+import { downloadPackageFiles } from "./package-items/storage.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -593,36 +596,29 @@ export async function createVersionFromDraft(params: {
   let zipBuffer: Buffer;
   if (pkg.type === "provider") {
     // Providers store everything in manifest — ZIP contains only manifest.json
-    const { zipArtifact } = await import("@appstrate/core/zip");
     const entries: Record<string, Uint8Array> = {
       "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
     };
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
   } else if (pkg.type === "flow") {
-    const { downloadPackageFiles } = await import("./package-items/storage.ts");
     const storedFiles = await downloadPackageFiles("flows", orgId, packageId);
     if (storedFiles) {
-      const { zipArtifact } = await import("@appstrate/core/zip");
       const entries: Record<string, Uint8Array> = { ...storedFiles };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
       entries["prompt.md"] = new TextEncoder().encode(content);
       zipBuffer = Buffer.from(zipArtifact(entries, 6));
     } else {
       // Locally-created flows have no stored files — minimal ZIP is correct
-      const { buildMinimalZip } = await import("./package-storage.ts");
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
   } else {
     // For skills/tools, build ZIP from storage files or content
-    const { downloadPackageFiles } = await import("./package-items/storage.ts");
     const files = await downloadPackageFiles(
       pkg.type === "skill" ? "skills" : "tools",
       orgId,
       packageId,
     );
     if (files) {
-      const { zipArtifact } = await import("@appstrate/core/zip");
-      // Include manifest.json if available
       const entries: Record<string, Uint8Array> = { ...files };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
       zipBuffer = Buffer.from(zipArtifact(entries, 6));

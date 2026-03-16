@@ -3,6 +3,7 @@ import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
+import { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG } from "./package-items.ts";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -76,8 +77,6 @@ export async function getPackageZip(flow: LoadedFlow, orgId: string): Promise<Bu
 
 /** Build a flow package ZIP on-the-fly from DB-backed packages. */
 async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer> {
-  const { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG } = await import("./package-items.ts");
-
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(flow.prompt),

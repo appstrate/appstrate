@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { parsePackageZip, PackageZipError } from "@appstrate/core/zip";
+import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
@@ -32,7 +32,7 @@ import {
 } from "../services/package-items.ts";
 import { validateToolSource, validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
-import { parseScopedName } from "@appstrate/core/naming";
+import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
@@ -52,6 +52,7 @@ import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middlewar
 import { getRunningExecutionsForPackage } from "../services/state.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import { forkPackage } from "../services/package-fork.ts";
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -247,7 +248,6 @@ async function createVersionSafe(params: {
     return;
   }
   try {
-    const { zipArtifact } = await import("@appstrate/core/zip");
     const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
     const zipBuffer = Buffer.from(zipArtifact(entries, 6));
@@ -1104,13 +1104,11 @@ export function createPackagesRouter() {
     const customName = typeof body.name === "string" ? body.name : undefined;
 
     if (customName !== undefined) {
-      const { SLUG_REGEX } = await import("@appstrate/core/naming");
       if (!SLUG_REGEX.test(customName)) {
         return c.json({ error: "INVALID_NAME", message: "Name must match slug format" }, 400);
       }
     }
 
-    const { forkPackage } = await import("../services/package-fork.ts");
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
 
     if ("code" in result) {
