@@ -5,6 +5,9 @@ import Editor from "@monaco-editor/react";
 import { useTheme } from "../../hooks/use-theme";
 import type { FlowFormState } from "./types";
 import { assemblePayload, payloadToFormState } from "./utils";
+import flowSchema from "./flow-schema.json";
+
+const FLOW_SCHEMA_URI = "https://afps.appstrate.dev/schema/v1/flow.schema.json";
 
 interface JsonEditorProps {
   form: FlowFormState;
@@ -16,8 +19,8 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
   const { resolvedTheme } = useTheme();
 
   const initialJson = useMemo(() => {
-    const { manifest, prompt } = assemblePayload(form);
-    return JSON.stringify({ manifest, prompt }, null, 2);
+    const { manifest } = assemblePayload(form);
+    return JSON.stringify(manifest, null, 2);
     // Only compute once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -28,13 +31,13 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
   const handleApply = () => {
     try {
       const parsed = JSON.parse(jsonValue);
-      if (!parsed.manifest || typeof parsed.prompt !== "string") {
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         setParseError(t("editor.jsonErrorStructure"));
         return;
       }
       const newState = payloadToFormState({
-        manifest: parsed.manifest,
-        prompt: parsed.prompt,
+        manifest: parsed,
+        prompt: form.prompt,
       });
       setParseError(null);
       onApply(newState);
@@ -53,6 +56,19 @@ export function JsonEditor({ form, onApply }: JsonEditorProps) {
         onChange={(v) => {
           setJsonValue(v ?? "");
           setParseError(null);
+        }}
+        beforeMount={(monaco) => {
+          monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+            enableSchemaRequest: false,
+            validate: true,
+            schemas: [
+              {
+                uri: FLOW_SCHEMA_URI,
+                fileMatch: ["*"],
+                schema: flowSchema,
+              },
+            ],
+          });
         }}
         options={{
           minimap: { enabled: false },
