@@ -19,8 +19,6 @@ import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema } from "../flow-editor/utils";
 import { EditorShell } from "../editor-shell";
 import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import providerSchema from "../../lib/schemas/provider.schema.json";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "json";
 
@@ -786,7 +784,6 @@ export function ProviderEditorInner({
             }
             setActiveTab("general");
           }}
-          schema={{ uri: AFPS_SCHEMA_URLS.provider, schema: providerSchema }}
         />
       )}
     </EditorShell>
