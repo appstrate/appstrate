@@ -55,6 +55,21 @@ export function requireOwnedPackage() {
   };
 }
 
+/** Check that a packageId scope matches the current org. Returns a 403 Response or null. */
+export function checkScopeMatch(c: Context<AppEnv>, packageId: string): Response | null {
+  const orgSlug = c.get("orgSlug");
+  if (!isOwnedByOrg(packageId, orgSlug)) {
+    return c.json(
+      {
+        error: "SCOPE_MISMATCH",
+        message: `Package scope must match your organization (@${orgSlug})`,
+      },
+      403,
+    );
+  }
+  return null;
+}
+
 /** Middleware: reject if flow is system (403) or has running executions (409). */
 export function requireMutableFlow() {
   return async (c: Context<AppEnv>, next: Next) => {

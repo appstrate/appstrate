@@ -134,9 +134,8 @@ async function forkWithConfig(
   // Create the fork package (draft)
   const newPkg = await createOrgItem(
     orgId,
-    orgSlug,
     {
-      id: sourceName,
+      id: targetId,
       name: (versionManifest.displayName as string) ?? undefined,
       description: (versionManifest.description as string) ?? undefined,
       content,

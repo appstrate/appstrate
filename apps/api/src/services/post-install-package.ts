@@ -50,8 +50,7 @@ async function upsertItem(
     // Re-install: update existing package
     await updateOrgItem(packageId, { manifest, content: item.content }, existing.lockVersion);
   } else {
-    // Fresh install: create new package (orgSlug=null → item.id is already the full packageId)
-    await createOrgItem(orgId, null, item, cfg, manifest);
+    await createOrgItem(orgId, item, cfg, manifest);
   }
 }
 

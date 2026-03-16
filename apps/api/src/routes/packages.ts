@@ -48,7 +48,7 @@ import {
 } from "../services/package-versions.ts";
 import { flowDetailHandler } from "./flow-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAdmin, requireOwnedPackage } from "../middleware/guards.ts";
+import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { getRunningExecutionsForPackage } from "../services/state.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
@@ -387,6 +387,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const packageId = validatedManifest.name;
 
+      const scopeErr = checkScopeMatch(c, packageId);
+      if (scopeErr) return scopeErr;
+
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
       if (existingIds.includes(packageId)) {
@@ -399,15 +402,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         );
       }
 
-      // Insert into DB
       const item = await createOrgItem(
         orgId,
-        null, // packageId is already fully scoped from manifest.name
-        {
-          id: packageId,
-          content,
-          createdBy: user.id,
-        },
+        { id: packageId, content, createdBy: user.id },
         rcfg.cfg,
         validatedManifest as Record<string, unknown>,
       );
@@ -492,9 +489,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     const item = await createOrgItem(
       orgId,
-      orgSlug,
       {
-        id: parsed.id,
+        id: `@${orgSlug}/${parsed.id}`,
         name: parsed.name,
         description: parsed.description,
         content: parsed.content,
@@ -1188,6 +1184,9 @@ export function createPackagesRouter() {
     const { manifest, content, files, type: packageType } = parsed;
     const packageId = manifest.name as string;
 
+    const scopeErr = checkScopeMatch(c, packageId);
+    if (scopeErr) return scopeErr;
+
     // System packages are immutable
     if (isSystemPackage(packageId)) {
       return c.json(
@@ -1274,7 +1273,7 @@ export function createPackagesRouter() {
         .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
         .where(eq(packages.id, packageId));
     } else {
-      // New package — insert (orgSlug=null since packageId is already fully scoped from manifest.name)
+      // New package — insert
       const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
       if (!cfg) {
         return c.json(
@@ -1284,7 +1283,6 @@ export function createPackagesRouter() {
       }
       await createOrgItem(
         orgId,
-        null,
         { id: packageId, content, createdBy: user.id },
         cfg,
         manifest as Record<string, unknown>,

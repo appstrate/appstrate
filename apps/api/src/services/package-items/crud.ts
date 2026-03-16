@@ -78,17 +78,16 @@ export interface CreateItemInput {
   createdBy?: string;
 }
 
-/** Insert a new package item. Returns the row with version=1 (lock counter). */
+/** Insert a new package item. `item.id` must be the fully-scoped packageId (e.g. `@scope/name`). */
 export async function createOrgItem(
   orgId: string,
-  orgSlug: string | null,
   item: CreateItemInput,
   cfg: PackageTypeConfig,
   manifest?: Record<string, unknown>,
   forkedFrom?: string,
 ): Promise<Package> {
   const now = new Date();
-  const packageId = orgSlug ? `@${orgSlug}/${item.id}` : item.id;
+  const packageId = item.id;
 
   const finalManifest: Record<string, unknown> = manifest
     ? { ...manifest }

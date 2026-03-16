@@ -43,9 +43,27 @@ mock.module("@appstrate/env", () => ({
   getEnv: () => ({ APP_URL: "http://localhost:3000" }),
 }));
 
+import { isOwnedByOrg } from "@appstrate/core/naming";
+
 mock.module("../../middleware/guards.ts", () => ({
   requireAdmin: () => async (_c: unknown, next: () => Promise<void>) => {
     await next();
+  },
+  checkScopeMatch: (
+    c: { get: (k: string) => string; json: (b: unknown, s: number) => Response },
+    packageId: string,
+  ) => {
+    const orgSlug = c.get("orgSlug");
+    if (!isOwnedByOrg(packageId, orgSlug)) {
+      return c.json(
+        {
+          error: "SCOPE_MISMATCH",
+          message: `Package scope must match your organization (@${orgSlug})`,
+        },
+        403,
+      );
+    }
+    return null;
   },
 }));
 
@@ -107,6 +125,7 @@ const { createProvidersRouter } = await import("../providers.ts");
 const app = new Hono();
 app.use("*", async (c, next) => {
   c.set("orgId" as never, "org-1" as never);
+  c.set("orgSlug" as never, "test" as never);
   c.set("user" as never, { id: "user-1", email: "test@test.com", name: "Test" } as never);
   c.set("orgRole" as never, "admin" as never);
   await next();
