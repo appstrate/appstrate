@@ -12,6 +12,7 @@ type Subscriber = {
     executionId?: string;
     packageId?: string;
     orgId: string;
+    isAdmin?: boolean;
   };
   send: (event: RealtimeEvent) => void;
 };
@@ -61,6 +62,8 @@ export async function initRealtime(): Promise<void> {
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.executionId && sub.filter.executionId !== raw.execution_id) continue;
+        // Filter by level: non-admins don't receive debug logs
+        if (!sub.filter.isAdmin && raw.level === "debug") continue;
         sub.send({ event: "execution_log", data });
       }
     } catch (err) {

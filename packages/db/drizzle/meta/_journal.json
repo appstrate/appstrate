@@ -78,6 +78,13 @@
       "when": 1773592800000,
       "tag": "0010_rename_extension_to_tool",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773774747874,
+      "tag": "0011_magenta_microbe",
+      "breakpoints": true
     }
   ]
 }

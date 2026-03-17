@@ -300,6 +300,11 @@ export const schemas = {
       userId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },
+      level: {
+        type: "string",
+        enum: ["debug", "info", "warn", "error"],
+        description: "Log severity level. Non-admin users only receive info, warn, and error logs.",
+      },
       event: { type: "string" },
       message: { type: "string" },
       data: { type: "object" },

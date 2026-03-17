@@ -179,7 +179,7 @@ async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<Exec
     const msg = parsePiStreamLine(line);
     if (!msg) continue;
 
-    if (msg.type === "progress" && !msg.data) {
+    if (msg.type === "progress" && !msg.data && !msg.level) {
       textBuffer += msg.message ?? "";
 
       if (inCodeBlock) {
@@ -266,6 +266,16 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
 
       case "error":
         return { type: "error", message: obj.message || "unknown error" };
+
+      case "log": {
+        const validLevels = ["debug", "info", "warn", "error"];
+        return {
+          type: "progress",
+          message: obj.message || "",
+          data: obj.data ?? undefined,
+          level: validLevels.includes(obj.level) ? obj.level : "info",
+        };
+      }
 
       default:
         return null;

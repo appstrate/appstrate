@@ -28,7 +28,7 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
  */
 async function validateSSEAuth(c: {
   req: { raw: Request; query: (key: string) => string | undefined };
-}): Promise<{ userId: string; orgId: string } | null> {
+}): Promise<{ userId: string; orgId: string; role: string } | null> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return null;
 
@@ -46,7 +46,11 @@ async function validateSSEAuth(c: {
 
   if (!rows[0]) return null;
 
-  return { userId: session.user.id, orgId };
+  return { userId: session.user.id, orgId, role: rows[0].role };
+}
+
+function isAdminRole(role: string): boolean {
+  return role === "admin" || role === "owner";
 }
 
 export function createRealtimeRouter() {
@@ -72,7 +76,7 @@ export function createRealtimeRouter() {
 
       addSubscriber({
         id: subId,
-        filter: { executionId, orgId: validated.orgId },
+        filter: { executionId, orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
         send,
       });
 
@@ -108,7 +112,7 @@ export function createRealtimeRouter() {
 
       addSubscriber({
         id: subId,
-        filter: { packageId, orgId: validated.orgId },
+        filter: { packageId, orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
         send,
       });
 
@@ -142,7 +146,7 @@ export function createRealtimeRouter() {
 
       addSubscriber({
         id: subId,
-        filter: { orgId: validated.orgId },
+        filter: { orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
         send,
       });
 

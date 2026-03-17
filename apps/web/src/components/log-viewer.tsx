@@ -1,13 +1,47 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, Check, Clock, ArrowDown, WrapText } from "lucide-react";
+import {
+  Copy,
+  Check,
+  Clock,
+  ArrowDown,
+  WrapText,
+  Info,
+  AlertTriangle,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
+  info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
+  warn: { icon: AlertTriangle, className: "text-amber-400 bg-amber-400/10", label: "WARN" },
+  error: { icon: XCircle, className: "text-destructive bg-destructive/10", label: "ERROR" },
+};
+
+function LevelBadge({ level }: { level?: string }) {
+  if (!level || level === "debug") return null;
+  const config = levelConfig[level];
+  if (!config) return null;
+  const Icon = config.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold leading-none mr-1.5 shrink-0",
+        config.className,
+      )}
+    >
+      <Icon size={10} />
+      {config.label}
+    </span>
+  );
+}
 
 export interface LogEntry {
   message: string;
   type: string;
+  level?: string;
   detail?: string;
   createdAt?: Date | string | null;
 }
@@ -32,11 +66,15 @@ function formatTimestamp(d: Date | string | null | undefined, lang: string): str
   }
 }
 
-const logEntryColors: Record<string, string> = {
-  error: "text-destructive",
-  success: "text-success",
+/** Text color by semantic type (nature of the log). */
+const typeColors: Record<string, string> = {
   system: "text-primary",
-  warning: "text-warning",
+};
+
+/** Text color by severity level (overrides type color when set). */
+const levelColors: Record<string, string> = {
+  warn: "text-amber-400",
+  error: "text-destructive",
 };
 
 export function LogViewer({ entries }: LogViewerProps) {
@@ -80,7 +118,8 @@ export function LogViewer({ entries }: LogViewerProps) {
     const text = entries
       .map((e) => {
         const ts = showTimestamps ? `[${formatTimestamp(e.createdAt, i18n.language)}] ` : "";
-        return `${ts}${e.message}`;
+        const detail = e.detail ? ` ${e.detail}` : "";
+        return `${ts}${e.message}${detail}`;
       })
       .join("\n");
     navigator.clipboard.writeText(text);
@@ -145,8 +184,8 @@ export function LogViewer({ entries }: LogViewerProps) {
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index];
-            const expanded =
-              expandAll || expandedIndex === virtualRow.index || entry.type === "error";
+            const hasLevel = entry.level && entry.level !== "debug";
+            const expanded = expandAll || expandedIndex === virtualRow.index || !!hasLevel;
             return (
               <div
                 key={virtualRow.index}
@@ -166,8 +205,9 @@ export function LogViewer({ entries }: LogViewerProps) {
                 <div
                   className={cn(
                     "px-3 py-0.5 text-sm font-mono text-muted-foreground cursor-pointer select-none leading-7 truncate hover:bg-muted/50",
-                    logEntryColors[entry.type],
+                    (entry.level && levelColors[entry.level]) || typeColors[entry.type],
                     entry.type === "progress" &&
+                      (!entry.level || entry.level === "debug") &&
                       "before:content-[''] before:inline-block before:w-1.5 before:h-1.5 before:rounded-full before:bg-primary before:mr-1.5 before:opacity-60",
                     expanded && "whitespace-normal break-words bg-muted/30",
                   )}
@@ -177,6 +217,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                       {formatTimestamp(entry.createdAt, i18n.language)}
                     </span>
                   )}
+                  <LevelBadge level={entry.level} />
                   {entry.message}
                   {entry.detail && (
                     <span className="ml-2 text-xs text-muted-foreground">{entry.detail}</span>
