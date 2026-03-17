@@ -291,7 +291,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   );
   sections.push('- **error**: Failures that affect the result (e.g. "Gmail API timeout")\n');
   sections.push(
-    "Call `log` at meaningful milestones — not for every small step. " +
+    "**Your very first action** must be a `log` call with level `info` to announce what you are about to do " +
+      '(e.g. "Retrieving recent emails from Gmail"). This is critical — users see a loading indicator until ' +
+      "the first log appears.\n",
+  );
+  sections.push(
+    "Then call `log` at meaningful milestones — not for every small step. " +
       "Non-admin users only see these log messages, not your internal tool calls or reasoning.\n",
   );
   sections.push(

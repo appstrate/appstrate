@@ -14,7 +14,7 @@ import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-rea
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
-import { LogViewer, type LogEntry } from "../components/log-viewer";
+import { LogViewer, ExecutionTimeline, type LogEntry } from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -93,7 +93,10 @@ export function ExecutionDetailPage() {
   const runFlow = useRunFlow(packageId!);
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
-  const [activeTab, setActiveTab] = useTabWithHash(["logs", "result", "state"] as const, "logs");
+  const [activeTab, setActiveTab] = useTabWithHash(
+    ["execution", "logs", "result", "state"] as const,
+    "execution",
+  );
   const hasUserSelected = useRef(false);
 
   // Build log entries from historical data, merging consecutive text-only
@@ -145,6 +148,10 @@ export function ExecutionDetailPage() {
   const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
+  const publicLogs = useMemo(
+    () => allLogs.filter((e) => e.level && e.level !== "debug"),
+    [allLogs],
+  );
 
   // Reset hasUserSelected when switching executions
   useEffect(() => {
@@ -273,10 +280,18 @@ export function ExecutionDetailPage() {
           value={activeTab}
           onValueChange={(v) => {
             hasUserSelected.current = true;
-            setActiveTab(v as "logs" | "result" | "state");
+            setActiveTab(v as "execution" | "logs" | "result" | "state");
           }}
         >
           <TabsList>
+            <TabsTrigger value="execution">
+              {t("exec.tabExecution")}
+              {publicLogs.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                  {publicLogs.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
               {allLogs.length > 0 && (
@@ -316,6 +331,10 @@ export function ExecutionDetailPage() {
           )}
         </div>
       </div>
+
+      {activeTab === "execution" && (
+        <ExecutionTimeline entries={publicLogs} isRunning={isRunning} />
+      )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
