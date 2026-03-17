@@ -10,13 +10,21 @@ export async function createShareToken(
   createdBy: string,
   orgId: string,
   expiresInDays = DEFAULT_EXPIRES_DAYS,
+  manifest?: Record<string, unknown>,
 ) {
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
 
   const [row] = await db
     .insert(shareTokens)
-    .values({ token, packageId, createdBy, orgId, expiresAt })
+    .values({
+      token,
+      packageId,
+      createdBy,
+      orgId,
+      expiresAt,
+      manifest: manifest ?? null,
+    })
     .returning();
 
   return row;
@@ -51,6 +59,7 @@ export async function consumeShareToken(token: string) {
       packageId: row.packageId,
       createdBy: row.createdBy,
       orgId: row.orgId,
+      manifest: row.manifest as Record<string, unknown> | null,
     };
   });
 

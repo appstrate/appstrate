@@ -117,7 +117,11 @@ export function PackageActionsDropdown({
   const generatePublicLink = async () => {
     setShareGenerating(true);
     try {
-      const data = await api<{ token: string }>(`/flows/${packageId}/share-token`, {
+      const versionQs =
+        isHistoricalVersion && downloadVersion
+          ? `?version=${encodeURIComponent(downloadVersion)}`
+          : "";
+      const data = await api<{ token: string }>(`/flows/${packageId}/share-token${versionQs}`, {
         method: "POST",
       });
       setShareUrl(`${window.location.origin}/share/${data.token}`);

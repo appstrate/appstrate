@@ -9,7 +9,12 @@ import {
   linkExecutionToToken,
 } from "../services/share-tokens.ts";
 import { getPackage } from "../services/flow-service.ts";
-import { createExecution, getAdminConnections, getPackageConfig } from "../services/state.ts";
+import {
+  createExecution,
+  getAdminConnections,
+  getPackageConfig,
+  listExecutionLogs,
+} from "../services/state.ts";
 import { resolveProviderStatuses } from "../services/connection-manager.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
@@ -38,20 +43,25 @@ export function createShareRouter() {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
 
+    // Use the snapshotted manifest if available, otherwise fall back to current draft
+    const manifest = shareToken.manifest
+      ? (shareToken.manifest as typeof flow.manifest)
+      : flow.manifest;
+
     // Resolve provider statuses
     const adminConns = await getAdminConnections(orgId, flow.id);
     const providerStatuses = await resolveProviderStatuses(
-      resolveManifestProviders(flow.manifest),
+      resolveManifestProviders(manifest),
       adminConns,
       orgId,
       undefined,
     );
 
     const result: Record<string, unknown> = {
-      displayName: flow.manifest.displayName,
-      description: flow.manifest.description,
-      ...(flow.manifest.input ? { input: { schema: flow.manifest.input.schema } } : {}),
-      ...(flow.manifest.output ? { output: { schema: flow.manifest.output.schema } } : {}),
+      displayName: manifest.displayName,
+      description: manifest.description,
+      ...(manifest.input ? { input: { schema: manifest.input.schema } } : {}),
+      ...(manifest.output ? { output: { schema: manifest.output.schema } } : {}),
       ...(providerStatuses.length > 0 ? { providers: providerStatuses } : {}),
       consumed: !!shareToken.consumedAt,
     };
@@ -98,14 +108,25 @@ export function createShareRouter() {
       );
     }
 
-    const { id: tokenId, packageId, createdBy: userId, orgId } = consumed;
+    const {
+      id: tokenId,
+      packageId,
+      createdBy: userId,
+      orgId,
+      manifest: snapshotManifest,
+    } = consumed;
 
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found." }, 404);
     }
 
-    const inputSchema = flow.manifest.input?.schema;
+    // Use the snapshotted manifest if available, otherwise fall back to current draft
+    const effectiveFlow = snapshotManifest
+      ? { ...flow, manifest: snapshotManifest as typeof flow.manifest }
+      : flow;
+
+    const inputSchema = effectiveFlow.manifest.input?.schema;
     const inputResult = await parseRequestInput(c, inputSchema);
     if (!inputResult.ok) {
       return c.json(inputResult.error, inputResult.status);
@@ -123,7 +144,7 @@ export function createShareRouter() {
     }));
 
     // Resolve provider profiles and config
-    const manifestProviders = resolveManifestProviders(flow.manifest);
+    const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
     const [providerProfiles, config] = await Promise.all([
       resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
       getPackageConfig(orgId, packageId),
@@ -131,7 +152,7 @@ export function createShareRouter() {
 
     // Validate flow readiness (prompt, skills, tools, providers, config)
     const readinessError = await validateFlowReadiness({
-      flow,
+      flow: effectiveFlow,
       providerProfiles,
       orgId,
       config,
@@ -152,7 +173,7 @@ export function createShareRouter() {
       ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
         await buildExecutionContext({
           executionId,
-          flow,
+          flow: effectiveFlow,
           providerProfiles,
           orgId,
           userId,
@@ -187,7 +208,7 @@ export function createShareRouter() {
       executionId,
       userId,
       orgId,
-      flow,
+      effectiveFlow,
       promptContext,
       flowPackage,
       uploadedFiles,
@@ -201,7 +222,7 @@ export function createShareRouter() {
     return c.json({ executionId });
   });
 
-  // GET /share/:token/status — polling endpoint for execution status (no JWT)
+  // GET /share/:token/status — polling endpoint for execution status + public logs (no JWT)
   router.get("/:token/status", rateLimitByIp(60), async (c) => {
     const token = c.req.param("token")!;
     const shareToken = await getShareToken(token);
@@ -211,24 +232,29 @@ export function createShareRouter() {
     }
 
     if (!shareToken.executionId) {
-      return c.json({ status: "pending" });
+      return c.json({ status: "pending", logs: [] });
     }
 
-    const rows = await db
-      .select({
-        status: executions.status,
-        result: executions.result,
-        error: executions.error,
-      })
-      .from(executions)
-      .where(eq(executions.id, shareToken.executionId))
-      .limit(1);
+    const [execRows, allLogs] = await Promise.all([
+      db
+        .select({
+          status: executions.status,
+          result: executions.result,
+          error: executions.error,
+        })
+        .from(executions)
+        .where(eq(executions.id, shareToken.executionId))
+        .limit(1),
+      listExecutionLogs(shareToken.executionId, shareToken.orgId),
+    ]);
 
-    const exec = rows[0];
+    const exec = execRows[0];
+
     return c.json({
       status: exec?.status ?? "pending",
       ...(exec?.result ? { result: exec.result } : {}),
       ...(exec?.error ? { error: exec.error } : {}),
+      logs: allLogs,
     });
   });
 

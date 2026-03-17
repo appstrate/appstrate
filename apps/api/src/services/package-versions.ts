@@ -13,6 +13,7 @@ export {
   getLatestVersionId,
   getLatestVersionWithManifest,
   resolveVersion,
+  resolveVersionManifest,
   getVersionForDownload,
   getVersionDetail,
   getVersionCount,

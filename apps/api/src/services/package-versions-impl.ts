@@ -240,6 +240,23 @@ export async function getVersionForDownload(
   return row ?? null;
 }
 
+/** Resolve a version query and return only the manifest (no ZIP download). */
+export async function resolveVersionManifest(
+  packageId: string,
+  versionQuery: string,
+): Promise<Record<string, unknown> | null> {
+  const versionId = await resolveVersion(packageId, versionQuery);
+  if (!versionId) return null;
+
+  const [row] = await db
+    .select({ manifest: packageVersions.manifest })
+    .from(packageVersions)
+    .where(eq(packageVersions.id, versionId))
+    .limit(1);
+
+  return (row?.manifest as Record<string, unknown>) ?? null;
+}
+
 // ─────────────────────────────────────────────
 // Version detail
 // ─────────────────────────────────────────────

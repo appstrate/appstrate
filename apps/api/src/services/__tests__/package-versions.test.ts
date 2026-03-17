@@ -23,6 +23,7 @@ mock.module("../package-storage.ts", () => packageStorageStub);
 
 mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-test",
+  verifyArtifactIntegrity: () => ({ valid: true }),
 }));
 
 const depsTracking = {

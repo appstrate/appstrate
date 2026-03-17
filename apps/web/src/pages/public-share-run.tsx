@@ -9,6 +9,7 @@ import { InputFields } from "../components/input-fields";
 import { initInputValues, buildInputPayload } from "../components/input-utils";
 import { ResultRenderer } from "../components/result-renderer";
 import { Spinner } from "../components/spinner";
+import { ExecutionTimeline, buildLogEntries, type RawLog } from "../components/log-viewer";
 
 type PageStatus = "loading" | "idle" | "running" | "success" | "failed" | "timeout" | "invalid";
 
@@ -55,6 +56,7 @@ export function PublicShareRunPage() {
   const [flowInfo, setFlowInfo] = useState<FlowInfo | null>(null);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  const [rawLogs, setRawLogs] = useState<RawLog[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const schema = flowInfo?.input?.schema;
@@ -67,6 +69,11 @@ export function PublicShareRunPage() {
     [initialInputValues, inputValues],
   );
   const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
+
+  const logEntries = useMemo(() => {
+    const { entries } = buildLogEntries(rawLogs);
+    return entries.filter((e) => e.level && e.level !== "debug");
+  }, [rawLogs]);
 
   // Fetch flow info on mount
   useEffect(() => {
@@ -96,7 +103,7 @@ export function PublicShareRunPage() {
       .catch(() => setPageStatus("invalid"));
   }, [token, t]);
 
-  // Polling for execution status
+  // Polling for execution status + logs
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -110,6 +117,9 @@ export function PublicShareRunPage() {
       const res = await fetch(`/share/${token}/status`);
       if (!res.ok) return;
       const data = await res.json();
+
+      // Update logs
+      if (data.logs) setRawLogs(data.logs as RawLog[]);
 
       const resolved = resolveExecutionStatus(data.status as string, t);
       if (resolved.pageStatus !== "running") {
@@ -142,6 +152,7 @@ export function PublicShareRunPage() {
     setPageStatus("running");
     setResult(null);
     setExecError(null);
+    setRawLogs([]);
 
     try {
       const input = schema ? buildInputPayload(schema, mergedInputValues) : undefined;
@@ -304,15 +315,11 @@ export function PublicShareRunPage() {
           </div>
         )}
 
-        {pageStatus === "running" && (
-          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
-            <Spinner />
-            <span>{t("shareable.running")}</span>
-          </div>
-        )}
+        {pageStatus === "running" && <ExecutionTimeline entries={logEntries} isRunning />}
 
         {(pageStatus === "success" || pageStatus === "failed" || pageStatus === "timeout") && (
           <div className="space-y-4">
+            {logEntries.length > 0 && <ExecutionTimeline entries={logEntries} />}
             {execError && (
               <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {execError}

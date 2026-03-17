@@ -97,6 +97,7 @@ mock.module("../../middleware/guards.ts", () => ({
   requireFlow: mock(() => mock()),
   requireAdmin: mock(() => mock()),
   requireMutableFlow: mock(() => mock()),
+  checkScopeMatch: mock(() => null),
 }));
 
 mock.module("../../middleware/rate-limit.ts", () => ({

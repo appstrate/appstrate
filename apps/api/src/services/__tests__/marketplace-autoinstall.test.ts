@@ -86,6 +86,7 @@ mock.module("@appstrate/core/zip", () => ({
 
 mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-fixed",
+  verifyArtifactIntegrity: () => ({ valid: true }),
 }));
 
 // @appstrate/core/naming — NOT mocked (pure functions, use real impl)
@@ -116,6 +117,11 @@ mock.module("../post-install-package.ts", () => ({
   postInstallPackage: async (params: unknown) => {
     postInstallCalls.push(params);
   },
+}));
+
+mock.module("../package-items/dependencies.ts", () => ({
+  syncFlowDepsJunctionTable: async () => {},
+  buildDependencies: async () => null,
 }));
 
 // --- Import after mocks ---

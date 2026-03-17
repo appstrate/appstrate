@@ -16,6 +16,7 @@ import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
+import { resolveVersionManifest } from "../services/package-versions.ts";
 import {
   getEffectiveProfileId,
   setPackageProfileOverride,
@@ -299,9 +300,23 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const providers = resolveManifestProviders(flow.manifest);
 
-    // Verify the flow is shareable publicly
+    // Resolve manifest to snapshot: use requested version or fall back to draft
+    const versionQuery = c.req.query("version");
+    let manifest = flow.manifest as Record<string, unknown>;
+    if (versionQuery && flow.source !== "system") {
+      const versionManifest = await resolveVersionManifest(flow.id, versionQuery);
+      if (!versionManifest) {
+        return c.json(
+          { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
+          404,
+        );
+      }
+      manifest = versionManifest;
+    }
+
+    // Verify the flow is shareable publicly (using the resolved manifest)
+    const providers = resolveManifestProviders(manifest as typeof flow.manifest);
     if (providers.length > 0) {
       // Check for user-mode providers
       const userModeService = providers.find((s) => (s.connectionMode ?? "user") === "user");
@@ -331,11 +346,10 @@ export function createFlowsRouter() {
       }
     }
 
-    const shareToken = await createShareToken(flow.id, user.id, orgId);
-    if (!shareToken) throw new Error("Failed to create share token");
+    const shareToken = await createShareToken(flow.id, user.id, orgId, undefined, manifest);
     return c.json({
-      token: shareToken.token,
-      expiresAt: shareToken.expiresAt,
+      token: shareToken!.token,
+      expiresAt: shareToken!.expiresAt,
     });
   });
 
