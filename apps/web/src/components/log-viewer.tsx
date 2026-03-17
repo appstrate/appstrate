@@ -14,13 +14,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// --- Shared types and utilities ---
+
+export interface LogEntry {
+  message: string;
+  type: string;
+  level?: string;
+  detail?: string;
+  createdAt?: Date | string | null;
+}
+
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
   warn: { icon: AlertTriangle, className: "text-amber-400 bg-amber-400/10", label: "WARN" },
   error: { icon: XCircle, className: "text-destructive bg-destructive/10", label: "ERROR" },
 };
 
-function LevelBadge({ level }: { level?: string }) {
+export function LevelBadge({ level }: { level?: string }) {
   if (!level || level === "debug") return null;
   const config = levelConfig[level];
   if (!config) return null;
@@ -38,19 +48,7 @@ function LevelBadge({ level }: { level?: string }) {
   );
 }
 
-export interface LogEntry {
-  message: string;
-  type: string;
-  level?: string;
-  detail?: string;
-  createdAt?: Date | string | null;
-}
-
-interface LogViewerProps {
-  entries: LogEntry[];
-}
-
-function formatTimestamp(d: Date | string | null | undefined, lang: string): string {
+export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {
   if (!d) return "\u2014";
   try {
     const date = d instanceof Date ? d : new Date(d);
@@ -67,15 +65,21 @@ function formatTimestamp(d: Date | string | null | undefined, lang: string): str
 }
 
 /** Text color by semantic type (nature of the log). */
-const typeColors: Record<string, string> = {
+export const typeColors: Record<string, string> = {
   system: "text-primary",
 };
 
 /** Text color by severity level (overrides type color when set). */
-const levelColors: Record<string, string> = {
+export const levelColors: Record<string, string> = {
   warn: "text-amber-400",
   error: "text-destructive",
 };
+
+// --- LogViewer (admin/developer view) ---
+
+interface LogViewerProps {
+  entries: LogEntry[];
+}
 
 export function LogViewer({ entries }: LogViewerProps) {
   const { t, i18n } = useTranslation("flows");
@@ -228,6 +232,44 @@ export function LogViewer({ entries }: LogViewerProps) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// --- ExecutionTimeline (public/user view) ---
+
+interface ExecutionTimelineProps {
+  entries: LogEntry[];
+  isRunning?: boolean;
+}
+
+export function ExecutionTimeline({ entries, isRunning }: ExecutionTimelineProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll on new entries or when loader appears
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries.length, isRunning]);
+
+  return (
+    <div className="space-y-1">
+      {entries.map((entry, i) => (
+        <div
+          key={i}
+          className={cn(
+            "flex items-start gap-2 text-sm",
+            (entry.level && levelColors[entry.level]) || "text-foreground",
+          )}
+        >
+          <span className="leading-6">{entry.message}</span>
+        </div>
+      ))}
+      {isRunning && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        </div>
+      )}
+      <div ref={bottomRef} />
     </div>
   );
 }
