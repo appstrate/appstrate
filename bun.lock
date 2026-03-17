@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.7.1",
+        "@appstrate/core": "^2.7.2",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -151,7 +151,7 @@
     },
   },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@1.0.0", "", { "dependencies": { "zod": "^4.3.6" } }, "sha512-Ynpaltv+DYM8SQTG0xU0VS/6bXj4EWNyRV8pTa4+U+th7Ke7dpjXoHHoBKANAkkBZCQ1h49Zhs4aH9/iktk98w=="],
+    "@afps-spec/schema": ["@afps-spec/schema@1.0.1", "", { "dependencies": { "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-Gt0KhIfiA1FuLEGp8LTwiLfwaXy6Vet40baYk+/uv8byvoS2by+ZPWz5D+N4HmrDwPcLRQr8U2apmzuZAUVu1A=="],
 
     "@apidevtools/json-schema-ref-parser": ["@apidevtools/json-schema-ref-parser@14.2.1", "", { "dependencies": { "js-yaml": "^4.1.0" }, "peerDependencies": { "@types/json-schema": "^7.0.15" } }, "sha512-HmdFw9CDYqM6B25pqGBpNeLCKvGPlIx1EbLrVL0zPvj50CJQUHyBNBw45Muk0kEIkogo1VZvOKHajdMuAzSxRg=="],
 
@@ -159,7 +159,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.7.1", "", { "dependencies": { "@afps-spec/schema": "^1.0.0", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-yArMYSagWDFRuGVI+YDeAP2AUTEwz6stqPzAyze6tglFrXSb+zngeIJyX+MPZ8Sb54JCiBRxBty4QgOzdtzvDQ=="],
+    "@appstrate/core": ["@appstrate/core@2.7.2", "", { "dependencies": { "@afps-spec/schema": "^1.0.1", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" } }, "sha512-UN080InGzBlX9ALc083KqEKrgXg5jes0FCXCeMNT4WSeh/YfSN8XW1tw1aivokYU0pZbQE5h0OphWmG75PP90g=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 

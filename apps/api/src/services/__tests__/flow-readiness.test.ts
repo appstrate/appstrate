@@ -33,7 +33,7 @@ const BASE_MANIFEST = {
   version: "1.0.0",
   type: "flow" as const,
   displayName: "My Flow",
-  schemaVersion: "1",
+  schemaVersion: "1.0",
   author: "test",
 };
 
