@@ -66,7 +66,9 @@ export function validateInput(
     properties: nonFileProps,
     ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
   };
-  return validateWithAjv(input ?? {}, nonFileSchema);
+  // Treat empty strings as missing for required fields (aligned with config validation)
+  const cleaned = normalizeConfigForValidation(input ?? {}, nonFileRequired);
+  return validateWithAjv(cleaned, nonFileSchema);
 }
 
 export function validateFileInputs(

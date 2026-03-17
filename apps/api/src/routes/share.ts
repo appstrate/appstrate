@@ -92,13 +92,13 @@ export function createShareRouter() {
     return c.json(result);
   });
 
-  // POST /share/:token/run — consume token and execute (no JWT)
+  // POST /share/:token/run — validate, then consume token and execute (no JWT)
   router.post("/:token/run", rateLimitByIp(5), async (c) => {
     const token = c.req.param("token")!;
 
-    // Atomically consume the token
-    const consumed = await consumeShareToken(token);
-    if (!consumed) {
+    // Verify token is valid (without consuming it yet)
+    const shareToken = await getShareToken(token);
+    if (!shareToken || shareToken.consumedAt || shareToken.expiresAt < new Date()) {
       return c.json(
         {
           error: "TOKEN_INVALID",
@@ -108,13 +108,8 @@ export function createShareRouter() {
       );
     }
 
-    const {
-      id: tokenId,
-      packageId,
-      createdBy: userId,
-      orgId,
-      manifest: snapshotManifest,
-    } = consumed;
+    const { id: tokenId, packageId, createdBy: userId, orgId } = shareToken;
+    const snapshotManifest = shareToken.manifest as Record<string, unknown> | null;
 
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
@@ -126,6 +121,8 @@ export function createShareRouter() {
       ? { ...flow, manifest: snapshotManifest as typeof flow.manifest }
       : flow;
 
+    // --- Validate everything BEFORE consuming the token ---
+
     const inputSchema = effectiveFlow.manifest.input?.schema;
     const inputResult = await parseRequestInput(c, inputSchema);
     if (!inputResult.ok) {
@@ -133,24 +130,12 @@ export function createShareRouter() {
     }
     const { input: parsedInput, uploadedFiles } = inputResult.data;
 
-    const executionId = `exec_${crypto.randomUUID()}`;
-
-    // Build file metadata for prompt context (no URLs — files injected directly into container)
-    const fileRefs = uploadedFiles?.map((f) => ({
-      fieldName: f.fieldName,
-      name: f.name,
-      type: f.type,
-      size: f.size,
-    }));
-
-    // Resolve provider profiles and config
     const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
     const [providerProfiles, config] = await Promise.all([
       resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
       getPackageConfig(orgId, packageId),
     ]);
 
-    // Validate flow readiness (prompt, skills, tools, providers, config)
     const readinessError = await validateFlowReadiness({
       flow: effectiveFlow,
       providerProfiles,
@@ -161,9 +146,30 @@ export function createShareRouter() {
       return c.json(readinessError, 400);
     }
 
+    // --- All validations passed — now atomically consume the token ---
+
+    const consumed = await consumeShareToken(token);
+    if (!consumed) {
+      return c.json(
+        {
+          error: "TOKEN_INVALID",
+          message: "This link has already been used or is no longer valid.",
+        },
+        410,
+      );
+    }
+
+    const executionId = `exec_${crypto.randomUUID()}`;
+
+    const fileRefs = uploadedFiles?.map((f) => ({
+      fieldName: f.fieldName,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+    }));
+
     const userProfileId = await getEffectiveProfileId(userId, packageId);
 
-    // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
     let flowPackage: Buffer | null;
     let flowVersionId: number | null;
@@ -188,7 +194,6 @@ export function createShareRouter() {
       throw err;
     }
 
-    // Create execution record (using admin's user_id), then link to share token
     await createExecution(
       executionId,
       packageId,

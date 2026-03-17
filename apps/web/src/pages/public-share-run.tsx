@@ -147,12 +147,12 @@ export function PublicShareRunPage() {
     return stopPolling;
   }, [pageStatus, startPolling, stopPolling]);
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleRun = async () => {
     if (!token) return;
-    setPageStatus("running");
-    setResult(null);
     setExecError(null);
-    setRawLogs([]);
+    setSubmitting(true);
 
     try {
       const input = schema ? buildInputPayload(schema, mergedInputValues) : undefined;
@@ -184,14 +184,20 @@ export function PublicShareRunPage() {
           setPageStatus("invalid");
           return;
         }
-        throw new Error(err.message || `Error ${res.status}`);
+        // Validation error — stay on form and show error
+        setExecError(err.message || `Error ${res.status}`);
+        return;
       }
 
       await res.json();
-      // Polling will start via the useEffect on pageStatus === "running"
+      // Execution started — switch to running state
+      setResult(null);
+      setRawLogs([]);
+      setPageStatus("running");
     } catch (err) {
-      setPageStatus("failed");
       setExecError(err instanceof Error ? err.message : t("error.unknown"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -299,6 +305,11 @@ export function PublicShareRunPage() {
 
         {pageStatus === "idle" && (
           <div className="space-y-4">
+            {execError && (
+              <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {execError}
+              </div>
+            )}
             {hasInput && (
               <InputFields
                 schema={schema!}
@@ -309,8 +320,8 @@ export function PublicShareRunPage() {
                 idPrefix="public-input"
               />
             )}
-            <Button className="w-full" onClick={handleRun}>
-              {t("shareable.execute")}
+            <Button className="w-full" onClick={handleRun} disabled={submitting}>
+              {submitting ? <Spinner /> : t("shareable.execute")}
             </Button>
           </div>
         )}
