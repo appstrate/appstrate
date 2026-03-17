@@ -23,6 +23,11 @@ mock.module("@appstrate/db/schema", () => schemaStubs);
 // @appstrate/core/dependencies — NOT mocked (pure function)
 // @appstrate/core/naming — NOT mocked (pure functions)
 
+mock.module("@appstrate/core/integrity", () => ({
+  computeIntegrity: () => "sha256-test",
+  verifyArtifactIntegrity: () => ({ valid: true }),
+}));
+
 mock.module("../package-storage.ts", () => packageStorageStub);
 
 mock.module("../flow-service.ts", () => ({

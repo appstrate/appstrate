@@ -77,6 +77,7 @@ mock.module("@appstrate/core/zip", () => ({
 
 mock.module("@appstrate/core/integrity", () => ({
   computeIntegrity: () => "sha256-abc123",
+  verifyArtifactIntegrity: () => ({ valid: true }),
 }));
 
 mock.module("@appstrate/db/storage", () => ({

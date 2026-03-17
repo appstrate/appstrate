@@ -14,7 +14,12 @@ import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-rea
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
-import { LogViewer, ExecutionTimeline, type LogEntry } from "../components/log-viewer";
+import {
+  LogViewer,
+  ExecutionTimeline,
+  buildLogEntries,
+  type RawLog,
+} from "../components/log-viewer";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -23,17 +28,6 @@ import { useMarkRead } from "../hooks/use-notifications";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
-
-function formatToolArgs(args: Record<string, unknown>): string {
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(args)) {
-    if (value === undefined || value === null) continue;
-    const str = typeof value === "string" ? value : JSON.stringify(value);
-    parts.push(`${key}: ${str}`);
-  }
-  const joined = parts.join(", ");
-  return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
-}
 
 export function ExecutionDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
@@ -99,48 +93,9 @@ export function ExecutionDetailPage() {
   );
   const hasUserSelected = useRef(false);
 
-  // Build log entries from historical data, merging consecutive text-only
-  // progress entries into a single flowing block so small streaming fragments
-  // don't each render on their own line.
   const { historicalLogs, historicalResult } = useMemo(() => {
-    const entries: LogEntry[] = [];
-    let result: Record<string, unknown> | null = null;
-    let lastWasPlainText = false;
-
-    if (logs) {
-      for (const log of logs) {
-        if (log.event === "result" && log.data) {
-          result = log.data as Record<string, unknown>;
-          lastWasPlainText = false;
-        } else if (log.event === "execution_completed") {
-          lastWasPlainText = false;
-        } else {
-          const logData = (log.data ?? {}) as Record<string, unknown>;
-          const message = (logData.message as string) || log.message || "";
-          if (message) {
-            const args = logData.args as Record<string, unknown> | undefined;
-            const detail = args ? formatToolArgs(args) : undefined;
-            // Text-only progress: no structured data (tool calls have data.tool/data.args)
-            const isPlainText = log.type === "progress" && !log.data;
-
-            if (isPlainText && lastWasPlainText && entries.length > 0) {
-              // Merge into previous text entry with newline to preserve natural breaks
-              entries[entries.length - 1]!.message += "\n" + message;
-            } else {
-              entries.push({
-                message,
-                type: log.type || "progress",
-                level: log.level || "debug",
-                detail,
-                createdAt: log.createdAt,
-              });
-            }
-            lastWasPlainText = isPlainText;
-          }
-        }
-      }
-    }
-
+    if (!logs) return { historicalLogs: [], historicalResult: null };
+    const { entries, result } = buildLogEntries(logs as RawLog[]);
     return { historicalLogs: entries, historicalResult: result };
   }, [logs]);
 

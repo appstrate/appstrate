@@ -174,6 +174,7 @@ export const shareTokens = pgTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),
+    manifest: jsonb("manifest"),
     executionId: text("execution_id").references(() => executions.id, { onDelete: "set null" }),
     consumedAt: timestamp("consumed_at"),
     expiresAt: timestamp("expires_at").notNull(),
