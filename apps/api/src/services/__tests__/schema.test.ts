@@ -7,7 +7,7 @@ import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
-  schemaVersion: "1.0.0",
+  schemaVersion: "1.0",
   name: "@test-org/test-flow",
   version: "1.0.0",
   type: "flow",
@@ -104,7 +104,7 @@ describe("validateManifest", () => {
 
   test("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.0",
       name: "@test-org/minimal",
       version: "1.0.0",
       type: "flow",
@@ -140,7 +140,7 @@ describe("validateManifest", () => {
 
   test("rejects manifest missing required fields", () => {
     const bad = {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.0",
       name: "@test-org/test",
       version: "1.0.0",
       type: "flow",

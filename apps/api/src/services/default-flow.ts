@@ -5,7 +5,7 @@ import { logger } from "../lib/logger.ts";
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
   type: "flow",
-  schemaVersion: "1.0.0",
+  schemaVersion: "1.0",
   displayName: "Hello World",
   author: "Appstrate",
   description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",

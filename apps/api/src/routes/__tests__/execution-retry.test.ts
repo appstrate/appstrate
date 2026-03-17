@@ -184,7 +184,7 @@ function makeFlow(overrides: {
     tools: [],
     source: "system",
     manifest: {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.0",
       name: "test-flow",
       displayName: "Test Flow",
       description: "A test flow",
