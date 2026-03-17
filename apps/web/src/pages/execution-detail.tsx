@@ -127,6 +127,7 @@ export function ExecutionDetailPage() {
               entries.push({
                 message,
                 type: log.type || "progress",
+                level: log.level || "debug",
                 detail,
                 createdAt: log.createdAt,
               });

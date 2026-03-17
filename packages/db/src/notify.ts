@@ -39,6 +39,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'user_id', NEW.user_id,
         'org_id', NEW.org_id,
         'type', NEW.type,
+        'level', NEW.level,
         'event', NEW.event,
         'message', LEFT(NEW.message, 2000),
         'data', CASE

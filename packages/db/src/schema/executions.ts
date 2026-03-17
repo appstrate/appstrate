@@ -72,6 +72,7 @@ export const executionLogs = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     type: text("type").notNull().default("progress"),
+    level: text("level").notNull().default("debug"),
     event: text("event"),
     message: text("message"),
     data: jsonb("data"),

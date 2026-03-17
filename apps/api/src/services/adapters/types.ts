@@ -10,6 +10,7 @@ export interface ExecutionMessage {
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;
+  level?: "debug" | "info" | "warn" | "error";
 }
 
 export interface UploadedFile {

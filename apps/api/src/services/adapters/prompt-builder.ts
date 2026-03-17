@@ -276,6 +276,29 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
+  // --- User communication ---
+  sections.push("## User Communication\n");
+  sections.push(
+    "Use the `log` tool to send progress updates and important messages to the user. " +
+      "These messages appear in the user's log viewer in real time.\n",
+  );
+  sections.push("Levels:");
+  sections.push(
+    '- **info**: Progress milestones and key results (e.g. "42 emails processed", "3 contacts created")',
+  );
+  sections.push(
+    '- **warn**: Unexpected but non-blocking issues (e.g. "3 emails skipped — no subject")',
+  );
+  sections.push('- **error**: Failures that affect the result (e.g. "Gmail API timeout")\n');
+  sections.push(
+    "Call `log` at meaningful milestones — not for every small step. " +
+      "Non-admin users only see these log messages, not your internal tool calls or reasoning.\n",
+  );
+  sections.push(
+    "**Do not use emojis** in log messages — the UI already displays colored level badges (INFO, WARN, ERROR). " +
+      "Keep messages plain and factual.\n",
+  );
+
   // --- Output format ---
   const outputSchema = ctx.schemas.output;
   sections.push("## Output Format\n");

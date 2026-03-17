@@ -86,6 +86,7 @@ export async function executeFlowInBackground(
             "progress",
             msg.message ?? null,
             msg.data ?? null,
+            msg.level ?? "debug",
           );
         } else if (msg.type === "error") {
           lastAdapterError = msg.message ?? null;
@@ -93,10 +94,11 @@ export async function executeFlowInBackground(
             executionId,
             userId,
             orgId,
-            "error",
+            "system",
             "adapter_error",
             msg.message ?? null,
             msg.data ?? null,
+            "error",
           );
         } else if (msg.type === "result" && msg.data) {
           result = msg.data;
@@ -123,10 +125,19 @@ export async function executeFlowInBackground(
               }
             : {}),
         });
-        await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
+        await appendExecutionLog(
           executionId,
-          status: "timeout",
-        });
+          userId,
+          orgId,
+          "system",
+          "execution_completed",
+          null,
+          {
+            executionId,
+            status: "timeout",
+          },
+          "error",
+        );
         return;
       }
       throw err;
@@ -161,6 +172,7 @@ export async function executeFlowInBackground(
               maxRetries,
               errors: outputValidation.errors,
             },
+            "debug",
           );
 
           const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
@@ -192,6 +204,7 @@ export async function executeFlowInBackground(
                   "progress",
                   msg.message ?? null,
                   msg.data ?? null,
+                  msg.level ?? "debug",
                 );
               } else if (msg.type === "result" && msg.data) {
                 result = msg.data;
@@ -218,6 +231,7 @@ export async function executeFlowInBackground(
               valid: false,
               errors: outputValidation.errors,
             },
+            "warn",
           );
           logger.warn("Output validation failed", {
             executionId,
@@ -264,11 +278,29 @@ export async function executeFlowInBackground(
           : {}),
       });
 
-      await appendExecutionLog(executionId, userId, orgId, "result", "result", null, result);
-      await appendExecutionLog(executionId, userId, orgId, "system", "execution_completed", null, {
+      await appendExecutionLog(
         executionId,
-        status: "success",
-      });
+        userId,
+        orgId,
+        "result",
+        "result",
+        null,
+        result,
+        "info",
+      );
+      await appendExecutionLog(
+        executionId,
+        userId,
+        orgId,
+        "system",
+        "execution_completed",
+        null,
+        {
+          executionId,
+          status: "success",
+        },
+        "info",
+      );
     } else {
       // Guard: don't overwrite "cancelled" status written by the cancel route
       if (signal.aborted) return;
@@ -292,11 +324,20 @@ export async function executeFlowInBackground(
         duration,
         notifiedAt: new Date().toISOString(),
       });
-      await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
+      await appendExecutionLog(
         executionId,
-        status: "failed",
-        error,
-      });
+        userId,
+        orgId,
+        "system",
+        "execution_completed",
+        null,
+        {
+          executionId,
+          status: "failed",
+          error,
+        },
+        "error",
+      );
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -311,11 +352,20 @@ export async function executeFlowInBackground(
       duration,
       notifiedAt: new Date().toISOString(),
     });
-    await appendExecutionLog(executionId, userId, orgId, "error", "execution_completed", null, {
+    await appendExecutionLog(
       executionId,
-      status: "failed",
-      error: errorMessage,
-    });
+      userId,
+      orgId,
+      "system",
+      "execution_completed",
+      null,
+      {
+        executionId,
+        status: "failed",
+        error: errorMessage,
+      },
+      "error",
+    );
   } finally {
     untrackExecution(executionId);
   }
@@ -483,7 +533,13 @@ export function createExecutionsRouter() {
       return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
     }
     const logs = await listExecutionLogs(execId, orgId);
-    return c.json(logs);
+
+    // Filter by role: non-admins don't see debug logs
+    const role = c.get("orgRole");
+    const isAdmin = role === "admin" || role === "owner";
+    const filtered = isAdmin ? logs : logs.filter((l) => l.level !== "debug");
+
+    return c.json(filtered);
   });
 
   // POST /api/executions/:id/cancel — cancel a running/pending execution
@@ -520,10 +576,19 @@ export function createExecutionsRouter() {
     });
 
     // Log the cancellation
-    await appendExecutionLog(execId, user.id, orgId, "system", "execution_completed", null, {
-      executionId: execId,
-      status: "cancelled",
-    });
+    await appendExecutionLog(
+      execId,
+      user.id,
+      orgId,
+      "system",
+      "execution_completed",
+      null,
+      {
+        executionId: execId,
+        status: "cancelled",
+      },
+      "info",
+    );
 
     // Abort in-flight fetch calls immediately, then stop the container as backup
     abortExecution(execId);

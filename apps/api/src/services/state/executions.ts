@@ -170,6 +170,7 @@ export async function appendExecutionLog(
   event: string | null,
   message: string | null,
   data: Record<string, unknown> | null,
+  level: "debug" | "info" | "warn" | "error" = "debug",
 ): Promise<number> {
   try {
     const [row] = await db
@@ -182,6 +183,7 @@ export async function appendExecutionLog(
         event,
         message,
         data,
+        level,
       })
       .returning({ id: executionLogs.id });
     return row?.id ?? 0;

@@ -89,7 +89,6 @@ async function loadExtensionsFromDir(dir: string, label: string) {
         }
         extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
         loadedExtensionIds.add(id);
-        emit({ type: "text_delta", text: `Loaded extension (${label}): ${entry}\n` });
       }),
   );
 
@@ -122,7 +121,6 @@ if (hasPackage) {
       const piSkillsDir = path.join(WORKSPACE, ".pi", "skills");
       await fs.mkdir(piSkillsDir, { recursive: true });
       await run(["cp", "-r", `${skillsDir}/.`, piSkillsDir]);
-      emit({ type: "text_delta", text: "Installed skills from flow package\n" });
     }
 
     // Load flow-package tools first (they take priority over runtime built-ins)
