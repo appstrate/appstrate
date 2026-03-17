@@ -1,78 +1,101 @@
 import { useState, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import type { ProviderStatus } from "@appstrate/shared-types";
 import { usePackageDetail } from "../hooks/use-packages";
-import { useExecutionRealtime } from "../hooks/use-realtime";
+import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
+import { useExecutionLogs } from "../hooks/use-executions";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
-import { InputFields } from "../components/input-fields";
-import { initInputValues, buildInputPayload } from "../components/input-utils";
-import { ResultRenderer } from "../components/result-renderer";
+import { useCurrentOrgId } from "../hooks/use-org";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiKeyModal } from "../components/api-key-modal";
-import { Spinner } from "../components/spinner";
-import { InlineMarkdown } from "../components/markdown";
+import { FlowRunCard, type RunCardStatus } from "../components/flow-run-card";
+import { buildLogEntries, type RawLog } from "../components/log-viewer";
 import { api, uploadFormData } from "../api";
-
-type PageStatus = "idle" | "running" | "success" | "failed" | "timeout";
+import type { ExecutionLog } from "@appstrate/shared-types";
 
 export function ShareableRunPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = `${scope}/${name}`;
-  const { data: flow, isLoading, error } = usePackageDetail("flow", packageId);
+  const orgId = useCurrentOrgId();
+  const qc = useQueryClient();
+  const { data: flow, isLoading, error: loadError } = usePackageDetail("flow", packageId);
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
 
   const [executionId, setExecutionId] = useState<string | null>(null);
-  const [status, setStatus] = useState<PageStatus>("idle");
+  const [status, setStatus] = useState<RunCardStatus>("idle");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [apiKeyService, setApiKeyService] = useState<{
     provider: string;
     id: string;
   } | null>(null);
 
-  const schema = flow?.input?.schema;
-  const hasInput = !!schema?.properties && Object.keys(schema.properties).length > 0;
+  const isRunning = status === "running";
 
-  const initialInputValues = useMemo(() => (schema ? initInputValues(schema) : {}), [schema]);
-  const [inputValues, setInputValues] = useState<Record<string, string>>({});
-  const mergedInputValues = useMemo(
-    () => ({ ...initialInputValues, ...inputValues }),
-    [initialInputValues, inputValues],
+  // Fetch logs for the current execution
+  const { data: logs } = useExecutionLogs(executionId ?? undefined);
+
+  // Subscribe to new log INSERTs via SSE while execution is running
+  useExecutionLogsRealtime(
+    isRunning ? (executionId ?? null) : null,
+    useCallback(
+      (newLog: Record<string, unknown>) => {
+        const log = newLog as unknown as ExecutionLog;
+        qc.setQueryData<ExecutionLog[]>(["execution-logs", orgId, executionId], (prev) => {
+          if (!prev) return [log];
+          if (prev.some((l) => l.id === log.id)) return prev;
+          return [...prev, log];
+        });
+      },
+      [qc, orgId, executionId],
+    ),
   );
-  const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
 
-  const handleStatusChange = useCallback((payload: Record<string, unknown>) => {
-    const newStatus = payload.status as string;
-    if (newStatus === "success" || newStatus === "failed" || newStatus === "timeout") {
-      setStatus(newStatus as PageStatus);
-      if (newStatus === "success" && payload.result) {
-        setResult(payload.result as Record<string, unknown>);
-      } else if (newStatus === "failed") {
-        setExecError((payload.error as string) || t("shareable.errorFailed"));
-      } else if (newStatus === "timeout") {
-        setExecError(t("shareable.errorTimeout"));
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const logEntries = useMemo(() => {
+    if (!logs) return [];
+    const { entries } = buildLogEntries(logs as RawLog[]);
+    return entries.filter((e) => e.level && e.level !== "debug");
+  }, [logs]);
 
-  useExecutionRealtime(executionId, handleStatusChange);
+  // SSE for execution status
+  useExecutionRealtime(
+    isRunning ? executionId : null,
+    useCallback(
+      (payload: Record<string, unknown>) => {
+        const newStatus = payload.status as string;
+        if (newStatus === "success" || newStatus === "failed" || newStatus === "timeout") {
+          setStatus(newStatus as RunCardStatus);
+          if (newStatus === "success" && payload.result) {
+            setResult(payload.result as Record<string, unknown>);
+          } else if (newStatus === "failed") {
+            setExecError((payload.error as string) || t("shareable.errorFailed"));
+          } else if (newStatus === "timeout") {
+            setExecError(t("shareable.errorTimeout"));
+          }
+          // Final refetch of logs
+          if (executionId) {
+            qc.invalidateQueries({ queryKey: ["execution-logs", orgId, executionId] });
+          }
+        }
+      },
+      [t, qc, orgId, executionId],
+    ),
+  );
 
   const providers = flow?.dependencies?.providers ?? [];
   const allConnected = providers.every((s) => s.status === "connected");
 
-  const handleRun = async () => {
+  const handleRun = async (input?: Record<string, unknown>, files?: Record<string, File[]>) => {
     if (!packageId) return;
-    setStatus("running");
-    setResult(null);
     setExecError(null);
+    setSubmitting(true);
 
     try {
-      const input = schema ? buildInputPayload(schema, mergedInputValues) : undefined;
-      const hasFiles = Object.values(fileValues).some((f) => f.length > 0);
+      const hasFiles = files && Object.values(files).some((f) => f.length > 0);
 
       let data: { executionId: string };
       if (hasFiles) {
@@ -80,10 +103,8 @@ export function ShareableRunPage() {
         if (input && Object.keys(input).length > 0) {
           fd.append("input", JSON.stringify(input));
         }
-        for (const [key, files] of Object.entries(fileValues)) {
-          for (const file of files) {
-            fd.append(key, file);
-          }
+        for (const [key, fileList] of Object.entries(files!)) {
+          for (const file of fileList) fd.append(key, file);
         }
         data = await uploadFormData<{ executionId: string }>(`/flows/${packageId}/run`, fd);
       } else {
@@ -92,174 +113,54 @@ export function ShareableRunPage() {
           body: JSON.stringify(input ? { input } : {}),
         });
       }
+
       setExecutionId(data.executionId);
+      setResult(null);
+      setStatus("running");
     } catch (err) {
-      setStatus("failed");
       setExecError(err instanceof Error ? err.message : t("error.unknown"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleRestart = () => {
+  const handleRerun = () => {
     setExecutionId(null);
     setStatus("idle");
     setResult(null);
     setExecError(null);
-    setFileValues({});
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
-          <div className="flex items-center justify-center py-8">
-            <Spinner />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleProviderConnect = (svc: ProviderStatus) => {
+    if (svc.authMode === "API_KEY") {
+      setApiKeyService({ provider: svc.provider, id: svc.id });
+    } else {
+      connectMutation.mutate(svc.provider);
+    }
+  };
 
-  if (error || !flow) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
-          <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error?.message || t("shareable.notFound")}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const cardStatus: RunCardStatus = isLoading ? "loading" : loadError ? "invalid" : status;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-lg">
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold">{flow.displayName}</h2>
-          {flow.description && (
-            <p className="text-sm text-muted-foreground mt-1">
-              <InlineMarkdown>{flow.description}</InlineMarkdown>
-            </p>
-          )}
-        </div>
-
-        {providers.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            {providers.map((svc) => {
-              const isConnected = svc.status === "connected";
-              const isAdminMode = svc.connectionMode === "admin";
-
-              if (isAdminMode) {
-                return (
-                  <div
-                    key={svc.id}
-                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
-                    title={svc.description}
-                  >
-                    <span
-                      className={cn(
-                        "h-2 w-2 rounded-full inline-block",
-                        svc.adminProvided && isConnected ? "bg-success" : "bg-destructive",
-                      )}
-                    />
-                    {svc.id}
-                    {svc.adminProvided && isConnected && (
-                      <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                        {t("admin")}
-                      </span>
-                    )}
-                    {!(svc.adminProvided && isConnected) && (
-                      <span className="ml-1 rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
-                        {t("detail.pending")}
-                      </span>
-                    )}
-                  </div>
-                );
-              }
-
-              // User-mode service
-              if (isConnected) {
-                return (
-                  <div
-                    key={svc.id}
-                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm"
-                    title={svc.description}
-                  >
-                    <span className="h-2 w-2 rounded-full bg-success inline-block" />
-                    {svc.id}
-                  </div>
-                );
-              }
-
-              const handleProviderConnect = () => {
-                if (svc.authMode === "API_KEY") {
-                  setApiKeyService({ provider: svc.provider, id: svc.id });
-                } else {
-                  connectMutation.mutate(svc.provider);
-                }
-              };
-
-              return (
-                <Button
-                  key={svc.id}
-                  variant="outline"
-                  type="button"
-                  className="flex items-center gap-1.5 border-dashed px-2.5 py-1.5 text-sm text-muted-foreground hover:border-primary hover:text-foreground"
-                  onClick={handleProviderConnect}
-                  title={svc.description}
-                >
-                  <span className="h-2 w-2 rounded-full bg-destructive inline-block" />
-                  {svc.id} ({t("detail.connect")})
-                </Button>
-              );
-            })}
-          </div>
-        )}
-
-        {status === "idle" && (
-          <div className="space-y-4">
-            {hasInput && (
-              <InputFields
-                schema={schema!}
-                values={mergedInputValues}
-                onChange={(key, value) => setInputValues((prev) => ({ ...prev, [key]: value }))}
-                fileValues={fileValues}
-                onFileChange={(key, files) => setFileValues((prev) => ({ ...prev, [key]: files }))}
-                idPrefix="shareable-input"
-              />
-            )}
-            <Button
-              className="w-full"
-              onClick={handleRun}
-              disabled={!allConnected}
-              title={!allConnected ? t("shareable.connectFirst") : t("shareable.titleRun")}
-            >
-              {t("shareable.execute")}
-            </Button>
-          </div>
-        )}
-
-        {status === "running" && (
-          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
-            <Spinner />
-            <span>{t("shareable.running")}</span>
-          </div>
-        )}
-
-        {(status === "success" || status === "failed" || status === "timeout") && (
-          <div className="space-y-4">
-            {execError && (
-              <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {execError}
-              </div>
-            )}
-            {result && <ResultRenderer data={result} outputSchema={flow.output?.schema} />}
-            <Button variant="outline" className="w-full" onClick={handleRestart}>
-              {t("shareable.rerun")}
-            </Button>
-          </div>
-        )}
-      </div>
+    <>
+      <FlowRunCard
+        displayName={flow?.displayName}
+        description={flow?.description}
+        inputSchema={flow?.input?.schema}
+        outputSchema={flow?.output?.schema}
+        providers={providers}
+        status={cardStatus}
+        error={execError ?? loadError?.message}
+        result={result}
+        logEntries={logEntries}
+        submitting={submitting}
+        onRun={handleRun}
+        onRerun={handleRerun}
+        onProviderConnect={handleProviderConnect}
+        canRun={allConnected}
+        canRunTitle={!allConnected ? t("shareable.connectFirst") : undefined}
+        invalidMessage={loadError?.message}
+      />
 
       <ApiKeyModal
         open={!!apiKeyService}
@@ -275,6 +176,6 @@ export function ShareableRunPage() {
           }
         }}
       />
-    </div>
+    </>
   );
 }
