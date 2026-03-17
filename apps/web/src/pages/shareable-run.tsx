@@ -1,10 +1,10 @@
-import { useState, useCallback, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { ProviderStatus } from "@appstrate/shared-types";
+import type { ProviderStatus, ExecutionLog } from "@appstrate/shared-types";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
-import { useExecutionLogs } from "../hooks/use-executions";
+import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useConnect, useConnectApiKey } from "../hooks/use-mutations";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,11 +12,19 @@ import { ApiKeyModal } from "../components/api-key-modal";
 import { FlowRunCard, type RunCardStatus } from "../components/flow-run-card";
 import { buildLogEntries, type RawLog } from "../components/log-viewer";
 import { api, uploadFormData } from "../api";
-import type { ExecutionLog } from "@appstrate/shared-types";
 
 export function ShareableRunPage() {
   const { t } = useTranslation(["flows", "common"]);
-  const { scope, name } = useParams<{ scope: string; name: string }>();
+  const {
+    scope,
+    name,
+    execId: urlExecId,
+  } = useParams<{
+    scope: string;
+    name: string;
+    execId?: string;
+  }>();
+  const navigate = useNavigate();
   const packageId = `${scope}/${name}`;
   const orgId = useCurrentOrgId();
   const qc = useQueryClient();
@@ -24,8 +32,8 @@ export function ShareableRunPage() {
   const connectMutation = useConnect();
   const apiKeyMutation = useConnectApiKey();
 
-  const [executionId, setExecutionId] = useState<string | null>(null);
-  const [status, setStatus] = useState<RunCardStatus>("idle");
+  const [executionId, setExecutionId] = useState<string | null>(urlExecId ?? null);
+  const [status, setStatus] = useState<RunCardStatus>(urlExecId ? "running" : "idle");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -35,6 +43,27 @@ export function ShareableRunPage() {
   } | null>(null);
 
   const isRunning = status === "running";
+
+  // Fetch execution record (for result on completion + resume after reload)
+  const { data: execution } = useExecution(executionId ?? undefined);
+
+  // Restore/sync state from execution record (on mount, reload, or SSE-triggered refetch)
+  useEffect(() => {
+    if (!execution) return;
+    const s = execution.status;
+    if (s === "success") {
+      setStatus("success");
+      if (execution.result) setResult(execution.result as Record<string, unknown>);
+    } else if (s === "failed") {
+      setStatus("failed");
+      setExecError((execution.error as string) || t("shareable.errorFailed"));
+    } else if (s === "timeout") {
+      setStatus("timeout");
+      setExecError(t("shareable.errorTimeout"));
+    } else if (s === "running" || s === "pending") {
+      setStatus("running");
+    }
+  }, [execution?.status, execution?.result]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch logs for the current execution
   const { data: logs } = useExecutionLogs(executionId ?? undefined);
@@ -61,23 +90,24 @@ export function ShareableRunPage() {
     return entries.filter((e) => e.level && e.level !== "debug");
   }, [logs]);
 
-  // SSE for execution status
+  // SSE for execution status — on terminal, refetch execution + logs to get result
   useExecutionRealtime(
     isRunning ? executionId : null,
     useCallback(
       (payload: Record<string, unknown>) => {
         const newStatus = payload.status as string;
-        if (newStatus === "success" || newStatus === "failed" || newStatus === "timeout") {
+        const terminal =
+          newStatus === "success" || newStatus === "failed" || newStatus === "timeout";
+        if (terminal) {
           setStatus(newStatus as RunCardStatus);
-          if (newStatus === "success" && payload.result) {
-            setResult(payload.result as Record<string, unknown>);
-          } else if (newStatus === "failed") {
+          if (newStatus === "failed") {
             setExecError((payload.error as string) || t("shareable.errorFailed"));
           } else if (newStatus === "timeout") {
             setExecError(t("shareable.errorTimeout"));
           }
-          // Final refetch of logs
+          // Refetch execution (for result) + logs (for completeness)
           if (executionId) {
+            qc.invalidateQueries({ queryKey: ["execution", orgId, executionId] });
             qc.invalidateQueries({ queryKey: ["execution-logs", orgId, executionId] });
           }
         }
@@ -117,6 +147,7 @@ export function ShareableRunPage() {
       setExecutionId(data.executionId);
       setResult(null);
       setStatus("running");
+      navigate(`/flows/${packageId}/run/${data.executionId}`, { replace: true });
     } catch (err) {
       setExecError(err instanceof Error ? err.message : t("error.unknown"));
     } finally {
@@ -129,6 +160,7 @@ export function ShareableRunPage() {
     setStatus("idle");
     setResult(null);
     setExecError(null);
+    navigate(`/flows/${packageId}/run`, { replace: true });
   };
 
   const handleProviderConnect = (svc: ProviderStatus) => {

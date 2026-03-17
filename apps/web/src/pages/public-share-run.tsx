@@ -18,10 +18,11 @@ interface FlowInfo {
     status: string;
     result?: Record<string, unknown>;
     error?: string;
+    logs?: RawLog[];
   };
 }
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
 
 function resolveExecutionStatus(
   status: string,
@@ -71,6 +72,7 @@ export function PublicShareRunPage() {
           setStatus(resolved.pageStatus);
           if (resolved.error) setError(data.execution.error || resolved.error);
           if (data.execution.result) setResult(data.execution.result);
+          if (data.execution.logs) setRawLogs(data.execution.logs);
         } else if (data.consumed) {
           setStatus("invalid");
         } else {

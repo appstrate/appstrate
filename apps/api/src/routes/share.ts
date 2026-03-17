@@ -66,25 +66,29 @@ export function createShareRouter() {
       consumed: !!shareToken.consumedAt,
     };
 
-    // If already consumed and has execution, include execution status
+    // If already consumed and has execution, include execution status + logs
     if (shareToken.consumedAt && shareToken.executionId) {
-      const rows = await db
-        .select({
-          status: executions.status,
-          result: executions.result,
-          error: executions.error,
-        })
-        .from(executions)
-        .where(eq(executions.id, shareToken.executionId))
-        .limit(1);
+      const [execRows, allLogs] = await Promise.all([
+        db
+          .select({
+            status: executions.status,
+            result: executions.result,
+            error: executions.error,
+          })
+          .from(executions)
+          .where(eq(executions.id, shareToken.executionId))
+          .limit(1),
+        listExecutionLogs(shareToken.executionId, shareToken.orgId),
+      ]);
 
-      const exec = rows[0];
+      const exec = execRows[0];
       if (exec) {
         result.execution = {
           id: shareToken.executionId,
           status: exec.status,
           ...(exec.result ? { result: exec.result } : {}),
           ...(exec.error ? { error: exec.error } : {}),
+          logs: allLogs,
         };
       }
     }

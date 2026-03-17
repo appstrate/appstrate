@@ -286,7 +286,7 @@ export function App() {
             <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
             <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
             <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
-            <Route path="/flows/:scope/:name/run" element={<ShareableRunPage />} />
+            <Route path="/flows/:scope/:name/run/:execId?" element={<ShareableRunPage />} />
             <Route element={<MainLayout />}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/flows" element={<PackageList />} />
