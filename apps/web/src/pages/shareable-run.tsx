@@ -10,7 +10,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiKeyModal } from "../components/api-key-modal";
 import { FlowRunCard, type RunCardStatus } from "../components/flow-run-card";
-import { buildLogEntries, type RawLog } from "../components/log-viewer";
+import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { api, uploadFormData } from "../api";
 
 export function ShareableRunPage() {

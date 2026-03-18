@@ -5,7 +5,7 @@
 #
 # Usage:
 #   cp docker-compose.override.example.yml docker-compose.override.yml
-#   docker compose up -d        # starts postgres + builds runtime images
+#   docker compose up -d        # starts postgres + redis + minio + builds runtime images
 #   bun run db:migrate           # run migrations manually
 #   bun run dev                  # start API + frontend on :3000
 
@@ -25,6 +25,38 @@ services:
     restart: "no"
     entrypoint: ["/bin/sh", "-c", "echo 'sidecar image built'"]
 
+  # ── MinIO for local S3-compatible storage ─────────────────────
+  appstrate-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Create the default bucket on first start
+  appstrate-minio-init:
+    image: minio/mc:latest
+    depends_on:
+      appstrate-minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://appstrate-minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/appstrate &&
+      echo 'Bucket appstrate ready'
+      "
+
   # ── Disable services handled manually in dev ────────────────────
   # Migrations: bun run db:migrate
   appstrate-migrate:
@@ -37,3 +69,6 @@ services:
     profiles: [prod]
     build:
       context: .
+
+volumes:
+  miniodata:

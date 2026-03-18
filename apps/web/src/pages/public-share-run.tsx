@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { JSONSchemaObject, ProviderStatus } from "@appstrate/shared-types";
 import { FlowRunCard, type RunCardStatus } from "../components/flow-run-card";
-import { buildLogEntries, type RawLog } from "../components/log-viewer";
+import { buildLogEntries, type RawLog } from "../components/log-utils";
 
 interface FlowInfo {
   displayName: string;

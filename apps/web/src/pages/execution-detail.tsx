@@ -14,12 +14,8 @@ import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-rea
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
-import {
-  LogViewer,
-  ExecutionTimeline,
-  buildLogEntries,
-  type RawLog,
-} from "../components/log-viewer";
+import { LogViewer, ExecutionTimeline } from "../components/log-viewer";
+import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";

@@ -93,7 +93,6 @@ mock.module("@appstrate/core/integrity", () => ({
 // @appstrate/core/dependencies — NOT mocked (pure function, use real impl)
 
 mock.module("@appstrate/db/storage", () => ({
-  ensureBucket: async () => {},
   uploadFile: async () => {},
   downloadFile: async () => null,
   deleteFile: async () => {},

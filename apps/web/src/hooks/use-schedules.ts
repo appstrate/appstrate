@@ -28,8 +28,6 @@ function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["schedules"] });
 }
 
-// Mutations still go through the API (croner sync needed on the backend)
-
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   return useMutation({

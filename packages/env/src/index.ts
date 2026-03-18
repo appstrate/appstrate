@@ -7,7 +7,10 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-  STORAGE_DIR: z.string().default(""),
+  // S3 storage (required)
+  S3_BUCKET: z.string().min(1, "S3_BUCKET is required"),
+  S3_REGION: z.string().min(1, "S3_REGION is required"),
+  S3_ENDPOINT: z.string().optional(),
 
   // Connect
   CONNECTION_ENCRYPTION_KEY: z
@@ -54,6 +57,9 @@ const envSchema = z.object({
   REGISTRY_URL: z.string().optional(),
   REGISTRY_CLIENT_ID: z.string().optional(),
   REGISTRY_CLIENT_SECRET: z.string().optional(),
+
+  // Redis (required — used for scheduling, rate limiting, cancel signaling, OAuth state)
+  REDIS_URL: z.string().min(1, "REDIS_URL is required"),
 
   // Outbound proxy
   PROXY_URL: z.string().optional(),

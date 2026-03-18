@@ -10,22 +10,25 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
-    "@appstrate/core": "^2.7.0",
+    "@appstrate/core": "^2.8.0",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/registry-client": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
     "@hono/swagger-ui": "^0.5.3",
     "ajv": "^8.18.0",
-    "croner": "^10.0.1",
+    "bullmq": "^5.71.0",
+    "cron-parser": "4",
     "drizzle-orm": "^0.39.3",
     "fflate": "^0.8.2",
     "hono": "^4.11.9",
+    "ioredis": "^5.10.0",
+    "rate-limiter-flexible": "^10.0.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/semver": "^7.7.1",
+    "@types/ioredis": "^5.0.0",
     "pino-pretty": "^13.1.3"
   }
 }
