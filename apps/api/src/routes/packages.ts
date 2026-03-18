@@ -53,6 +53,7 @@ import { getRunningExecutionsForPackage } from "../services/state.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { forkPackage } from "../services/package-fork.ts";
+import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -1179,10 +1180,23 @@ export function createPackagesRouter() {
     try {
       parsed = parsePackageZip(new Uint8Array(buffer));
     } catch (err) {
-      if (err instanceof PackageZipError) {
+      if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
+        const result = await tryParseSkillOnlyZip(new Uint8Array(buffer), c.get("orgSlug"));
+        if (result.ok) {
+          parsed = result.parsed;
+        } else if (result.reason === "unchanged") {
+          return c.json(
+            { error: "SKILL_UNCHANGED", message: "Ce skill existe déjà avec le même contenu" },
+            409,
+          );
+        } else {
+          return c.json({ error: err.code, message: err.message, details: err.details }, 400);
+        }
+      } else if (err instanceof PackageZipError) {
         return c.json({ error: err.code, message: err.message, details: err.details }, 400);
+      } else {
+        throw err;
       }
-      throw err;
     }
 
     const { manifest, content, files, type: packageType } = parsed;
