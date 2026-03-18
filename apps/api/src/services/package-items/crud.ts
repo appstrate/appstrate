@@ -8,6 +8,16 @@ import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 
+export class PackageAlreadyExistsError extends Error {
+  constructor(
+    public packageId: string,
+    public packageType: string,
+  ) {
+    super(`A ${packageType} with identifier '${packageId}' already exists`);
+    this.name = "PackageAlreadyExistsError";
+  }
+}
+
 // ─────────────────────────────────────────────
 // Generic package lookup
 // ─────────────────────────────────────────────
@@ -112,24 +122,37 @@ export async function createOrgItem(
     }
   }
 
-  const [row] = await db
-    .insert(packages)
-    .values({
-      id: packageId,
-      orgId,
-      type: cfg.type,
-      source: "local",
-      draftManifest: finalManifest,
-      draftContent: item.content,
-      createdBy: item.createdBy ?? null,
-      createdAt: now,
-      updatedAt: now,
-      forkedFrom: forkedFrom ?? null,
-    })
-    .returning();
+  try {
+    const [row] = await db
+      .insert(packages)
+      .values({
+        id: packageId,
+        orgId,
+        type: cfg.type,
+        source: "local",
+        draftManifest: finalManifest,
+        draftContent: item.content,
+        createdBy: item.createdBy ?? null,
+        createdAt: now,
+        updatedAt: now,
+        forkedFrom: forkedFrom ?? null,
+      })
+      .returning();
 
-  if (!row) throw new Error("Failed to insert package: no row returned");
-  return row;
+    if (!row) throw new Error("Failed to insert package: no row returned");
+    return row;
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {
+      // Look up the existing package's type for a helpful error message
+      const [existing] = await db
+        .select({ type: packages.type })
+        .from(packages)
+        .where(eq(packages.id, packageId))
+        .limit(1);
+      throw new PackageAlreadyExistsError(packageId, existing?.type ?? cfg.type);
+    }
+    throw err;
+  }
 }
 
 /** Update a package item with optimistic locking. Returns null on version mismatch (409). */
