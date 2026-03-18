@@ -53,11 +53,6 @@ const envSchema = z.object({
   PI_IMAGE: z.string().default("appstrate-pi:latest"),
   SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
-  // Registry
-  REGISTRY_URL: z.string().optional(),
-  REGISTRY_CLIENT_ID: z.string().optional(),
-  REGISTRY_CLIENT_SECRET: z.string().optional(),
-
   // Redis (required — used for scheduling, rate limiting, cancel signaling, OAuth state)
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
 

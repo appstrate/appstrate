@@ -7,7 +7,6 @@ import {
   Check,
   Activity,
   Calendar,
-  ShoppingBag,
   Plug,
   Settings,
   Plus,
@@ -92,12 +91,6 @@ export function OrgSwitcher() {
             <Link to="/schedules" className="flex items-center gap-2">
               <Calendar size={14} />
               {t("orgSwitcher.schedules")}
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link to="/marketplace" className="flex items-center gap-2">
-              <ShoppingBag size={14} />
-              {t("orgSwitcher.marketplace")}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>

@@ -131,7 +131,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } catch {
-        // silent fail, same as marketplace
+        // silent fail
       }
     },
     [scope, name],

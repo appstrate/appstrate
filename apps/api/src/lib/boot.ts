@@ -23,7 +23,6 @@ import { markOrphanExecutionsFailed } from "../services/state.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initCancelSubscriber } from "../services/execution-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { initRegistryProvider } from "../services/registry-provider.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 
 export async function boot(): Promise<void> {
@@ -52,13 +51,6 @@ export async function boot(): Promise<void> {
   // Backfill provider deps from manifest → packageDependencies for existing flows
   await backfillFlowProviderDeps().catch((err) => {
     logger.warn("Could not backfill flow provider deps", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  // Initialize registry provider (non-fatal)
-  await initRegistryProvider().catch((err) => {
-    logger.warn("Could not initialize registry provider", {
       error: err instanceof Error ? err.message : String(err),
     });
   });

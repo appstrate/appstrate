@@ -214,29 +214,10 @@ const expectedEndpoints = [
   "PUT /api/notifications/read-all",
   "GET /api/executions",
 
-  // Marketplace
-  "GET /api/marketplace/status",
-  "GET /api/marketplace/search",
-  "GET /api/marketplace/installed",
-  "GET /api/marketplace/updates",
-  "POST /api/marketplace/update",
-  "GET /api/marketplace/packages/{scope}/{name}",
-  "POST /api/marketplace/install",
-
   // Packages
   "POST /api/packages/import",
   "GET /api/packages/{scope}/{name}/{version}/download",
-  "GET /api/packages/{scope}/{name}/publish-plan",
-  "POST /api/packages/{scope}/{name}/publish",
   "POST /api/packages/{scope}/{name}/fork",
-
-  // Registry
-  "POST /api/registry/connect",
-  "GET /api/registry/callback",
-  "DELETE /api/registry/disconnect",
-  "GET /api/registry/status",
-  "GET /api/registry/scopes",
-  "POST /api/registry/scopes",
 ];
 
 const specEndpoints = new Set<string>();

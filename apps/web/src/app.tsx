@@ -9,11 +9,6 @@ import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { ExecutionsPage } from "./pages/executions-page";
 import { DashboardPage } from "./pages/dashboard";
-import { MarketplacePage } from "./pages/marketplace";
-import { MarketplaceDetailPage } from "./pages/marketplace-detail";
-import { MarketplaceUpdatesPage } from "./pages/marketplace-updates";
-import { MarketplacePublishPage } from "./pages/marketplace-publish";
-import { MarketplaceConnectionPage } from "./pages/marketplace-connection";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OnboardingCreateStep } from "./pages/onboarding/create-step";
@@ -43,7 +38,6 @@ import {
   Settings,
   FileText,
   LogOut,
-  ShoppingBag,
   LayoutGrid,
   Sun,
   Moon,
@@ -178,13 +172,6 @@ function MainLayout() {
           title="Flows"
         >
           <LayoutGrid size={18} />
-        </Link>
-        <Link
-          to="/marketplace"
-          className="inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          title="Marketplace"
-        >
-          <ShoppingBag size={18} />
         </Link>
         <NotificationBell />
         <div className="mx-2 h-5 w-px bg-border" />
@@ -346,11 +333,6 @@ export function App() {
                 element={<UnifiedPackageDetailPage type="provider" />}
               />
               <Route path="/library" element={<Navigate to="/skills" replace />} />
-              <Route path="/marketplace" element={<MarketplacePage />} />
-              <Route path="/marketplace/updates" element={<MarketplaceUpdatesPage />} />
-              <Route path="/marketplace/publish" element={<MarketplacePublishPage />} />
-              <Route path="/marketplace/connection" element={<MarketplaceConnectionPage />} />
-              <Route path="/marketplace/:scope/:name" element={<MarketplaceDetailPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
