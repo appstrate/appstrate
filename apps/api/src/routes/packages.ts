@@ -28,6 +28,7 @@ import {
   TOOL_CONFIG,
   FLOW_CONFIG,
   PROVIDER_CONFIG,
+  PackageAlreadyExistsError,
   type PackageTypeConfig,
 } from "../services/package-items.ts";
 import { validateToolSource, validateManifest } from "@appstrate/core/validation";
@@ -491,18 +492,26 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         ? { version: parsed.version }
         : undefined;
 
-    const item = await createOrgItem(
-      orgId,
-      {
-        id: `@${orgSlug}/${parsed.id}`,
-        name: parsed.name,
-        description: parsed.description,
-        content: parsed.content,
-        createdBy: user.id,
-      },
-      rcfg.cfg,
-      effectiveManifest,
-    );
+    let item;
+    try {
+      item = await createOrgItem(
+        orgId,
+        {
+          id: `@${orgSlug}/${parsed.id}`,
+          name: parsed.name,
+          description: parsed.description,
+          content: parsed.content,
+          createdBy: user.id,
+        },
+        rcfg.cfg,
+        effectiveManifest,
+      );
+    } catch (err) {
+      if (err instanceof PackageAlreadyExistsError) {
+        return c.json({ error: "NAME_COLLISION", message: err.message }, 409);
+      }
+      throw err;
+    }
 
     if (parsed.normalizedFiles) {
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, item.id, parsed.normalizedFiles);
@@ -1299,12 +1308,19 @@ export function createPackagesRouter() {
           400,
         );
       }
-      await createOrgItem(
-        orgId,
-        { id: packageId, content, createdBy: user.id },
-        cfg,
-        manifest as Record<string, unknown>,
-      );
+      try {
+        await createOrgItem(
+          orgId,
+          { id: packageId, content, createdBy: user.id },
+          cfg,
+          manifest as Record<string, unknown>,
+        );
+      } catch (err) {
+        if (err instanceof PackageAlreadyExistsError) {
+          return c.json({ error: "NAME_COLLISION", message: err.message }, 409);
+        }
+        throw err;
+      }
     }
 
     // Per-type post-install (version, package upsert, storage upload)
