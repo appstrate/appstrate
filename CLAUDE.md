@@ -77,7 +77,6 @@ appstrate/
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
-├── packages/registry-client/ # @appstrate/registry-client — HTTP client for Appstrate [registry]
 │
 ├── system-packages/           # System package ZIPs (providers, skills, extensions, flows — loaded at boot)
 │
@@ -88,7 +87,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`, `@appstrate/registry-client`. **External npm dep**: `@appstrate/core` (shared with registry — validation, zip, naming, dependencies, integrity, semver, registry-deps, update-check, publish-manifest).
+**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`. **External npm dep**: `@appstrate/core` (validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages).
 
 ## Architecture
 
@@ -177,7 +176,6 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
-- **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` uses a 3-phase pattern: `collectPackages()` (network + DB reads, no writes) → `commitPackages()` (single DB transaction with `pg_advisory_xact_lock` per package) → post-install (storage/versions). Auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set and diamond dedup via `collected` array. Max 10 packages per install (root + deps). Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Packages installed from the marketplace are stored with `source: "local"` — the registry is a distribution channel, not a permanent status. Provenance is traceable via `packageVersions` entries (integrity, manifest snapshot). Uses `@appstrate/core/dependencies` for extraction and `@appstrate/core/naming` for packageId conversion.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/extension deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). Migration path: migration 0011 adds schema columns, seed script backfills existing packages, migration 0012 finalizes.
 - **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and extensions. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
 - **FlowService**: All flows (system + local) stored in DB. System flows loaded from ZIPs at boot and synced to DB with `orgId: null`.
@@ -205,7 +203,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `marketplace`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`, `registry`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`.
 
 ## Database
 
