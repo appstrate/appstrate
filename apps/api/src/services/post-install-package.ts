@@ -37,7 +37,7 @@ function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<strin
   }
 }
 
-/** Insert or update a skill/tool during post-install (marketplace install). */
+/** Insert or update a skill/tool during post-install. */
 async function upsertItem(
   orgId: string,
   packageId: string,

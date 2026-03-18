@@ -652,7 +652,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by flows or required by marketplace packages",
+          description: "Skill is referenced by flows or required by other packages",
           content: {
             "application/json": {
               schema: {
@@ -662,7 +662,7 @@ export const packagesPaths = {
                     type: "string",
                     enum: ["IN_USE", "DEPENDED_ON"],
                     description:
-                      "IN_USE: referenced by flows. DEPENDED_ON: required by marketplace packages.",
+                      "IN_USE: referenced by flows. DEPENDED_ON: required by other packages.",
                   },
                   message: { type: "string" },
                   flows: {
@@ -1177,7 +1177,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Tool is referenced by flows or required by marketplace packages",
+          description: "Tool is referenced by flows or required by other packages",
           content: {
             "application/json": {
               schema: {
@@ -1187,7 +1187,7 @@ export const packagesPaths = {
                     type: "string",
                     enum: ["IN_USE", "DEPENDED_ON"],
                     description:
-                      "IN_USE: referenced by flows. DEPENDED_ON: required by marketplace packages.",
+                      "IN_USE: referenced by flows. DEPENDED_ON: required by other packages.",
                   },
                   message: { type: "string" },
                   flows: {

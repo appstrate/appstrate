@@ -9,8 +9,6 @@ import { db } from "../lib/db.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
-import { publishPackage, PublishValidationError } from "../services/registry-publish.ts";
-import { getPublishPlan } from "../services/dependency-graph.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -752,7 +750,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
         return c.json(
           {
             error: "DEPENDED_ON",
-            message: `${label} '${itemId}' is required by ${result.dependents!.length} marketplace package(s)`,
+            message: `${label} '${itemId}' is required by ${result.dependents!.length} package(s)`,
             dependents: result.dependents,
           },
           409,
@@ -1455,41 +1453,6 @@ export function createPackagesRouter() {
       version: ver.version,
     });
     return new Response(new Uint8Array(data), { status: 200, headers: downloadHeaders });
-  });
-
-  // GET /api/packages/:scope/:name/publish-plan — get publish dependency plan
-  router.get("/:scope{@[^/]+}/:name/publish-plan", requireAdmin(), async (c) => {
-    const orgId = c.get("orgId");
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const targetVersion = c.req.query("version") || undefined;
-    const plan = await getPublishPlan(packageId, orgId, targetVersion);
-    return c.json(plan);
-  });
-
-  // POST /api/packages/:scope/:name/publish — publish a package to registry
-  router.post("/:scope{@[^/]+}/:name/publish", requireAdmin(), requireOwnedPackage(), async (c) => {
-    const user = c.get("user");
-    const orgId = c.get("orgId");
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const body = await c.req.json().catch(() => ({}));
-    const targetVersion = body.version as string | undefined;
-
-    try {
-      const result = await publishPackage(packageId, orgId, user.id, targetVersion);
-      return c.json(result);
-    } catch (err) {
-      if (err instanceof PublishValidationError) {
-        logger.warn("Publish validation error", {
-          packageId,
-          code: err.code,
-          error: err.message,
-        });
-        return c.json({ error: err.code, message: err.message }, err.statusCode as 400 | 409 | 502);
-      }
-      const message = err instanceof Error ? err.message : "Failed to publish package";
-      logger.error("Publish failed", { packageId, error: message });
-      return c.json({ error: "PUBLISH_FAILED", message }, 500);
-    }
   });
 
   return router;

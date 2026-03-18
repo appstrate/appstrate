@@ -13,7 +13,6 @@
     "@appstrate/core": "^2.8.0",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
-    "@appstrate/registry-client": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
     "@hono/swagger-ui": "^0.5.3",
     "ajv": "^8.18.0",
