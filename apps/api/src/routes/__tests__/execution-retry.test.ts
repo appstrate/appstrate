@@ -91,6 +91,10 @@ mock.module("../../services/execution-tracker.ts", () => ({
   trackExecution: mock(() => new AbortController()),
   untrackExecution: mock(() => {}),
   abortExecution: mock(() => {}),
+  getInFlightCount: mock(() => 0),
+  waitForInFlight: mock(async () => true),
+  initCancelSubscriber: mock(() => {}),
+  stopCancelSubscriber: mock(async () => {}),
 }));
 
 mock.module("../../middleware/guards.ts", () => ({

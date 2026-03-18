@@ -45,6 +45,8 @@ bun run dev                   # turbo dev → Hono on :3000
 | Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
 | Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback |
 | Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
+| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state |
+| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                   |
 
 ## Navigating the Codebase
 
@@ -115,9 +117,9 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |-- Persists logs to execution_logs table
      |                                |-- Supports concurrent executions per flow
      |                                |
-     |   Scheduler (croner):          |-- Loads enabled schedules from DB at startup
-     |                                |-- Cron triggers → triggerScheduledExecution()
-     |                                |-- Distributed lock via schedule_runs table
+     |   Scheduler (BullMQ + Redis):   |-- Distributed cron via BullMQ repeatable jobs
+     |                                |-- Worker processes jobs → triggerScheduledExecution()
+     |                                |-- Exactly-once guaranteed (Redis atomic dequeue)
      |                                |-- Uses same executeFlowInBackground() path
      |                                |
      |            Sidecar Pool (pre-warmed):  |-- initSidecarPool() at startup
@@ -172,7 +174,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `flow` (set by `requireFlow()`).
 - **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not system package + no running executions.
-- **Rate limiting**: Token bucket per `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Key limits: run (20/min), import (10/min), create (10/min).
+- **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Marketplace**: `marketplace.ts` + `registry-provider.ts` — searches/installs packages from external Appstrate [registry]. `installFromMarketplace()` uses a 3-phase pattern: `collectPackages()` (network + DB reads, no writes) → `commitPackages()` (single DB transaction with `pg_advisory_xact_lock` per package) → post-install (storage/versions). Auto-installs missing `registryDependencies` recursively (marked `autoInstalled: true`), with circular-dependency protection via `visited` set and diamond dedup via `collected` array. Max 10 packages per install (root + deps). Auto-installed packages are hidden from library listings but protected from deletion while depended upon (`DEPENDED_ON` 409 error). Packages installed from the marketplace are stored with `source: "local"` — the registry is a distribution channel, not a permanent status. Provenance is traceable via `packageVersions` entries (integrity, manifest snapshot). Uses `@appstrate/core/dependencies` for extraction and `@appstrate/core/naming` for packageId conversion.
@@ -215,6 +217,7 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `REDIS_URL`                 | Yes      | —                                             | Redis connection string (required for scheduler, rate limiting, cancel signaling, OAuth PKCE)               |
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |
@@ -232,7 +235,9 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (override for GHCR / custom registries)                              |
 | `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy (override for GHCR / custom registries)                                 |
 | `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset)                                               |
-| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                                                                                 |
+| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                                                                 |
+| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
+| `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
 
 ## Flow & Extension Gotchas
 
@@ -249,5 +254,5 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 ## Known Issues & Technical Debt
 
 1. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
-2. **Scheduler is in-memory**: Cron jobs run in-process via `croner`, re-loaded from DB on restart. Distributed locking via `schedule_runs` table prevents duplicates.
+2. **Scheduler**: Redis-backed via BullMQ. Distributed exactly-once cron firing, worker rate limiting (max 5/min). Schedules synced from `packageSchedules` table to BullMQ at boot.
 3. **Orphan cleanup**: On startup, orphaned executions (still `running`/`pending`) are marked `failed` and all containers labeled `appstrate.managed=true` are cleaned up via `cleanupOrphanedContainers()` in `docker.ts`.

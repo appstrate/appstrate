@@ -9,6 +9,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appstrate/core": "^2.7.0"
+    "@appstrate/core": "^2.8.0"
   }
 }

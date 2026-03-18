@@ -36,7 +36,6 @@ mock.module("../flow-service.ts", () => ({
 }));
 
 mock.module("@appstrate/db/storage", () => ({
-  ensureBucket: async () => {},
   uploadFile: async () => {},
   downloadFile: async () => null,
   deleteFile: async () => {},

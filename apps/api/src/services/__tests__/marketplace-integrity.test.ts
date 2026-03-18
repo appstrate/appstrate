@@ -81,7 +81,6 @@ mock.module("@appstrate/core/integrity", () => ({
 }));
 
 mock.module("@appstrate/db/storage", () => ({
-  ensureBucket: async () => {},
   uploadFile: async () => {},
   downloadFile: async () => null,
   deleteFile: async () => {},

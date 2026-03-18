@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { Cron } from "croner";
 import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
@@ -9,6 +8,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
+import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 
@@ -56,9 +56,7 @@ export function createSchedulesRouter() {
     }
 
     // Validate cron expression
-    try {
-      new Cron(body.cronExpression, { paused: true });
-    } catch {
+    if (!isValidCron(body.cronExpression)) {
       return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
     }
 
@@ -92,12 +90,8 @@ export function createSchedulesRouter() {
     }>();
 
     // Validate cron expression if provided
-    if (body.cronExpression) {
-      try {
-        new Cron(body.cronExpression, { paused: true });
-      } catch {
-        return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
-      }
+    if (body.cronExpression && !isValidCron(body.cronExpression)) {
+      return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
     }
 
     const schedule = await updateSchedule(id, body);

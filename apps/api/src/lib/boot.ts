@@ -2,7 +2,6 @@ import { and, eq, lt } from "drizzle-orm";
 import { db } from "./db.ts";
 import {
   oauthStates,
-  scheduleRuns,
   organizations,
   packages,
   packageVersions,
@@ -21,13 +20,17 @@ import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { Manifest } from "@appstrate/core/validation";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
-import { initScheduler } from "../services/scheduler.ts";
+import { initScheduleWorker } from "../services/scheduler.ts";
+import { initCancelSubscriber } from "../services/execution-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { ensureStorageBucket } from "../services/package-storage.ts";
-import { ensurePackageItemsBucket } from "../services/package-items.ts";
 import { initRegistryProvider } from "../services/registry-provider.ts";
+import { ensureBucket } from "@appstrate/db/storage";
 
 export async function boot(): Promise<void> {
+  // Verify S3 bucket is accessible (fail-fast if misconfigured)
+  await ensureBucket();
+  logger.info("S3 bucket verified");
+
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();
   logger.info("System proxies loaded");
@@ -60,18 +63,8 @@ export async function boot(): Promise<void> {
     });
   });
 
-  // Parallel init: storage, package items, NOTIFY triggers, and realtime are all independent
+  // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
-    ensureStorageBucket().catch((err) => {
-      logger.warn("Could not ensure storage bucket", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }),
-    ensurePackageItemsBucket().catch((err) => {
-      logger.warn("Could not ensure package items bucket", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }),
     createNotifyTriggers(db)
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
@@ -111,14 +104,17 @@ export async function boot(): Promise<void> {
     });
   }
 
+  // Initialize cross-instance cancel subscriber (no-op without Redis)
+  initCancelSubscriber();
+
   // Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
-  await Promise.all([
+  const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize sidecar pool", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),
-    initScheduler().catch((err) => {
+    initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize scheduler", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -151,16 +147,9 @@ export async function boot(): Promise<void> {
           error: err instanceof Error ? err.message : String(err),
         });
       }),
-    db
-      .delete(scheduleRuns)
-      .where(lt(scheduleRuns.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
-      .then((deleted) => logger.debug("Cleaned up old schedule_runs", { deleted }))
-      .catch((err) => {
-        logger.warn("Could not clean up old schedule_runs", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }),
-  ]);
+  ];
+
+  await Promise.all(parallelInits);
 }
 
 /**
@@ -176,61 +165,70 @@ async function syncSystemPackages(): Promise<void> {
 
   let synced = 0;
   for (const [id, entry] of allPackages) {
-    const { manifest, zipBuffer, type } = entry;
-    const version = manifest.version as string;
+    try {
+      const { manifest, zipBuffer, type } = entry;
+      const version = manifest.version as string;
 
-    // Check if this exact version already exists (nothing changed since last boot)
-    const [existingVersion] = await db
-      .select({ id: packageVersions.id })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
-      .limit(1);
+      // Check if this exact version already exists (nothing changed since last boot)
+      const [existingVersion] = await db
+        .select({ id: packageVersions.id })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
+        .limit(1);
 
-    const isNewVersion = !existingVersion;
+      const isNewVersion = !existingVersion;
 
-    // 1. UPSERT packages row (source: "system", orgId: null — global)
-    await db
-      .insert(packages)
-      .values({
-        id,
-        orgId: null,
-        type,
-        source: "system",
-        draftManifest: manifest as unknown as Record<string, unknown>,
-        draftContent: entry.content,
-      })
-      .onConflictDoUpdate({
-        target: packages.id,
-        set: {
+      // 1. UPSERT packages row (source: "system", orgId: null — global)
+      await db
+        .insert(packages)
+        .values({
+          id,
+          orgId: null,
+          type,
+          source: "system",
           draftManifest: manifest as unknown as Record<string, unknown>,
           draftContent: entry.content,
-          source: "system",
-          orgId: null,
-          ...(isNewVersion ? { updatedAt: new Date() } : {}),
-        },
+        })
+        .onConflictDoUpdate({
+          target: packages.id,
+          set: {
+            draftManifest: manifest as unknown as Record<string, unknown>,
+            draftContent: entry.content,
+            source: "system",
+            orgId: null,
+            ...(isNewVersion ? { updatedAt: new Date() } : {}),
+          },
+        });
+
+      // 2. UPSERT providerCredentials per org (only for providers)
+      if (type === "provider") {
+        for (const org of orgs) {
+          await db
+            .insert(providerCredentials)
+            .values({ providerId: id, orgId: org.id })
+            .onConflictDoNothing();
+        }
+      }
+
+      // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
+      // This uploads to S3 then inserts the version row.
+      await createVersionAndUpload({
+        packageId: id,
+        version,
+        orgId: null,
+        createdBy: null,
+        zipBuffer,
+        manifest: manifest as unknown as Record<string, unknown>,
       });
 
-    // 2. UPSERT providerCredentials per org (only for providers)
-    if (type === "provider") {
-      for (const org of orgs) {
-        await db
-          .insert(providerCredentials)
-          .values({ providerId: id, orgId: org.id })
-          .onConflictDoNothing();
-      }
+      synced++;
+    } catch (err) {
+      // Per-package error isolation: log and continue with remaining packages
+      logger.warn("Failed to sync system package", {
+        packageId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-
-    // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
-    await createVersionAndUpload({
-      packageId: id,
-      version,
-      orgId: null,
-      createdBy: null,
-      zipBuffer,
-      manifest: manifest as unknown as Record<string, unknown>,
-    });
-
-    synced++;
   }
 
   logger.info("System packages synced", { packages: synced, orgs: orgs.length });

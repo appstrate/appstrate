@@ -43,6 +43,21 @@ services:
       timeout: 5s
       retries: 5
 
+  appstrate-redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+    mem_limit: 256m
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   appstrate-migrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
     restart: "no"
@@ -80,7 +95,10 @@ services:
       - SYSTEM_MODELS=${SYSTEM_MODELS:-[]}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
       - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL:-}
-      - STORAGE_DIR=${STORAGE_DIR:-./storage}
+      - REDIS_URL=redis://appstrate-redis:6379
+      - S3_BUCKET=${S3_BUCKET:?Set S3_BUCKET in .env}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
@@ -88,10 +106,11 @@ services:
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - appstrate-storage:/app/storage
     depends_on:
       appstrate-migrate:
         condition: service_completed_successfully
+      appstrate-redis:
+        condition: service_healthy
       appstrate-pi:
         condition: service_completed_successfully
       appstrate-sidecar:
@@ -99,4 +118,4 @@ services:
 
 volumes:
   pgdata:
-  appstrate-storage:
+  redisdata:

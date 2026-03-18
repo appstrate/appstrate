@@ -154,7 +154,9 @@ Key variables (see `.env.example` for full list):
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                |
 | `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                       |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)          |
-| `STORAGE_DIR`               | No       | `""`                                          | Directory for file storage                            |
+| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                            |
+| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                          |
+| `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                     |
 | `OAUTH_CALLBACK_URL`        | No       | —                                             | Custom OAuth callback URL (computed from `APP_URL` if unset) |
 | `REGISTRY_URL`              | No       | —                                             | Registry URL for marketplace features                 |
 | `REGISTRY_CLIENT_ID`        | No       | —                                             | Registry OAuth client ID                              |

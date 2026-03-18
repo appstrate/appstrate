@@ -8,7 +8,6 @@ import {
   serial,
   uuid,
   index,
-  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { executionStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
@@ -135,26 +134,6 @@ export const packageSchedules = pgTable(
     index("idx_schedules_package_id").on(table.packageId),
     index("idx_schedules_user_id").on(table.userId),
     index("idx_package_schedules_org_id").on(table.orgId),
-  ],
-);
-
-export const scheduleRuns = pgTable(
-  "schedule_runs",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    scheduleId: text("schedule_id")
-      .notNull()
-      .references(() => packageSchedules.id, { onDelete: "cascade" }),
-    fireTime: timestamp("fire_time").notNull(),
-    executionId: text("execution_id").references(() => executions.id, { onDelete: "set null" }),
-    instanceId: text("instance_id"),
-    createdAt: timestamp("created_at").defaultNow(),
-  },
-  (table) => [
-    uniqueIndex("schedule_runs_unique").on(table.scheduleId, table.fireTime),
-    index("idx_schedule_runs_created_at").on(table.createdAt),
   ],
 );
 

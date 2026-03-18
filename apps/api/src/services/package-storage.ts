@@ -8,9 +8,6 @@ import { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG } from "./package-items.ts"
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
 
-/** Ensure the flow-packages Storage bucket exists. Call once at boot. */
-export const ensureStorageBucket = () => storage.ensureBucket(BUCKET);
-
 /** Download a versioned package ZIP from Storage. Optionally verifies integrity. Returns null if not found. */
 export async function downloadVersionZip(
   packageId: string,

@@ -8,7 +8,8 @@ import { initInputValues, buildInputPayload } from "./input-utils";
 import { ResultRenderer } from "./result-renderer";
 import { Spinner } from "./spinner";
 import { InlineMarkdown } from "./markdown";
-import { ExecutionTimeline, type LogEntry } from "./log-viewer";
+import { ExecutionTimeline } from "./log-viewer";
+import type { LogEntry } from "./log-utils";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,5 +1,4 @@
 import type { packageTypeEnum } from "@appstrate/db/schema";
-import * as storage from "@appstrate/db/storage";
 
 // ─────────────────────────────────────────────
 // Package type configuration
@@ -42,6 +41,3 @@ export const PROVIDER_CONFIG: PackageTypeConfig = {
 // ─────────────────────────────────────────────
 
 export const PACKAGE_ITEMS_BUCKET = "library-packages";
-
-/** Ensure the package-items Storage bucket exists. Call once at boot. */
-export const ensurePackageItemsBucket = () => storage.ensureBucket(PACKAGE_ITEMS_BUCKET);

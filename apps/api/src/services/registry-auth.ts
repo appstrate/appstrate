@@ -7,26 +7,29 @@ import { db } from "../lib/db.ts";
 import { registryConnections } from "@appstrate/db/schema";
 import { getRegistryDiscovery } from "./registry-provider.ts";
 import { logger } from "../lib/logger.ts";
+import { getRedisConnection } from "../lib/redis.ts";
 
-// ─── PKCE in-memory state ────────────────────────────────
+// ─── PKCE state storage ─────────────────────────────────
 
-interface PkceState {
-  codeVerifier: string;
-  userId: string;
-  createdAt: number;
-}
-
-const pendingStates = new Map<string, PkceState>();
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const PKCE_TTL = 600; // 10 minutes in seconds
 const TOKEN_TTL_DAYS = 30;
 
-function cleanExpiredStates() {
-  const now = Date.now();
-  for (const [key, val] of pendingStates) {
-    if (now - val.createdAt > STATE_TTL_MS) {
-      pendingStates.delete(key);
-    }
-  }
+async function storePkceState(state: string, codeVerifier: string, userId: string): Promise<void> {
+  const redis = getRedisConnection();
+  const key = `oauth:pkce:${state}`;
+  await redis.hset(key, { codeVerifier, userId });
+  await redis.expire(key, PKCE_TTL);
+}
+
+async function consumePkceState(
+  state: string,
+): Promise<{ codeVerifier: string; userId: string } | null> {
+  const redis = getRedisConnection();
+  const key = `oauth:pkce:${state}`;
+  const pending = await redis.hgetall(key);
+  if (!pending?.codeVerifier || !pending.userId) return null;
+  await redis.del(key);
+  return { codeVerifier: pending.codeVerifier, userId: pending.userId };
 }
 
 // ─── OAuth initiation ────────────────────────────────────
@@ -34,8 +37,6 @@ function cleanExpiredStates() {
 export async function initiateRegistryOAuth(
   userId: string,
 ): Promise<{ authUrl: string; state: string }> {
-  cleanExpiredStates();
-
   const env = getEnv();
   if (!env.REGISTRY_CLIENT_ID) {
     throw new Error("REGISTRY_CLIENT_ID not configured");
@@ -51,7 +52,7 @@ export async function initiateRegistryOAuth(
   const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
   const state = crypto.randomUUID();
 
-  pendingStates.set(state, { codeVerifier, userId, createdAt: Date.now() });
+  await storePkceState(state, codeVerifier, userId);
 
   const callbackUrl = `${env.APP_URL}/api/registry/callback`;
   const params = new URLSearchParams({
@@ -74,13 +75,10 @@ export async function handleRegistryCallback(
   code: string,
   state: string,
 ): Promise<{ username: string }> {
-  cleanExpiredStates();
-
-  const pending = pendingStates.get(state);
+  const pending = await consumePkceState(state);
   if (!pending) {
     throw new Error("Invalid or expired OAuth state");
   }
-  pendingStates.delete(state);
 
   const env = getEnv();
   const discovery = getRegistryDiscovery();

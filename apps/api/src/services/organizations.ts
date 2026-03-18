@@ -235,7 +235,6 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(executions).where(eq(executions.orgId, orgId));
     await tx.delete(shareTokens).where(eq(shareTokens.orgId, orgId));
     await tx.delete(packageAdminConnections).where(eq(packageAdminConnections.orgId, orgId));
-    // schedule_runs cascades from flow_schedules
     await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
     await tx.delete(packageConfigs).where(eq(packageConfigs.orgId, orgId));
     await tx.delete(packages).where(eq(packages.orgId, orgId));
