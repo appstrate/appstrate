@@ -328,34 +328,21 @@ export async function testModelConfig(config: {
     };
   }
 
-  // Build request based on API type
-  // Anthropic: POST /v1/messages with max_tokens:1 (GET /v1/models is not available for all key types)
-  // OpenAI/custom: GET /models (lightweight, no tokens consumed)
-  // Google: GET /models (lightweight, no tokens consumed)
+  // Build request based on API type — all providers use lightweight GET /models (no tokens consumed)
   const base = config.baseUrl.replace(/\/+$/, "");
   let url: string;
-  let method = "GET";
-  let body: string | undefined;
   const headers: Record<string, string> = {};
 
   switch (config.api) {
     case "anthropic-messages":
-      url = `${base}/v1/messages`;
-      method = "POST";
+      url = `${base}/v1/models`;
       if (config.apiKey.startsWith("sk-ant-oat")) {
-        // OAuth tokens require Bearer auth + beta header (same as Pi SDK / Claude Code)
         headers["Authorization"] = `Bearer ${config.apiKey}`;
         headers["anthropic-beta"] = "oauth-2025-04-20";
       } else {
         headers["x-api-key"] = config.apiKey;
       }
       headers["anthropic-version"] = "2023-06-01";
-      headers["content-type"] = "application/json";
-      body = JSON.stringify({
-        model: config.modelId,
-        max_tokens: 1,
-        messages: [{ role: "user", content: "hi" }],
-      });
       break;
     case "google-generative-ai":
       url = `${base}/models?key=${encodeURIComponent(config.apiKey)}`;
@@ -370,9 +357,7 @@ export async function testModelConfig(config: {
   const start = performance.now();
   try {
     const res = await fetch(url, {
-      method,
       headers,
-      body,
       signal: AbortSignal.timeout(10_000),
     });
     const latency = Math.round(performance.now() - start);
