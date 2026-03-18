@@ -55,6 +55,7 @@ import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
+import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -1166,48 +1167,56 @@ export function createPackagesRouter() {
 
   // --- Package import/download/publish routes ---
 
-  // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requireAdmin(), async (c) => {
-    const user = c.get("user");
-    const orgId = c.get("orgId");
+  // --- Shared import logic (used by /import and /import-github) ---
 
-    const formData = await c.req.formData();
-    const file = formData.get("file");
-    if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
-    }
-    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
-        400,
-      );
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    let parsed;
+  async function parseZipWithSkillFallback(
+    zipBytes: Uint8Array,
+    orgSlug: string,
+    c: Context<AppEnv>,
+  ) {
     try {
-      parsed = parsePackageZip(new Uint8Array(buffer));
+      return { parsed: parsePackageZip(zipBytes), error: null };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
-        const result = await tryParseSkillOnlyZip(new Uint8Array(buffer), c.get("orgSlug"));
+        const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);
         if (result.ok) {
-          parsed = result.parsed;
-        } else if (result.reason === "unchanged") {
-          return c.json(
-            { error: "SKILL_UNCHANGED", message: "Ce skill existe déjà avec le même contenu" },
-            409,
-          );
-        } else {
-          return c.json({ error: err.code, message: err.message, details: err.details }, 400);
+          return { parsed: result.parsed, error: null };
         }
-      } else if (err instanceof PackageZipError) {
-        return c.json({ error: err.code, message: err.message, details: err.details }, 400);
-      } else {
-        throw err;
+        if (result.reason === "unchanged") {
+          return {
+            parsed: null,
+            error: c.json(
+              {
+                error: "SKILL_UNCHANGED",
+                message: "This skill already exists with the same content",
+              },
+              409,
+            ),
+          };
+        }
+        return {
+          parsed: null,
+          error: c.json({ error: err.code, message: err.message, details: err.details }, 400),
+        };
       }
+      if (err instanceof PackageZipError) {
+        return {
+          parsed: null,
+          error: c.json({ error: err.code, message: err.message, details: err.details }, 400),
+        };
+      }
+      throw err;
     }
+  }
 
+  async function handleImport(
+    c: Context<AppEnv>,
+    parsed: ReturnType<typeof parsePackageZip>,
+    buffer: Buffer,
+    force: boolean,
+  ) {
+    const user = c.get("user");
+    const orgId = c.get("orgId");
     const { manifest, content, files, type: packageType } = parsed;
     const packageId = manifest.name as string;
 
@@ -1227,7 +1236,6 @@ export function createPackagesRouter() {
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
-    const force = c.req.query("force") === "true";
 
     if (existing) {
       if (existing.orgId !== orgId) {
@@ -1263,7 +1271,7 @@ export function createPackagesRouter() {
             {
               error: "DRAFT_OVERWRITE",
               message:
-                "Ce package a des modifications non publiées qui seront écrasées par l'import.",
+                "This package has unpublished changes that will be overwritten by the import.",
               details: {
                 packageId,
                 draftVersion: (existing.draftManifest as Record<string, unknown>)?.version ?? null,
@@ -1285,7 +1293,7 @@ export function createPackagesRouter() {
               {
                 error: "INTEGRITY_MISMATCH",
                 message:
-                  "Cette version existe déjà avec un contenu différent. Utilisez l'option force pour remplacer.",
+                  "This version already exists with different content. Use the force option to replace.",
                 details: { packageId, version: importedVersion },
               },
               409,
@@ -1349,7 +1357,6 @@ export function createPackagesRouter() {
     }
 
     // Force import: replace existing version content if integrity differs
-    // Runs after postInstallPackage so we don't duplicate the ZIP upload
     const importedVersionForReplace = (manifest as Record<string, unknown>).version as
       | string
       | undefined;
@@ -1370,6 +1377,54 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     return c.json({ packageId, type: packageType }, 201);
+  }
+
+  // POST /api/packages/import — import any package type from ZIP
+  router.post("/import", rateLimit(10), requireAdmin(), async (c) => {
+    const formData = await c.req.formData();
+    const file = formData.get("file");
+    if (!file || !(file instanceof File)) {
+      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
+    }
+    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
+        400,
+      );
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const zipBytes = new Uint8Array(buffer);
+
+    const { parsed, error } = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"), c);
+    if (!parsed) return error!;
+
+    return handleImport(c, parsed, buffer, c.req.query("force") === "true");
+  });
+
+  // POST /api/packages/import-github — import a package from a GitHub URL
+  router.post("/import-github", rateLimit(10), requireAdmin(), async (c) => {
+    const body = await c.req.json<{ url?: string }>();
+    if (!body.url || typeof body.url !== "string") {
+      return c.json({ error: "VALIDATION_ERROR", message: "Missing 'url' field" }, 400);
+    }
+
+    let zipBytes: Uint8Array;
+    try {
+      zipBytes = await fetchGithubDirectory(body.url);
+    } catch (err) {
+      if (err instanceof GithubImportError) {
+        return c.json({ error: err.code, message: err.message }, 400);
+      }
+      throw err;
+    }
+
+    const buffer = Buffer.from(zipBytes);
+
+    const { parsed, error } = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"), c);
+    if (!parsed) return error!;
+
+    return handleImport(c, parsed, buffer, false);
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

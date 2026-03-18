@@ -215,6 +215,25 @@ export function useImportPackage() {
   });
 }
 
+export function useImportFromGithub() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async (url: string) => {
+      return api<{ packageId: string; type: string }>("/packages/import-github", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["packages"] });
+      navigate(`/${data.type}s/${data.packageId}`);
+    },
+  });
+}
+
 export function useCancelExecution() {
   const qc = useQueryClient();
   return useMutation({
