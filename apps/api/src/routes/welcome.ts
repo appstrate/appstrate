@@ -10,7 +10,7 @@ const router = new Hono<AppEnv>();
 router.post("/welcome/setup", async (c) => {
   const currentUser = c.get("user");
   if (!currentUser?.id) {
-    return c.json({ error: "UNAUTHORIZED", message: "Non authentifie" }, 401);
+    return c.json({ error: "UNAUTHORIZED", message: "Not authenticated" }, 401);
   }
 
   const body = await c.req.json<{ displayName?: string }>();
