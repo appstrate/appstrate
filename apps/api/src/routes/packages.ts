@@ -116,11 +116,14 @@ async function parsePackageUpload(
       return c.json({ error: "VALIDATION_ERROR", message: "File is required" }, 400);
     }
 
-    if (!file.name.endsWith(".afps")) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Only .afps files are accepted" }, 400);
+    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
+        400,
+      );
     }
 
-    const id = file.name.replace(/\.afps$/i, "");
+    const id = file.name.replace(/\.(afps|zip)$/i, "");
     if (!SLUG_RE.test(id)) {
       return c.json(
         { error: "VALIDATION_ERROR", message: "Invalid file name (kebab-case slug required)" },
@@ -1163,8 +1166,11 @@ export function createPackagesRouter() {
     if (!file || !(file instanceof File)) {
       return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
     }
-    if (!file.name.endsWith(".afps")) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Only .afps files are accepted" }, 400);
+    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
+      return c.json(
+        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
+        400,
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
