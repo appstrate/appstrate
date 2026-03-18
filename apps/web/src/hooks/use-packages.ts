@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
@@ -77,6 +78,7 @@ function useUploadPackage(type: PackageType) {
 
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (id: string) => {
@@ -84,6 +86,7 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      navigate("/");
     },
   });
 }

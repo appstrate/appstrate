@@ -210,9 +210,7 @@ export function useImportPackage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["flows"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
-      if (data.type === "flow") {
-        navigate(`/flows/${data.packageId}`);
-      }
+      navigate(`/${data.type}s/${data.packageId}`);
     },
   });
 }
