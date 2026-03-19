@@ -64,7 +64,7 @@ async function getProviderDefinition(db: Db, providerId: string): Promise<Record
 }
 
 /**
- * Get decrypted credentials for a service.
+ * Get decrypted credentials for a provider.
  * Handles token refresh for OAuth2 connections by looking up provider
  * definition and credentials from the DB.
  */

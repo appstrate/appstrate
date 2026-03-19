@@ -263,7 +263,7 @@ export const connectionsPaths = {
     delete: {
       operationId: "disconnectProvider",
       tags: ["Connections"],
-      summary: "Disconnect a service",
+      summary: "Disconnect a provider",
       description:
         "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile.",
       parameters: [

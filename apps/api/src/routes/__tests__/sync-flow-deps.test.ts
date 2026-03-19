@@ -24,7 +24,7 @@ describe("extractDepsFromManifest", () => {
     expect(result.providerIds).toEqual([]);
   });
 
-  test("returns empty arrays when skills/tools/services keys are absent", () => {
+  test("returns empty arrays when skills/tools/providers keys are absent", () => {
     const result = extractDepsFromManifest({
       dependencies: {},
     });

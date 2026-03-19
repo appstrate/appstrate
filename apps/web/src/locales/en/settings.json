@@ -43,7 +43,7 @@
   "services.title": "Connectors",
   "services.empty": "No connectors configured.",
   "services.emptyHint": "Configure connectors to see them here.",
-  "services.connected": "Connected",
+  "providers.connected": "Connected",
   "services.notConnected": "Not connected",
   "services.disconnectConfirm": "Disconnect connector \"{{name}}\"?",
   "packages.title": "Packages",

@@ -66,7 +66,7 @@ export const internalPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { description: "Execution not running" },
-        "404": { description: "Flow, service, or admin binding not found" },
+        "404": { description: "Flow, provider, or admin binding not found" },
       },
     },
   },

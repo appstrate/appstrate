@@ -78,11 +78,11 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
           {summary && (
             <>
               {summary.connectedCount > 0 &&
-                t("detail.servicesSummaryOk", { connected: summary.connectedCount })}
+                t("detail.providersSummaryOk", { connected: summary.connectedCount })}
               {summary.connectedCount > 0 && summary.actionCount > 0 && " — "}
               {summary.actionCount > 0 && (
                 <span className="text-warning font-medium">
-                  {t("detail.servicesSummaryAction", { count: summary.actionCount })}
+                  {t("detail.providersSummaryAction", { count: summary.actionCount })}
                 </span>
               )}
             </>
@@ -154,7 +154,9 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
           if (isAdminMode && svc.adminProvided && isConnected) {
             actionButtons = (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-emerald-500">{t("settings:services.connected")}</span>
+                <span className="text-xs text-emerald-500">
+                  {t("settings:providers.connected")}
+                </span>
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                   {t("admin")}
                 </span>
@@ -203,7 +205,11 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
             actionButtons = (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-emerald-500">
-                  {connectedLabelWithProfile(t("settings:services.connected"), profiles, profileId)}
+                  {connectedLabelWithProfile(
+                    t("settings:providers.connected"),
+                    profiles,
+                    profileId,
+                  )}
                 </span>
                 {hasScopeIssue && svc.scopesMissing && (
                   <Button

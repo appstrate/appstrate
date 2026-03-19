@@ -343,7 +343,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const isBuiltIn = source === "system";
 
   // Determine available tabs based on type
-  const servicesSummary =
+  const providersSummary =
     type === "flow" && flowDetail
       ? computeProvidersSummary(flowDetail.dependencies.providers, t)
       : null;
@@ -520,11 +520,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "flow" && servicesSummary && servicesSummary.actionCount > 0 && (
+      {type === "flow" && providersSummary && providersSummary.actionCount > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
           <span className="text-warning text-base leading-none">⚠</span>
           <span className="text-warning">
-            {t("detail.servicesAlert", { count: servicesSummary.actionCount })}
+            {t("detail.providersAlert", { count: providersSummary.actionCount })}
           </span>
         </div>
       )}
