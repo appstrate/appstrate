@@ -155,9 +155,9 @@ export async function resolveCredentialsForProxy(
   let sidecarCredentials: Record<string, string>;
   if (authMode === "oauth2" || authMode === "api_key") {
     const creds = (def.credentials as Record<string, unknown>) ?? {};
-    const fieldName = (creds.fieldName as string) ?? (authMode === "api_key" ? "api_key" : "token");
+    const fieldName = creds.fieldName as string | undefined;
     const value = result.credentials.access_token ?? result.credentials.api_key;
-    if (value) {
+    if (fieldName && value) {
       sidecarCredentials = { [fieldName]: value };
     } else {
       sidecarCredentials = result.credentials;
@@ -258,7 +258,7 @@ function rowToConnection(row: typeof serviceConnections.$inferSelect): Connectio
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
-    createdAt: row.createdAt?.toISOString() ?? "",
-    updatedAt: row.updatedAt?.toISOString() ?? "",
+    createdAt: row.createdAt!.toISOString(),
+    updatedAt: row.updatedAt!.toISOString(),
   };
 }

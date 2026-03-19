@@ -1,1 +1,0 @@
-ALTER TABLE "executions" ADD COLUMN "proxy_label" text;

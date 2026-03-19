@@ -1,2 +1,0 @@
-CREATE UNIQUE INDEX "idx_org_models_one_default" ON "org_models" USING btree ("org_id") WHERE "org_models"."is_default" = true;--> statement-breakpoint
-CREATE UNIQUE INDEX "idx_org_proxies_one_default" ON "org_proxies" USING btree ("org_id") WHERE "org_proxies"."is_default" = true;

@@ -23,13 +23,14 @@
     "verify:openapi": "bun scripts/verify-openapi.ts"
   },
   "dependencies": {
-    "@appstrate/core": "^2.8.2"
+    "@appstrate/core": "^2.8.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^5.5.0",
     "@redocly/openapi-core": "^2.19.1",
     "@types/bun": "latest",
+    "@types/semver": "^7.7.1",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.0.1",

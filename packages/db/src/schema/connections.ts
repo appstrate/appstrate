@@ -22,8 +22,8 @@ export const connectionProfiles = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("idx_connection_profiles_default")
@@ -45,7 +45,7 @@ export const userPackageProfiles = pgTable(
     profileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.packageId] }),
@@ -64,7 +64,7 @@ export const packageAdminConnections = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     profileId: uuid("profile_id").references(() => connectionProfiles.id, { onDelete: "set null" }),
-    connectedAt: timestamp("connected_at").defaultNow(),
+    connectedAt: timestamp("connected_at").defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.packageId, table.providerId] }),
@@ -85,7 +85,7 @@ export const providerCredentials = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     credentialsEncrypted: text("credentials_encrypted"),
     enabled: boolean("enabled").notNull().default(false),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.providerId, table.orgId] })],
 );
@@ -107,8 +107,8 @@ export const serviceConnections = pgTable(
       .array()
       .default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at"),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("idx_service_connections_unique").on(
@@ -132,8 +132,8 @@ export const registryConnections = pgTable(
     registryUsername: text("registry_username").notNull(),
     registryUserId: text("registry_user_id").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("idx_registry_connections_user_id").on(table.userId)],
 );
@@ -159,7 +159,7 @@ export const oauthStates = pgTable(
       .array()
       .default(sql`'{}'::text[]`),
     redirectUri: text("redirect_uri").notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at")
       .notNull()
       .default(sql`NOW() + INTERVAL '10 minutes'`),

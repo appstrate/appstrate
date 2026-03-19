@@ -9,8 +9,20 @@ import { logger } from "../lib/logger.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 
 /**
+ * Sentinel value for providers that have credentials but no standard token field
+ * (e.g. basic or custom auth modes). Downstream consumers only check token
+ * existence in the map — the value itself is never forwarded to containers.
+ */
+const CONNECTED_SENTINEL = "__connected__";
+
+/**
  * Build a map of provider tokens for all required providers.
  * providerProfiles maps providerId → profileId.
+ *
+ * For providers with `access_token` or `api_key` credentials, the actual token
+ * value is stored. For other auth modes (basic, custom) that have credentials,
+ * a sentinel value is used so downstream filters correctly identify the provider
+ * as connected.
  */
 export async function buildProviderTokens(
   providers: FlowProviderRequirement[],
@@ -24,14 +36,11 @@ export async function buildProviderTokens(
         const profileId = providerProfiles[svc.id]!;
 
         const result = await getCredentials(db, profileId, svc.provider, orgId);
-        let token = result
-          ? (result.credentials.access_token ?? result.credentials.api_key ?? null)
+        const token = result
+          ? (result.credentials.access_token ??
+            result.credentials.api_key ??
+            (Object.keys(result.credentials).length > 0 ? CONNECTED_SENTINEL : null))
           : null;
-        // Fallback: credentials exist but no standard field — mark as connected
-        // so the provider appears in the prompt and CONNECTED_PROVIDERS
-        if (!token && result && Object.keys(result.credentials).length > 0) {
-          token = "__connected__";
-        }
         if (!token) {
           logger.warn("No token resolved for provider", {
             providerId: svc.id,

@@ -67,7 +67,7 @@ const createProviderSchema = z.object({
     .optional(),
 });
 
-const updateProviderSchema = createProviderSchema.omit({ id: true }).partial();
+const updateProviderSchema = createProviderSchema.omit({ id: true });
 
 export function createProvidersRouter() {
   const router = new Hono<AppEnv>();
@@ -343,80 +343,70 @@ export function createProvidersRouter() {
     }
 
     const data = parsed.data;
-    const oldManifest = (existingPkg.draftManifest ?? {}) as Record<string, unknown>;
-    const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
 
-    // Merge definition — preserve nested structure
-    const authMode = data.authMode ?? (oldDef.authMode as string);
-    const newDef: Record<string, unknown> = {
-      ...oldDef,
-      ...(data.authMode !== undefined ? { authMode: data.authMode } : {}),
-      ...(data.authorizedUris !== undefined ? { authorizedUris: data.authorizedUris } : {}),
-      ...(data.allowAllUris !== undefined ? { allowAllUris: data.allowAllUris } : {}),
-      ...(data.availableScopes !== undefined ? { availableScopes: data.availableScopes } : {}),
-      ...(data.credentialHeaderName !== undefined
-        ? { credentialHeaderName: data.credentialHeaderName }
-        : {}),
-      ...(data.credentialHeaderPrefix !== undefined
-        ? { credentialHeaderPrefix: data.credentialHeaderPrefix }
-        : {}),
+    // Build complete definition from request (no merge with old values)
+    const definition: Record<string, unknown> = {
+      authMode: data.authMode,
+      authorizedUris: data.authorizedUris ?? [],
+      allowAllUris: data.allowAllUris ?? false,
+      availableScopes: data.availableScopes ?? [],
     };
 
-    // Merge auth-mode-specific sub-objects
-    if (authMode === "oauth2") {
-      const oldOAuth2 = (oldDef.oauth2 as Record<string, unknown>) ?? {};
-      newDef.oauth2 = {
-        ...oldOAuth2,
-        ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
-        ...(data.tokenUrl !== undefined ? { tokenUrl: data.tokenUrl } : {}),
-        ...(data.refreshUrl !== undefined ? { refreshUrl: data.refreshUrl } : {}),
-        ...(data.defaultScopes !== undefined ? { defaultScopes: data.defaultScopes } : {}),
-        ...(data.scopeSeparator !== undefined ? { scopeSeparator: data.scopeSeparator } : {}),
-        ...(data.pkceEnabled !== undefined ? { pkceEnabled: data.pkceEnabled } : {}),
-        ...(data.tokenAuthMethod !== undefined ? { tokenAuthMethod: data.tokenAuthMethod } : {}),
-        ...(data.authorizationParams !== undefined
-          ? { authorizationParams: data.authorizationParams }
-          : {}),
-        ...(data.tokenParams !== undefined ? { tokenParams: data.tokenParams } : {}),
+    // Auth-mode-specific sub-objects
+    if (data.authMode === "oauth2") {
+      definition.oauth2 = {
+        authorizationUrl: data.authorizationUrl,
+        tokenUrl: data.tokenUrl,
+        refreshUrl: data.refreshUrl,
+        defaultScopes: data.defaultScopes ?? [],
+        scopeSeparator: data.scopeSeparator ?? " ",
+        pkceEnabled: data.pkceEnabled ?? true,
+        tokenAuthMethod: data.tokenAuthMethod,
+        authorizationParams: data.authorizationParams ?? {},
+        tokenParams: data.tokenParams ?? {},
       };
-    } else if (authMode === "oauth1") {
-      const oldOAuth1 = (oldDef.oauth1 as Record<string, unknown>) ?? {};
-      newDef.oauth1 = {
-        ...oldOAuth1,
-        ...(data.requestTokenUrl !== undefined ? { requestTokenUrl: data.requestTokenUrl } : {}),
-        ...(data.accessTokenUrl !== undefined ? { accessTokenUrl: data.accessTokenUrl } : {}),
-        ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
-        ...(data.authorizationParams !== undefined
-          ? { authorizationParams: data.authorizationParams }
-          : {}),
+    } else if (data.authMode === "oauth1") {
+      definition.oauth1 = {
+        requestTokenUrl: data.requestTokenUrl,
+        accessTokenUrl: data.accessTokenUrl,
+        authorizationUrl: data.authorizationUrl,
+        authorizationParams: data.authorizationParams ?? {},
       };
     }
 
-    if (authMode === "api_key" || authMode === "basic" || authMode === "custom") {
-      const oldCreds = (oldDef.credentials as Record<string, unknown>) ?? {};
-      newDef.credentials = {
-        ...oldCreds,
-        ...(data.credentialSchema !== undefined ? { schema: data.credentialSchema } : {}),
-        ...(data.credentialFieldName !== undefined ? { fieldName: data.credentialFieldName } : {}),
+    if (data.authMode === "api_key" || data.authMode === "basic" || data.authMode === "custom") {
+      definition.credentials = {
+        schema: data.credentialSchema,
+        fieldName: data.credentialFieldName,
       };
+    }
+
+    // Cross-cutting transport fields (implementation-specific)
+    if (data.credentialHeaderName !== undefined) {
+      definition.credentialHeaderName = data.credentialHeaderName;
+    }
+    if (data.credentialHeaderPrefix !== undefined) {
+      definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
     }
 
     try {
       await db.transaction(async (tx) => {
-        // 1. Update packages manifest
+        // 1. Update packages manifest (complete replacement, no merge)
         await tx
           .update(packages)
           .set({
             draftManifest: {
-              ...oldManifest,
-              ...(data.displayName ? { displayName: data.displayName } : {}),
-              ...(data.version !== undefined ? { version: data.version } : {}),
-              ...(data.description !== undefined ? { description: data.description } : {}),
-              ...(data.author !== undefined ? { author: data.author } : {}),
-              ...(data.iconUrl !== undefined ? { iconUrl: data.iconUrl } : {}),
-              ...(data.categories ? { categories: data.categories } : {}),
-              ...(data.docsUrl !== undefined ? { docsUrl: data.docsUrl } : {}),
-              definition: newDef,
+              $schema: AFPS_SCHEMA_URLS.provider,
+              name: providerId,
+              type: "provider",
+              version: data.version ?? "1.0.0",
+              displayName: data.displayName,
+              description: data.description,
+              author: data.author,
+              iconUrl: data.iconUrl,
+              categories: data.categories,
+              docsUrl: data.docsUrl,
+              definition,
             },
             updatedAt: new Date(),
           })
