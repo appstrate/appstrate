@@ -14,8 +14,8 @@ import {
   getAdminConnections,
   getPackageConfig,
   listExecutionLogs,
-} from "../services/state.ts";
-import { resolveProviderStatuses } from "../services/connection-manager.ts";
+} from "../services/state/index.ts";
+import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { validateFlowReadiness } from "../services/flow-readiness.ts";

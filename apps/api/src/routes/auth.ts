@@ -13,7 +13,7 @@ import {
   disconnectProvider,
   disconnectConnectionById,
   getProviderAuthMode,
-} from "../services/connection-manager.ts";
+} from "../services/connection-manager/index.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "../lib/db.ts";

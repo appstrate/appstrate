@@ -4,16 +4,16 @@ import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/flow-service.ts";
-import { getPackageById } from "../services/package-items.ts";
+import { getPackageById } from "../services/package-items/index.ts";
 import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
 import {
   getAdminConnections,
   getPackageConfig,
   getLastExecution,
   getRunningExecutionsForPackage,
-} from "../services/state.ts";
+} from "../services/state/index.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { resolveProviderStatuses } from "../services/connection-manager.ts";
+import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { getEnv } from "@appstrate/env";

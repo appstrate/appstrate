@@ -7,7 +7,7 @@ import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
 import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state.ts";
+import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state/index.ts";
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";

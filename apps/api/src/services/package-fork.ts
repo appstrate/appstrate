@@ -12,7 +12,7 @@ import {
   SKILL_CONFIG,
   TOOL_CONFIG,
   PROVIDER_CONFIG,
-} from "./package-items.ts";
+} from "./package-items/index.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions-impl.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";

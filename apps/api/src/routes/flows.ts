@@ -10,8 +10,8 @@ import {
   getPackageMemories,
   deletePackageMemory,
   deleteAllPackageMemories,
-} from "../services/state.ts";
-import { getConnectionStatus } from "../services/connection-manager.ts";
+} from "../services/state/index.ts";
+import { getConnectionStatus } from "../services/connection-manager/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";

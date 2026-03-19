@@ -11,7 +11,7 @@ import {
 import {
   listAllUserConnections,
   deleteAllUserConnections,
-} from "../services/connection-manager.ts";
+} from "../services/connection-manager/index.ts";
 import { listConnections } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 

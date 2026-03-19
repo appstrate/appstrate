@@ -5,7 +5,7 @@ import { db } from "../lib/db.ts";
 import { packageSchedules } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
-import { createExecution, getPackageConfig } from "./state.ts";
+import { createExecution, getPackageConfig } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import type { PromptContext } from "./adapters/types.ts";
