@@ -22,10 +22,10 @@ export function computeProvidersSummary(
 
   const parts: string[] = [];
   if (connectedCount > 0) {
-    parts.push(t("detail.servicesSummaryOk", { connected: connectedCount }));
+    parts.push(t("detail.providersSummaryOk", { connected: connectedCount }));
   }
   if (actionCount > 0) {
-    parts.push(t("detail.servicesSummaryAction", { count: actionCount }));
+    parts.push(t("detail.providersSummaryAction", { count: actionCount }));
   }
 
   return { text: parts.join(" \u2014 "), connectedCount, actionCount };

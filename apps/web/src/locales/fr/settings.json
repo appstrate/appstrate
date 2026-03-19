@@ -43,7 +43,7 @@
   "services.title": "Providers",
   "services.empty": "Aucun provider configuré.",
   "services.emptyHint": "Configurez des providers pour les voir ici.",
-  "services.connected": "Connecté",
+  "providers.connected": "Connecté",
   "services.notConnected": "Non connecté",
   "services.disconnectConfirm": "Déconnecter le provider \"{{name}}\" ?",
   "packages.title": "Packages",

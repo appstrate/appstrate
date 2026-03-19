@@ -4,7 +4,7 @@ import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders } from "../hooks/use-providers";
-import { useServices } from "../hooks/use-services";
+import { useIntegrations } from "../hooks/use-integrations";
 import { useOrg } from "../hooks/use-org";
 import {
   useConnect,
@@ -31,7 +31,7 @@ export function ProvidersPage() {
   const { t } = useTranslation(["settings", "flows"]);
   const [showAll, setShowAll] = useState(false);
   const { data: providersData } = useProviders();
-  const { data: integrations } = useServices();
+  const { data: integrations } = useIntegrations();
   const { isOrgAdmin } = useOrg();
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
@@ -101,7 +101,7 @@ export function ProvidersPage() {
       const connectButton = isConnected ? (
         <div className="flex items-center gap-2">
           <span className="text-xs text-emerald-500">
-            {connectedLabelWithProfile(t("services.connected"), profiles, profileId)}
+            {connectedLabelWithProfile(t("providers.connected"), profiles, profileId)}
           </span>
           <Button
             variant="outline"
@@ -204,8 +204,8 @@ export function ProvidersPage() {
           open
           onClose={() => setCustomCredProvider(null)}
           schema={customCredProvider.schema}
-          serviceId={customCredProvider.id}
-          serviceName={customCredProvider.name}
+          providerId={customCredProvider.id}
+          providerName={customCredProvider.name}
           isPending={connectCredentialsMutation.isPending}
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(

@@ -10,8 +10,8 @@ interface CustomCredentialsModalProps {
   open: boolean;
   onClose: () => void;
   schema: JSONSchemaObject;
-  serviceId: string;
-  serviceName?: string;
+  providerId: string;
+  providerName?: string;
   isPending: boolean;
   onSubmit: (credentials: Record<string, string>) => void;
 }
@@ -20,8 +20,8 @@ export function CustomCredentialsModal({
   open,
   onClose,
   schema,
-  serviceId,
-  serviceName,
+  providerId,
+  providerName,
   isPending,
   onSubmit,
 }: CustomCredentialsModalProps) {
@@ -59,7 +59,7 @@ export function CustomCredentialsModal({
     <Modal
       open={open}
       onClose={handleClose}
-      title={t("customCreds.title", { name: serviceName || serviceId })}
+      title={t("customCreds.title", { name: providerName || providerId })}
     >
       {orderedKeys.map((key) => {
         const prop = properties[key];

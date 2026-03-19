@@ -99,8 +99,8 @@ export function FlowModals({ packageId }: { packageId: string }) {
           open
           onClose={() => setCustomCredService(null)}
           schema={customCredSchema}
-          serviceId={customCredService.id}
-          serviceName={customCredService.name}
+          providerId={customCredService.id}
+          providerName={customCredService.name}
           isPending={credentialsMutation.isPending}
           onSubmit={(credentials) => {
             const { provider, id: serviceId, bindAfter } = customCredService;

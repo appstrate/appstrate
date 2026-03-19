@@ -184,7 +184,7 @@ router.get("/integrations", async (c) => {
   return c.json({ integrations });
 });
 
-// DELETE /auth/connections/:provider — disconnect a service for current user
+// DELETE /auth/connections/:provider — disconnect a provider for current user
 // If ?connectionId is provided, deletes only that specific connection.
 // Otherwise, deletes ALL connections for the provider on the profile.
 router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {

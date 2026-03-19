@@ -45,7 +45,7 @@ function usePackageDetail<T extends PackageType>(type: T, id: string | undefined
   const profileId = useCurrentProfileId();
   const cfg = PACKAGE_CONFIG[type];
 
-  // Flows support profileId for per-user service status resolution
+  // Flows support profileId for per-user provider status resolution
   const qs = type === "flow" && profileId ? `?profileId=${profileId}` : "";
   // Include profileId in key for flows (different profiles = different results)
   const queryKey: unknown[] = ["packages", cfg.detailKey, orgId, id];

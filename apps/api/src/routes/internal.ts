@@ -154,25 +154,25 @@ export function createInternalRouter() {
     if (!auth.ok) return auth.response;
 
     const { executionId, execution } = auth;
-    const serviceId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
-    // Load the flow to validate the requested service
+    // Load the flow to validate the requested provider
     const flow = await getPackage(execution.packageId, execution.orgId);
     if (!flow) {
       return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
     }
 
-    const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === serviceId);
+    const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
     if (!provider) {
       logger.warn("Credential request for unknown provider", {
         executionId,
-        providerId: serviceId,
+        providerId,
         packageId: execution.packageId,
       });
       return c.json(
         {
           error: "PROVIDER_NOT_FOUND",
-          message: `Provider '${serviceId}' is not required by this flow`,
+          message: `Provider '${providerId}' is not required by this flow`,
         },
         404,
       );
@@ -185,12 +185,12 @@ export function createInternalRouter() {
 
       if (connectionMode === "admin") {
         const adminConns = await getAdminConnections(execution.orgId, execution.packageId);
-        const adminProfileId = adminConns[serviceId];
+        const adminProfileId = adminConns[providerId];
         if (!adminProfileId) {
           return c.json(
             {
               error: "TOKEN_NOT_AVAILABLE",
-              message: `No admin binding for service '${serviceId}'`,
+              message: `No admin binding for provider '${providerId}'`,
             },
             404,
           );
@@ -215,7 +215,7 @@ export function createInternalRouter() {
         return c.json(
           {
             error: "TOKEN_NOT_AVAILABLE",
-            message: `No credentials for service '${serviceId}'`,
+            message: `No credentials for provider '${providerId}'`,
           },
           404,
         );
@@ -223,7 +223,7 @@ export function createInternalRouter() {
 
       logger.info("Credential access", {
         executionId,
-        providerId: serviceId,
+        providerId,
         provider: provider.provider,
         packageId: execution.packageId,
         connectionMode,
@@ -234,7 +234,7 @@ export function createInternalRouter() {
     } catch (err) {
       logger.error("Failed to resolve credentials", {
         executionId,
-        providerId: serviceId,
+        providerId,
         error: err instanceof Error ? err.message : String(err),
       });
       return c.json({ error: "INTERNAL_ERROR", message: "Failed to resolve credentials" }, 500);

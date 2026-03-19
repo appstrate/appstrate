@@ -4,11 +4,11 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
 import type { Integration } from "@appstrate/shared-types";
 
-export function useServices() {
+export function useIntegrations() {
   const orgId = useCurrentOrgId();
   const profileId = useCurrentProfileId();
   return useQuery({
-    queryKey: ["services", orgId, profileId],
+    queryKey: ["integrations", orgId, profileId],
     queryFn: async () => {
       const qs = profileId ? `?profileId=${profileId}` : "";
       const data = await apiFetch<{ integrations: Integration[] }>(`/auth/integrations${qs}`);

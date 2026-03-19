@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
 import { useProviders } from "../../hooks/use-providers";
-import { useServices } from "../../hooks/use-services";
+import { useIntegrations } from "../../hooks/use-integrations";
 import { useConnect, useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";
 import { ApiKeyModal } from "../../components/api-key-modal";
 import { CustomCredentialsModal } from "../../components/custom-credentials-modal";
@@ -22,7 +22,7 @@ export function OnboardingProvidersStep() {
   const orgId = useOnboardingGuard();
 
   const { data: providersData, isLoading: providersLoading } = useProviders();
-  const { data: services } = useServices();
+  const { data: integrations } = useIntegrations();
 
   const connectMutation = useConnect();
   const connectApiKeyMutation = useConnectApiKey();
@@ -41,8 +41,8 @@ export function OnboardingProvidersStep() {
 
   const providers = providersData?.providers ?? [];
 
-  const getServiceStatus = (providerId: string) => {
-    return services?.find((s) => s.provider === providerId);
+  const getIntegrationStatus = (providerId: string) => {
+    return integrations?.find((s) => s.provider === providerId);
   };
 
   const handleConnect = (provider: ProviderConfig) => {
@@ -89,8 +89,8 @@ export function OnboardingProvidersStep() {
       ) : (
         <div className="flex flex-col gap-3">
           {providers.map((provider) => {
-            const service = getServiceStatus(provider.id);
-            const isConnected = service?.status === "connected";
+            const integration = getIntegrationStatus(provider.id);
+            const isConnected = integration?.status === "connected";
             const isConnecting = connectingProvider === provider.id;
 
             return (
@@ -112,7 +112,7 @@ export function OnboardingProvidersStep() {
                     {isConnected ? (
                       <Badge variant="success" className="flex items-center gap-1">
                         <CheckCircle2 size={12} />
-                        {t("services.connected")}
+                        {t("providers.connected")}
                       </Badge>
                     ) : provider.enabled ? (
                       <Button
@@ -155,8 +155,8 @@ export function OnboardingProvidersStep() {
           open
           onClose={() => setCustomCredProvider(null)}
           schema={customCredProvider.schema}
-          serviceId={customCredProvider.id}
-          serviceName={customCredProvider.name}
+          providerId={customCredProvider.id}
+          providerName={customCredProvider.name}
           isPending={connectCredentialsMutation.isPending}
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(

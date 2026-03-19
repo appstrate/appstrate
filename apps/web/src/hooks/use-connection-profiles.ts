@@ -56,7 +56,7 @@ export function useDeleteConnectionProfile() {
     mutationFn: (id: string) => api(`/connection-profiles/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
-      qc.invalidateQueries({ queryKey: ["services"] });
+      qc.invalidateQueries({ queryKey: ["integrations"] });
     },
   });
 }
@@ -71,7 +71,7 @@ export function useSetFlowProfile(packageId: string) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["services"] });
+      qc.invalidateQueries({ queryKey: ["integrations"] });
     },
   });
 }
