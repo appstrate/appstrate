@@ -2,7 +2,7 @@ import { db } from "../../lib/db.ts";
 import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
 import { eq, inArray } from "drizzle-orm";
 import {
-  serviceConnections,
+  userProviderConnections,
   connectionProfiles,
   organizationMembers,
   organizations,
@@ -73,17 +73,17 @@ export async function listAllUserConnections(
   // 1. Fetch all user connections with org info
   const rows = await db
     .select({
-      connectionId: serviceConnections.id,
-      providerId: serviceConnections.providerId,
-      orgId: serviceConnections.orgId,
-      scopesGranted: serviceConnections.scopesGranted,
-      connectedAt: serviceConnections.createdAt,
+      connectionId: userProviderConnections.id,
+      providerId: userProviderConnections.providerId,
+      orgId: userProviderConnections.orgId,
+      scopesGranted: userProviderConnections.scopesGranted,
+      connectedAt: userProviderConnections.createdAt,
       profileId: connectionProfiles.id,
       profileName: connectionProfiles.name,
       isDefault: connectionProfiles.isDefault,
     })
-    .from(serviceConnections)
-    .innerJoin(connectionProfiles, eq(serviceConnections.profileId, connectionProfiles.id))
+    .from(userProviderConnections)
+    .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
     .where(eq(connectionProfiles.userId, userId));
 
   if (rows.length === 0) return { providers: [] };

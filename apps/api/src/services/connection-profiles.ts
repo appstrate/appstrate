@@ -4,7 +4,11 @@
 
 import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { connectionProfiles, userPackageProfiles, serviceConnections } from "@appstrate/db/schema";
+import {
+  connectionProfiles,
+  userPackageProfiles,
+  userProviderConnections,
+} from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { getAdminConnections } from "./state/index.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
@@ -46,10 +50,10 @@ export async function listProfiles(
       isDefault: connectionProfiles.isDefault,
       createdAt: connectionProfiles.createdAt,
       updatedAt: connectionProfiles.updatedAt,
-      connectionCount: count(serviceConnections.id),
+      connectionCount: count(userProviderConnections.id),
     })
     .from(connectionProfiles)
-    .leftJoin(serviceConnections, eq(serviceConnections.profileId, connectionProfiles.id))
+    .leftJoin(userProviderConnections, eq(userProviderConnections.profileId, connectionProfiles.id))
     .where(eq(connectionProfiles.userId, userId))
     .groupBy(connectionProfiles.id);
 
@@ -173,7 +177,7 @@ export async function removePackageProfileOverride(
 
 /**
  * Resolve profile IDs for each provider in a package.
- * Admin providers get their profile from package_admin_connections.
+ * Admin providers get their profile from flow_provider_bindings.
  * User providers get the effective profile for the user+package.
  */
 export async function resolveProviderProfiles(

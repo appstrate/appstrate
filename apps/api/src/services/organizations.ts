@@ -7,7 +7,7 @@ import {
   executions,
   executionLogs,
   shareTokens,
-  packageAdminConnections,
+  flowProviderBindings,
   packageSchedules,
   packageConfigs,
   packages,
@@ -234,11 +234,11 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(executionLogs).where(eq(executionLogs.orgId, orgId));
     await tx.delete(executions).where(eq(executions.orgId, orgId));
     await tx.delete(shareTokens).where(eq(shareTokens.orgId, orgId));
-    await tx.delete(packageAdminConnections).where(eq(packageAdminConnections.orgId, orgId));
+    await tx.delete(flowProviderBindings).where(eq(flowProviderBindings.orgId, orgId));
     await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
     await tx.delete(packageConfigs).where(eq(packageConfigs.orgId, orgId));
     await tx.delete(packages).where(eq(packages.orgId, orgId));
-    // serviceConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
+    // userProviderConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // organization_members cascades from organizations (onDelete: "cascade")
 

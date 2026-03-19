@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { serviceConnections, providerCredentials, packages } from "@appstrate/db/schema";
+import { userProviderConnections, providerCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
@@ -16,12 +16,12 @@ export async function getConnection(
 ): Promise<ConnectionRecord | null> {
   const rows = await db
     .select()
-    .from(serviceConnections)
+    .from(userProviderConnections)
     .where(
       and(
-        eq(serviceConnections.profileId, profileId),
-        eq(serviceConnections.providerId, providerId),
-        eq(serviceConnections.orgId, orgId),
+        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.providerId, providerId),
+        eq(userProviderConnections.orgId, orgId),
       ),
     )
     .limit(1);
@@ -40,8 +40,13 @@ export async function listConnections(
 ): Promise<ConnectionRecord[]> {
   const rows = await db
     .select()
-    .from(serviceConnections)
-    .where(and(eq(serviceConnections.profileId, profileId), eq(serviceConnections.orgId, orgId)));
+    .from(userProviderConnections)
+    .where(
+      and(
+        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.orgId, orgId),
+      ),
+    );
 
   return rows.map(rowToConnection);
 }
@@ -195,7 +200,7 @@ export async function saveConnection(
   const encrypted = encryptCredentials(credentials);
 
   await db
-    .insert(serviceConnections)
+    .insert(userProviderConnections)
     .values({
       profileId,
       providerId,
@@ -207,9 +212,9 @@ export async function saveConnection(
     })
     .onConflictDoUpdate({
       target: [
-        serviceConnections.profileId,
-        serviceConnections.providerId,
-        serviceConnections.orgId,
+        userProviderConnections.profileId,
+        userProviderConnections.providerId,
+        userProviderConnections.orgId,
       ],
       set: {
         credentialsEncrypted: encrypted,
@@ -230,12 +235,12 @@ export async function deleteConnection(
   orgId: string,
 ): Promise<void> {
   await db
-    .delete(serviceConnections)
+    .delete(userProviderConnections)
     .where(
       and(
-        eq(serviceConnections.profileId, profileId),
-        eq(serviceConnections.providerId, providerId),
-        eq(serviceConnections.orgId, orgId),
+        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.providerId, providerId),
+        eq(userProviderConnections.orgId, orgId),
       ),
     );
 }
@@ -244,12 +249,12 @@ export async function deleteConnection(
  * Delete a single connection by its ID.
  */
 export async function deleteConnectionById(db: Db, connectionId: string): Promise<void> {
-  await db.delete(serviceConnections).where(eq(serviceConnections.id, connectionId));
+  await db.delete(userProviderConnections).where(eq(userProviderConnections.id, connectionId));
 }
 
 // --- Internal helpers ---
 
-function rowToConnection(row: typeof serviceConnections.$inferSelect): ConnectionRecord {
+function rowToConnection(row: typeof userProviderConnections.$inferSelect): ConnectionRecord {
   return {
     id: row.id,
     profileId: row.profileId,

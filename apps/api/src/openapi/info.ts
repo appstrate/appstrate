@@ -32,7 +32,7 @@ export const openApiInfo = {
     { name: "Organizations", description: "Organization and member management" },
     { name: "Profile", description: "User profile management" },
     { name: "Realtime", description: "Server-Sent Events (SSE) for real-time updates" },
-    { name: "Connections", description: "Service connections (OAuth, API key)" },
+    { name: "Connections", description: "Provider connections (OAuth, API key)" },
     { name: "Invitations", description: "Organization invitation magic links" },
     { name: "Share", description: "Public share tokens for one-time execution" },
     { name: "Welcome", description: "Post-invite profile setup" },
