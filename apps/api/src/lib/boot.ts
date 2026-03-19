@@ -33,7 +33,7 @@ export async function boot(): Promise<void> {
   // Load all system packages (providers + skills + tools + flows) from ZIPs
   await initSystemPackages();
 
-  // Sync system packages to DB for all orgs (with registry-grade versioning)
+  // Sync system packages to DB + upload files to global _system/ namespace
   await syncSystemPackages().catch((err) => {
     logger.warn("Could not sync system packages", {
       error: err instanceof Error ? err.message : String(err),
