@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.8.3",
+        "@appstrate/core": "^2.8.4",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -31,7 +31,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/connect": "workspace:*",
-        "@appstrate/core": "^2.8.3",
+        "@appstrate/core": "^2.8.4",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -55,7 +55,7 @@
     "apps/web": {
       "name": "@appstrate/web",
       "dependencies": {
-        "@appstrate/core": "^2.8.3",
+        "@appstrate/core": "^2.8.4",
         "@appstrate/shared-types": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -133,7 +133,7 @@
       "name": "@appstrate/env",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.8.3",
+        "@appstrate/core": "^2.8.4",
         "zod": "^4.3.6",
       },
     },
@@ -155,7 +155,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.8.3", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-WlJCZTkR+b81NyHf20rNWYpa7jxYRtnQodnI/7hSpK34g71vBYVEpk4T96orrOGZWOm/B7GCYNax6X5Cve1Zhw=="],
+    "@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 
