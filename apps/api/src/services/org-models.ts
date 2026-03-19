@@ -347,7 +347,17 @@ export async function testModelConfig(config: {
     case "google-generative-ai":
       url = `${base}/models?key=${encodeURIComponent(config.apiKey)}`;
       break;
+    case "google-vertex":
+      url = `${base}/models`;
+      headers["Authorization"] = `Bearer ${config.apiKey}`;
+      break;
+    case "azure-openai-responses":
+      url = `${base}/models`;
+      headers["api-key"] = config.apiKey;
+      break;
     case "openai-completions":
+    case "openai-responses":
+    case "bedrock-converse-stream":
     default:
       url = `${base}/models`;
       headers["Authorization"] = `Bearer ${config.apiKey}`;

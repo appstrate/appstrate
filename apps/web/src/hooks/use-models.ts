@@ -118,6 +118,28 @@ export function useTestModelInline() {
   });
 }
 
+export interface OpenRouterModel {
+  id: string;
+  name: string;
+  contextWindow: number | null;
+  maxTokens: number | null;
+  input: string[];
+  reasoning: boolean;
+}
+
+export function useOpenRouterModels(search: string | undefined) {
+  return useQuery({
+    queryKey: ["openrouter-models", search],
+    queryFn: () =>
+      api<{ models: OpenRouterModel[] }>(
+        `/models/openrouter${search ? `?q=${encodeURIComponent(search)}` : ""}`,
+      ).then((d) => d.models),
+    enabled: search !== undefined,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+}
+
 export function useFlowModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
