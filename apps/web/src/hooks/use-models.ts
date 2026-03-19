@@ -20,7 +20,7 @@ export function useCreateModel() {
       api: string;
       baseUrl: string;
       modelId: string;
-      apiKey: string;
+      providerKeyId: string;
       input?: string[];
       contextWindow?: number;
       maxTokens?: number;
@@ -50,7 +50,7 @@ export function useUpdateModel() {
         api?: string;
         baseUrl?: string;
         modelId?: string;
-        apiKey?: string;
+        providerKeyId?: string;
         enabled?: boolean;
         input?: string[] | null;
         contextWindow?: number | null;
@@ -99,22 +99,6 @@ export function useSetDefaultModel() {
 export function useTestModel() {
   return useMutation({
     mutationFn: (id: string) => api<TestResult>(`/models/${id}/test`, { method: "POST" }),
-  });
-}
-
-export function useTestModelInline() {
-  return useMutation({
-    mutationFn: (data: {
-      api: string;
-      baseUrl: string;
-      modelId: string;
-      apiKey?: string;
-      existingModelId?: string;
-    }) =>
-      api<TestResult>("/models/test", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
   });
 }
 

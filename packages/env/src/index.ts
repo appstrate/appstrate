@@ -23,7 +23,7 @@ const envSchema = z.object({
     .string()
     .default("[]")
     .transform((s) => JSON.parse(s) as unknown[]),
-  SYSTEM_MODELS: z
+  SYSTEM_PROVIDER_KEYS: z
     .string()
     .default("[]")
     .transform((s) => JSON.parse(s) as unknown[]),

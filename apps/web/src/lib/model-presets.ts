@@ -1,4 +1,4 @@
-export interface ModelPreset {
+interface ModelPreset {
   modelId: string;
   label: string;
   input: string[];
@@ -7,7 +7,7 @@ export interface ModelPreset {
   reasoning: boolean;
 }
 
-export interface ProviderPreset {
+interface ProviderPreset {
   id: string;
   label: string;
   api: string;

@@ -7,7 +7,7 @@ import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
-import { initSystemModels } from "../services/model-registry.ts";
+import { initSystemProviderKeys } from "../services/model-registry.ts";
 import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/index.ts";
@@ -26,9 +26,9 @@ export async function boot(): Promise<void> {
   initSystemProxies();
   logger.info("System proxies loaded");
 
-  // Load system models from SYSTEM_MODELS env var
-  initSystemModels();
-  logger.info("System models loaded");
+  // Load system provider keys + models from SYSTEM_PROVIDER_KEYS env var
+  initSystemProviderKeys();
+  logger.info("System provider keys loaded");
 
   // Load system packages from ZIPs, sync to DB + S3
   await loadAndSyncSystemPackages().catch((err) => {

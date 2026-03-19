@@ -97,6 +97,14 @@ const expectedEndpoints = [
   "GET /api/flows/{scope}/{name}/proxy",
   "PUT /api/flows/{scope}/{name}/proxy",
 
+  // Provider Keys
+  "GET /api/provider-keys",
+  "POST /api/provider-keys",
+  "POST /api/provider-keys/test",
+  "PUT /api/provider-keys/{id}",
+  "DELETE /api/provider-keys/{id}",
+  "POST /api/provider-keys/{id}/test",
+
   // Models
   "GET /api/models",
   "POST /api/models",
