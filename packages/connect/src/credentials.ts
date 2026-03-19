@@ -83,7 +83,8 @@ export async function getCredentials(
 
   if (authMode === "oauth2") {
     let refreshContext;
-    const tokenUrl = (def.refreshUrl as string) ?? (def.tokenUrl as string);
+    const oauth2 = (def.oauth2 as Record<string, unknown>) ?? {};
+    const tokenUrl = (oauth2.refreshUrl as string) ?? (oauth2.tokenUrl as string);
     if (tokenUrl) {
       const [cred] = await db
         .select({
@@ -102,8 +103,8 @@ export async function getCredentials(
             tokenUrl,
             clientId: adminCreds.clientId,
             clientSecret: adminCreds.clientSecret,
-            tokenAuthMethod: (def.tokenAuthMethod as string) ?? undefined,
-            scopeSeparator: (def.scopeSeparator as string) ?? undefined,
+            tokenAuthMethod: (oauth2.tokenAuthMethod as string) ?? undefined,
+            scopeSeparator: (oauth2.scopeSeparator as string) ?? undefined,
           };
         }
       }
@@ -153,8 +154,8 @@ export async function resolveCredentialsForProxy(
 
   let sidecarCredentials: Record<string, string>;
   if (authMode === "oauth2" || authMode === "api_key") {
-    const fieldName =
-      (def.credentialFieldName as string) ?? (authMode === "api_key" ? "api_key" : "token");
+    const creds = (def.credentials as Record<string, unknown>) ?? {};
+    const fieldName = (creds.fieldName as string) ?? (authMode === "api_key" ? "api_key" : "token");
     const value = result.credentials.access_token ?? result.credentials.api_key;
     if (value) {
       sidecarCredentials = { [fieldName]: value };
@@ -202,7 +203,6 @@ export async function saveConnection(
       credentialsEncrypted: encrypted,
       scopesGranted: options?.scopesGranted ?? [],
       expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
-      rawTokenResponse: null,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -215,7 +215,6 @@ export async function saveConnection(
         credentialsEncrypted: encrypted,
         scopesGranted: options?.scopesGranted ?? [],
         expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
-        rawTokenResponse: null,
         updatedAt: new Date(),
       },
     });
@@ -259,7 +258,6 @@ function rowToConnection(row: typeof serviceConnections.$inferSelect): Connectio
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
-    metadata: (row.metadata as Record<string, unknown>) ?? {},
     createdAt: row.createdAt?.toISOString() ?? "",
     updatedAt: row.updatedAt?.toISOString() ?? "",
   };

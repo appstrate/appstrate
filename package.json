@@ -23,7 +23,7 @@
     "verify:openapi": "bun scripts/verify-openapi.ts"
   },
   "dependencies": {
-    "@appstrate/core": "^2.8.1"
+    "@appstrate/core": "^2.8.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

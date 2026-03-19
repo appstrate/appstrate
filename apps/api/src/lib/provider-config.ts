@@ -22,6 +22,7 @@ export function packageToProviderConfig(
     explicitSchema ??
     (getDefaultAdminCredentialSchema(resolved.authMode) as JSONSchemaObject | undefined) ??
     undefined;
+  const credentials = (def.credentials as Record<string, unknown>) ?? {};
   return {
     ...resolved,
     version: (manifest.version as string) ?? undefined,
@@ -33,6 +34,6 @@ export function packageToProviderConfig(
     adminCredentialSchema,
     setupGuide: (manifest.setupGuide as ProviderSetupGuide) ?? undefined,
     tokenAuthMethod: resolved.tokenAuthMethod as ProviderConfig["tokenAuthMethod"],
-    credentialSchema: (def.credentialSchema as Record<string, unknown>) ?? undefined,
+    credentialSchema: (credentials.schema as Record<string, unknown>) ?? undefined,
   };
 }

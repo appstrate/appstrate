@@ -3,7 +3,6 @@ import {
   text,
   timestamp,
   boolean,
-  jsonb,
   uuid,
   index,
   uniqueIndex,
@@ -108,8 +107,6 @@ export const serviceConnections = pgTable(
       .array()
       .default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at"),
-    rawTokenResponse: jsonb("raw_token_response"),
-    metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

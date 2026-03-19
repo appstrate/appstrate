@@ -58,6 +58,7 @@ export interface PromptContext {
     authorizedUris?: string[];
     allowAllUris?: boolean;
     docsUrl?: string;
+    hasProviderDoc?: boolean;
     categories?: string[];
   }>;
   memories?: Array<{ id: number; content: string; createdAt: string | null }>;

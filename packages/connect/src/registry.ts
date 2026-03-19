@@ -17,17 +17,26 @@ export async function getProvider(
   providerId: string,
 ): Promise<ProviderDefinition | null> {
   const rows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .select({
+      id: packages.id,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+    })
     .from(packages)
     .where(and(eq(packages.id, providerId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
     .limit(1);
 
   if (rows.length === 0) return null;
   const pkg = rows[0]!;
-  return buildProviderDefinitionFromManifest(
+  const resolved = buildProviderDefinitionFromManifest(
     pkg.id,
     (pkg.draftManifest ?? {}) as Record<string, unknown>,
   );
+  const content = pkg.draftContent?.trim() ?? "";
+  return {
+    ...resolved,
+    hasProviderDoc: content.length > 0 && !content.startsWith("{"),
+  };
 }
 
 /**
