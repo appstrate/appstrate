@@ -9,6 +9,9 @@ export type { OrgRole } from "@appstrate/shared-types";
 import type { FlowManifest } from "@appstrate/core/validation";
 export type { FlowManifest };
 
+import type { ToolMeta } from "../services/adapters/types.ts";
+export type { ToolMeta };
+
 export interface FlowProviderRequirement {
   id: string;
   provider: string;
@@ -20,13 +23,6 @@ export interface FlowProviderRequirement {
 // --- Loaded Flow (manifest + prompt from DB) ---
 
 export interface SkillMeta {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}
-
-export interface ToolMeta {
   id: string;
   version?: string;
   name?: string;
