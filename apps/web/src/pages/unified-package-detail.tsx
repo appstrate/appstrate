@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   usePackageDetail,
@@ -23,7 +22,7 @@ import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
-import { Settings, CheckCircle, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 // Shared components
 import { SharedHeader } from "../components/package-detail/shared-header";
@@ -34,7 +33,7 @@ import { VersionHistory } from "../components/version-history";
 import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
-import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
+import { ProviderCredentialsForm } from "../components/provider-credentials-form";
 // Flow-specific components
 import { FlowActions } from "../components/package-detail/flow-actions";
 import {
@@ -255,7 +254,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         : hasMissingRequiredConfig && showConfigTab
           ? "configuration"
           : "executions"
-      : "content";
+      : type === "provider"
+        ? "configuration"
+        : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
@@ -264,7 +265,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }, [tab, hasDraftChanges, isVersionView, source, defaultTab, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
-  const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [diffTabOverride, setDiffTab] = useState<"manifest" | "content" | null>(null);
 
   // ── Loading / Error ──
@@ -369,7 +369,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
-    { id: "content", label: t("packages.content") },
     ...(type === "provider"
       ? [
           {
@@ -378,6 +377,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           },
         ]
       : []),
+    { id: "content", label: t("packages.content") },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -422,16 +422,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             />
           ) : isOrgAdmin ? (
             <>
-              {type === "provider" && providerConfig && (
-                <Button variant="outline" size="sm" onClick={() => setCredentialsOpen(true)}>
-                  {providerConfig.enabled ? (
-                    <CheckCircle size={14} className="text-emerald-500" />
-                  ) : (
-                    <Settings size={14} />
-                  )}
-                  {t("providers.configure", { ns: "settings" })}
-                </Button>
-              )}
               <PackageActionsDropdown
                 packageId={packageId}
                 type={type}
@@ -589,41 +579,29 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "provider" && tab === "configuration" && pkgDetail && (
+      {type === "provider" && tab === "configuration" && providerConfig && (
         <div className="rounded-lg border border-border bg-card p-4">
-          {providerConfig && (
-            <div className="flex items-center justify-between mb-4 pb-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  {t("providers.credentials", { ns: "settings" })}:
+          {isOrgAdmin ? (
+            <ProviderCredentialsForm
+              provider={providerConfig}
+              callbackUrl={callbackUrl}
+            />
+          ) : (
+            <div className="flex items-center gap-2 py-2">
+              <span className="text-sm text-muted-foreground">
+                {t("providers.credentials", { ns: "settings" })}:
+              </span>
+              {providerConfig.enabled ? (
+                <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
+                  {t("providers.configured", { ns: "settings" })}
                 </span>
-                {providerConfig.enabled ? (
-                  <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
-                    {t("providers.configured", { ns: "settings" })}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
-                    {t("providers.notConfigured", { ns: "settings" })}
-                  </span>
-                )}
-              </div>
-              {isOrgAdmin && (
-                <Button variant="outline" size="sm" onClick={() => setCredentialsOpen(true)}>
-                  <Settings size={14} />
-                  {t("providers.configure", { ns: "settings" })}
-                </Button>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
+                  {t("providers.notConfigured", { ns: "settings" })}
+                </span>
               )}
             </div>
           )}
-          <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
-            {JSON.stringify(
-              (isHistoricalVersion && versionDetail?.manifest
-                ? versionDetail.manifest
-                : pkgDetail.manifest) ?? {},
-              null,
-              2,
-            )}
-          </pre>
         </div>
       )}
 
@@ -713,14 +691,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {/* Flow modals */}
       {type === "flow" && <FlowModals packageId={packageId} />}
 
-      {/* Provider credentials modal */}
-      {type === "provider" && providerConfig && credentialsOpen && (
-        <ProviderCredentialsModal
-          provider={providerConfig}
-          callbackUrl={callbackUrl}
-          onClose={() => setCredentialsOpen(false)}
-        />
-      )}
     </>
   );
 }
