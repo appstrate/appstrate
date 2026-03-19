@@ -6,7 +6,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   listUserExecutions,
-} from "../services/state.ts";
+} from "../services/state/index.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();

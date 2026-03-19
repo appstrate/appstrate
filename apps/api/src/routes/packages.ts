@@ -28,7 +28,7 @@ import {
   PROVIDER_CONFIG,
   PackageAlreadyExistsError,
   type PackageTypeConfig,
-} from "../services/package-items.ts";
+} from "../services/package-items/index.ts";
 import { validateToolSource, validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
 import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
@@ -48,7 +48,7 @@ import {
 import { flowDetailHandler } from "./flow-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
-import { getRunningExecutionsForPackage } from "../services/state.ts";
+import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { forkPackage } from "../services/package-fork.ts";

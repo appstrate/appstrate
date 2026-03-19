@@ -9,7 +9,7 @@ import {
   TOOL_CONFIG,
   type PackageTypeConfig,
   type CreateItemInput,
-} from "./package-items.ts";
+} from "./package-items/index.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "./package-items/config.ts";
 

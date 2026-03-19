@@ -35,7 +35,3 @@ export function deleteFile(bucket: string, path: string): Promise<void> {
 export function ensureBucket(): Promise<void> {
   return getStore().ensureBucket();
 }
-
-export function safePath(bucket: string, filePath: string): string {
-  return getStore().safePath(bucket, filePath);
-}

@@ -46,7 +46,7 @@ mock.module("../system-packages.ts", () => systemPackagesStub);
 // --- Import after mocks ---
 
 const { deleteOrgItem, listOrgItems, createOrgItem, getOrgItem, SKILL_CONFIG } =
-  await import("../package-items.ts");
+  await import("../package-items/index.ts");
 
 // --- Tests ---
 

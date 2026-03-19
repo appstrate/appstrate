@@ -324,17 +324,6 @@ CREATE TABLE "provider_credentials" (
 	CONSTRAINT "provider_credentials_provider_id_org_id_pk" PRIMARY KEY("provider_id","org_id")
 );
 --> statement-breakpoint
-CREATE TABLE "registry_connections" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" text NOT NULL,
-	"access_token_encrypted" text NOT NULL,
-	"registry_username" text NOT NULL,
-	"registry_user_id" text NOT NULL,
-	"expires_at" timestamp NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE "service_connections" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"profile_id" uuid NOT NULL,
@@ -406,7 +395,6 @@ ALTER TABLE "package_admin_connections" ADD CONSTRAINT "package_admin_connection
 ALTER TABLE "package_admin_connections" ADD CONSTRAINT "package_admin_connections_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "provider_credentials" ADD CONSTRAINT "provider_credentials_provider_id_packages_id_fk" FOREIGN KEY ("provider_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "provider_credentials" ADD CONSTRAINT "provider_credentials_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "registry_connections" ADD CONSTRAINT "registry_connections_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "service_connections" ADD CONSTRAINT "service_connections_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "service_connections" ADD CONSTRAINT "service_connections_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_package_profiles" ADD CONSTRAINT "user_package_profiles_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -454,7 +442,6 @@ CREATE INDEX "idx_connection_profiles_user_id" ON "connection_profiles" USING bt
 CREATE INDEX "idx_oauth_states_expires" ON "oauth_states" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "idx_package_admin_connections_package_id" ON "package_admin_connections" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_package_admin_connections_org_id" ON "package_admin_connections" USING btree ("org_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "idx_registry_connections_user_id" ON "registry_connections" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_service_connections_unique" ON "service_connections" USING btree ("profile_id","provider_id","org_id");--> statement-breakpoint
 CREATE INDEX "idx_service_connections_profile" ON "service_connections" USING btree ("profile_id");--> statement-breakpoint
 CREATE INDEX "idx_service_connections_org_id" ON "service_connections" USING btree ("org_id");--> statement-breakpoint

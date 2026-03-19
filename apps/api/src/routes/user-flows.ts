@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items.ts";
+import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items/index.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 
 export function createUserFlowsRouter() {

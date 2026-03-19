@@ -2,7 +2,7 @@ import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/flow-service.ts";
-import { getRunningExecutionsForPackage } from "../services/state.ts";
+import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 
 /** Middleware: reject with 403 if the current user is not org admin/owner. */
 export function requireAdmin() {

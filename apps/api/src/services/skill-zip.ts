@@ -1,7 +1,7 @@
 import { unzipArtifact, type ParsedPackageZip } from "@appstrate/core/zip";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
-import { getPackageById } from "./package-items.ts";
+import { getPackageById } from "./package-items/index.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 
 export type SkillOnlyResult =

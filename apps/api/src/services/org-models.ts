@@ -3,7 +3,7 @@ import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { getPackageConfig } from "./state.ts";
+import { getPackageConfig } from "./state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";

@@ -16,7 +16,7 @@ let mockLatestVersion: Record<string, { id: number; manifest: Record<string, unk
 
 // --- Mocks (must be before dynamic import) ---
 
-mock.module("../package-items.ts", () => ({
+mock.module("../package-items/index.ts", () => ({
   getPackageById: async (id: string) => mockPackageById[id] ?? null,
 }));
 

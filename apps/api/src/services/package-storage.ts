@@ -3,7 +3,12 @@ import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./package-items.ts";
+import {
+  getFlowItemFiles,
+  SKILL_CONFIG,
+  TOOL_CONFIG,
+  PROVIDER_CONFIG,
+} from "./package-items/index.ts";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;

@@ -3,7 +3,7 @@
  * Shared by executions.ts, share.ts, and scheduler.ts.
  */
 
-import { getConnectionStatus, validateScopes } from "./connection-manager.ts";
+import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";

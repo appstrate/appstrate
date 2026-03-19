@@ -121,23 +121,6 @@ export const serviceConnections = pgTable(
   ],
 );
 
-export const registryConnections = pgTable(
-  "registry_connections",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    accessTokenEncrypted: text("access_token_encrypted").notNull(),
-    registryUsername: text("registry_username").notNull(),
-    registryUserId: text("registry_user_id").notNull(),
-    expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table) => [uniqueIndex("idx_registry_connections_user_id").on(table.userId)],
-);
-
 export const oauthStates = pgTable(
   "oauth_states",
   {

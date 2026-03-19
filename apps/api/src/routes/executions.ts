@@ -13,7 +13,7 @@ import {
   listPackageExecutions,
   listExecutionLogs,
   addPackageMemories,
-} from "../services/state.ts";
+} from "../services/state/index.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";

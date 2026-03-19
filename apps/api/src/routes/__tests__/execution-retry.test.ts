@@ -22,7 +22,7 @@ mock.module("../../lib/db.ts", () => ({
 const logs: { event: string; data: Record<string, unknown> | null }[] = [];
 const updates: { id: string; updates: Record<string, unknown> }[] = [];
 
-mock.module("../../services/state.ts", () => ({
+mock.module("../../services/state/index.ts", () => ({
   appendExecutionLog: mock(
     async (
       _executionId: string,
@@ -53,7 +53,7 @@ mock.module("../../services/state.ts", () => ({
   addPackageMemories: mock(async () => {}),
 }));
 
-mock.module("../../services/connection-manager.ts", () => ({
+mock.module("../../services/connection-manager/index.ts", () => ({
   getConnectionStatus: mock(async () => ({ status: "connected" })),
   listUserConnections: mock(async () => []),
   hasCustomConnection: mock(async () => false),

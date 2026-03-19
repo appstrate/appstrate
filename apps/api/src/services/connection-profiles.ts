@@ -6,7 +6,7 @@ import { eq, and, count } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { connectionProfiles, userPackageProfiles, serviceConnections } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
-import { getAdminConnections } from "./state.ts";
+import { getAdminConnections } from "./state/index.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
