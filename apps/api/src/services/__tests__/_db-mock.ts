@@ -169,6 +169,7 @@ export const packageItemsStorageStub = {
   uploadPackageFiles: async () => "sha256-test-items",
   downloadPackageFiles: async () => null as Record<string, Uint8Array> | null,
   deletePackageFiles: async () => {},
+  SYSTEM_STORAGE_NAMESPACE: "_system",
 };
 
 export const packageStorageStub = {
@@ -219,11 +220,14 @@ export const packageVersionsStub = {
   createPackageVersion: async () => null,
   listPackageVersions: async () => [],
   getLatestVersionId: async () => null,
+  getLatestVersionWithManifest: async () => null,
   resolveVersion: async () => null,
+  resolveVersionManifest: async () => null,
   getVersionForDownload: async () => null,
   getVersionDetail: async () => null,
   getVersionCount: async () => 0,
   yankVersion: async () => false,
+  deletePackageVersion: async () => false,
   addDistTag: async () => {},
   removeDistTag: async () => {},
   getMatchingDistTags: async () => [],
