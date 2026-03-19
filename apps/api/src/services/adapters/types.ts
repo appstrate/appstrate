@@ -30,6 +30,7 @@ export interface FileReference {
 
 export interface ToolMeta {
   id: string;
+  version?: string;
   name?: string;
   description?: string;
 }
