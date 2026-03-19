@@ -72,7 +72,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{provider}": {
+  "/auth/connect/{scope}/{name}": {
     post: {
       operationId: "connectOAuth",
       tags: ["Connections"],
@@ -81,7 +81,20 @@ export const connectionsPaths = {
         "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "provider", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+          description: "Provider scope (e.g. @appstrate)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Provider name (e.g. gmail)",
+        },
       ],
       requestBody: {
         content: {
@@ -114,7 +127,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{provider}/api-key": {
+  "/auth/connect/{scope}/{name}/api-key": {
     post: {
       operationId: "connectApiKey",
       tags: ["Connections"],
@@ -122,7 +135,20 @@ export const connectionsPaths = {
       description: "Save an API key credential for a provider that uses api_key auth mode.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "provider", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+          description: "Provider scope (e.g. @appstrate)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Provider name (e.g. gmail)",
+        },
       ],
       requestBody: {
         required: true,
@@ -159,7 +185,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{provider}/credentials": {
+  "/auth/connect/{scope}/{name}/credentials": {
     post: {
       operationId: "connectCredentials",
       tags: ["Connections"],
@@ -168,7 +194,20 @@ export const connectionsPaths = {
         "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "provider", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+          description: "Provider scope (e.g. @appstrate)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Provider name (e.g. gmail)",
+        },
       ],
       requestBody: {
         required: true,
@@ -259,7 +298,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connections/{provider}": {
+  "/auth/connections/{scope}/{name}": {
     delete: {
       operationId: "disconnectProvider",
       tags: ["Connections"],
@@ -268,7 +307,20 @@ export const connectionsPaths = {
         "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "provider", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+          description: "Provider scope (e.g. @appstrate)",
+        },
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Provider name (e.g. gmail)",
+        },
         {
           name: "profileId",
           in: "query",
