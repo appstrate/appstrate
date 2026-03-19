@@ -74,6 +74,7 @@ export function OrgSettingsPage() {
   const [tab, setTab] = useTabWithHash<Tab>(validTabs, "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
+  const [modelsSubTab, setModelsSubTab] = useState<"models-list" | "provider-keys">("models-list");
 
   // Members
   const [inviteEmail, setInviteEmail] = useState("");
@@ -554,42 +555,57 @@ export function OrgSettingsPage() {
 
       {tab === "models" && (
         <>
-          <ProviderKeysSection
-            providerKeys={providerKeys}
-            isLoading={pkLoading}
-            error={pkError}
-            onCreate={() => {
-              setEditPk(null);
-              setPkModalOpen(true);
-            }}
-            onEdit={(pk) => {
-              setEditPk(pk);
-              setPkModalOpen(true);
-            }}
-            onDelete={(pk) => {
-              if (!confirm(t("providerKeys.deleteConfirm", { label: pk.label }))) return;
-              deletePkMutation.mutate(pk.id);
-            }}
-          />
-          <ModelsTab
-            models={models}
-            isLoading={modelsLoading}
-            error={modelsError}
-            onCreate={() => {
-              setEditModel(null);
-              setModelModalOpen(true);
-            }}
-            onEdit={(m) => {
-              setEditModel(m);
-              setModelModalOpen(true);
-            }}
-            onDelete={(m) => {
-              if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
-              deleteModelMutation.mutate(m.id);
-            }}
-            onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
-            onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
-          />
+          <Tabs
+            value={modelsSubTab}
+            onValueChange={(v) => setModelsSubTab(v as "models-list" | "provider-keys")}
+          >
+            <TabsList className="mb-4">
+              <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
+              <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {modelsSubTab === "models-list" && (
+            <ModelsTab
+              models={models}
+              isLoading={modelsLoading}
+              error={modelsError}
+              onCreate={() => {
+                setEditModel(null);
+                setModelModalOpen(true);
+              }}
+              onEdit={(m) => {
+                setEditModel(m);
+                setModelModalOpen(true);
+              }}
+              onDelete={(m) => {
+                if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
+                deleteModelMutation.mutate(m.id);
+              }}
+              onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
+              onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
+            />
+          )}
+
+          {modelsSubTab === "provider-keys" && (
+            <ProviderKeysSection
+              providerKeys={providerKeys}
+              isLoading={pkLoading}
+              error={pkError}
+              onCreate={() => {
+                setEditPk(null);
+                setPkModalOpen(true);
+              }}
+              onEdit={(pk) => {
+                setEditPk(pk);
+                setPkModalOpen(true);
+              }}
+              onDelete={(pk) => {
+                if (!confirm(t("providerKeys.deleteConfirm", { label: pk.label }))) return;
+                deletePkMutation.mutate(pk.id);
+              }}
+            />
+          )}
         </>
       )}
 
@@ -651,12 +667,36 @@ export function OrgSettingsPage() {
         open={modelModalOpen}
         onClose={() => setModelModalOpen(false)}
         model={editModel}
-        isPending={createModelMutation.isPending || updateModelMutation.isPending}
+        isPending={
+          createModelMutation.isPending ||
+          updateModelMutation.isPending ||
+          createPkMutation.isPending
+        }
         onSubmit={(data) => {
           if (editModel) {
             updateModelMutation.mutate(
               { id: editModel.id, data },
               { onSuccess: () => setModelModalOpen(false) },
+            );
+          } else if (data.newProviderKey) {
+            const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
+            const providerLabel = provider?.label ?? "Custom";
+            createPkMutation.mutate(
+              {
+                label: providerLabel,
+                api: data.api,
+                baseUrl: data.baseUrl,
+                apiKey: data.newProviderKey.apiKey,
+              },
+              {
+                onSuccess: (result) => {
+                  const { newProviderKey: _, ...modelData } = data;
+                  createModelMutation.mutate(
+                    { ...modelData, providerKeyId: result.id },
+                    { onSuccess: () => setModelModalOpen(false) },
+                  );
+                },
+              },
             );
           } else {
             createModelMutation.mutate(data, { onSuccess: () => setModelModalOpen(false) });
@@ -736,12 +776,6 @@ function ProxiesTab({
 
   return (
     <>
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">{t("proxies.description")}</p>
-        </div>
-      </div>
-
       <div className="flex items-center justify-end gap-2 mb-4">
         <Button onClick={onCreate}>{t("proxies.add")}</Button>
       </div>
@@ -845,14 +879,6 @@ function ProviderKeysSection({
 
   return (
     <div className="mb-8">
-      <div className="text-sm font-medium text-muted-foreground mb-4">
-        {t("providerKeys.title")}
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <p className="text-sm text-muted-foreground">{t("providerKeys.description")}</p>
-      </div>
-
       <div className="flex items-center justify-end gap-2 mb-4">
         <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
       </div>
@@ -947,12 +973,6 @@ function ModelsTab({
 
   return (
     <>
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">{t("models.description")}</p>
-        </div>
-      </div>
-
       <div className="flex items-center justify-end gap-2 mb-4">
         <Button onClick={onCreate}>{t("models.add")}</Button>
       </div>

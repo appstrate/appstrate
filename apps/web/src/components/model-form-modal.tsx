@@ -22,7 +22,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
 import { useFormErrors } from "../hooks/use-form-errors";
 import { useOpenRouterModels, type OpenRouterModel } from "../hooks/use-models";
 import { useProviderKeys } from "../hooks/use-provider-keys";
@@ -43,6 +43,7 @@ interface ModelFormData {
   baseUrl: string;
   modelId: string;
   providerKeyId: string;
+  newProviderKey?: { apiKey: string };
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -209,6 +210,7 @@ function ModelFormBody({
   const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
 
   const [providerKeyId, setProviderKeyId] = useState(model?.providerKeyId ?? "");
+  const [inlineApiKey, setInlineApiKey] = useState("");
   const providerKeysQuery = useProviderKeys();
 
   const availableProviderKeys = useMemo(() => {
@@ -218,6 +220,9 @@ function ModelFormBody({
       (k) => k.api === api && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
     );
   }, [providerKeysQuery.data, api, baseUrl]);
+
+  const selectedKey = availableProviderKeys.find((k) => k.id === providerKeyId);
+  const inlineKeyMode = !selectedKey && !providerKeyId;
 
   const [openRouterSearch, setOpenRouterSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -267,12 +272,13 @@ function ModelFormBody({
         return undefined;
       },
       providerKeyId: (v: string) => {
+        if (inlineKeyMode && inlineApiKey.trim()) return undefined;
         if (model) return undefined; // optional when editing
         if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
     }),
-    [t, model, isPreset, isCustomProvider],
+    [t, model, isPreset, isCustomProvider, inlineKeyMode, inlineApiKey],
   );
 
   const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
@@ -342,7 +348,10 @@ function ModelFormBody({
       api: api.trim(),
       baseUrl: baseUrl.trim(),
       modelId: modelId.trim(),
-      providerKeyId,
+      providerKeyId: inlineKeyMode ? "" : providerKeyId,
+      ...(inlineKeyMode && inlineApiKey.trim()
+        ? { newProviderKey: { apiKey: inlineApiKey.trim() } }
+        : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
@@ -462,24 +471,72 @@ function ModelFormBody({
           </div>
         )}
 
-        {/* Provider key selector — visible once a model is chosen */}
+        {/* Provider key — visible once a model is chosen */}
         {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
-            <Label htmlFor="mdl-pk">{t("models.form.selectProviderKey")}</Label>
-            <Select value={providerKeyId} onValueChange={setProviderKeyId}>
-              <SelectTrigger id="mdl-pk">
-                <SelectValue placeholder={t("models.form.selectProviderKey")} />
-              </SelectTrigger>
-              <SelectContent>
-                {availableProviderKeys.map((k) => (
-                  <SelectItem key={k.id} value={k.id}>
-                    {k.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {availableProviderKeys.length === 0 && (
-              <div className="text-sm text-muted-foreground">{t("models.form.noProviderKeys")}</div>
+            <Label>{t("providerKeys.form.apiKey")}</Label>
+            {selectedKey ? (
+              <div className="flex gap-2">
+                <div className="flex-1 flex items-center gap-2 h-9 rounded-md border border-input bg-muted px-3 text-sm">
+                  <KeyRound className="size-3.5 text-muted-foreground shrink-0" />
+                  <span className="truncate">{selectedKey.label}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 h-9 w-9"
+                  onClick={() => {
+                    setProviderKeyId("");
+                    setInlineApiKey("");
+                  }}
+                >
+                  <X className="size-4" />
+                  <span className="sr-only">Clear</span>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={inlineApiKey}
+                  onChange={(e) => {
+                    setInlineApiKey(e.target.value);
+                    clearField("providerKeyId");
+                  }}
+                  placeholder="sk-..."
+                  className={cn("flex-1", errors.providerKeyId && "border-destructive")}
+                  aria-invalid={errors.providerKeyId ? true : undefined}
+                />
+                {availableProviderKeys.length > 0 && (
+                  <Select
+                    value=""
+                    onValueChange={(id) => {
+                      setProviderKeyId(id);
+                      setInlineApiKey("");
+                    }}
+                  >
+                    <SelectTrigger className="w-auto shrink-0">
+                      <SelectValue placeholder={t("models.form.useExistingKey")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableProviderKeys.map((k) => (
+                        <SelectItem key={k.id} value={k.id}>
+                          {k.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+            {!selectedKey && inlineApiKey.trim() && (
+              <div className="text-sm text-muted-foreground">
+                {t("models.form.createProviderKeyHint")}
+              </div>
+            )}
+            {errors.providerKeyId && (
+              <div className="text-sm text-destructive">{errors.providerKeyId}</div>
             )}
           </div>
         )}

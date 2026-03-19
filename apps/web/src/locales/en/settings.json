@@ -286,7 +286,6 @@
   "profiles.all": "All profiles",
   "proxies.tabTitle": "Proxies",
   "proxies.title": "Organization Proxies",
-  "proxies.description": "Configure residential proxies for flow executions.",
   "proxies.empty": "No proxies configured",
   "proxies.add": "Add proxy",
   "proxies.edit": "Edit",
@@ -312,7 +311,6 @@
   "proxies.testFailed": "Failed: {{message}}",
   "proxies.flow.none": "No proxy",
   "models.tabTitle": "Models",
-  "models.description": "Configure LLM models for flow executions.",
   "models.add": "Add model",
   "models.edit": "Edit",
   "models.delete": "Delete",
@@ -384,7 +382,6 @@
   "onboarding.summaryMembersNone": "No members invited",
   "onboarding.goToDashboard": "Go to dashboard",
   "providerKeys.title": "Provider Keys",
-  "providerKeys.description": "Share an API key across multiple models from the same provider.",
   "providerKeys.add": "Add key",
   "providerKeys.edit": "Edit",
   "providerKeys.delete": "Delete",
@@ -403,6 +400,8 @@
   "providerKeys.form.baseUrl": "Base URL",
   "models.form.selectProviderKey": "Select a provider key",
   "models.form.noProviderKeys": "No keys available for this provider",
+  "models.form.createProviderKeyHint": "A provider key will be created automatically.",
+  "models.form.useExistingKey": "My keys",
   "models.alert.noModel": "No LLM model configured",
   "models.alert.noModelDescription": "Configure a model in organization settings to run this flow."
 }

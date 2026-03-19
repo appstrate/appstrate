@@ -286,7 +286,6 @@
   "profiles.all": "Tous les profils",
   "proxies.tabTitle": "Proxies",
   "proxies.title": "Proxies de l'organisation",
-  "proxies.description": "Configurez des proxies résidentiels pour les exécutions de flows.",
   "proxies.empty": "Aucun proxy configuré",
   "proxies.add": "Ajouter un proxy",
   "proxies.edit": "Modifier",
@@ -312,7 +311,6 @@
   "proxies.testFailed": "Échec : {{message}}",
   "proxies.flow.none": "Aucun proxy",
   "models.tabTitle": "Modèles",
-  "models.description": "Configurez les modèles LLM pour les exécutions de flows.",
   "models.add": "Ajouter un modèle",
   "models.edit": "Modifier",
   "models.delete": "Supprimer",
@@ -384,7 +382,6 @@
   "onboarding.summaryMembersNone": "Aucun membre invité",
   "onboarding.goToDashboard": "Aller au tableau de bord",
   "providerKeys.title": "Clés fournisseur",
-  "providerKeys.description": "Partagez une clé API entre plusieurs modèles du même fournisseur.",
   "providerKeys.add": "Ajouter une clé",
   "providerKeys.edit": "Modifier",
   "providerKeys.delete": "Supprimer",
@@ -403,6 +400,8 @@
   "providerKeys.form.baseUrl": "URL de base",
   "models.form.selectProviderKey": "Sélectionnez une clé fournisseur",
   "models.form.noProviderKeys": "Aucune clé disponible pour ce fournisseur",
+  "models.form.createProviderKeyHint": "Une clé fournisseur sera créée automatiquement.",
+  "models.form.useExistingKey": "Mes clés",
   "models.alert.noModel": "Aucun modèle LLM configuré",
   "models.alert.noModelDescription": "Configurez un modèle dans les paramètres de l'organisation pour pouvoir exécuter ce flow."
 }
