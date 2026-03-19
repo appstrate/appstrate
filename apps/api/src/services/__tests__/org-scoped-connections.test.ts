@@ -10,8 +10,8 @@ mock.module("../../lib/logger.ts", () => ({
 
 mock.module("../../lib/db.ts", () => ({ db }));
 
-// Schema stubs for serviceConnections (must have column names matching queries)
-const serviceConnectionsStub = {
+// Schema stubs for userProviderConnections (must have column names matching queries)
+const userProviderConnectionsStub = {
   id: "id",
   profileId: "profile_id",
   providerId: "provider_id",
@@ -58,7 +58,7 @@ const providerCredentialsStub = {
 };
 
 mock.module("@appstrate/db/schema", () => ({
-  serviceConnections: serviceConnectionsStub,
+  userProviderConnections: userProviderConnectionsStub,
   connectionProfiles: connectionProfilesStub,
   organizationMembers: organizationMembersStub,
   organizations: organizationsStub,
@@ -193,14 +193,14 @@ describe("getConnectionStatus", () => {
 
 describe("listAllUserConnections", () => {
   test("returns empty providers when no connections", async () => {
-    queues.select.push([]); // serviceConnections join
+    queues.select.push([]); // userProviderConnections join
 
     const result = await listAllUserConnections("user-1");
     expect(result.providers).toEqual([]);
   });
 
   test("groups connections by provider then org", async () => {
-    // 1. serviceConnections query
+    // 1. userProviderConnections query
     queues.select.push([
       {
         connectionId: "conn-1",

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { serviceConnections } from "@appstrate/db/schema";
+import { userProviderConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
@@ -131,13 +131,13 @@ async function doRefresh(
   // Update the connection in DB — propagate error so callers can log appropriately
   const newEncrypted = encryptCredentials(newCreds);
   await db
-    .update(serviceConnections)
+    .update(userProviderConnections)
     .set({
       credentialsEncrypted: newEncrypted,
       expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
       updatedAt: new Date(),
     })
-    .where(eq(serviceConnections.id, connectionId));
+    .where(eq(userProviderConnections.id, connectionId));
 
   return newCreds;
 }

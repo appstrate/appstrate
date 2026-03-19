@@ -23,7 +23,9 @@ export const packageConfigs = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     config: jsonb("config").notNull().default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
@@ -134,7 +136,9 @@ export const packageDependencies = pgTable(
     dependencyId: text("dependency_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [

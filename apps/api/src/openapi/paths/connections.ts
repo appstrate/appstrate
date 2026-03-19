@@ -4,7 +4,7 @@ export const connectionsPaths = {
       operationId: "listConnections",
       tags: ["Connections"],
       summary: "List active connections",
-      description: "List active service connections for the current user in the org.",
+      description: "List active provider connections for the current user in the org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {

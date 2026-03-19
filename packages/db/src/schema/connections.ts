@@ -53,8 +53,8 @@ export const userPackageProfiles = pgTable(
   ],
 );
 
-export const packageAdminConnections = pgTable(
-  "package_admin_connections",
+export const flowProviderBindings = pgTable(
+  "flow_provider_bindings",
   {
     packageId: text("package_id")
       .notNull()
@@ -68,8 +68,8 @@ export const packageAdminConnections = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.packageId, table.providerId] }),
-    index("idx_package_admin_connections_package_id").on(table.packageId),
-    index("idx_package_admin_connections_org_id").on(table.orgId),
+    index("idx_flow_provider_bindings_package_id").on(table.packageId),
+    index("idx_flow_provider_bindings_org_id").on(table.orgId),
   ],
 );
 
@@ -90,9 +90,9 @@ export const providerCredentials = pgTable(
   (table) => [primaryKey({ columns: [table.providerId, table.orgId] })],
 );
 
-// ─── Service connections (user-level OAuth/API tokens, org-scoped) ──
-export const serviceConnections = pgTable(
-  "service_connections",
+// ─── User provider connections (user-level OAuth/API tokens, org-scoped) ──
+export const userProviderConnections = pgTable(
+  "user_provider_connections",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     profileId: uuid("profile_id")
@@ -111,13 +111,13 @@ export const serviceConnections = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_service_connections_unique").on(
+    uniqueIndex("idx_user_provider_connections_unique").on(
       table.profileId,
       table.providerId,
       table.orgId,
     ),
-    index("idx_service_connections_profile").on(table.profileId),
-    index("idx_service_connections_org_id").on(table.orgId),
+    index("idx_user_provider_connections_profile").on(table.profileId),
+    index("idx_user_provider_connections_org_id").on(table.orgId),
   ],
 );
 

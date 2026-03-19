@@ -1,7 +1,7 @@
 import { db } from "../../lib/db.ts";
 import { logger } from "../../lib/logger.ts";
 import { eq, and, inArray } from "drizzle-orm";
-import { serviceConnections, connectionProfiles } from "@appstrate/db/schema";
+import { userProviderConnections, connectionProfiles } from "@appstrate/db/schema";
 import {
   listConnections as listConnectionsRaw,
   deleteConnection as deleteConnectionRaw,
@@ -39,10 +39,10 @@ export async function disconnectConnectionById(
 ): Promise<void> {
   // Verify the connection belongs to a profile owned by this user
   const rows = await db
-    .select({ id: serviceConnections.id })
-    .from(serviceConnections)
-    .innerJoin(connectionProfiles, eq(serviceConnections.profileId, connectionProfiles.id))
-    .where(and(eq(serviceConnections.id, connectionId), eq(connectionProfiles.userId, userId)))
+    .select({ id: userProviderConnections.id })
+    .from(userProviderConnections)
+    .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
+    .where(and(eq(userProviderConnections.id, connectionId), eq(connectionProfiles.userId, userId)))
     .limit(1);
 
   if (rows.length === 0) {
@@ -61,9 +61,9 @@ export async function deleteAllUserConnections(userId: string): Promise<void> {
 
   if (profiles.length === 0) return;
 
-  await db.delete(serviceConnections).where(
+  await db.delete(userProviderConnections).where(
     inArray(
-      serviceConnections.profileId,
+      userProviderConnections.profileId,
       profiles.map((p) => p.id),
     ),
   );

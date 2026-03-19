@@ -85,7 +85,8 @@ export const connectionProfilesPaths = {
       operationId: "deleteAllUserConnections",
       tags: ["Connection Profiles"],
       summary: "Delete all user connections",
-      description: "Delete all service connections across all profiles for the authenticated user.",
+      description:
+        "Delete all provider connections across all profiles for the authenticated user.",
       responses: {
         "200": {
           description: "Connections deleted",
@@ -107,7 +108,7 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "List all user connections",
       description:
-        "List all service connections across all profiles and organizations for the authenticated user, grouped by provider then by organization.",
+        "List all provider connections across all profiles and organizations for the authenticated user, grouped by provider then by organization.",
       responses: {
         "200": {
           description: "User connections grouped by provider and organization",
@@ -244,7 +245,7 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "List connections for a profile",
       description:
-        "List all service connections associated with a specific connection profile in the current organization.",
+        "List all provider connections associated with a specific connection profile in the current organization.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
