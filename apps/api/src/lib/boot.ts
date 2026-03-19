@@ -30,12 +30,9 @@ export async function boot(): Promise<void> {
   initSystemModels();
   logger.info("System models loaded");
 
-  // Load all system packages (providers + skills + tools + flows) from ZIPs
-  await initSystemPackages();
-
-  // Sync system packages to DB + upload files to global _system/ namespace
-  await syncSystemPackages().catch((err) => {
-    logger.warn("Could not sync system packages", {
+  // Load system packages from ZIPs, sync to DB + S3
+  await loadAndSyncSystemPackages().catch((err) => {
+    logger.warn("Could not load/sync system packages", {
       error: err instanceof Error ? err.message : String(err),
     });
   });
@@ -130,11 +127,12 @@ export async function boot(): Promise<void> {
 }
 
 /**
- * Sync system packages to the DB.
+ * Load system packages from ZIPs on disk, then sync to DB + S3.
  * Upserts packages rows (source: "system"), uploads files to global _system/ namespace,
  * and creates packageVersions with SHA256 SRI integrity.
  */
-async function syncSystemPackages(): Promise<void> {
+async function loadAndSyncSystemPackages(): Promise<void> {
+  await initSystemPackages();
   const allPackages = getSystemPackages();
   if (allPackages.size === 0) return;
 
