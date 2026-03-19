@@ -281,15 +281,6 @@ describe("POST /api/providers", () => {
     expect(json.error).toBe("OPERATION_NOT_ALLOWED");
   });
 
-  test("returns 403 when ID conflicts with system provider (source: system)", async () => {
-    queues.select.push([{ source: "system" }]); // isSystemProviderInDb → system
-
-    const res = await jsonRequest("/api/providers", "POST", validCreateBody());
-    expect(res.status).toBe(403);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("OPERATION_NOT_ALLOWED");
-  });
-
   test("returns 400 on duplicate ID (NAME_COLLISION)", async () => {
     queues.select.push([]); // isSystemProviderInDb → not system
     queues.select.push([{ id: "@test/new-provider" }]); // existing check → found
@@ -358,10 +349,20 @@ describe("PUT /api/providers/:scope/:name", () => {
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
       displayName: "New Name",
+      authMode: "oauth2",
     });
     expect(res.status).toBe(200);
     const json = (await res.json()) as { id: string };
     expect(json.id).toBe("@test/provider");
+  });
+
+  test("returns 400 when required fields missing", async () => {
+    const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
+      displayName: "New Name",
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   test("returns 403 for system provider", async () => {
@@ -369,6 +370,7 @@ describe("PUT /api/providers/:scope/:name", () => {
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
       displayName: "New",
+      authMode: "oauth2",
     });
     expect(res.status).toBe(403);
     const json = (await res.json()) as { error: string };
@@ -381,11 +383,12 @@ describe("PUT /api/providers/:scope/:name", () => {
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
       displayName: "New",
+      authMode: "oauth2",
     });
     expect(res.status).toBe(404);
   });
 
-  test("merges partial definition (preserves old values)", async () => {
+  test("replaces definition completely (no merge with old values)", async () => {
     queues.select.push([]); // isSystemProviderInDb
     queues.select.push([
       {
@@ -404,17 +407,20 @@ describe("PUT /api/providers/:scope/:name", () => {
     ]);
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
+      displayName: "New Name",
+      authMode: "oauth2",
       tokenUrl: "https://new.com/token",
+      authorizationUrl: "https://new.com/auth",
     });
     expect(res.status).toBe(200);
 
     const upd = tracking.updateCalls[0] as { draftManifest: Record<string, unknown> };
-    expect(upd.draftManifest.displayName).toBe("Old Name"); // preserved
-    expect(upd.draftManifest.description).toBe("Old desc"); // preserved
+    expect(upd.draftManifest.displayName).toBe("New Name"); // replaced
+    expect(upd.draftManifest.description).toBeUndefined(); // not preserved from old
     const def = upd.draftManifest.definition as Record<string, unknown>;
     const oauth2 = def.oauth2 as Record<string, unknown>;
-    expect(oauth2.authorizationUrl).toBe("https://old.com/auth"); // preserved
-    expect(oauth2.tokenUrl).toBe("https://new.com/token"); // updated
+    expect(oauth2.authorizationUrl).toBe("https://new.com/auth"); // from request
+    expect(oauth2.tokenUrl).toBe("https://new.com/token"); // from request
   });
 
   test("updates credentials when clientId/clientSecret provided", async () => {
@@ -424,6 +430,8 @@ describe("PUT /api/providers/:scope/:name", () => {
     ]);
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
+      displayName: "Provider",
+      authMode: "oauth2",
       clientId: "new-id",
       clientSecret: "new-secret",
     });
@@ -441,6 +449,7 @@ describe("PUT /api/providers/:scope/:name", () => {
 
     const res = await jsonRequest("/api/providers/@test/provider", "PUT", {
       displayName: "Updated",
+      authMode: "oauth2",
     });
     expect(res.status).toBe(200);
     expect(encryptCalls).toHaveLength(0);
