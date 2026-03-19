@@ -1,12 +1,6 @@
 import { and, eq, lt } from "drizzle-orm";
 import { db } from "./db.ts";
-import {
-  oauthStates,
-  organizations,
-  packages,
-  packageVersions,
-  providerCredentials,
-} from "@appstrate/db/schema";
+import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
@@ -16,7 +10,7 @@ import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModels } from "../services/model-registry.ts";
 import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
-import { uploadPackageFiles } from "../services/package-items.ts";
+import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items.ts";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initCancelSubscriber } from "../services/execution-tracker.ts";
@@ -136,15 +130,13 @@ export async function boot(): Promise<void> {
 }
 
 /**
- * Sync system packages to the DB for all existing orgs.
- * Upserts packages rows (source: "system"), providerCredentials (per org, for providers only),
- * and packageVersions with SHA256 SRI integrity.
+ * Sync system packages to the DB.
+ * Upserts packages rows (source: "system"), uploads files to global _system/ namespace,
+ * and creates packageVersions with SHA256 SRI integrity.
  */
 async function syncSystemPackages(): Promise<void> {
   const allPackages = getSystemPackages();
   if (allPackages.size === 0) return;
-
-  const orgs = await db.select({ id: organizations.id }).from(organizations);
 
   let synced = 0;
   for (const [id, entry] of allPackages) {
@@ -183,19 +175,14 @@ async function syncSystemPackages(): Promise<void> {
           },
         });
 
-      // 2. UPSERT providerCredentials per org + upload provider files (only for providers)
-      if (type === "provider") {
-        const hasProviderDoc = !!entry.files["PROVIDER.md"];
-        for (const org of orgs) {
-          await db
-            .insert(providerCredentials)
-            .values({ providerId: id, orgId: org.id })
-            .onConflictDoNothing();
-          // Upload provider files to library-packages so flow ZIP bundling can find them
-          if (hasProviderDoc) {
-            await uploadPackageFiles("providers", org.id, id, entry.files);
-          }
-        }
+      // 2. Upload system package files to global _system/ namespace (once, not per-org)
+      if (Object.keys(entry.files).length > 1) {
+        await uploadPackageFiles(
+          type as "flows" | "skills" | "tools" | "providers",
+          SYSTEM_STORAGE_NAMESPACE,
+          id,
+          entry.files,
+        );
       }
 
       // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
@@ -219,5 +206,5 @@ async function syncSystemPackages(): Promise<void> {
     }
   }
 
-  logger.info("System packages synced", { packages: synced, orgs: orgs.length });
+  logger.info("System packages synced", { packages: synced });
 }
