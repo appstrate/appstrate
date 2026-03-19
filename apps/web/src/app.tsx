@@ -332,7 +332,6 @@ export function App() {
                 path="/providers/:scope/:name/:version"
                 element={<UnifiedPackageDetailPage type="provider" />}
               />
-              <Route path="/library" element={<Navigate to="/skills" replace />} />
               <Route path="/preferences" element={<PreferencesPage />} />
               <Route path="/org-settings" element={<OrgSettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
