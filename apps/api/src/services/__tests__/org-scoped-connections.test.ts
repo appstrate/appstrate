@@ -19,8 +19,6 @@ const serviceConnectionsStub = {
   credentialsEncrypted: "credentials_encrypted",
   scopesGranted: "scopes_granted",
   expiresAt: "expires_at",
-  rawTokenResponse: "raw_token_response",
-  metadata: "metadata",
   createdAt: "created_at",
   updatedAt: "updated_at",
 };

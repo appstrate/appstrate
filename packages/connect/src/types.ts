@@ -2,8 +2,11 @@ import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/valid
 
 export type { AuthMode };
 
-/** Provider definition used by the connect package — alias for core's resolved type. */
-export type ProviderDefinition = ResolvedProviderDefinition;
+/** Provider definition used by the connect package — extends core's resolved type with runtime fields. */
+export type ProviderDefinition = ResolvedProviderDefinition & {
+  /** Whether this provider has a PROVIDER.md companion file. */
+  hasProviderDoc?: boolean;
+};
 
 export interface ConnectionRecord {
   id: string;
@@ -13,7 +16,6 @@ export interface ConnectionRecord {
   credentialsEncrypted: string;
   scopesGranted: string[];
   expiresAt: string | null;
-  metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

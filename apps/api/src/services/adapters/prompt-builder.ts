@@ -146,7 +146,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
       }
 
-      if (svc.docsUrl) {
+      if (svc.hasProviderDoc) {
+        sections.push(`  API docs: \`.pi/providers/${svc.id}/PROVIDER.md\``);
+      } else if (svc.docsUrl) {
         sections.push(`  Documentation: ${svc.docsUrl}`);
       }
 

@@ -16,9 +16,7 @@ import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModels } from "../services/model-registry.ts";
 import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
-import { setFlowItems, PROVIDER_CONFIG } from "../services/package-items.ts";
-import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
-import type { Manifest } from "@appstrate/core/validation";
+import { uploadPackageFiles } from "../services/package-items.ts";
 import { markOrphanExecutionsFailed } from "../services/state.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initCancelSubscriber } from "../services/execution-tracker.ts";
@@ -44,13 +42,6 @@ export async function boot(): Promise<void> {
   // Sync system packages to DB for all orgs (with registry-grade versioning)
   await syncSystemPackages().catch((err) => {
     logger.warn("Could not sync system packages", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  // Backfill provider deps from manifest → packageDependencies for existing flows
-  await backfillFlowProviderDeps().catch((err) => {
-    logger.warn("Could not backfill flow provider deps", {
       error: err instanceof Error ? err.message : String(err),
     });
   });
@@ -192,13 +183,18 @@ async function syncSystemPackages(): Promise<void> {
           },
         });
 
-      // 2. UPSERT providerCredentials per org (only for providers)
+      // 2. UPSERT providerCredentials per org + upload provider files (only for providers)
       if (type === "provider") {
+        const hasProviderDoc = !!entry.files["PROVIDER.md"];
         for (const org of orgs) {
           await db
             .insert(providerCredentials)
             .values({ providerId: id, orgId: org.id })
             .onConflictDoNothing();
+          // Upload provider files to library-packages so flow ZIP bundling can find them
+          if (hasProviderDoc) {
+            await uploadPackageFiles("providers", org.id, id, entry.files);
+          }
         }
       }
 
@@ -224,30 +220,4 @@ async function syncSystemPackages(): Promise<void> {
   }
 
   logger.info("System packages synced", { packages: synced, orgs: orgs.length });
-}
-
-/** Backfill provider deps from manifest → packageDependencies for existing flows.
- *  Ensures flows created before provider unification get their provider deps populated. */
-async function backfillFlowProviderDeps(): Promise<void> {
-  const orgs = await db.select({ id: organizations.id }).from(organizations);
-
-  let total = 0;
-  for (const org of orgs) {
-    const orgFlows = await db
-      .select({ id: packages.id, draftManifest: packages.draftManifest })
-      .from(packages)
-      .where(and(eq(packages.orgId, org.id), eq(packages.type, "flow")));
-
-    for (const flow of orgFlows) {
-      const { providerIds } = extractDepsFromManifest(flow.draftManifest as Partial<Manifest>);
-      if (providerIds.length > 0) {
-        await setFlowItems(flow.id, org.id, providerIds, PROVIDER_CONFIG);
-        total++;
-      }
-    }
-  }
-
-  if (total > 0) {
-    logger.info("Backfilled provider deps for flows", { flows: total });
-  }
 }

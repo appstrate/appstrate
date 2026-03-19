@@ -44,6 +44,7 @@ export async function resolveProviderDefs(
       authorizedUris: def.authorizedUris,
       allowAllUris: def.allowAllUris,
       docsUrl: def.docsUrl,
+      hasProviderDoc: def.hasProviderDoc,
       categories: def.categories,
     }));
 }

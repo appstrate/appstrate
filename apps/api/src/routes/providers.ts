@@ -164,28 +164,50 @@ export function createProvidersRouter() {
       );
     }
 
-    // Build the definition object for manifest.definition
+    // Build the nested definition object for manifest.definition
     const definition: Record<string, unknown> = {
       authMode: data.authMode,
-      authorizationUrl: data.authorizationUrl,
-      tokenUrl: data.tokenUrl,
-      refreshUrl: data.refreshUrl,
-      requestTokenUrl: data.requestTokenUrl,
-      accessTokenUrl: data.accessTokenUrl,
-      defaultScopes: data.defaultScopes ?? [],
-      scopeSeparator: data.scopeSeparator ?? " ",
-      pkceEnabled: data.pkceEnabled ?? true,
-      tokenAuthMethod: data.tokenAuthMethod,
-      authorizationParams: data.authorizationParams ?? {},
-      tokenParams: data.tokenParams ?? {},
-      credentialSchema: data.credentialSchema,
-      credentialFieldName: data.credentialFieldName,
-      credentialHeaderName: data.credentialHeaderName,
-      credentialHeaderPrefix: data.credentialHeaderPrefix,
       authorizedUris: data.authorizedUris ?? [],
       allowAllUris: data.allowAllUris ?? false,
       availableScopes: data.availableScopes ?? [],
     };
+
+    // Auth-mode-specific sub-objects
+    if (data.authMode === "oauth2") {
+      definition.oauth2 = {
+        authorizationUrl: data.authorizationUrl,
+        tokenUrl: data.tokenUrl,
+        refreshUrl: data.refreshUrl,
+        defaultScopes: data.defaultScopes ?? [],
+        scopeSeparator: data.scopeSeparator ?? " ",
+        pkceEnabled: data.pkceEnabled ?? true,
+        tokenAuthMethod: data.tokenAuthMethod,
+        authorizationParams: data.authorizationParams ?? {},
+        tokenParams: data.tokenParams ?? {},
+      };
+    } else if (data.authMode === "oauth1") {
+      definition.oauth1 = {
+        requestTokenUrl: data.requestTokenUrl,
+        accessTokenUrl: data.accessTokenUrl,
+        authorizationUrl: data.authorizationUrl,
+        authorizationParams: data.authorizationParams ?? {},
+      };
+    }
+
+    if (data.authMode === "api_key" || data.authMode === "basic" || data.authMode === "custom") {
+      definition.credentials = {
+        schema: data.credentialSchema,
+        fieldName: data.credentialFieldName,
+      };
+    }
+
+    // Cross-cutting transport fields (implementation-specific)
+    if (data.credentialHeaderName !== undefined) {
+      definition.credentialHeaderName = data.credentialHeaderName;
+    }
+    if (data.credentialHeaderPrefix !== undefined) {
+      definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
+    }
 
     try {
       await db.transaction(async (tx) => {
@@ -324,37 +346,60 @@ export function createProvidersRouter() {
     const oldManifest = (existingPkg.draftManifest ?? {}) as Record<string, unknown>;
     const oldDef = (oldManifest.definition ?? {}) as Record<string, unknown>;
 
-    // Merge definition
+    // Merge definition — preserve nested structure
+    const authMode = data.authMode ?? (oldDef.authMode as string);
     const newDef: Record<string, unknown> = {
       ...oldDef,
       ...(data.authMode !== undefined ? { authMode: data.authMode } : {}),
-      ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
-      ...(data.tokenUrl !== undefined ? { tokenUrl: data.tokenUrl } : {}),
-      ...(data.refreshUrl !== undefined ? { refreshUrl: data.refreshUrl } : {}),
-      ...(data.requestTokenUrl !== undefined ? { requestTokenUrl: data.requestTokenUrl } : {}),
-      ...(data.accessTokenUrl !== undefined ? { accessTokenUrl: data.accessTokenUrl } : {}),
-      ...(data.defaultScopes !== undefined ? { defaultScopes: data.defaultScopes } : {}),
-      ...(data.scopeSeparator !== undefined ? { scopeSeparator: data.scopeSeparator } : {}),
-      ...(data.pkceEnabled !== undefined ? { pkceEnabled: data.pkceEnabled } : {}),
-      ...(data.tokenAuthMethod !== undefined ? { tokenAuthMethod: data.tokenAuthMethod } : {}),
-      ...(data.authorizationParams !== undefined
-        ? { authorizationParams: data.authorizationParams }
-        : {}),
-      ...(data.tokenParams !== undefined ? { tokenParams: data.tokenParams } : {}),
-      ...(data.credentialSchema !== undefined ? { credentialSchema: data.credentialSchema } : {}),
-      ...(data.credentialFieldName !== undefined
-        ? { credentialFieldName: data.credentialFieldName }
-        : {}),
+      ...(data.authorizedUris !== undefined ? { authorizedUris: data.authorizedUris } : {}),
+      ...(data.allowAllUris !== undefined ? { allowAllUris: data.allowAllUris } : {}),
+      ...(data.availableScopes !== undefined ? { availableScopes: data.availableScopes } : {}),
       ...(data.credentialHeaderName !== undefined
         ? { credentialHeaderName: data.credentialHeaderName }
         : {}),
       ...(data.credentialHeaderPrefix !== undefined
         ? { credentialHeaderPrefix: data.credentialHeaderPrefix }
         : {}),
-      ...(data.authorizedUris !== undefined ? { authorizedUris: data.authorizedUris } : {}),
-      ...(data.allowAllUris !== undefined ? { allowAllUris: data.allowAllUris } : {}),
-      ...(data.availableScopes !== undefined ? { availableScopes: data.availableScopes } : {}),
     };
+
+    // Merge auth-mode-specific sub-objects
+    if (authMode === "oauth2") {
+      const oldOAuth2 = (oldDef.oauth2 as Record<string, unknown>) ?? {};
+      newDef.oauth2 = {
+        ...oldOAuth2,
+        ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
+        ...(data.tokenUrl !== undefined ? { tokenUrl: data.tokenUrl } : {}),
+        ...(data.refreshUrl !== undefined ? { refreshUrl: data.refreshUrl } : {}),
+        ...(data.defaultScopes !== undefined ? { defaultScopes: data.defaultScopes } : {}),
+        ...(data.scopeSeparator !== undefined ? { scopeSeparator: data.scopeSeparator } : {}),
+        ...(data.pkceEnabled !== undefined ? { pkceEnabled: data.pkceEnabled } : {}),
+        ...(data.tokenAuthMethod !== undefined ? { tokenAuthMethod: data.tokenAuthMethod } : {}),
+        ...(data.authorizationParams !== undefined
+          ? { authorizationParams: data.authorizationParams }
+          : {}),
+        ...(data.tokenParams !== undefined ? { tokenParams: data.tokenParams } : {}),
+      };
+    } else if (authMode === "oauth1") {
+      const oldOAuth1 = (oldDef.oauth1 as Record<string, unknown>) ?? {};
+      newDef.oauth1 = {
+        ...oldOAuth1,
+        ...(data.requestTokenUrl !== undefined ? { requestTokenUrl: data.requestTokenUrl } : {}),
+        ...(data.accessTokenUrl !== undefined ? { accessTokenUrl: data.accessTokenUrl } : {}),
+        ...(data.authorizationUrl !== undefined ? { authorizationUrl: data.authorizationUrl } : {}),
+        ...(data.authorizationParams !== undefined
+          ? { authorizationParams: data.authorizationParams }
+          : {}),
+      };
+    }
+
+    if (authMode === "api_key" || authMode === "basic" || authMode === "custom") {
+      const oldCreds = (oldDef.credentials as Record<string, unknown>) ?? {};
+      newDef.credentials = {
+        ...oldCreds,
+        ...(data.credentialSchema !== undefined ? { schema: data.credentialSchema } : {}),
+        ...(data.credentialFieldName !== undefined ? { fieldName: data.credentialFieldName } : {}),
+      };
+    }
 
     try {
       await db.transaction(async (tx) => {

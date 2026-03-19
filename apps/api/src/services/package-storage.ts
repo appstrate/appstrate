@@ -3,7 +3,7 @@ import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow } from "../types/index.ts";
-import { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG } from "./package-items.ts";
+import { getFlowItemFiles, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./package-items.ts";
 
 const BUCKET = "flow-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
@@ -79,10 +79,11 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
     "prompt.md": new TextEncoder().encode(flow.prompt),
   };
 
-  // Fetch skill files and tool files in parallel
-  const [skillFiles, toolFiles] = await Promise.all([
+  // Fetch skill, tool, and provider files in parallel
+  const [skillFiles, toolFiles, providerFiles] = await Promise.all([
     getFlowItemFiles(flow.id, orgId, SKILL_CONFIG),
     getFlowItemFiles(flow.id, orgId, TOOL_CONFIG),
+    getFlowItemFiles(flow.id, orgId, PROVIDER_CONFIG),
   ]);
 
   for (const [skillId, files] of skillFiles) {
@@ -94,6 +95,12 @@ async function buildUserFlowZip(flow: LoadedFlow, orgId: string): Promise<Buffer
   for (const [, files] of toolFiles) {
     for (const [filePath, content] of Object.entries(files)) {
       entries[`tools/${filePath}`] = content;
+    }
+  }
+
+  for (const [providerId, files] of providerFiles) {
+    for (const [filePath, content] of Object.entries(files)) {
+      entries[`providers/${providerId}/${filePath}`] = content;
     }
   }
 

@@ -108,6 +108,10 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles(cfg.storageFolder, orgId, packageId, files);
   }
 
+  if (packageType === "provider" && files["PROVIDER.md"]) {
+    await uploadPackageFiles("providers", orgId, packageId, files);
+  }
+
   if (packageType === "flow" && Object.keys(files).length > 0) {
     await uploadPackageFiles("flows", orgId, packageId, files);
   }

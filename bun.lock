@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.8.1",
+        "@appstrate/core": "^2.8.2",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -30,7 +30,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/connect": "workspace:*",
-        "@appstrate/core": "^2.8.0",
+        "@appstrate/core": "^2.8.2",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -54,7 +54,7 @@
     "apps/web": {
       "name": "@appstrate/web",
       "dependencies": {
-        "@appstrate/core": "^2.8.0",
+        "@appstrate/core": "^2.8.2",
         "@appstrate/shared-types": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -133,7 +133,7 @@
       "name": "@appstrate/env",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.8.0",
+        "@appstrate/core": "^2.8.2",
         "zod": "^4.3.6",
       },
     },
@@ -141,7 +141,7 @@
       "name": "@appstrate/shared-types",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.8.0",
+        "@appstrate/core": "^2.8.2",
         "@appstrate/db": "workspace:*",
       },
     },
@@ -155,7 +155,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.8.1", "", { "dependencies": { "@afps-spec/schema": "^1.0.1", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-kbZcXWu/Z2MFYSkIUOjjm0NTOMNhocY9ahG1x8n2KVkQwKW27XIf2hS27ZteKTh0e+aWTkvrutK0bTA78WOqoA=="],
+    "@appstrate/core": ["@appstrate/core@2.8.2", "", { "dependencies": { "@afps-spec/schema": "^1.0.1", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-c3HYu7fyW9q6ixPwUKl4QO/pABMaT+zmx8RHXTkR6JmdwnGhU4S+4e5FfZRI2Dde9vo6ESnJbFJpFed0XmzCQQ=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 

@@ -394,8 +394,10 @@ describe("PUT /api/providers/:scope/:name", () => {
           description: "Old desc",
           definition: {
             authMode: "oauth2",
-            authorizationUrl: "https://old.com/auth",
-            tokenUrl: "https://old.com/token",
+            oauth2: {
+              authorizationUrl: "https://old.com/auth",
+              tokenUrl: "https://old.com/token",
+            },
           },
         },
       },
@@ -410,8 +412,9 @@ describe("PUT /api/providers/:scope/:name", () => {
     expect(upd.draftManifest.displayName).toBe("Old Name"); // preserved
     expect(upd.draftManifest.description).toBe("Old desc"); // preserved
     const def = upd.draftManifest.definition as Record<string, unknown>;
-    expect(def.authorizationUrl).toBe("https://old.com/auth"); // preserved
-    expect(def.tokenUrl).toBe("https://new.com/token"); // updated
+    const oauth2 = def.oauth2 as Record<string, unknown>;
+    expect(oauth2.authorizationUrl).toBe("https://old.com/auth"); // preserved
+    expect(oauth2.tokenUrl).toBe("https://new.com/token"); // updated
   });
 
   test("updates credentials when clientId/clientSecret provided", async () => {

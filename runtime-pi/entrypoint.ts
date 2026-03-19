@@ -115,13 +115,16 @@ await Promise.all([
 
 if (hasPackage) {
   try {
-    // Install skills
-    const skillsDir = path.join(WORKSPACE, ".flow-package", "skills");
-    if (await exists(skillsDir)) {
-      const piSkillsDir = path.join(WORKSPACE, ".pi", "skills");
-      await fs.mkdir(piSkillsDir, { recursive: true });
-      await run(["cp", "-r", `${skillsDir}/.`, piSkillsDir]);
-    }
+    // Install skills and provider docs in parallel
+    const installDir = async (folder: string) => {
+      const src = path.join(WORKSPACE, ".flow-package", folder);
+      if (await exists(src)) {
+        const dest = path.join(WORKSPACE, ".pi", folder);
+        await fs.mkdir(dest, { recursive: true });
+        await run(["cp", "-r", `${src}/.`, dest]);
+      }
+    };
+    await Promise.all([installDir("skills"), installDir("providers")]);
 
     // Load flow-package tools first (they take priority over runtime built-ins)
     await loadExtensionsFromDir(

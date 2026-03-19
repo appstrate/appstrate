@@ -1,10 +1,5 @@
 import i18n from "../i18n";
 
-export function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return str.slice(0, max) + "...";
-}
-
 export function formatDateField(dateStr: string | Date): string {
   try {
     const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
