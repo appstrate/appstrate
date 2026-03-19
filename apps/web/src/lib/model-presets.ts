@@ -114,7 +114,156 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       },
     ],
   },
+  {
+    id: "mistral",
+    label: "Mistral",
+    api: "openai-completions",
+    baseUrl: "https://api.mistral.ai/v1",
+    models: [
+      {
+        modelId: "mistral-large-latest",
+        label: "Mistral Large",
+        input: ["text", "image"],
+        contextWindow: 128_000,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+      {
+        modelId: "mistral-medium-latest",
+        label: "Mistral Medium",
+        input: ["text"],
+        contextWindow: 128_000,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+      {
+        modelId: "mistral-small-latest",
+        label: "Mistral Small",
+        input: ["text", "image"],
+        contextWindow: 128_000,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+      {
+        modelId: "codestral-latest",
+        label: "Codestral",
+        input: ["text"],
+        contextWindow: 256_000,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+    ],
+  },
+  {
+    id: "xai",
+    label: "xAI",
+    api: "openai-completions",
+    baseUrl: "https://api.x.ai/v1",
+    models: [
+      {
+        modelId: "grok-4",
+        label: "Grok 4",
+        input: ["text", "image"],
+        contextWindow: 131_072,
+        maxTokens: 65_536,
+        reasoning: true,
+      },
+      {
+        modelId: "grok-3",
+        label: "Grok 3",
+        input: ["text", "image"],
+        contextWindow: 131_072,
+        maxTokens: 65_536,
+        reasoning: false,
+      },
+      {
+        modelId: "grok-3-mini",
+        label: "Grok 3 Mini",
+        input: ["text", "image"],
+        contextWindow: 131_072,
+        maxTokens: 65_536,
+        reasoning: true,
+      },
+    ],
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    api: "openai-completions",
+    baseUrl: "https://api.groq.com/openai/v1",
+    models: [
+      {
+        modelId: "llama-3.3-70b-versatile",
+        label: "Llama 3.3 70B",
+        input: ["text", "image"],
+        contextWindow: 131_072,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+      {
+        modelId: "gemma2-9b-it",
+        label: "Gemma 2 9B",
+        input: ["text"],
+        contextWindow: 8_192,
+        maxTokens: 8_192,
+        reasoning: false,
+      },
+      {
+        modelId: "mixtral-8x7b-32768",
+        label: "Mixtral 8x7B",
+        input: ["text"],
+        contextWindow: 32_768,
+        maxTokens: 32_768,
+        reasoning: false,
+      },
+    ],
+  },
+  {
+    id: "cerebras",
+    label: "Cerebras",
+    api: "openai-completions",
+    baseUrl: "https://api.cerebras.ai/v1",
+    models: [
+      {
+        modelId: "llama-4-scout-17b-16e-instruct",
+        label: "Llama 4 Scout",
+        input: ["text", "image"],
+        contextWindow: 131_072,
+        maxTokens: 16_384,
+        reasoning: false,
+      },
+      {
+        modelId: "llama3.3-70b",
+        label: "Llama 3.3 70B",
+        input: ["text"],
+        contextWindow: 131_072,
+        maxTokens: 16_384,
+        reasoning: false,
+      },
+    ],
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    api: "openai-completions",
+    baseUrl: "https://openrouter.ai/api/v1",
+    models: [],
+  },
 ];
+
+/**
+ * Supported API types for the Pi SDK.
+ * Used by the custom provider form to offer all available adapter options.
+ */
+export const API_TYPES = [
+  { value: "openai-completions", label: "OpenAI / Compatible" },
+  { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "anthropic-messages", label: "Anthropic" },
+  { value: "google-generative-ai", label: "Google AI" },
+  { value: "google-vertex", label: "Google Vertex AI" },
+  { value: "azure-openai-responses", label: "Azure OpenAI" },
+  { value: "bedrock-converse-stream", label: "AWS Bedrock" },
+] as const;
 
 export function findPresetMatch(
   api: string,

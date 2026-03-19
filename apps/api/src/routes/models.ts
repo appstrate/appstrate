@@ -117,6 +117,66 @@ export function createModelsRouter() {
     }
   });
 
+  // GET /api/models/openrouter — search OpenRouter models (proxy)
+  router.get("/openrouter", rateLimit(10), async (c) => {
+    const q = c.req.query("q") || "";
+
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models", {
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!res.ok) {
+        return c.json(
+          { error: "PROVIDER_ERROR", message: `OpenRouter returned ${res.status}` },
+          502,
+        );
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const json: any = await res.json();
+      const rawModels = json?.data;
+
+      if (!Array.isArray(rawModels)) {
+        return c.json({ models: [] });
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let models = rawModels.map((m: any) => ({
+        id: String(m.id ?? ""),
+        name: String(m.name || m.id || ""),
+        contextWindow: typeof m.context_length === "number" ? m.context_length : null,
+        maxTokens:
+          typeof m.top_provider?.max_completion_tokens === "number"
+            ? m.top_provider.max_completion_tokens
+            : null,
+        input: m.architecture?.input_modalities?.includes?.("image") ? ["text", "image"] : ["text"],
+        reasoning: false,
+      }));
+
+      // Filter by search query
+      if (q.trim()) {
+        const lower = q.toLowerCase();
+        models = models.filter(
+          (m) => m.id.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower),
+        );
+      }
+
+      // Limit results
+      models = models.slice(0, 50);
+
+      return c.json({ models });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        return c.json({ error: "TIMEOUT", message: "OpenRouter request timed out" }, 504);
+      }
+      logger.error("OpenRouter model search failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.json({ error: "NETWORK_ERROR", message: "Failed to fetch OpenRouter models" }, 502);
+    }
+  });
+
   // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
   router.post("/test", rateLimit(5), async (c) => {

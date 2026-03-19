@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -13,12 +13,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
 import { useFormErrors } from "../hooks/use-form-errors";
-import { useTestModelInline } from "../hooks/use-models";
+import { useTestModelInline, useOpenRouterModels, type OpenRouterModel } from "../hooks/use-models";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
+  API_TYPES,
   findPresetMatch,
   getProviderById,
   findProviderByApiAndBaseUrl,
@@ -59,8 +70,115 @@ function detectModel(model: OrgModelInfo | null): string {
   const match = findPresetMatch(model.api, model.modelId);
   if (match) return match.model.modelId;
   const byApiAndUrl = findProviderByApiAndBaseUrl(model.api, model.baseUrl);
-  if (byApiAndUrl) return CUSTOM_ID;
+  if (byApiAndUrl) {
+    // Providers with no static presets (e.g. OpenRouter) use dynamic model IDs
+    if (byApiAndUrl.models.length === 0) return model.modelId;
+    return CUSTOM_ID;
+  }
   return CUSTOM_ID;
+}
+
+function OpenRouterCombobox({
+  value,
+  search,
+  onSearchChange,
+  models,
+  isLoading,
+  placeholder,
+  emptyText,
+  searchingText,
+  onSelect,
+}: {
+  value: string;
+  search: string;
+  onSearchChange: (v: string) => void;
+  models: OpenRouterModel[];
+  isLoading: boolean;
+  placeholder: string;
+  emptyText: string;
+  searchingText: string;
+  onSelect: (m: OpenRouterModel) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const [triggerWidth, setTriggerWidth] = useState<number | undefined>();
+  const selected = models.find((m) => m.id === value);
+
+  useEffect(() => {
+    if (open && triggerRef.current) {
+      setTriggerWidth(triggerRef.current.offsetWidth);
+    }
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          ref={triggerRef}
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+        >
+          {selected ? (
+            <span className="truncate">{selected.name}</span>
+          ) : value ? (
+            <span className="truncate">{value}</span>
+          ) : (
+            <span className="text-muted-foreground">{placeholder}</span>
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="p-0"
+        align="start"
+        style={triggerWidth ? { width: triggerWidth } : undefined}
+      >
+        <Command shouldFilter={false}>
+          <CommandInput placeholder={placeholder} value={search} onValueChange={onSearchChange} />
+          <CommandList>
+            {isLoading && (
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                <Spinner className="size-3" />
+                {searchingText}
+              </div>
+            )}
+            {!isLoading && models.length === 0 && <CommandEmpty>{emptyText}</CommandEmpty>}
+            {models.length > 0 && (
+              <CommandGroup>
+                {models.map((m) => (
+                  <CommandItem
+                    key={m.id}
+                    value={m.id}
+                    onSelect={() => {
+                      onSelect(m);
+                      onSearchChange(m.name);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn("mr-2 h-4 w-4", value === m.id ? "opacity-100" : "opacity-0")}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate font-medium">{m.name}</div>
+                      <div className="truncate text-xs text-muted-foreground">{m.id}</div>
+                    </div>
+                    {m.contextWindow && (
+                      <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                        {Math.round(m.contextWindow / 1000)}k
+                      </span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function ModelFormBody({
@@ -90,6 +208,19 @@ function ModelFormBody({
   const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
   const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
 
+  const [openRouterSearch, setOpenRouterSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(openRouterSearch), 300);
+    return () => clearTimeout(timer);
+  }, [openRouterSearch]);
+
+  const openRouterQuery = useOpenRouterModels(
+    providerId === "openrouter" ? debouncedSearch : undefined,
+  );
+
+  const isOpenRouter = providerId === "openrouter";
   const isCustomProvider = providerId === CUSTOM_ID;
   const isCustomModel = selectedModelId === CUSTOM_ID;
   const isPreset = !isCustomProvider && !isCustomModel && !!selectedModelId;
@@ -191,6 +322,7 @@ function ModelFormBody({
       }
     }
     resetModelFields();
+    setOpenRouterSearch("");
   };
 
   const handleModelChange = (id: string) => {
@@ -214,7 +346,7 @@ function ModelFormBody({
     setReasoning(preset.reasoning);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!validateAll({ label, api, baseUrl, modelId, apiKey })) return;
@@ -296,8 +428,8 @@ function ModelFormBody({
           </Select>
         </div>
 
-        {/* Model select (only for known providers) */}
-        {selectedProvider && (
+        {/* Model select (only for known providers, except OpenRouter) */}
+        {selectedProvider && !isOpenRouter && (
           <div className="space-y-2">
             <Label htmlFor="mdl-model">{t("models.form.modelId")}</Label>
             <Select value={selectedModelId} onValueChange={handleModelChange}>
@@ -313,6 +445,33 @@ function ModelFormBody({
                 <SelectItem value={CUSTOM_ID}>{t("models.form.custom")}</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {/* OpenRouter model search (combobox) */}
+        {isOpenRouter && (
+          <div className="space-y-2">
+            <Label>{t("models.form.modelId")}</Label>
+            <OpenRouterCombobox
+              value={modelId}
+              search={openRouterSearch}
+              onSearchChange={setOpenRouterSearch}
+              models={openRouterQuery.data ?? []}
+              isLoading={openRouterQuery.isLoading}
+              placeholder={t("models.form.openRouterSearchPlaceholder")}
+              emptyText={t("models.form.openRouterNoResults")}
+              searchingText={t("models.form.openRouterSearching")}
+              onSelect={(m) => {
+                setSelectedModelId(m.id);
+                setModelId(m.id);
+                setLabel(m.name);
+                if (m.contextWindow) setContextWindow(m.contextWindow.toString());
+                if (m.maxTokens) setMaxTokens(m.maxTokens.toString());
+                setInputText(m.input?.includes("text") !== false);
+                setInputImage(m.input?.includes("image") ?? false);
+                setReasoning(m.reasoning ?? false);
+              }}
+            />
           </div>
         )}
 
@@ -339,7 +498,7 @@ function ModelFormBody({
         )}
 
         {/* API Key — visible once a model is chosen */}
-        {!!selectedModelId && (
+        {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
             <Label htmlFor="mdl-apiKey">{t("models.form.apiKey")}</Label>
             <Input
@@ -379,9 +538,11 @@ function ModelFormBody({
                     <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="anthropic-messages">Anthropic</SelectItem>
-                    <SelectItem value="openai-completions">OpenAI / Compatible</SelectItem>
-                    <SelectItem value="google-generative-ai">Google AI</SelectItem>
+                    {API_TYPES.map((apiType) => (
+                      <SelectItem key={apiType.value} value={apiType.value}>
+                        {apiType.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 {errors.api && <div className="text-sm text-destructive">{errors.api}</div>}
@@ -424,68 +585,69 @@ function ModelFormBody({
               />
               {errors.modelId && <div className="text-sm text-destructive">{errors.modelId}</div>}
             </div>
+          </>
+        )}
 
-            <div className="border-t pt-4 mt-2 space-y-4">
-              <Label className="text-sm font-medium text-muted-foreground">
-                {t("models.form.capabilities")}
-              </Label>
-              <div className="space-y-2">
-                <Label>{t("models.form.input")}</Label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={inputText}
-                      onChange={(e) => setInputText(e.target.checked)}
-                    />
-                    {t("models.form.inputText")}
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={inputImage}
-                      onChange={(e) => setInputImage(e.target.checked)}
-                    />
-                    {t("models.form.inputImage")}
-                  </label>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
-                  <Input
-                    id="mdl-ctx"
-                    type="number"
-                    value={contextWindow}
-                    onChange={(e) => setContextWindow(e.target.value)}
-                    placeholder="200000"
+        {/* Capabilities — visible for custom provider/model only (preset + OpenRouter auto-fill from source of truth) */}
+        {isCustom && (
+          <div className="border-t pt-4 mt-2 space-y-4">
+            <Label className="text-sm font-medium text-muted-foreground">
+              {t("models.form.capabilities")}
+            </Label>
+            <div className="space-y-2">
+              <Label>{t("models.form.input")}</Label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={inputText}
+                    onChange={(e) => setInputText(e.target.checked)}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
-                  <Input
-                    id="mdl-maxtok"
-                    type="number"
-                    value={maxTokens}
-                    onChange={(e) => setMaxTokens(e.target.value)}
-                    placeholder="16384"
+                  {t("models.form.inputText")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={inputImage}
+                    onChange={(e) => setInputImage(e.target.checked)}
                   />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="mdl-reasoning"
-                  type="checkbox"
-                  checked={reasoning}
-                  onChange={(e) => setReasoning(e.target.checked)}
-                />
-                <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {t("models.form.capabilitiesHint")}
+                  {t("models.form.inputImage")}
+                </label>
               </div>
             </div>
-          </>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mdl-ctx">{t("models.form.contextWindow")}</Label>
+                <Input
+                  id="mdl-ctx"
+                  type="number"
+                  value={contextWindow}
+                  onChange={(e) => setContextWindow(e.target.value)}
+                  placeholder="200000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mdl-maxtok">{t("models.form.maxTokens")}</Label>
+                <Input
+                  id="mdl-maxtok"
+                  type="number"
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(e.target.value)}
+                  placeholder="16384"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="mdl-reasoning"
+                type="checkbox"
+                checked={reasoning}
+                onChange={(e) => setReasoning(e.target.checked)}
+              />
+              <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
+            </div>
+            <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
+          </div>
         )}
       </form>
     </Modal>

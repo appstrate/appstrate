@@ -121,6 +121,69 @@ export const modelsPaths = {
       },
     },
   },
+  "/api/models/openrouter": {
+    get: {
+      operationId: "searchOpenRouterModels",
+      tags: ["Models"],
+      summary: "Search OpenRouter models",
+      description:
+        "Search available models on OpenRouter. Results include model capabilities (context window, max tokens, input modalities). Rate limited to 10 requests per minute. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "q",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Search query to filter models by name or ID",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Model search results",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  models: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: {
+                          type: "string",
+                          description: "Model ID (e.g. anthropic/claude-3-opus)",
+                        },
+                        name: { type: "string", description: "Human-readable model name" },
+                        contextWindow: {
+                          type: ["integer", "null"],
+                          description: "Context window size",
+                        },
+                        maxTokens: { type: ["integer", "null"], description: "Max output tokens" },
+                        input: {
+                          type: "array",
+                          items: { type: "string" },
+                          description: "Supported input types",
+                        },
+                        reasoning: {
+                          type: "boolean",
+                          description: "Whether model supports reasoning",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "429": { description: "Rate limited" },
+        "502": { description: "OpenRouter API error" },
+        "504": { description: "OpenRouter request timeout" },
+      },
+    },
+  },
   "/api/models/test": {
     post: {
       operationId: "testModelInline",
