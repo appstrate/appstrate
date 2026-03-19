@@ -27,7 +27,7 @@ export async function* runContainerLifecycle(
 
   yield {
     type: "progress",
-    message: `${adapterName} container started`,
+    message: `container started`,
     data: { adapter: adapterName, executionId, workloadId: handle.id, ...extraData },
   };
 
