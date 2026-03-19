@@ -369,11 +369,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
-    {
-      id: "content",
-      label:
-        type === "provider" ? t("providers.configure", { ns: "settings" }) : t("packages.content"),
-    },
+    { id: "content", label: t("packages.content") },
+    ...(type === "provider"
+      ? [
+          {
+            id: "configuration" as DetailTab,
+            label: t("providers.configure", { ns: "settings" }),
+          },
+        ]
+      : []),
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -577,34 +581,48 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {type !== "flow" && tab === "content" && pkgDetail && (
         <div className="rounded-lg border border-border bg-card p-4">
-          {type === "provider" && providerConfig && (
-            <div className="flex items-center gap-2 mb-4 pb-4 border-b border-border">
-              <span className="text-sm text-muted-foreground">
-                {t("providers.credentials", { ns: "settings" })}:
-              </span>
-              {providerConfig.enabled ? (
-                <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
-                  {t("providers.configured", { ns: "settings" })}
+          <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
+            {isHistoricalVersion && versionDetail?.content != null
+              ? versionDetail.content
+              : pkgDetail.content}
+          </pre>
+        </div>
+      )}
+
+      {type === "provider" && tab === "configuration" && pkgDetail && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          {providerConfig && (
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  {t("providers.credentials", { ns: "settings" })}:
                 </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
-                  {t("providers.notConfigured", { ns: "settings" })}
-                </span>
+                {providerConfig.enabled ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
+                    {t("providers.configured", { ns: "settings" })}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
+                    {t("providers.notConfigured", { ns: "settings" })}
+                  </span>
+                )}
+              </div>
+              {isOrgAdmin && (
+                <Button variant="outline" size="sm" onClick={() => setCredentialsOpen(true)}>
+                  <Settings size={14} />
+                  {t("providers.configure", { ns: "settings" })}
+                </Button>
               )}
             </div>
           )}
           <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
-            {type === "provider"
-              ? JSON.stringify(
-                  (isHistoricalVersion && versionDetail?.manifest
-                    ? versionDetail.manifest
-                    : pkgDetail.manifest) ?? {},
-                  null,
-                  2,
-                )
-              : isHistoricalVersion && versionDetail?.content != null
-                ? versionDetail.content
-                : pkgDetail.content}
+            {JSON.stringify(
+              (isHistoricalVersion && versionDetail?.manifest
+                ? versionDetail.manifest
+                : pkgDetail.manifest) ?? {},
+              null,
+              2,
+            )}
           </pre>
         </div>
       )}
