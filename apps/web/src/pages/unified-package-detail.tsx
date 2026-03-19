@@ -582,10 +582,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "provider" && tab === "configuration" && providerConfig && (
         <div className="rounded-lg border border-border bg-card p-4">
           {isOrgAdmin ? (
-            <ProviderCredentialsForm
-              provider={providerConfig}
-              callbackUrl={callbackUrl}
-            />
+            <ProviderCredentialsForm provider={providerConfig} callbackUrl={callbackUrl} />
           ) : (
             <div className="flex items-center gap-2 py-2">
               <span className="text-sm text-muted-foreground">
@@ -690,7 +687,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {/* Flow modals */}
       {type === "flow" && <FlowModals packageId={packageId} />}
-
     </>
   );
 }

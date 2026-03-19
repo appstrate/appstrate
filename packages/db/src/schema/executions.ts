@@ -18,7 +18,7 @@ export const executions = pgTable(
   "executions",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id"),
+    packageId: text("package_id").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),

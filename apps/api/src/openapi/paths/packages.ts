@@ -102,6 +102,129 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/import-github": {
+    post: {
+      operationId: "importPackageFromGithub",
+      tags: ["Packages"],
+      summary: "Import a package from a GitHub URL",
+      description:
+        "Import a package (flow, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. Admin only. Rate-limited to 10 requests/minute.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["url"],
+              properties: {
+                url: {
+                  type: "string",
+                  description:
+                    "GitHub URL pointing to a repository or subdirectory (e.g. https://github.com/owner/repo/tree/main/path)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Package imported",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["packageId", "type"],
+                properties: {
+                  packageId: { type: "string", description: "The imported package ID" },
+                  type: {
+                    type: "string",
+                    description: "Package type (flow/skill/tool/provider)",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description:
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.)",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["error", "message"],
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: [
+                      "VALIDATION_ERROR",
+                      "INVALID_URL",
+                      "NOT_FOUND",
+                      "RATE_LIMITED",
+                      "GITHUB_ERROR",
+                      "REPO_TOO_LARGE",
+                      "EMPTY_PATH",
+                      "TOO_MANY_FILES",
+                      "TOO_LARGE",
+                      "FILE_TOO_LARGE",
+                      "DOWNLOAD_FAILED",
+                    ],
+                  },
+                  message: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "Package has unpublished draft changes that would be overwritten, or version exists with different content",
+          content: {
+            "application/json": {
+              schema: {
+                oneOf: [
+                  {
+                    type: "object",
+                    required: ["error", "message", "details"],
+                    properties: {
+                      error: { type: "string", enum: ["DRAFT_OVERWRITE"] },
+                      message: { type: "string" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          packageId: { type: "string" },
+                          draftVersion: { type: ["string", "null"] },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    type: "object",
+                    required: ["error", "message", "details"],
+                    properties: {
+                      error: { type: "string", enum: ["INTEGRITY_MISMATCH"] },
+                      message: { type: "string" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          packageId: { type: "string" },
+                          version: { type: "string" },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/{version}/download": {
     get: {
       operationId: "downloadPackageVersion",

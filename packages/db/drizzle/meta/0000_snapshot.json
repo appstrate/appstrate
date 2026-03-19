@@ -1,5 +1,5 @@
 {
-  "id": "d8e04ff1-0217-4fa9-97a4-9b072c052aba",
+  "id": "abf50fd3-610c-4220-aae8-95c5c95fb1d1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1746,26 +1746,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "substring(\"packages\".\"id\" from '^(@[^/]+)/')",
-            "type": "stored"
-          }
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "substring(\"packages\".\"id\" from '^@[^/]+/(.+)$')",
-            "type": "stored"
-          }
-        },
         "org_id": {
           "name": "org_id",
           "type": "uuid",
@@ -1861,21 +1841,6 @@
           "columns": [
             {
               "expression": "type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_packages_scope": {
-          "name": "idx_packages_scope",
-          "columns": [
-            {
-              "expression": "scope",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2123,7 +2088,7 @@
           "name": "package_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "user_id": {
           "name": "user_id",
