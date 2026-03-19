@@ -29,7 +29,11 @@ export async function uploadPackageFiles(
   return integrity;
 }
 
+/** Global namespace for system packages in S3 (not org-scoped). */
+export const SYSTEM_STORAGE_NAMESPACE = "_system";
+
 /** Download a package item's full files from Storage. Returns normalized file map or null.
+ *  Tries org-scoped path first, falls back to global _system/ namespace for system packages.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
   type: "flows" | "skills" | "tools" | "providers",
@@ -37,12 +41,16 @@ export async function downloadPackageFiles(
   itemId: string,
   expectedIntegrity?: string | null,
 ): Promise<Record<string, Uint8Array> | null> {
-  const path = `${orgId}/${type}/${itemId}.afps`;
-  const data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, path);
+  // Try org-scoped path first, fall back to global system namespace
+  const orgPath = `${orgId}/${type}/${itemId}.afps`;
+  const systemPath = `${SYSTEM_STORAGE_NAMESPACE}/${type}/${itemId}.afps`;
+
+  let data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, orgPath);
   if (!data) {
-    logger.warn("Failed to download package files", { type, orgId, itemId });
-    return null;
+    data = await storage.downloadFile(PACKAGE_ITEMS_BUCKET, systemPath);
   }
+  if (!data) return null;
+
   const bytes = new Uint8Array(data);
   if (expectedIntegrity) {
     const result = verifyArtifactIntegrity(bytes, expectedIntegrity);

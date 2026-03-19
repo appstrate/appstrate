@@ -1,6 +1,4 @@
 import { logger } from "../lib/logger.ts";
-import { db } from "../lib/db.ts";
-import { providerCredentials } from "@appstrate/db/schema";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
   createOrgItem,
@@ -114,14 +112,6 @@ export async function postInstallPackage(params: {
 
   if (packageType === "flow" && Object.keys(files).length > 0) {
     await uploadPackageFiles("flows", orgId, packageId, files);
-  }
-
-  if (packageType === "provider") {
-    // UPSERT providerCredentials (providerId, orgId) — empty, admin configures later
-    await db
-      .insert(providerCredentials)
-      .values({ providerId: packageId, orgId })
-      .onConflictDoNothing();
   }
 
   await createVersion(manifest);

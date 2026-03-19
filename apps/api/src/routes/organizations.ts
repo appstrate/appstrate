@@ -21,7 +21,6 @@ import {
   cancelInvitation,
   updateInvitationRole,
 } from "../services/invitations.ts";
-import { provisionSystemProvidersForOrg } from "../services/system-providers.ts";
 import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
 
 const router = new Hono<AppEnv>();
@@ -65,8 +64,7 @@ router.post("/", async (c) => {
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
 
-  // Provision system providers for the new org (non-fatal)
-  await provisionSystemProvidersForOrg(org.id).catch(() => {});
+  // System providers are global (orgId: null in packages, no per-org providerCredentials needed)
 
   // Provision default hello-world flow for the new org (non-fatal)
   await provisionDefaultFlowForOrg(org.id, org.slug, user.id).catch(() => {});
