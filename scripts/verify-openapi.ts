@@ -216,6 +216,7 @@ const expectedEndpoints = [
 
   // Packages
   "POST /api/packages/import",
+  "POST /api/packages/import-github",
   "GET /api/packages/{scope}/{name}/{version}/download",
   "POST /api/packages/{scope}/{name}/fork",
 ];

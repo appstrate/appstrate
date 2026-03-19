@@ -190,8 +190,6 @@ CREATE TABLE "package_versions" (
 --> statement-breakpoint
 CREATE TABLE "packages" (
 	"id" text PRIMARY KEY NOT NULL,
-	"scope" text GENERATED ALWAYS AS (substring("packages"."id" from '^(@[^/]+)/')) STORED,
-	"name" text GENERATED ALWAYS AS (substring("packages"."id" from '^@[^/]+/(.+)$')) STORED,
 	"org_id" uuid,
 	"type" "package_type" NOT NULL,
 	"source" "package_source" DEFAULT 'local' NOT NULL,
@@ -221,7 +219,7 @@ CREATE TABLE "execution_logs" (
 --> statement-breakpoint
 CREATE TABLE "executions" (
 	"id" text PRIMARY KEY NOT NULL,
-	"package_id" text,
+	"package_id" text NOT NULL,
 	"user_id" text NOT NULL,
 	"org_id" uuid NOT NULL,
 	"status" "execution_status" DEFAULT 'pending' NOT NULL,
@@ -421,7 +419,6 @@ CREATE UNIQUE INDEX "package_versions_pkg_version_unique" ON "package_versions" 
 CREATE INDEX "idx_package_versions_package_id" ON "package_versions" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_packages_org_id" ON "packages" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_packages_type" ON "packages" USING btree ("type");--> statement-breakpoint
-CREATE INDEX "idx_packages_scope" ON "packages" USING btree ("scope");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_execution_id" ON "execution_logs" USING btree ("execution_id");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_lookup" ON "execution_logs" USING btree ("execution_id","id");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_user_id" ON "execution_logs" USING btree ("user_id");--> statement-breakpoint
