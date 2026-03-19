@@ -64,8 +64,6 @@ router.post("/", async (c) => {
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
 
-  // System providers are global (orgId: null in packages, no per-org providerCredentials needed)
-
   // Provision default hello-world flow for the new org (non-fatal)
   await provisionDefaultFlowForOrg(org.id, org.slug, user.id).catch(() => {});
 
