@@ -64,11 +64,11 @@ const expectedEndpoints = [
   // Connections
   "GET /auth/connections",
   "GET /auth/integrations",
-  "POST /auth/connect/{provider}",
-  "POST /auth/connect/{provider}/api-key",
-  "POST /auth/connect/{provider}/credentials",
+  "POST /auth/connect/{scope}/{name}",
+  "POST /auth/connect/{scope}/{name}/api-key",
+  "POST /auth/connect/{scope}/{name}/credentials",
   "GET /auth/callback",
-  "DELETE /auth/connections/{provider}",
+  "DELETE /auth/connections/{scope}/{name}",
 
   // Providers
   "GET /api/providers",
