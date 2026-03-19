@@ -21,7 +21,7 @@ const createModelSchema = z.object({
   api: z.string().min(1, "api is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   modelId: z.string().min(1, "modelId is required"),
-  apiKey: z.string().min(1, "apiKey is required"),
+  providerKeyId: z.string().min(1, "providerKeyId is required"),
   input: z.array(z.string()).optional(),
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -33,7 +33,7 @@ const updateModelSchema = z.object({
   api: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
   modelId: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
+  providerKeyId: z.string().optional(),
   enabled: z.boolean().optional(),
   input: z.array(z.string()).nullable().optional(),
   contextWindow: z.number().int().positive().nullable().optional(),
@@ -78,9 +78,18 @@ export function createModelsRouter() {
     }
 
     try {
-      const { label, api, baseUrl, modelId, apiKey, input, contextWindow, maxTokens, reasoning } =
-        parsed.data;
-      const id = await createOrgModel(orgId, label, api, baseUrl, modelId, apiKey, user.id, {
+      const {
+        label,
+        api,
+        baseUrl,
+        modelId,
+        providerKeyId,
+        input,
+        contextWindow,
+        maxTokens,
+        reasoning,
+      } = parsed.data;
+      const id = await createOrgModel(orgId, label, api, baseUrl, modelId, user.id, providerKeyId, {
         input,
         contextWindow,
         maxTokens,

@@ -40,17 +40,20 @@ export const modelsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["label", "api", "baseUrl", "modelId", "apiKey"],
+              required: ["label", "api", "baseUrl", "modelId", "providerKeyId"],
               properties: {
                 label: { type: "string", description: "Display name for the model" },
                 api: {
                   type: "string",
                   description:
-                    "API type (openai-completions, anthropic-messages, google-generative-ai)",
+                    "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
                 },
                 baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
                 modelId: { type: "string", description: "Model identifier (e.g. gpt-4o)" },
-                apiKey: { type: "string", description: "API key for authentication" },
+                providerKeyId: {
+                  type: "string",
+                  description: "Provider key ID for API key credentials",
+                },
                 input: {
                   type: "array",
                   items: { type: "string" },
@@ -249,11 +252,14 @@ export const modelsPaths = {
                 api: { type: "string" },
                 baseUrl: { type: "string", format: "uri" },
                 modelId: { type: "string" },
-                apiKey: { type: "string" },
+                providerKeyId: {
+                  type: "string",
+                  description: "Provider key ID to change which key is used",
+                },
                 enabled: { type: "boolean" },
-                input: { type: "array", items: { type: "string" } },
-                contextWindow: { type: "integer" },
-                maxTokens: { type: "integer" },
+                input: { type: ["array", "null"], items: { type: "string" } },
+                contextWindow: { type: ["integer", "null"] },
+                maxTokens: { type: ["integer", "null"] },
                 reasoning: { type: "boolean" },
               },
             },

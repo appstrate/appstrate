@@ -34,9 +34,17 @@ import {
   useSetDefaultModel,
   useTestModel,
 } from "../hooks/use-models";
+import {
+  useProviderKeys,
+  useCreateProviderKey,
+  useUpdateProviderKey,
+  useDeleteProviderKey,
+  useTestProviderKey,
+} from "../hooks/use-provider-keys";
 import { useConnectionTest } from "../hooks/use-connection-test";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ModelFormModal } from "../components/model-form-modal";
+import { ProviderKeyFormModal } from "../components/provider-key-form-modal";
 import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
@@ -51,6 +59,7 @@ import type {
   ApiKeyInfo,
   OrgProxyInfo,
   OrgModelInfo,
+  OrgProviderKeyInfo,
   TestResult,
 } from "@appstrate/shared-types";
 
@@ -88,6 +97,14 @@ export function OrgSettingsPage() {
   const updateModelMutation = useUpdateModel();
   const deleteModelMutation = useDeleteModel();
   const setDefaultModelMutation = useSetDefaultModel();
+
+  // Provider Keys
+  const [pkModalOpen, setPkModalOpen] = useState(false);
+  const [editPk, setEditPk] = useState<OrgProviderKeyInfo | null>(null);
+  const { data: providerKeys, isLoading: pkLoading, error: pkError } = useProviderKeys();
+  const createPkMutation = useCreateProviderKey();
+  const updatePkMutation = useUpdateProviderKey();
+  const deletePkMutation = useDeleteProviderKey();
 
   // API Keys
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
@@ -247,14 +264,14 @@ export function OrgSettingsPage() {
 
   // --- Handlers ---
 
-  const handleSaveName = (e: React.FormEvent) => {
+  const handleSaveName = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const trimmed = newName.trim();
     if (!trimmed) return;
     updateNameMutation.mutate(trimmed);
   };
 
-  const handleInvite = (e: React.FormEvent) => {
+  const handleInvite = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setInviteError(null);
     const trimmed = inviteEmail.trim();
@@ -536,25 +553,44 @@ export function OrgSettingsPage() {
       )}
 
       {tab === "models" && (
-        <ModelsTab
-          models={models}
-          isLoading={modelsLoading}
-          error={modelsError}
-          onCreate={() => {
-            setEditModel(null);
-            setModelModalOpen(true);
-          }}
-          onEdit={(m) => {
-            setEditModel(m);
-            setModelModalOpen(true);
-          }}
-          onDelete={(m) => {
-            if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
-            deleteModelMutation.mutate(m.id);
-          }}
-          onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
-          onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
-        />
+        <>
+          <ProviderKeysSection
+            providerKeys={providerKeys}
+            isLoading={pkLoading}
+            error={pkError}
+            onCreate={() => {
+              setEditPk(null);
+              setPkModalOpen(true);
+            }}
+            onEdit={(pk) => {
+              setEditPk(pk);
+              setPkModalOpen(true);
+            }}
+            onDelete={(pk) => {
+              if (!confirm(t("providerKeys.deleteConfirm", { label: pk.label }))) return;
+              deletePkMutation.mutate(pk.id);
+            }}
+          />
+          <ModelsTab
+            models={models}
+            isLoading={modelsLoading}
+            error={modelsError}
+            onCreate={() => {
+              setEditModel(null);
+              setModelModalOpen(true);
+            }}
+            onEdit={(m) => {
+              setEditModel(m);
+              setModelModalOpen(true);
+            }}
+            onDelete={(m) => {
+              if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
+              deleteModelMutation.mutate(m.id);
+            }}
+            onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
+            onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
+          />
+        </>
       )}
 
       {tab === "proxies" && (
@@ -624,6 +660,28 @@ export function OrgSettingsPage() {
             );
           } else {
             createModelMutation.mutate(data, { onSuccess: () => setModelModalOpen(false) });
+          }
+        }}
+      />
+
+      <ProviderKeyFormModal
+        open={pkModalOpen}
+        onClose={() => setPkModalOpen(false)}
+        providerKey={editPk}
+        isPending={createPkMutation.isPending || updatePkMutation.isPending}
+        onSubmit={(data) => {
+          if (editPk) {
+            updatePkMutation.mutate(
+              { id: editPk.id, data },
+              { onSuccess: () => setPkModalOpen(false) },
+            );
+          } else {
+            createPkMutation.mutate(
+              data as { label: string; api: string; baseUrl: string; apiKey: string },
+              {
+                onSuccess: () => setPkModalOpen(false),
+              },
+            );
           }
         }}
       />
@@ -760,6 +818,104 @@ function ProxiesTab({
         </EmptyState>
       )}
     </>
+  );
+}
+
+function ProviderKeysSection({
+  providerKeys,
+  isLoading,
+  error,
+  onCreate,
+  onEdit,
+  onDelete,
+}: {
+  providerKeys: OrgProviderKeyInfo[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  onCreate: () => void;
+  onEdit: (pk: OrgProviderKeyInfo) => void;
+  onDelete: (pk: OrgProviderKeyInfo) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const testMutation = useTestProviderKey();
+  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+
+  return (
+    <div className="mb-8">
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("providerKeys.title")}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <p className="text-sm text-muted-foreground">{t("providerKeys.description")}</p>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
+      </div>
+
+      {providerKeys && providerKeys.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {providerKeys.map((pk) => {
+            const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
+            const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
+            return (
+              <div key={pk.id} className="rounded-lg border border-border bg-card p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  {ProviderIcon && <ProviderIcon className="size-5" />}
+                  <div className="flex-1">
+                    <h3 className="text-[0.95rem] font-semibold">{pk.label}</h3>
+                    <span className="text-sm text-muted-foreground">{pk.api}</span>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleTest(pk.id)}
+                    disabled={testingId === pk.id}
+                  >
+                    {testingId === pk.id ? <Spinner /> : t("providerKeys.test")}
+                  </Button>
+                  {testResults[pk.id] && (
+                    <TestResultSpan
+                      result={testResults[pk.id]!}
+                      successKey="providerKeys.testSuccess"
+                      failedKey="providerKeys.testFailed"
+                    />
+                  )}
+                  {pk.source === "custom" && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => onEdit(pk)}>
+                        {t("providerKeys.edit")}
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => onDelete(pk)}>
+                        {t("providerKeys.delete")}
+                      </Button>
+                    </>
+                  )}
+                  {pk.source === "built-in" && (
+                    <span className="text-xs text-muted-foreground">{t("models.builtIn")}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          message={t("providerKeys.empty")}
+          hint={t("providerKeys.emptyHint")}
+          icon={KeyRound}
+          compact
+        >
+          <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
+        </EmptyState>
+      )}
+    </div>
   );
 }
 

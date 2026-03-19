@@ -24,8 +24,9 @@ import {
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { useFormErrors } from "../hooks/use-form-errors";
-import { useTestModelInline, useOpenRouterModels, type OpenRouterModel } from "../hooks/use-models";
-import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import { useOpenRouterModels, type OpenRouterModel } from "../hooks/use-models";
+import { useProviderKeys } from "../hooks/use-provider-keys";
+import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   CUSTOM_ID,
   PROVIDER_PRESETS,
@@ -41,7 +42,7 @@ interface ModelFormData {
   api: string;
   baseUrl: string;
   modelId: string;
-  apiKey: string;
+  providerKeyId: string;
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -201,12 +202,22 @@ function ModelFormBody({
   const [api, setApi] = useState(model?.api ?? "");
   const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "");
   const [modelId, setModelId] = useState(model?.modelId ?? "");
-  const [apiKey, setApiKey] = useState("");
   const [inputText, setInputText] = useState(model?.input?.includes("text") !== false);
   const [inputImage, setInputImage] = useState(model?.input?.includes("image") ?? false);
   const [contextWindow, setContextWindow] = useState(model?.contextWindow?.toString() ?? "");
   const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
   const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
+
+  const [providerKeyId, setProviderKeyId] = useState(model?.providerKeyId ?? "");
+  const providerKeysQuery = useProviderKeys();
+
+  const availableProviderKeys = useMemo(() => {
+    if (!providerKeysQuery.data || !api || !baseUrl) return [];
+    const normalizedBase = baseUrl.replace(/\/+$/, "");
+    return providerKeysQuery.data.filter(
+      (k) => k.api === api && k.baseUrl.replace(/\/+$/, "") === normalizedBase,
+    );
+  }, [providerKeysQuery.data, api, baseUrl]);
 
   const [openRouterSearch, setOpenRouterSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -255,8 +266,9 @@ function ModelFormBody({
         if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
-      apiKey: (v: string) => {
-        if (!model && !v.trim()) return t("validation.required", { ns: "common" });
+      providerKeyId: (v: string) => {
+        if (model) return undefined; // optional when editing
+        if (!v.trim()) return t("validation.required", { ns: "common" });
         return undefined;
       },
     }),
@@ -264,36 +276,6 @@ function ModelFormBody({
   );
 
   const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
-
-  // --- Inline test ---
-  const testMutation = useTestModelInline();
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-
-  const canTest =
-    !!api.trim() && !!baseUrl.trim() && !!modelId.trim() && (!!apiKey.trim() || !!model);
-
-  const handleTest = () => {
-    setTestResult(null);
-    testMutation.mutate(
-      {
-        api: api.trim(),
-        baseUrl: baseUrl.trim(),
-        modelId: modelId.trim(),
-        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...(model ? { existingModelId: model.id } : {}),
-      },
-      {
-        onSuccess: (result) => setTestResult(result),
-        onError: () =>
-          setTestResult({
-            ok: false,
-            latency: 0,
-            error: "NETWORK_ERROR",
-            message: "Request failed",
-          }),
-      },
-    );
-  };
 
   const resetModelFields = () => {
     setLabel("");
@@ -349,7 +331,7 @@ function ModelFormBody({
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!validateAll({ label, api, baseUrl, modelId, apiKey })) return;
+    if (!validateAll({ label, api, baseUrl, modelId, providerKeyId })) return;
 
     const inputArr = [inputText && "text", inputImage && "image"].filter(Boolean) as string[];
     const cw = contextWindow.trim() ? parseInt(contextWindow.trim(), 10) : undefined;
@@ -360,12 +342,12 @@ function ModelFormBody({
       api: api.trim(),
       baseUrl: baseUrl.trim(),
       modelId: modelId.trim(),
-      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      providerKeyId,
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
       ...(reasoning ? { reasoning: true } : {}),
-    } as ModelFormData);
+    });
   };
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
@@ -377,23 +359,6 @@ function ModelFormBody({
       title={title}
       actions={
         <>
-          <div className="flex items-center gap-2 mr-auto">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleTest}
-              disabled={!canTest || testMutation.isPending}
-            >
-              {testMutation.isPending ? <Spinner /> : t("models.test")}
-            </Button>
-            {testResult && (
-              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
-                {testResult.ok
-                  ? t("models.testSuccess", { latency: testResult.latency })
-                  : t("models.testFailed", { message: testResult.message })}
-              </span>
-            )}
-          </div>
           <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
@@ -497,27 +462,25 @@ function ModelFormBody({
           </div>
         )}
 
-        {/* API Key — visible once a model is chosen */}
+        {/* Provider key selector — visible once a model is chosen */}
         {(!!selectedModelId || (isOpenRouter && !!modelId)) && (
           <div className="space-y-2">
-            <Label htmlFor="mdl-apiKey">{t("models.form.apiKey")}</Label>
-            <Input
-              id="mdl-apiKey"
-              type="password"
-              value={apiKey}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                clearField("apiKey");
-              }}
-              onBlur={() => onBlur("apiKey", apiKey)}
-              placeholder="sk-..."
-              aria-invalid={errors.apiKey ? true : undefined}
-              className={cn(errors.apiKey && "border-destructive")}
-            />
-            {model && (
-              <div className="text-sm text-muted-foreground">{t("models.form.apiKeyHint")}</div>
+            <Label htmlFor="mdl-pk">{t("models.form.selectProviderKey")}</Label>
+            <Select value={providerKeyId} onValueChange={setProviderKeyId}>
+              <SelectTrigger id="mdl-pk">
+                <SelectValue placeholder={t("models.form.selectProviderKey")} />
+              </SelectTrigger>
+              <SelectContent>
+                {availableProviderKeys.map((k) => (
+                  <SelectItem key={k.id} value={k.id}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {availableProviderKeys.length === 0 && (
+              <div className="text-sm text-muted-foreground">{t("models.form.noProviderKeys")}</div>
             )}
-            {errors.apiKey && <div className="text-sm text-destructive">{errors.apiKey}</div>}
           </div>
         )}
 

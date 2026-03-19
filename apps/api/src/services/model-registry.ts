@@ -1,6 +1,16 @@
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 
+// --- Types ---
+
+export interface SystemProviderKeyDefinition {
+  id: string;
+  label: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 export interface ModelDefinition {
   id: string;
   label: string;
@@ -8,6 +18,7 @@ export interface ModelDefinition {
   baseUrl: string;
   modelId: string;
   apiKey: string;
+  providerKeyId: string;
   input?: string[] | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
@@ -16,45 +27,129 @@ export interface ModelDefinition {
   enabled?: boolean;
 }
 
+// --- State ---
+
+let systemProviderKeys: Map<string, SystemProviderKeyDefinition> | null = null;
 let systemModels: Map<string, ModelDefinition> | null = null;
 
-function isValidModel(m: ModelDefinition): boolean {
-  return !!(m.id && m.label && m.api && m.baseUrl && m.modelId && m.apiKey);
+// --- Parsing ---
+
+interface RawProviderKey {
+  id: string;
+  label: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+  models?: RawModel[];
 }
 
-function parseEnvModels(): ModelDefinition[] {
-  const raw = getEnv().SYSTEM_MODELS;
-  return raw as ModelDefinition[];
+interface RawModel {
+  id?: string;
+  modelId: string;
+  label: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+  isDefault?: boolean;
+  enabled?: boolean;
+}
+
+function isValidProviderKey(pk: RawProviderKey): boolean {
+  return !!(pk.id && pk.label && pk.api && pk.baseUrl && pk.apiKey);
 }
 
 /**
- * Initialize system models from the SYSTEM_MODELS env var.
+ * Initialize system provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
  * Call once at boot before any model lookups.
+ *
+ * Format:
+ * ```json
+ * [{
+ *   "id": "anthropic-prod",
+ *   "label": "Anthropic",
+ *   "api": "anthropic-messages",
+ *   "baseUrl": "https://api.anthropic.com",
+ *   "apiKey": "sk-ant-...",
+ *   "models": [
+ *     { "modelId": "claude-opus-4-6", "label": "Claude Opus 4.6", "isDefault": true }
+ *   ]
+ * }]
+ * ```
  */
-export function initSystemModels(): void {
-  const map = new Map<string, ModelDefinition>();
-  const models = parseEnvModels();
+export function initSystemProviderKeys(): void {
+  const pkMap = new Map<string, SystemProviderKeyDefinition>();
+  const mdlMap = new Map<string, ModelDefinition>();
 
-  for (const m of models) {
-    if (!isValidModel(m)) {
+  const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawProviderKey[];
+
+  for (const pk of raw) {
+    if (!isValidProviderKey(pk)) {
       logger.error(
-        "[model-registry] SYSTEM_MODELS: skipping invalid entry (missing id/label/api/baseUrl/modelId/apiKey)",
-        {
-          model: { ...m, apiKey: m.apiKey ? "***" : undefined },
-        },
+        "[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry (missing id/label/api/baseUrl/apiKey)",
+        { providerKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined } },
       );
       continue;
     }
-    map.set(m.id, m);
+
+    pkMap.set(pk.id, {
+      id: pk.id,
+      label: pk.label,
+      api: pk.api,
+      baseUrl: pk.baseUrl,
+      apiKey: pk.apiKey,
+    });
+
+    // Parse models under this provider key
+    if (Array.isArray(pk.models)) {
+      for (const m of pk.models) {
+        if (!m.modelId || !m.label) {
+          logger.error(
+            "[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model (missing modelId/label)",
+            { providerKeyId: pk.id, model: m },
+          );
+          continue;
+        }
+
+        const modelId = m.id ?? `${pk.id}:${m.modelId}`;
+        mdlMap.set(modelId, {
+          id: modelId,
+          label: m.label,
+          api: pk.api,
+          baseUrl: pk.baseUrl,
+          modelId: m.modelId,
+          apiKey: pk.apiKey,
+          providerKeyId: pk.id,
+          input: m.input ?? null,
+          contextWindow: m.contextWindow ?? null,
+          maxTokens: m.maxTokens ?? null,
+          reasoning: m.reasoning ?? null,
+          isDefault: m.isDefault,
+          enabled: m.enabled,
+        });
+      }
+    }
   }
 
-  systemModels = map;
+  systemProviderKeys = pkMap;
+  systemModels = mdlMap;
+}
+
+// --- Accessors ---
+
+export function getSystemProviderKeys(): ReadonlyMap<string, SystemProviderKeyDefinition> {
+  if (!systemProviderKeys) {
+    throw new Error(
+      "[model-registry] System provider keys not initialized. Call initSystemProviderKeys() at boot.",
+    );
+  }
+  return systemProviderKeys;
 }
 
 export function getSystemModels(): ReadonlyMap<string, ModelDefinition> {
   if (!systemModels) {
     throw new Error(
-      "[model-registry] System models not initialized. Call initSystemModels() at boot.",
+      "[model-registry] System models not initialized. Call initSystemProviderKeys() at boot.",
     );
   }
   return systemModels;
@@ -62,4 +157,8 @@ export function getSystemModels(): ReadonlyMap<string, ModelDefinition> {
 
 export function isSystemModel(modelId: string): boolean {
   return systemModels?.has(modelId) ?? false;
+}
+
+export function isSystemProviderKey(keyId: string): boolean {
+  return systemProviderKeys?.has(keyId) ?? false;
 }

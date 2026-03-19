@@ -203,7 +203,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`.
 
 ## Database
 
@@ -222,7 +222,7 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
 | `SYSTEM_PROXIES`            | No       | `"[]"`                                        | JSON array of system proxy definitions                                                                     |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy URL injected into sidecar containers                                                   |
-| `SYSTEM_MODELS`             | No       | `"[]"`                                        | JSON array of system LLM model definitions (same pattern as `SYSTEM_PROXIES`)                              |
+| `SYSTEM_PROVIDER_KEYS`      | No       | `"[]"`                                        | JSON array of system provider keys with nested models (credentials + model list per provider)              |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug`\|`info`\|`warn`\|`error`                                                                           |
 | `PORT`                      | No       | `3000`                                        | Server port                                                                                                |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                             |

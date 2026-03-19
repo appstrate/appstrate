@@ -271,6 +271,19 @@ export interface OrgModelInfo {
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
+  providerKeyId: string;
+  providerKeyLabel: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrgProviderKeyInfo {
+  id: string;
+  label: string;
+  api: string;
+  baseUrl: string;
+  source: "built-in" | "custom";
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;

@@ -93,6 +93,7 @@ The API is organized into 23 route domains with 158 documented endpoints:
 | **Connections**         | OAuth2/API key service connections                        |
 | **Connection Profiles** | Shared connection sets across flows                       |
 | **Providers**           | Provider package configuration (OAuth2, API key, custom)  |
+| **Provider Keys**       | Org-level LLM provider API key management                |
 | **Proxies**             | Org-level and flow-level HTTP proxy config                |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                      |
 | **Packages**            | Organization skills/extensions CRUD, import, publish      |
@@ -148,7 +149,7 @@ Key variables (see `.env.example` for full list):
 | `PORT`                      | No       | `3000`                                        | Server port                                           |
 | `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Docker socket path                                    |
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches host (fallback: `host.docker.internal:{PORT}`) |
-| `SYSTEM_MODELS`             | No       | `[]`                                          | JSON array of system LLM model definitions            |
+| `SYSTEM_PROVIDER_KEYS`      | No       | `[]`                                          | JSON array of system provider keys with nested models |
 | `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers            |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                |

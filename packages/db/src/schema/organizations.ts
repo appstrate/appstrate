@@ -119,6 +119,24 @@ export const orgProxies = pgTable(
   ],
 );
 
+export const orgProviderKeys = pgTable(
+  "org_provider_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    api: text("api").notNull(),
+    baseUrl: text("base_url").notNull(),
+    apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (t) => [index("idx_org_provider_keys_org_id").on(t.orgId)],
+);
+
 export const orgModels = pgTable(
   "org_models",
   {
@@ -130,7 +148,11 @@ export const orgModels = pgTable(
     api: text("api").notNull(),
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
-    apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    providerKeyId: uuid("provider_key_id")
+      .notNull()
+      .references(() => orgProviderKeys.id, {
+        onDelete: "cascade",
+      }),
     input: jsonb("input"), // ["text", "image"] | null
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null

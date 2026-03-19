@@ -1,12 +1,12 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
-import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { getPackageConfig } from "./state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
 
 // --- List (system + DB) ---
 
@@ -36,6 +36,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in",
+      providerKeyId: def.providerKeyId,
+      providerKeyLabel: null,
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -58,6 +60,8 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       enabled: row.enabled,
       isDefault: row.isDefault,
       source: row.source as "built-in" | "custom",
+      providerKeyId: row.providerKeyId,
+      providerKeyLabel: null,
       createdBy: row.createdBy,
       createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
       updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),
@@ -75,8 +79,8 @@ export async function createOrgModel(
   api: string,
   baseUrl: string,
   modelId: string,
-  apiKey: string,
   userId: string,
+  providerKeyId: string,
   capabilities?: {
     input?: string[];
     contextWindow?: number;
@@ -84,8 +88,6 @@ export async function createOrgModel(
     reasoning?: boolean;
   },
 ): Promise<string> {
-  const apiKeyEncrypted = encrypt(apiKey);
-
   // If this is the first model for the org, set it as default
   const existing = await db
     .select({ id: orgModels.id })
@@ -102,7 +104,7 @@ export async function createOrgModel(
       api,
       baseUrl,
       modelId,
-      apiKeyEncrypted,
+      providerKeyId,
       input: capabilities?.input ?? null,
       contextWindow: capabilities?.contextWindow ?? null,
       maxTokens: capabilities?.maxTokens ?? null,
@@ -123,12 +125,12 @@ export async function updateOrgModel(
     api?: string;
     baseUrl?: string;
     modelId?: string;
-    apiKey?: string;
     enabled?: boolean;
     input?: string[] | null;
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
+    providerKeyId?: string;
   },
 ): Promise<void> {
   if (isSystemModel(modelDbId)) {
@@ -140,7 +142,7 @@ export async function updateOrgModel(
   if (data.api !== undefined) updates.api = data.api;
   if (data.baseUrl !== undefined) updates.baseUrl = data.baseUrl;
   if (data.modelId !== undefined) updates.modelId = data.modelId;
-  if (data.apiKey !== undefined) updates.apiKeyEncrypted = encrypt(data.apiKey);
+  if (data.providerKeyId !== undefined) updates.providerKeyId = data.providerKeyId;
   if (data.enabled !== undefined) updates.enabled = data.enabled;
   if (data.input !== undefined) updates.input = data.input;
   if (data.contextWindow !== undefined) updates.contextWindow = data.contextWindow;
@@ -235,20 +237,19 @@ export async function resolveModel(
     .limit(1);
 
   if (dbDefault) {
-    try {
+    const creds = await loadProviderKeyCredentials(orgId, dbDefault.providerKeyId);
+    if (creds) {
       return {
         api: dbDefault.api,
         baseUrl: dbDefault.baseUrl,
         modelId: dbDefault.modelId,
-        apiKey: decrypt(dbDefault.apiKeyEncrypted),
+        apiKey: creds.apiKey,
         label: dbDefault.label,
         input: dbDefault.input as string[] | null,
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
       };
-    } catch {
-      logger.warn("Failed to decrypt default model API key", { modelId: dbDefault.id });
     }
   }
 
@@ -278,7 +279,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
       api: orgModels.api,
       baseUrl: orgModels.baseUrl,
       modelId: orgModels.modelId,
-      apiKeyEncrypted: orgModels.apiKeyEncrypted,
+      providerKeyId: orgModels.providerKeyId,
       enabled: orgModels.enabled,
       label: orgModels.label,
       input: orgModels.input,
@@ -292,22 +293,20 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   if (!row || !row.enabled) return null;
 
-  try {
-    return {
-      api: row.api,
-      baseUrl: row.baseUrl,
-      modelId: row.modelId,
-      apiKey: decrypt(row.apiKeyEncrypted),
-      label: row.label,
-      input: row.input as string[] | null,
-      contextWindow: row.contextWindow,
-      maxTokens: row.maxTokens,
-      reasoning: row.reasoning,
-    };
-  } catch {
-    logger.warn("Failed to decrypt model API key", { modelId: modelDbId });
-    return null;
-  }
+  const creds = await loadProviderKeyCredentials(orgId, row.providerKeyId);
+  if (!creds) return null;
+
+  return {
+    api: row.api,
+    baseUrl: row.baseUrl,
+    modelId: row.modelId,
+    apiKey: creds.apiKey,
+    label: row.label,
+    input: row.input as string[] | null,
+    contextWindow: row.contextWindow,
+    maxTokens: row.maxTokens,
+    reasoning: row.reasoning,
+  };
 }
 
 // --- Connection test ---
