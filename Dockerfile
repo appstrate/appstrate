@@ -11,7 +11,6 @@ COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
 COPY packages/env/package.json packages/env/
-COPY packages/registry-client/package.json packages/registry-client/
 
 RUN bun install --frozen-lockfile
 
@@ -28,7 +27,6 @@ COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modu
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
-COPY --from=deps /app/packages/registry-client/node_modules ./packages/registry-client/node_modules
 
 COPY . .
 
@@ -46,7 +44,6 @@ COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modu
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
-COPY --from=deps /app/packages/registry-client/node_modules ./packages/registry-client/node_modules
 
 # API source (Bun runs TypeScript directly)
 COPY --from=build /app/apps/api/src ./apps/api/src
@@ -68,10 +65,6 @@ COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 # Env package (Zod-validated env vars — used by API, DB, connect at runtime)
 COPY --from=build /app/packages/env/src ./packages/env/src
 COPY --from=build /app/packages/env/package.json ./packages/env/
-
-# Registry client (HTTP client for Appstrate registry)
-COPY --from=build /app/packages/registry-client/src ./packages/registry-client/src
-COPY --from=build /app/packages/registry-client/package.json ./packages/registry-client/
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
