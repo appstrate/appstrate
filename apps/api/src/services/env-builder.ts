@@ -188,6 +188,7 @@ export async function buildExecutionContext(params: {
     contextWindow: modelResult.contextWindow,
     maxTokens: modelResult.maxTokens,
     reasoning: modelResult.reasoning,
+    cost: modelResult.cost,
   };
 
   const promptContext = buildPromptContext({

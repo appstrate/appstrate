@@ -181,7 +181,9 @@ const model: Model<Api> = {
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
   input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) : ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  cost: process.env.MODEL_COST
+    ? JSON.parse(process.env.MODEL_COST)
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: process.env.MODEL_CONTEXT_WINDOW ? parseInt(process.env.MODEL_CONTEXT_WINDOW) : 128000,
   maxTokens: process.env.MODEL_MAX_TOKENS ? parseInt(process.env.MODEL_MAX_TOKENS) : 16384,
 };

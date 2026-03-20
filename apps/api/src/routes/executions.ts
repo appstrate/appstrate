@@ -66,6 +66,7 @@ export async function executeFlowInBackground(
     let result: Record<string, unknown> | null = null;
     let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+    let accumulatedCost = 0;
 
     try {
       for await (const msg of adapter.execute(
@@ -77,6 +78,7 @@ export async function executeFlowInBackground(
         inputFiles,
       )) {
         if (msg.usage) accumulateUsage(accumulated, msg.usage);
+        if (msg.cost != null) accumulatedCost += msg.cost;
         if (msg.type === "progress") {
           await appendExecutionLog(
             executionId,
@@ -195,6 +197,7 @@ export async function executeFlowInBackground(
               Math.min(60, Math.floor(remaining / 1000)),
             )) {
               if (msg.usage) accumulateUsage(accumulated, msg.usage);
+              if (msg.cost != null) accumulatedCost += msg.cost;
               if (msg.type === "progress") {
                 await appendExecutionLog(
                   executionId,
@@ -276,6 +279,7 @@ export async function executeFlowInBackground(
               tokenUsage: { ...accumulated } as Record<string, unknown>,
             }
           : {}),
+        cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
       await appendExecutionLog(
