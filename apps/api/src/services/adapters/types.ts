@@ -1,3 +1,11 @@
+/** Per-model pricing in $/M tokens (margin included). */
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
@@ -10,6 +18,7 @@ export interface ExecutionMessage {
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;
+  cost?: number;
   level?: "debug" | "info" | "warn" | "error";
 }
 
@@ -73,6 +82,7 @@ export interface PromptContext {
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
+    cost?: ModelCost | null;
   };
   proxyUrl?: string | null;
   timeout?: number;

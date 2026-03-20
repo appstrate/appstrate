@@ -73,6 +73,9 @@ export class PiAdapter implements ExecutionAdapter {
       if (llmConfig.maxTokens != null) containerEnv.MODEL_MAX_TOKENS = String(llmConfig.maxTokens);
       if (llmConfig.reasoning != null)
         containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
+      if (llmConfig.cost) {
+        containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
+      }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
       // The execution network is internal (no NAT) — clients that ignore
@@ -221,7 +224,8 @@ async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<Exec
   if (remaining) yield remaining;
 }
 
-function parsePiStreamLine(line: string): ExecutionMessage | null {
+/** @internal Exported for testing */
+export function parsePiStreamLine(line: string): ExecutionMessage | null {
   try {
     const obj = JSON.parse(line);
 
@@ -258,6 +262,7 @@ function parsePiStreamLine(line: string): ExecutionMessage | null {
             cache_creation_input_tokens: t.cacheWrite ?? 0,
             cache_read_input_tokens: t.cacheRead ?? 0,
           },
+          cost: typeof obj.cost === "number" ? obj.cost : undefined,
         };
       }
 

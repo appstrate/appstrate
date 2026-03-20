@@ -45,6 +45,7 @@ export async function updateExecution(
     duration?: number;
     tokenUsage?: Record<string, unknown>;
     notifiedAt?: string;
+    cost?: number | null;
   },
 ): Promise<void> {
   const set: Record<string, unknown> = {};
@@ -58,6 +59,7 @@ export async function updateExecution(
   if (updates.state !== undefined) set.state = updates.state;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
+  if (updates.cost !== undefined) set.cost = updates.cost;
 
   try {
     await db.update(executions).set(set).where(eq(executions.id, id));

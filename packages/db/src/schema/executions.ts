@@ -8,6 +8,7 @@ import {
   serial,
   uuid,
   index,
+  doublePrecision,
 } from "drizzle-orm/pg-core";
 import { executionStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
@@ -42,6 +43,7 @@ export const executions = pgTable(
     readAt: timestamp("read_at"),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
+    cost: doublePrecision("cost"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),

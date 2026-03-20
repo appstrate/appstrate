@@ -1,5 +1,6 @@
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import type { ModelCost } from "./adapters/types.ts";
 
 // --- Types ---
 
@@ -23,6 +24,7 @@ export interface ModelDefinition {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
+  cost?: ModelCost | null;
   isDefault?: boolean;
   enabled?: boolean;
 }
@@ -51,6 +53,7 @@ interface RawModel {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
+  cost?: ModelCost;
   isDefault?: boolean;
   enabled?: boolean;
 }
@@ -124,6 +127,7 @@ export function initSystemProviderKeys(): void {
           contextWindow: m.contextWindow ?? null,
           maxTokens: m.maxTokens ?? null,
           reasoning: m.reasoning ?? null,
+          cost: m.cost ?? null,
           isDefault: m.isDefault,
           enabled: m.enabled,
         });

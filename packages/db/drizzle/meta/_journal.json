@@ -15,6 +15,13 @@
       "when": 1773954732378,
       "tag": "0001_bumpy_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774016206812,
+      "tag": "0002_unknown_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

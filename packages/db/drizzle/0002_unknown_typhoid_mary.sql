@@ -1,0 +1,1 @@
+ALTER TABLE "executions" ADD COLUMN "cost" double precision;

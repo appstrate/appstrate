@@ -223,6 +223,32 @@ describe("model-registry", () => {
     });
   });
 
+  describe("cost tracking", () => {
+    test("parses cost from model definition", () => {
+      const cost = { input: 4.5, output: 22.5, cacheRead: 0.45, cacheWrite: 5.625 };
+      mockEnvValue = [
+        {
+          ...VALID_PROVIDER_KEY,
+          models: [{ modelId: "claude-sonnet", label: "Sonnet", cost }],
+        },
+      ];
+      initSystemProviderKeys();
+
+      const model = getSystemModels().get("anthropic-prod:claude-sonnet");
+      expect(model).toBeDefined();
+      expect(model!.cost).toEqual(cost);
+    });
+
+    test("cost defaults to null when not provided", () => {
+      mockEnvValue = [VALID_PROVIDER_KEY];
+      initSystemProviderKeys();
+
+      const model = getSystemModels().get("anthropic-prod:claude-opus-4-6");
+      expect(model).toBeDefined();
+      expect(model!.cost).toBeNull();
+    });
+  });
+
   describe("getSystemModels/getSystemProviderKeys before init", () => {
     test("throws if not initialized", () => {
       // Re-import fresh module to test uninitialized state — but since we use

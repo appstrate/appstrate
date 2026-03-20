@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
+import type { ModelCost } from "./adapters/types.ts";
 import { getPackageConfig } from "./state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
@@ -192,6 +193,7 @@ interface ResolvedModel {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
+  cost?: ModelCost | null;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -205,6 +207,7 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     contextWindow: def.contextWindow ?? null,
     maxTokens: def.maxTokens ?? null,
     reasoning: def.reasoning ?? null,
+    cost: def.cost ?? null,
   };
 }
 
@@ -249,6 +252,7 @@ export async function resolveModel(
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
+        cost: null, // DB models (OSS custom) don't have cost tracking
       };
     }
   }
@@ -306,6 +310,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
+    cost: null, // DB models (OSS custom) don't have cost tracking
   };
 }
 
