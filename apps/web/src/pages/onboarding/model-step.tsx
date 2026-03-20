@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useCreateModel } from "../../hooks/use-models";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { BrainCircuit } from "lucide-react";
@@ -15,6 +16,14 @@ export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
+  const { features } = useAppConfig();
+
+  // Skip this step in cloud mode (models are managed by the platform)
+  useEffect(() => {
+    if (!features.models) {
+      navigate("/onboarding/providers", { replace: true });
+    }
+  }, [features.models, navigate]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const { data: models } = useModels();

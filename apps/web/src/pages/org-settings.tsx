@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { useAppConfig } from "../hooks/use-app-config";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -69,9 +70,17 @@ export function OrgSettingsPage() {
   const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
-  const validTabs = ["general", "members", "models", "proxies", "api-keys"] as const;
-  type Tab = (typeof validTabs)[number];
-  const [tab, setTab] = useTabWithHash<Tab>(validTabs, "general");
+  const { features } = useAppConfig();
+
+  const validTabs = [
+    "general",
+    "members",
+    ...(features.models ? ["models" as const] : []),
+    "proxies",
+    "api-keys",
+  ] as const;
+  type Tab = "general" | "members" | "models" | "proxies" | "api-keys";
+  const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const [modelsSubTab, setModelsSubTab] = useState<"models-list" | "provider-keys">("models-list");
@@ -307,7 +316,7 @@ export function OrgSettingsPage() {
           <TabsTrigger value="members">
             {t("orgSettings.tabMembers", { count: members.length })}
           </TabsTrigger>
-          <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>
+          {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
           <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
           <TabsTrigger value="api-keys">{t("orgSettings.tabApiKeys")}</TabsTrigger>
         </TabsList>
@@ -553,7 +562,7 @@ export function OrgSettingsPage() {
         </>
       )}
 
-      {tab === "models" && (
+      {tab === "models" && features.models && (
         <>
           <Tabs
             value={modelsSubTab}
@@ -561,7 +570,9 @@ export function OrgSettingsPage() {
           >
             <TabsList className="mb-4">
               <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-              <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
+              {features.providerKeys && (
+                <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
 
@@ -587,7 +598,7 @@ export function OrgSettingsPage() {
             />
           )}
 
-          {modelsSubTab === "provider-keys" && (
+          {modelsSubTab === "provider-keys" && features.providerKeys && (
             <ProviderKeysSection
               providerKeys={providerKeys}
               isLoading={pkLoading}

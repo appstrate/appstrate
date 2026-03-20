@@ -5,6 +5,7 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
+import { loadCloud } from "./cloud-loader.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -18,6 +19,9 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 
 export async function boot(): Promise<void> {
+  // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
+  await loadCloud();
+
   // Verify S3 bucket is accessible (fail-fast if misconfigured)
   await ensureBucket();
   logger.info("S3 bucket verified");

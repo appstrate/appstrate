@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
 import { useOrg } from "../../hooks/use-org";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useProviders } from "../../hooks/use-providers";
 import { api } from "../../api";
@@ -14,6 +15,7 @@ export function OnboardingDoneStep() {
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
   const { currentOrg } = useOrg();
+  const { features } = useAppConfig();
 
   const { data: models } = useModels();
   const { data: providersData } = useProviders();
@@ -50,22 +52,24 @@ export function OnboardingDoneStep() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2
-              size={20}
-              className={
-                defaultModel ? "text-green-500 shrink-0" : "text-muted-foreground shrink-0"
-              }
-            />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
-              <span className="text-sm text-muted-foreground">
-                {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
-              </span>
+        {features.models && (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2
+                size={20}
+                className={
+                  defaultModel ? "text-green-500 shrink-0" : "text-muted-foreground shrink-0"
+                }
+              />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
+                <span className="text-sm text-muted-foreground">
+                  {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center gap-3">

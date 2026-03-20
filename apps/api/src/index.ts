@@ -32,6 +32,7 @@ import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
+import { getCloudModule } from "./lib/cloud-loader.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -50,6 +51,20 @@ app.route("/", healthRouter);
 // OpenAPI docs — public (before auth middleware)
 app.get("/api/openapi.json", (c) => c.json(openApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
+
+// Platform config — public (before auth middleware)
+app.get("/api/config", (c) => {
+  const cloud = getCloudModule();
+  return c.json({
+    socialProviders: [] as string[],
+    platform: cloud ? "cloud" : "oss",
+    features: {
+      billing: cloud !== null,
+      models: cloud === null,
+      providerKeys: cloud === null,
+    },
+  });
+});
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -76,8 +91,8 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/realtime/")) return next();
   // OAuth callback is a redirect from the provider — no session
   if (path === "/auth/callback") return next();
-  // OpenAPI docs are public
-  if (path === "/api/docs" || path === "/api/openapi.json") return next();
+  // OpenAPI docs and config are public
+  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return next();
 
   // Try Bearer API key first
   const authHeader = c.req.header("Authorization");
@@ -129,8 +144,8 @@ app.use("*", async (c, next) => {
   if (path.startsWith("/api/auth/")) return next();
   if (path.startsWith("/api/realtime/")) return next();
   if (path === "/auth/callback") return next();
-  // OpenAPI docs are public
-  if (path === "/api/docs" || path === "/api/openapi.json") return next();
+  // OpenAPI docs and config are public
+  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return next();
   if (path === "/api/orgs" || path === "/api/orgs/") return next();
   // Allow /api/orgs/:orgId/* routes (they handle their own auth)
   if (path.startsWith("/api/orgs/")) return next();
@@ -193,6 +208,12 @@ app.route("/api", welcomeRouter);
 // Internal routes (container-to-host, auth via execution token — no JWT)
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
+
+// Cloud routes (billing, webhooks — no-op in OSS)
+const cloud = getCloudModule();
+if (cloud) {
+  cloud.registerCloudRoutes(app);
+}
 
 // Static files for UI
 app.use("/*", serveStatic({ root: "./apps/web/dist" }));
