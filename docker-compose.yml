@@ -58,6 +58,25 @@ services:
       timeout: 5s
       retries: 5
 
+  appstrate-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-appstrate}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   appstrate-migrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
     restart: "no"
@@ -96,9 +115,11 @@ services:
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
       - OAUTH_CALLBACK_URL=${OAUTH_CALLBACK_URL:-}
       - REDIS_URL=redis://appstrate-redis:6379
-      - S3_BUCKET=${S3_BUCKET:?Set S3_BUCKET in .env}
+      - S3_BUCKET=${S3_BUCKET:-appstrate}
       - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://appstrate-minio:9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-appstrate}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
@@ -111,6 +132,8 @@ services:
         condition: service_completed_successfully
       appstrate-redis:
         condition: service_healthy
+      appstrate-minio:
+        condition: service_healthy
       appstrate-pi:
         condition: service_completed_successfully
       appstrate-sidecar:
@@ -119,3 +142,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  miniodata:
