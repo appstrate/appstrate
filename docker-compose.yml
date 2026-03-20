@@ -77,6 +77,22 @@ services:
       timeout: 5s
       retries: 5
 
+  appstrate-minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    entrypoint: >
+      sh -c "
+        until mc alias set local http://appstrate-minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} 2>/dev/null; do sleep 1; done;
+        mc mb local/$${S3_BUCKET} --ignore-existing;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-appstrate}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET:-appstrate}
+    depends_on:
+      appstrate-minio:
+        condition: service_healthy
+
   appstrate-migrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
     restart: "no"
@@ -132,8 +148,8 @@ services:
         condition: service_completed_successfully
       appstrate-redis:
         condition: service_healthy
-      appstrate-minio:
-        condition: service_healthy
+      appstrate-minio-init:
+        condition: service_completed_successfully
       appstrate-pi:
         condition: service_completed_successfully
       appstrate-sidecar:
