@@ -26,6 +26,14 @@ const createModelSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
   reasoning: z.boolean().optional(),
+  cost: z
+    .object({
+      input: z.number().nonnegative(),
+      output: z.number().nonnegative(),
+      cacheRead: z.number().nonnegative(),
+      cacheWrite: z.number().nonnegative(),
+    })
+    .optional(),
 });
 
 const updateModelSchema = z.object({
@@ -39,6 +47,15 @@ const updateModelSchema = z.object({
   contextWindow: z.number().int().positive().nullable().optional(),
   maxTokens: z.number().int().positive().nullable().optional(),
   reasoning: z.boolean().nullable().optional(),
+  cost: z
+    .object({
+      input: z.number().nonnegative(),
+      output: z.number().nonnegative(),
+      cacheRead: z.number().nonnegative(),
+      cacheWrite: z.number().nonnegative(),
+    })
+    .nullable()
+    .optional(),
 });
 
 const setDefaultSchema = z.object({
@@ -88,12 +105,14 @@ export function createModelsRouter() {
         contextWindow,
         maxTokens,
         reasoning,
+        cost,
       } = parsed.data;
       const id = await createOrgModel(orgId, label, api, baseUrl, modelId, user.id, providerKeyId, {
         input,
         contextWindow,
         maxTokens,
         reasoning,
+        cost,
       });
       return c.json({ id }, 201);
     } catch (err) {
@@ -151,17 +170,36 @@ export function createModelsRouter() {
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let models = rawModels.map((m: any) => ({
-        id: String(m.id ?? ""),
-        name: String(m.name || m.id || ""),
-        contextWindow: typeof m.context_length === "number" ? m.context_length : null,
-        maxTokens:
-          typeof m.top_provider?.max_completion_tokens === "number"
-            ? m.top_provider.max_completion_tokens
+      let models = rawModels.map((m: any) => {
+        // OpenRouter pricing is per-token; convert to $/M tokens for ModelCost
+        const pricing = m.pricing;
+        const promptPerToken = parseFloat(pricing?.prompt);
+        const completionPerToken = parseFloat(pricing?.completion);
+        const cacheReadPerToken = parseFloat(pricing?.input_cache_read);
+        const hasValidPricing = !isNaN(promptPerToken) && !isNaN(completionPerToken);
+
+        return {
+          id: String(m.id ?? ""),
+          name: String(m.name || m.id || ""),
+          contextWindow: typeof m.context_length === "number" ? m.context_length : null,
+          maxTokens:
+            typeof m.top_provider?.max_completion_tokens === "number"
+              ? m.top_provider.max_completion_tokens
+              : null,
+          input: m.architecture?.input_modalities?.includes?.("image")
+            ? ["text", "image"]
+            : ["text"],
+          reasoning: false,
+          cost: hasValidPricing
+            ? {
+                input: promptPerToken * 1_000_000,
+                output: completionPerToken * 1_000_000,
+                cacheRead: isNaN(cacheReadPerToken) ? 0 : cacheReadPerToken * 1_000_000,
+                cacheWrite: 0,
+              }
             : null,
-        input: m.architecture?.input_modalities?.includes?.("image") ? ["text", "image"] : ["text"],
-        reasoning: false,
-      }));
+        };
+      });
 
       // Filter by search query
       if (q.trim()) {

@@ -30,14 +30,17 @@ function getStepIndex(key: StepKey): number {
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useOnboardingGuard() {
-  const { currentOrg, loading } = useOrg();
+  const { currentOrg, loading, orgs } = useOrg();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!loading && !currentOrg) {
+    // Wait until orgs are fully loaded before deciding to redirect.
+    // After switchOrg(), the query cache is cleared and briefly returns
+    // orgs=[] with isLoading=false before the refetch starts.
+    if (!loading && orgs.length === 0) {
       navigate("/onboarding/create", { replace: true });
     }
-  }, [currentOrg, loading, navigate]);
+  }, [orgs, loading, navigate]);
 
   return currentOrg?.id ?? null;
 }

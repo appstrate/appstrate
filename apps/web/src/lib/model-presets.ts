@@ -1,3 +1,5 @@
+import type { ModelCost } from "../hooks/use-models";
+
 interface ModelPreset {
   modelId: string;
   label: string;
@@ -5,6 +7,7 @@ interface ModelPreset {
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
+  cost?: ModelCost;
 }
 
 interface ProviderPreset {
@@ -31,6 +34,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 200_000,
         maxTokens: 128_000,
         reasoning: true,
+        cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
       },
       {
         modelId: "claude-sonnet-4-6",
@@ -39,6 +43,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 200_000,
         maxTokens: 64_000,
         reasoning: true,
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
       },
       {
         modelId: "claude-haiku-4-5-20251001",
@@ -47,6 +52,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 200_000,
         maxTokens: 64_000,
         reasoning: true,
+        cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
       },
     ],
   },
@@ -63,6 +69,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 1_050_000,
         maxTokens: 128_000,
         reasoning: true,
+        cost: { input: 2.5, output: 15, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "gpt-5-mini",
@@ -71,6 +78,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 400_000,
         maxTokens: 128_000,
         reasoning: true,
+        cost: { input: 0.75, output: 4.5, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "o4-mini",
@@ -79,6 +87,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 200_000,
         maxTokens: 100_000,
         reasoning: true,
+        cost: { input: 1.1, output: 4.4, cacheRead: 0, cacheWrite: 0 },
       },
     ],
   },
@@ -95,6 +104,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 1_048_576,
         maxTokens: 65_536,
         reasoning: true,
+        cost: { input: 2, output: 12, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "gemini-2.5-pro",
@@ -103,6 +113,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 1_048_576,
         maxTokens: 65_536,
         reasoning: true,
+        cost: { input: 1.25, output: 10, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "gemini-2.5-flash",
@@ -111,6 +122,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 1_048_576,
         maxTokens: 65_536,
         reasoning: true,
+        cost: { input: 0.3, output: 2.5, cacheRead: 0, cacheWrite: 0 },
       },
     ],
   },
@@ -127,6 +139,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 128_000,
         maxTokens: 32_768,
         reasoning: false,
+        cost: { input: 2, output: 6, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "mistral-medium-latest",
@@ -135,6 +148,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 128_000,
         maxTokens: 32_768,
         reasoning: false,
+        cost: { input: 0.4, output: 2, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "mistral-small-latest",
@@ -143,6 +157,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 128_000,
         maxTokens: 32_768,
         reasoning: false,
+        cost: { input: 0.15, output: 0.6, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "codestral-latest",
@@ -151,6 +166,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 256_000,
         maxTokens: 32_768,
         reasoning: false,
+        cost: { input: 0.3, output: 0.9, cacheRead: 0, cacheWrite: 0 },
       },
     ],
   },
@@ -167,6 +183,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 131_072,
         maxTokens: 65_536,
         reasoning: true,
+        cost: { input: 2, output: 6, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "grok-3",
@@ -175,6 +192,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 131_072,
         maxTokens: 65_536,
         reasoning: false,
+        cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 },
       },
       {
         modelId: "grok-3-mini",
@@ -183,6 +201,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
         contextWindow: 131_072,
         maxTokens: 65_536,
         reasoning: true,
+        cost: { input: 0.3, output: 0.5, cacheRead: 0, cacheWrite: 0 },
       },
     ],
   },

@@ -261,83 +261,78 @@ export function App() {
     <ErrorBoundary>
       <Toaster />
       <OrgGate>
-        <GlobalRealtimeSync>
-          <Routes>
-            <Route path="/login" element={<Navigate to="/" replace />} />
-            <Route path="/register" element={<Navigate to="/" replace />} />
-            <Route path="/share/:token" element={<PublicShareRunPage />} />
-            <Route path="/invite/:token" element={<InviteAcceptPage />} />
-            <Route path="/welcome" element={<WelcomePage />} />
-            <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
-            <Route path="/onboarding/model" element={<OnboardingModelStep />} />
-            <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
-            <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
-            <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
-            <Route path="/flows/:scope/:name/run/:execId?" element={<ShareableRunPage />} />
-            <Route element={<MainLayout />}>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/flows" element={<PackageList />} />
-              <Route path="/flows/new" element={<PackageEditorPage type="flow" />} />
-              <Route path="/flows/:scope/:name/edit" element={<PackageEditorPage type="flow" />} />
-              <Route
-                path="/flows/:scope/:name"
-                element={<UnifiedPackageDetailPage type="flow" />}
-              />
-              <Route
-                path="/flows/:scope/:name/:version"
-                element={<UnifiedPackageDetailPage type="flow" />}
-              />
-              <Route
-                path="/flows/:scope/:name/executions/:execId"
-                element={<ExecutionDetailPage />}
-              />
-              <Route path="/executions" element={<ExecutionsPage />} />
-              <Route path="/schedules" element={<SchedulesListPage />} />
-              <Route path="/skills" element={<SkillsPage />} />
-              <Route path="/tools" element={<ToolsPage />} />
-              <Route path="/providers" element={<ProvidersPage />} />
-              <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
-              <Route
-                path="/skills/:scope/:name/edit"
-                element={<PackageEditorPage type="skill" />}
-              />
-              <Route
-                path="/skills/:scope/:name"
-                element={<UnifiedPackageDetailPage type="skill" />}
-              />
-              <Route
-                path="/skills/:scope/:name/:version"
-                element={<UnifiedPackageDetailPage type="skill" />}
-              />
-              <Route path="/tools/new" element={<PackageEditorPage type="tool" />} />
-              <Route path="/tools/:scope/:name/edit" element={<PackageEditorPage type="tool" />} />
-              <Route
-                path="/tools/:scope/:name"
-                element={<UnifiedPackageDetailPage type="tool" />}
-              />
-              <Route
-                path="/tools/:scope/:name/:version"
-                element={<UnifiedPackageDetailPage type="tool" />}
-              />
-              <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
-              <Route
-                path="/providers/:scope/:name/edit"
-                element={<PackageEditorPage type="provider" />}
-              />
-              <Route
-                path="/providers/:scope/:name"
-                element={<UnifiedPackageDetailPage type="provider" />}
-              />
-              <Route
-                path="/providers/:scope/:name/:version"
-                element={<UnifiedPackageDetailPage type="provider" />}
-              />
-              <Route path="/preferences" element={<PreferencesPage />} />
-              <Route path="/org-settings" element={<OrgSettingsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        </GlobalRealtimeSync>
+        <Routes>
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/register" element={<Navigate to="/" replace />} />
+          <Route path="/share/:token" element={<PublicShareRunPage />} />
+          <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          <Route path="/welcome" element={<WelcomePage />} />
+          <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
+          <Route path="/onboarding/model" element={<OnboardingModelStep />} />
+          <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
+          <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
+          <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
+          <Route path="/flows/:scope/:name/run/:execId?" element={<ShareableRunPage />} />
+          <Route
+            element={
+              <GlobalRealtimeSync>
+                <MainLayout />
+              </GlobalRealtimeSync>
+            }
+          >
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/flows" element={<PackageList />} />
+            <Route path="/flows/new" element={<PackageEditorPage type="flow" />} />
+            <Route path="/flows/:scope/:name/edit" element={<PackageEditorPage type="flow" />} />
+            <Route path="/flows/:scope/:name" element={<UnifiedPackageDetailPage type="flow" />} />
+            <Route
+              path="/flows/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="flow" />}
+            />
+            <Route
+              path="/flows/:scope/:name/executions/:execId"
+              element={<ExecutionDetailPage />}
+            />
+            <Route path="/executions" element={<ExecutionsPage />} />
+            <Route path="/schedules" element={<SchedulesListPage />} />
+            <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
+            <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
+            <Route
+              path="/skills/:scope/:name"
+              element={<UnifiedPackageDetailPage type="skill" />}
+            />
+            <Route
+              path="/skills/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="skill" />}
+            />
+            <Route path="/tools/new" element={<PackageEditorPage type="tool" />} />
+            <Route path="/tools/:scope/:name/edit" element={<PackageEditorPage type="tool" />} />
+            <Route path="/tools/:scope/:name" element={<UnifiedPackageDetailPage type="tool" />} />
+            <Route
+              path="/tools/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="tool" />}
+            />
+            <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
+            <Route
+              path="/providers/:scope/:name/edit"
+              element={<PackageEditorPage type="provider" />}
+            />
+            <Route
+              path="/providers/:scope/:name"
+              element={<UnifiedPackageDetailPage type="provider" />}
+            />
+            <Route
+              path="/providers/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="provider" />}
+            />
+            <Route path="/preferences" element={<PreferencesPage />} />
+            <Route path="/org-settings" element={<OrgSettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
       </OrgGate>
     </ErrorBoundary>
   );

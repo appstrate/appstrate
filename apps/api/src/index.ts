@@ -53,15 +53,17 @@ app.get("/api/openapi.json", (c) => c.json(openApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Platform config — public (before auth middleware)
+// In OSS (no cloud module): models & provider keys visible, billing hidden.
+// In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
 app.get("/api/config", (c) => {
-  const cloud = getCloudModule();
+  const isCloud = getCloudModule() !== null;
   return c.json({
     socialProviders: [] as string[],
-    platform: cloud ? "cloud" : "oss",
+    platform: isCloud ? "cloud" : "oss",
     features: {
-      billing: cloud !== null,
-      models: cloud === null,
-      providerKeys: cloud === null,
+      billing: isCloud,
+      models: !isCloud,
+      providerKeys: !isCloud,
     },
   });
 });

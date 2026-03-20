@@ -268,6 +268,7 @@ export interface OrgModelInfo {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
   enabled: boolean;
   isDefault: boolean;
   source: "built-in" | "custom";
