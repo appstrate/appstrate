@@ -25,6 +25,7 @@ export function useCreateModel() {
       contextWindow?: number;
       maxTokens?: number;
       reasoning?: boolean;
+      cost?: ModelCost;
     }) => {
       return api<{ id: string }>("/models", {
         method: "POST",
@@ -56,6 +57,7 @@ export function useUpdateModel() {
         contextWindow?: number | null;
         maxTokens?: number | null;
         reasoning?: boolean | null;
+        cost?: ModelCost | null;
       };
     }) => {
       return api(`/models/${id}`, {
@@ -102,6 +104,14 @@ export function useTestModel() {
   });
 }
 
+/** Per-model pricing in $/M tokens. */
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface OpenRouterModel {
   id: string;
   name: string;
@@ -109,6 +119,7 @@ export interface OpenRouterModel {
   maxTokens: number | null;
   input: string[];
   reasoning: boolean;
+  cost: ModelCost | null;
 }
 
 export function useOpenRouterModels(search: string | undefined) {

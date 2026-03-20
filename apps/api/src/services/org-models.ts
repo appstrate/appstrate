@@ -34,6 +34,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       contextWindow: def.contextWindow ?? null,
       maxTokens: def.maxTokens ?? null,
       reasoning: def.reasoning ?? null,
+      cost: def.cost ?? null,
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
       source: "built-in",
@@ -58,6 +59,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       contextWindow: row.contextWindow,
       maxTokens: row.maxTokens,
       reasoning: row.reasoning,
+      cost: (row.cost as OrgModelInfo["cost"]) ?? null,
       enabled: row.enabled,
       isDefault: row.isDefault,
       source: row.source as "built-in" | "custom",
@@ -87,6 +89,7 @@ export async function createOrgModel(
     contextWindow?: number;
     maxTokens?: number;
     reasoning?: boolean;
+    cost?: ModelCost;
   },
 ): Promise<string> {
   // If this is the first model for the org, set it as default
@@ -110,6 +113,7 @@ export async function createOrgModel(
       contextWindow: capabilities?.contextWindow ?? null,
       maxTokens: capabilities?.maxTokens ?? null,
       reasoning: capabilities?.reasoning ?? null,
+      cost: capabilities?.cost ?? null,
       isDefault: isFirst,
       source: "custom",
       createdBy: userId,
@@ -131,6 +135,7 @@ export async function updateOrgModel(
     contextWindow?: number | null;
     maxTokens?: number | null;
     reasoning?: boolean | null;
+    cost?: ModelCost | null;
     providerKeyId?: string;
   },
 ): Promise<void> {
@@ -149,6 +154,7 @@ export async function updateOrgModel(
   if (data.contextWindow !== undefined) updates.contextWindow = data.contextWindow;
   if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens;
   if (data.reasoning !== undefined) updates.reasoning = data.reasoning;
+  if (data.cost !== undefined) updates.cost = data.cost;
 
   await db
     .update(orgModels)
@@ -252,7 +258,7 @@ export async function resolveModel(
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
-        cost: null, // DB models (OSS custom) don't have cost tracking
+        cost: (dbDefault.cost as ModelCost) ?? null,
       };
     }
   }
@@ -290,6 +296,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
       contextWindow: orgModels.contextWindow,
       maxTokens: orgModels.maxTokens,
       reasoning: orgModels.reasoning,
+      cost: orgModels.cost,
     })
     .from(orgModels)
     .where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)))
@@ -310,7 +317,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: null, // DB models (OSS custom) don't have cost tracking
+    cost: (row.cost as ModelCost) ?? null,
   };
 }
 

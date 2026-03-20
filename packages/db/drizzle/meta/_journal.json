@@ -22,6 +22,13 @@
       "when": 1774016206812,
       "tag": "0002_unknown_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774020076574,
+      "tag": "0003_medical_stryfe",
+      "breakpoints": true
     }
   ]
 }

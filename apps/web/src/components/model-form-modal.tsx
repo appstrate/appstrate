@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
 import { useFormErrors } from "../hooks/use-form-errors";
-import { useOpenRouterModels, type OpenRouterModel } from "../hooks/use-models";
+import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
 import { useProviderKeys } from "../hooks/use-provider-keys";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
@@ -48,6 +48,7 @@ interface ModelFormData {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  cost?: ModelCost;
 }
 
 interface ModelFormModalProps {
@@ -208,6 +209,7 @@ function ModelFormBody({
   const [contextWindow, setContextWindow] = useState(model?.contextWindow?.toString() ?? "");
   const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
   const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
+  const [cost, setCost] = useState<ModelCost | null>(null);
 
   const [providerKeyId, setProviderKeyId] = useState(model?.providerKeyId ?? "");
   const [inlineApiKey, setInlineApiKey] = useState("");
@@ -291,6 +293,7 @@ function ModelFormBody({
     setContextWindow("");
     setMaxTokens("");
     setReasoning(false);
+    setCost(null);
   };
 
   const handleProviderChange = (id: string) => {
@@ -332,6 +335,7 @@ function ModelFormBody({
     setContextWindow(preset.contextWindow.toString());
     setMaxTokens(preset.maxTokens.toString());
     setReasoning(preset.reasoning);
+    setCost(preset.cost ?? null);
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -356,6 +360,7 @@ function ModelFormBody({
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
       ...(reasoning ? { reasoning: true } : {}),
+      ...(cost ? { cost } : {}),
     });
   };
 
@@ -444,6 +449,7 @@ function ModelFormBody({
                 setInputText(m.input?.includes("text") !== false);
                 setInputImage(m.input?.includes("image") ?? false);
                 setReasoning(m.reasoning ?? false);
+                setCost(m.cost ?? null);
               }}
             />
           </div>

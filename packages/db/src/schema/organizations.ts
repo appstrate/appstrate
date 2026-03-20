@@ -157,6 +157,7 @@ export const orgModels = pgTable(
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
     reasoning: boolean("reasoning"), // true | null
+    cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
     enabled: boolean("enabled").notNull().default(true),
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"

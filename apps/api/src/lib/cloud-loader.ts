@@ -16,7 +16,6 @@ let _cloud: CloudModule | null | undefined = undefined;
 export async function loadCloud(): Promise<CloudModule | null> {
   if (_cloud !== undefined) return _cloud;
   try {
-    // @ts-expect-error — @appstrate/cloud only exists in EE builds
     _cloud = (await import("@appstrate/cloud")) as CloudModule;
     return _cloud;
   } catch {
