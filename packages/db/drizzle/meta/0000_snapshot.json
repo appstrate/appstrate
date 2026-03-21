@@ -1,5 +1,5 @@
 {
-  "id": "abf50fd3-610c-4220-aae8-95c5c95fb1d1",
+  "id": "0852f224-d07b-4abd-b6df-0dc51d861574",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -686,9 +686,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "api_key_encrypted": {
-          "name": "api_key_encrypted",
-          "type": "text",
+        "provider_key_id": {
+          "name": "provider_key_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -713,6 +713,12 @@
         "reasoning": {
           "name": "reasoning",
           "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost": {
+          "name": "cost",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -805,9 +811,135 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "org_models_provider_key_id_org_provider_keys_id_fk": {
+          "name": "org_models_provider_key_id_org_provider_keys_id_fk",
+          "tableFrom": "org_models",
+          "tableTo": "org_provider_keys",
+          "columnsFrom": [
+            "provider_key_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "org_models_created_by_user_id_fk": {
           "name": "org_models_created_by_user_id_fk",
           "tableFrom": "org_models",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.org_provider_keys": {
+      "name": "org_provider_keys",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "api": {
+          "name": "api",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_url": {
+          "name": "base_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "api_key_encrypted": {
+          "name": "api_key_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_org_provider_keys_org_id": {
+          "name": "idx_org_provider_keys_org_id",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "org_provider_keys_org_id_organizations_id_fk": {
+          "name": "org_provider_keys_org_id_organizations_id_fk",
+          "tableFrom": "org_provider_keys",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "org_provider_keys_created_by_user_id_fk": {
+          "name": "org_provider_keys_created_by_user_id_fk",
+          "tableFrom": "org_provider_keys",
           "tableTo": "user",
           "columnsFrom": [
             "created_by"
@@ -2189,12 +2321,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "proxy_label": {
           "name": "proxy_label",
           "type": "text",
@@ -2204,6 +2330,18 @@
         "model_label": {
           "name": "model_label",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost": {
+          "name": "cost",
+          "type": "double precision",
           "primaryKey": false,
           "notNull": false
         }

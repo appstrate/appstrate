@@ -124,7 +124,7 @@ export async function buildExecutionContext(params: {
 }): Promise<{
   promptContext: PromptContext;
   flowPackage: Buffer | null;
-  flowVersionId: number | null;
+  packageVersionId: number | null;
   proxyLabel: string | null;
   modelLabel: string | null;
 }> {
@@ -163,17 +163,17 @@ export async function buildExecutionContext(params: {
 
   // Resolve version ID: explicit override is trusted; otherwise only associate
   // the latest version if its manifest matches the live flow (dirty check).
-  let flowVersionId: number | null;
+  let packageVersionId: number | null;
   if (typeof latestVersion === "number") {
     // overrideVersionId path — already a plain number
-    flowVersionId = latestVersion;
+    packageVersionId = latestVersion;
   } else if (latestVersion) {
     // Compare version manifest with live flow manifest
     const liveKey = JSON.stringify(flow.manifest);
     const versionKey = JSON.stringify(latestVersion.manifest);
-    flowVersionId = liveKey === versionKey ? latestVersion.id : null;
+    packageVersionId = liveKey === versionKey ? latestVersion.id : null;
   } else {
-    flowVersionId = null;
+    packageVersionId = null;
   }
 
   const proxyUrl = proxyResult?.url ?? null;
@@ -209,5 +209,5 @@ export async function buildExecutionContext(params: {
     llmConfig,
   });
 
-  return { promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel };
+  return { promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel };
 }

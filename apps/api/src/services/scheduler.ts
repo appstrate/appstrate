@@ -227,11 +227,11 @@ async function triggerScheduledExecution(
     // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
     let flowPackage: Buffer | null;
-    let flowVersionId: number | null;
+    let packageVersionId: number | null;
     let proxyLabel: string | null;
     let modelLabel: string | null;
     try {
-      ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+      ({ promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel } =
         await buildExecutionContext({
           executionId,
           flow,
@@ -281,7 +281,7 @@ async function triggerScheduledExecution(
       orgId,
       input ?? null,
       scheduleId,
-      flowVersionId ?? undefined,
+      packageVersionId ?? undefined,
       userProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,

@@ -87,14 +87,27 @@ CREATE TABLE "org_models" (
 	"api" text NOT NULL,
 	"base_url" text NOT NULL,
 	"model_id" text NOT NULL,
-	"api_key_encrypted" text NOT NULL,
+	"provider_key_id" uuid NOT NULL,
 	"input" jsonb,
 	"context_window" integer,
 	"max_tokens" integer,
 	"reasoning" boolean,
+	"cost" jsonb,
 	"enabled" boolean DEFAULT true NOT NULL,
 	"is_default" boolean DEFAULT false NOT NULL,
 	"source" text DEFAULT 'custom' NOT NULL,
+	"created_by" text,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
+CREATE TABLE "org_provider_keys" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"label" text NOT NULL,
+	"api" text NOT NULL,
+	"base_url" text NOT NULL,
+	"api_key_encrypted" text NOT NULL,
 	"created_by" text,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now()
@@ -236,9 +249,10 @@ CREATE TABLE "executions" (
 	"schedule_id" text,
 	"package_version_id" integer,
 	"notified_at" timestamp,
-	"read_at" timestamp,
 	"proxy_label" text,
-	"model_label" text
+	"model_label" text,
+	"read_at" timestamp,
+	"cost" double precision
 );
 --> statement-breakpoint
 CREATE TABLE "package_memories" (
@@ -350,7 +364,10 @@ ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_org_id_organizatio
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_invited_by_user_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_accepted_by_user_id_fk" FOREIGN KEY ("accepted_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_models" ADD CONSTRAINT "org_models_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_models" ADD CONSTRAINT "org_models_provider_key_id_org_provider_keys_id_fk" FOREIGN KEY ("provider_key_id") REFERENCES "public"."org_provider_keys"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_models" ADD CONSTRAINT "org_models_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_provider_keys" ADD CONSTRAINT "org_provider_keys_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_provider_keys" ADD CONSTRAINT "org_provider_keys_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_proxies" ADD CONSTRAINT "org_proxies_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_proxies" ADD CONSTRAINT "org_proxies_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "organization_members" ADD CONSTRAINT "organization_members_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -408,6 +425,7 @@ CREATE INDEX "idx_org_invitations_org_id" ON "org_invitations" USING btree ("org
 CREATE INDEX "idx_org_invitations_email" ON "org_invitations" USING btree ("email");--> statement-breakpoint
 CREATE INDEX "idx_org_models_org_id" ON "org_models" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_org_models_one_default" ON "org_models" USING btree ("org_id") WHERE "org_models"."is_default" = true;--> statement-breakpoint
+CREATE INDEX "idx_org_provider_keys_org_id" ON "org_provider_keys" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_org_proxies_org_id" ON "org_proxies" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_org_proxies_one_default" ON "org_proxies" USING btree ("org_id") WHERE "org_proxies"."is_default" = true;--> statement-breakpoint
 CREATE INDEX "idx_organization_members_user_id" ON "organization_members" USING btree ("user_id");--> statement-breakpoint

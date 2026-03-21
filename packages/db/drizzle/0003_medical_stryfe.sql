@@ -1,1 +1,0 @@
-ALTER TABLE "org_models" ADD COLUMN "cost" jsonb;

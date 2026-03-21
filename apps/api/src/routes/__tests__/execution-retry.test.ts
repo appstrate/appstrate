@@ -76,7 +76,7 @@ mock.module("../../services/env-builder.ts", () => ({
   buildExecutionContext: mock(async () => ({
     promptContext: makePromptContext(),
     flowPackage: null,
-    flowVersionId: null,
+    packageVersionId: null,
     proxyLabel: null,
     modelLabel: null,
   })),

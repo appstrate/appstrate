@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1773937665022,
-      "tag": "0000_fast_lilandra",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1773954732378,
-      "tag": "0001_bumpy_millenium_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1774016206812,
-      "tag": "0002_unknown_typhoid_mary",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1774020076574,
-      "tag": "0003_medical_stryfe",
+      "when": 1774116745298,
+      "tag": "0000_burly_reavers",
       "breakpoints": true
     }
   ]
