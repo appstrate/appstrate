@@ -472,11 +472,11 @@ export function createExecutionsRouter() {
     // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
     let flowPackage: Buffer | null;
-    let flowVersionId: number | null;
+    let packageVersionId: number | null;
     let proxyLabel: string | null;
     let modelLabel: string | null;
     try {
-      ({ promptContext, flowPackage, flowVersionId, proxyLabel, modelLabel } =
+      ({ promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel } =
         await buildExecutionContext({
           executionId,
           flow: effectiveFlow,
@@ -517,7 +517,7 @@ export function createExecutionsRouter() {
       orgId,
       parsedInput ?? null,
       undefined,
-      flowVersionId ?? undefined,
+      packageVersionId ?? undefined,
       userProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,

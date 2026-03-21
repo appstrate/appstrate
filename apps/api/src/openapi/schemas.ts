@@ -288,8 +288,9 @@ export const schemas = {
       duration: { type: "integer", description: "Duration in milliseconds" },
       connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
-      flowVersionId: { type: "integer" },
+      packageVersionId: { type: "integer" },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at execution time" },
+      modelLabel: { type: ["string", "null"], description: "Model label used at execution time" },
     },
   },
   ExecutionLog: {
