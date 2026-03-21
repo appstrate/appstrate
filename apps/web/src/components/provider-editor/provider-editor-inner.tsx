@@ -1,7 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCreateProvider, useUpdateProvider } from "../../hooks/use-mutations";
+import { api } from "../../api";
+import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
+import { UnsavedChangesModal } from "../unsaved-changes-modal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -226,6 +230,7 @@ export function ProviderEditorInner({
 }: ProviderEditorInnerProps) {
   const { t } = useTranslation(["settings", "flows", "common"]);
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const createProvider = useCreateProvider();
   const updateProvider = useUpdateProvider();
 
@@ -245,6 +250,36 @@ export function ProviderEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProviderEditorTab>("general");
 
+  // --- Unsaved changes detection ---
+  const initialSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        metadata: getInitialMetadata(provider, orgSlug),
+        fields: getInitialFields(provider),
+        credentialFields: provider?.credentialSchema
+          ? schemaToFields(provider.credentialSchema as unknown as JSONSchemaObject, "credentials")
+          : [],
+        availableScopes: provider?.availableScopes ?? [],
+      }),
+    [provider, orgSlug],
+  );
+  const isDirty = useMemo(
+    () =>
+      initialSnapshot !== JSON.stringify({ metadata, fields, credentialFields, availableScopes }),
+    [initialSnapshot, metadata, fields, credentialFields, availableScopes],
+  );
+  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+
+  const saveDraft = useCallback(async () => {
+    if (!isEdit || !packageId) return;
+    const data = buildPayload(metadata, fields, isEdit, availableScopes, credentialFields);
+    await api(`/providers/${packageId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    qc.invalidateQueries({ queryKey: ["providers"] });
+  }, [metadata, fields, isEdit, packageId, availableScopes, credentialFields, qc]);
+
   const setField = useCallback(
     <K extends keyof ProviderFields>(key: K, value: ProviderFields[K]) => {
       setFields((prev) => ({ ...prev, [key]: value }));
@@ -260,6 +295,7 @@ export function ProviderEditorInner({
       return;
     }
 
+    allowNavigation();
     const data = buildPayload(metadata, fields, isEdit, availableScopes, credentialFields);
 
     if (isEdit && packageId) {
@@ -786,6 +822,8 @@ export function ProviderEditorInner({
           }}
         />
       )}
+
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
   );
 }

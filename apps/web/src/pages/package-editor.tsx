@@ -1,14 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
 import type { OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
+import { api } from "../api";
+import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
+import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
 // Flow editor components
 import { MetadataSection } from "../components/flow-editor/metadata-section";
@@ -71,12 +75,31 @@ function FlowEditorInner({
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const createFlow = useCreatePackage("flow");
   const updateFlow = useUpdatePackage("flow", packageId || "");
 
   const [form, setForm] = useState<FlowFormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+
+  // --- Unsaved changes detection ---
+  const isDirty = useMemo(
+    () => JSON.stringify(initialState) !== JSON.stringify(form),
+    [initialState, form],
+  );
+  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+
+  const saveDraft = useCallback(async () => {
+    if (!isEdit || !detail || !packageId) return;
+    const { prompt, ...payload } = flowAssemblePayload(form);
+    await api(`/packages/flows/${packageId}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...payload, content: prompt, lockVersion: detail.lockVersion! }),
+    });
+    qc.invalidateQueries({ queryKey: ["packages"] });
+    qc.invalidateQueries({ queryKey: ["flows"] });
+  }, [form, isEdit, detail, packageId, qc]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from server data to local form state */
   useEffect(() => {
@@ -114,6 +137,7 @@ function FlowEditorInner({
       setActiveTab("prompt");
       return;
     }
+    allowNavigation();
     const { prompt, ...payload } = flowAssemblePayload(form);
     const body = { ...payload, content: prompt };
     if (isEdit && detail) {
@@ -229,6 +253,8 @@ function FlowEditorInner({
           schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow }}
         />
       )}
+
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
   );
 }
@@ -248,12 +274,32 @@ function PackageEditorInner({
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const createPkg = useCreatePackage(type);
   const updatePkg = useUpdatePackage(type, packageId || "");
 
   const [form, setForm] = useState(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+
+  // --- Unsaved changes detection ---
+  const isDirty = useMemo(
+    () => JSON.stringify(initialState) !== JSON.stringify(form),
+    [initialState, form],
+  );
+  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+
+  const saveDraft = useCallback(async () => {
+    if (!isEdit || !packageId) return;
+    const module = getPackageTypeModule(type);
+    const payload = module.assemblePayload(form);
+    const cfg = PACKAGE_CONFIG[type];
+    await api(`/packages/${cfg.path}/${packageId}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...payload, lockVersion: form._lockVersion! }),
+    });
+    qc.invalidateQueries({ queryKey: ["packages"] });
+  }, [form, isEdit, type, packageId, qc]);
 
   if (form._type !== "skill" && form._type !== "tool") return null;
 
@@ -271,6 +317,7 @@ function PackageEditorInner({
       return;
     }
 
+    allowNavigation();
     const module = getPackageTypeModule(type);
     const payload = module.assemblePayload(form);
     if (isEdit) {
@@ -354,6 +401,8 @@ function PackageEditorInner({
           schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] }}
         />
       )}
+
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
   );
 }
