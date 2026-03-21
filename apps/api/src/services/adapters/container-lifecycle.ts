@@ -49,7 +49,8 @@ export async function* runContainerLifecycle(
 
   try {
     for await (const msg of options.processLogs(orchestrator.streamLogs(handle, signal))) {
-      if (msg.type === "result") hasResult = true;
+      if (msg.type === "report" || msg.type === "report_final" || msg.type === "structured_output")
+        hasResult = true;
       if (msg.type === "error") lastError = msg.message;
       yield msg;
     }

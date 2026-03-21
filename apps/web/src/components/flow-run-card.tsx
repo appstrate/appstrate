@@ -29,13 +29,12 @@ export interface FlowRunCardProps {
   displayName?: string;
   description?: string;
   inputSchema?: JSONSchemaObject;
-  outputSchema?: JSONSchemaObject;
   providers?: ProviderStatus[];
 
   // State
   status: RunCardStatus;
   error?: string | null;
-  result?: Record<string, unknown> | null;
+  result?: { report?: string; data?: Record<string, unknown> } | null;
   logEntries?: LogEntry[];
   submitting?: boolean;
 
@@ -169,7 +168,6 @@ export function FlowRunCard({
   displayName,
   description,
   inputSchema,
-  outputSchema,
   providers,
   status,
   error,
@@ -294,7 +292,7 @@ export function FlowRunCard({
               {error}
             </div>
           )}
-          {result && <ResultRenderer data={result} outputSchema={outputSchema} />}
+          {result && <ResultRenderer report={result.report} data={result.data} />}
           {onRerun && (
             <Button variant="outline" className="w-full" onClick={onRerun}>
               {t("shareable.rerun")}

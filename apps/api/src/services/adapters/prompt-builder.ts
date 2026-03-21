@@ -1,4 +1,3 @@
-import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { PromptContext } from "./types.ts";
 import {
   getCredentialFieldName,
@@ -49,9 +48,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   sections.push("### Persistence");
   sections.push(
     "You have two ways to persist data between executions:\n" +
-      "- **State**: A JSON object in your output (`state`) — overwritten each run, scoped to the user. " +
+      "- **State**: Use the `set_state` tool to save a JSON object — overwritten each run. " +
       "Use this for structured data you need to process next time (cursors, timestamps, counters).\n" +
-      "- **Memory**: A list of text memos (`memories`) — accumulated across all runs, shared across all users. " +
+      "- **Memory**: Use the `add_memory` tool to save text memos — accumulated across all runs, shared across all users. " +
       "Use this to capture discoveries, learnings, and insights that should persist long-term.\n" +
       "Everything else — files, variables, computations — is lost when this container stops.\n",
   );
@@ -236,7 +235,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("```\n");
     sections.push(
       "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
-        "To update the state for the next run, include an updated `state` object in your JSON output.\n",
+        "To update the state for the next run, use the `set_state` tool.\n",
     );
   }
 
@@ -252,9 +251,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       sections.push(`- ${mem.content}${date}`);
     }
     sections.push(
-      "\nTo add new memories, include a `memories` array of strings in your JSON output. " +
+      "\nTo add new memories, use the `add_memory` tool. " +
         "Use memories for discoveries, learnings, and insights worth remembering long-term. " +
-        "Use `state` for structured data needed for the next run.\n",
+        "Use `set_state` for structured data needed for the next run.\n",
     );
   }
 
@@ -306,183 +305,53 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "Keep messages plain and factual.\n",
   );
 
-  // --- Output format ---
+  // --- Output tools ---
   const outputSchema = ctx.schemas.output;
-  sections.push("## Output Format\n");
+  sections.push("## Output\n");
   sections.push(
-    "When you have completed the task, output your final result as a JSON object inside a ```json code block. " +
-      "This is the ONLY output that will be captured and returned to the user — everything else is logged but not persisted as a result.\n",
+    "Use the following tools to produce your output. " +
+      "Do NOT write a JSON code block — use tool calls instead.\n",
+  );
+
+  sections.push("### report(content)");
+  sections.push(
+    "Stream narrative content in Markdown format. Each call appends to the report. " +
+      "Use headings, lists, bold, and tables to structure your content. " +
+      "Set `final: true` on your last call to signal the report is complete.\n",
+  );
+  sections.push(
+    "For short reports, a single `report(..., final=true)` call is fine. " +
+      "For longer reports (multiple sections), split by section so the user sees progress, " +
+      "and set `final: true` on the last call.\n",
   );
 
   if (outputSchema?.properties && Object.keys(outputSchema.properties).length > 0) {
-    sections.push("The JSON must include the following fields:");
-    const example: Record<string, unknown> = {};
+    sections.push("### structured_output(data)");
+    sections.push(
+      "Return machine-readable data as a JSON object. Each call is deep-merged into the result. " +
+        "Include **only** the fields listed below — do not add extra fields.\n",
+    );
+    sections.push("Fields:");
     for (const [key, prop] of Object.entries(outputSchema.properties)) {
       const req = outputSchema.required?.includes(key) ? "required" : "optional";
       sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
-      if (prop.type === "string") example[key] = "...";
-      else if (prop.type === "number") example[key] = 0;
-      else if (prop.type === "boolean") example[key] = false;
-      else if (prop.type === "array") example[key] = [];
-      else if (prop.type === "object") example[key] = {};
     }
-    sections.push("\nExample:");
-    sections.push("```json");
-    sections.push(JSON.stringify(example, null, 2));
-    sections.push("```");
-  } else {
-    sections.push("The JSON must contain at minimum a `summary` field (string).");
-    sections.push("Example:");
-    sections.push("```json");
-    sections.push(
-      JSON.stringify(
-        {
-          summary: "Processed 5 emails, created 3 tickets",
-          tickets_created: [],
-          state: { last_run: "2025-01-01T00:00:00Z" },
-        },
-        null,
-        2,
-      ),
-    );
-    sections.push("```");
+    sections.push("");
   }
 
+  sections.push("### set_state(state)");
   sections.push(
-    "\n### State Persistence\n" +
-      "Include a `state` object in your JSON output to persist data for the next run. " +
-      "Only the latest state is kept — design it to be self-contained.\n",
+    "Persist a JSON object for the next execution run. Only the last call is kept — " +
+      "design the state to be self-contained. " +
+      "Use for cursors, timestamps, counters, or any data needed to resume work.\n",
   );
 
+  sections.push("### add_memory(content)");
   sections.push(
-    "### Memory Persistence\n" +
-      'Include a `memories` array of strings (e.g. `"memories": ["Learned that X works better than Y"]`) ' +
-      "to save discoveries and insights that accumulate over time. " +
-      "Memories are shared across all users and persist indefinitely.\n",
-  );
-
-  sections.push(
-    "### Validation\n" +
-      "Your JSON output is validated against the expected schema. " +
-      "If it does not match, you may be asked to correct it. " +
-      "Make sure all required fields are present and correctly typed.\n",
+    "Save a discovery or learning as a long-term memory (shared across all users, persists indefinitely). " +
+      "Use for insights worth remembering across runs.\n",
   );
 
   // Append raw prompt at the end, without any interpolation
   return sections.join("\n") + "\n---\n\n" + ctx.rawPrompt;
-}
-
-export function extractJsonResult(text: string): Record<string, unknown> | null {
-  // Strategy 1: ```json ... ``` blocks, case-insensitive (last one wins)
-  const jsonFenceMatches = [...text.matchAll(/```json\s*\n([\s\S]*?)```/gi)];
-  if (jsonFenceMatches.length > 0) {
-    const lastMatch = jsonFenceMatches[jsonFenceMatches.length - 1]!;
-    try {
-      return JSON.parse(lastMatch[1]!.trim());
-    } catch {
-      // Fall through to next strategy
-    }
-  }
-
-  // Strategy 2: bare ``` fences (no language tag) whose content starts with { (last one wins)
-  const bareFenceMatches = [...text.matchAll(/```(?!\w)\s*\n([\s\S]*?)```/g)];
-  for (let i = bareFenceMatches.length - 1; i >= 0; i--) {
-    const content = bareFenceMatches[i]![1]!.trim();
-    if (content.startsWith("{")) {
-      try {
-        return JSON.parse(content);
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  // Strategy 3: raw JSON object in text — find { and its matching }, try parsing
-  let searchFrom = text.length;
-  while (searchFrom > 0) {
-    const openIdx = text.lastIndexOf("{", searchFrom - 1);
-    if (openIdx === -1) break;
-
-    // Find matching closing brace (respects string literals)
-    let depth = 0;
-    let inStr = false;
-    let escaped = false;
-    let endIdx = -1;
-    for (let i = openIdx; i < text.length; i++) {
-      const ch = text[i]!;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\" && inStr) {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inStr = !inStr;
-        continue;
-      }
-      if (inStr) continue;
-      if (ch === "{") depth++;
-      else if (ch === "}") {
-        depth--;
-        if (depth === 0) {
-          endIdx = i;
-          break;
-        }
-      }
-    }
-
-    if (endIdx !== -1) {
-      try {
-        const parsed = JSON.parse(text.slice(openIdx, endIdx + 1));
-        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-          return parsed;
-        }
-      } catch {
-        // Try previous occurrence
-      }
-    }
-    searchFrom = openIdx;
-  }
-
-  return null;
-}
-
-export function buildRetryPrompt(
-  badResult: Record<string, unknown>,
-  validationErrors: string[],
-  outputSchema: JSONSchemaObject,
-): string {
-  const lines: string[] = [];
-
-  lines.push("# Output Correction Required\n");
-  lines.push(
-    "Your previous output did not match the required schema. Fix the JSON and return ONLY a corrected ```json block.\n",
-  );
-
-  lines.push("## Your Previous Output\n");
-  lines.push("```json");
-  lines.push(JSON.stringify(badResult, null, 2));
-  lines.push("```\n");
-
-  lines.push("## Validation Errors\n");
-  for (const err of validationErrors) {
-    lines.push(`- ${err}`);
-  }
-  lines.push("");
-
-  lines.push("## Expected Schema\n");
-  for (const [key, prop] of Object.entries(outputSchema.properties)) {
-    const req = outputSchema.required?.includes(key) ? "required" : "optional";
-    lines.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
-  }
-  lines.push("");
-
-  lines.push("## Instructions\n");
-  lines.push(
-    "Return ONLY a single ```json code block with the corrected JSON. Do not include any explanation or commentary.",
-  );
-
-  return lines.join("\n");
 }

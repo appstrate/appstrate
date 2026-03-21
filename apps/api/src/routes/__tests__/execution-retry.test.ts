@@ -113,9 +113,7 @@ mock.module("../../services/orchestrator/index.ts", () => ({
   getOrchestrator: () => ({ stopByExecutionId: mock(async () => "stopped") }),
 }));
 
-// Track how many times the adapter's execute() is called
-let adapterCallCount = 0;
-let mockAdapter: ExecutionAdapter;
+let adapterMessages: ExecutionMessage[] = [];
 
 class MockTimeoutError extends Error {
   constructor(message: string) {
@@ -125,10 +123,14 @@ class MockTimeoutError extends Error {
 }
 
 mock.module("../../services/adapters/index.ts", () => ({
-  getAdapter: () => mockAdapter,
+  getAdapter: (): ExecutionAdapter => ({
+    async *execute(): AsyncGenerator<ExecutionMessage> {
+      for (const msg of adapterMessages) {
+        yield msg;
+      }
+    },
+  }),
   TimeoutError: MockTimeoutError,
-  buildRetryPrompt: (_badResult: unknown, _errors: string[], _schema: unknown) =>
-    "mock retry prompt",
 }));
 
 mock.module("../../services/package-storage.ts", () => ({
@@ -167,26 +169,7 @@ function makePromptContext(): PromptContext {
   };
 }
 
-function createMockAdapter(results: (Record<string, unknown> | "timeout")[]): ExecutionAdapter {
-  adapterCallCount = 0;
-  return {
-    async *execute(): AsyncGenerator<ExecutionMessage> {
-      const idx = adapterCallCount++;
-      const value = results[idx] ?? results[results.length - 1];
-      if (value === "timeout") {
-        throw new MockTimeoutError("Execution timed out");
-      }
-      yield { type: "progress", message: "Working..." };
-      yield { type: "result", data: value as Record<string, unknown> };
-    },
-  };
-}
-
-function makeFlow(overrides: {
-  outputSchema?: JSONSchemaObject;
-  outputRetries?: number;
-  timeout?: number;
-}): LoadedFlow {
+function makeFlow(overrides?: { outputSchema?: JSONSchemaObject }): LoadedFlow {
   return {
     id: "test-flow",
     prompt: "test prompt",
@@ -200,9 +183,8 @@ function makeFlow(overrides: {
       description: "A test flow",
       author: "test",
       dependencies: { providers: {}, skills: {}, tools: {} },
-      output: overrides.outputSchema ? { schema: overrides.outputSchema } : undefined,
-      timeout: overrides.timeout ?? 300,
-      "x-outputRetries": overrides.outputRetries,
+      output: overrides?.outputSchema ? { schema: overrides.outputSchema } : undefined,
+      timeout: 300,
     } as unknown as LoadedFlow["manifest"],
   };
 }
@@ -229,93 +211,108 @@ function lastUpdate() {
 beforeEach(() => {
   logs.length = 0;
   updates.length = 0;
-  adapterCallCount = 0;
+  adapterMessages = [];
 });
 
-describe("executeFlowInBackground — retry loop", () => {
-  test("no output schema → no retry, status success", async () => {
-    const result = { summary: "done" };
-    mockAdapter = createMockAdapter([result]);
+describe("executeFlowInBackground — output tools", () => {
+  test("structured_output → success with data", async () => {
+    adapterMessages = [
+      { type: "progress", message: "Working..." },
+      { type: "structured_output", data: { summary: "done", count: 5 } },
+    ];
 
-    const flow = makeFlow({});
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
     await executeFlowInBackground("exec-1", "user-1", "org-1", flow, makePromptContext());
 
-    expect(adapterCallCount).toBe(1);
-    expect(findLogs("output_validation_retry")).toHaveLength(0);
     expect(lastUpdate()!.updates.status).toBe("success");
+    const result = lastUpdate()!.updates.result as { data: Record<string, unknown> };
+    expect(result.data.summary).toBe("done");
+    expect(result.data.count).toBe(5);
   });
 
-  test("valid output on first attempt → no retry, status success", async () => {
-    const result = { summary: "done", count: 5 };
-    mockAdapter = createMockAdapter([result]);
+  test("report → success with report", async () => {
+    adapterMessages = [
+      { type: "progress", message: "Analyzing..." },
+      { type: "report", content: "## Summary\n\nAll good." },
+    ];
 
-    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
+    const flow = makeFlow({});
     await executeFlowInBackground("exec-2", "user-1", "org-1", flow, makePromptContext());
 
-    expect(adapterCallCount).toBe(1);
-    expect(findLogs("output_validation_retry")).toHaveLength(0);
     expect(lastUpdate()!.updates.status).toBe("success");
-    expect((lastUpdate()!.updates.result as Record<string, unknown>).count).toBe(5);
+    const result = lastUpdate()!.updates.result as { report: string };
+    expect(result.report).toBe("## Summary\n\nAll good.\n\n");
   });
 
-  test("invalid then valid → 1 retry, status success", async () => {
-    const badResult = { summary: "done" }; // missing count
-    const goodResult = { summary: "done", count: 3 };
-    mockAdapter = createMockAdapter([badResult, goodResult]);
+  test("report + structured_output → success with both", async () => {
+    adapterMessages = [
+      { type: "report", content: "## Report\n\n" },
+      { type: "report", content: "Details here." },
+      { type: "structured_output", data: { count: 42 } },
+    ];
 
-    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
+    const flow = makeFlow({});
     await executeFlowInBackground("exec-3", "user-1", "org-1", flow, makePromptContext());
 
-    expect(adapterCallCount).toBe(2);
-    expect(findLogs("output_validation_retry")).toHaveLength(1);
-    expect(findLogs("output_validation")).toHaveLength(0); // no final validation error
     expect(lastUpdate()!.updates.status).toBe("success");
-    expect((lastUpdate()!.updates.result as Record<string, unknown>).count).toBe(3);
+    const result = lastUpdate()!.updates.result as {
+      report: string;
+      data: Record<string, unknown>;
+    };
+    expect(result.report).toBe("## Report\n\n\n\nDetails here.\n\n");
+    expect(result.data.count).toBe(42);
   });
 
-  test("all retries fail → status success with last result, validation error logged", async () => {
-    const badResult = { summary: "done" }; // always missing count
-    mockAdapter = createMockAdapter([badResult, badResult, badResult]);
+  test("multiple structured_output calls are merged", async () => {
+    adapterMessages = [
+      { type: "structured_output", data: { a: 1 } },
+      { type: "structured_output", data: { b: 2 } },
+    ];
 
-    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 2 });
+    const flow = makeFlow({});
     await executeFlowInBackground("exec-4", "user-1", "org-1", flow, makePromptContext());
 
-    // 1 initial + 2 retries = 3 calls
-    expect(adapterCallCount).toBe(3);
-    expect(findLogs("output_validation_retry")).toHaveLength(2);
-    // Final validation failure logged
-    const finalValidation = findLogs("output_validation");
-    expect(finalValidation).toHaveLength(1);
-    expect(finalValidation[0]!.data!.valid).toBe(false);
-    // Still succeeds (uses last result)
     expect(lastUpdate()!.updates.status).toBe("success");
+    const result = lastUpdate()!.updates.result as { data: Record<string, unknown> };
+    expect(result.data).toEqual({ a: 1, b: 2 });
   });
 
-  test("outputRetries: 0 → no retry even if invalid", async () => {
-    const badResult = { summary: "done" }; // missing count
-    mockAdapter = createMockAdapter([badResult]);
+  test("set_state persists state separately", async () => {
+    adapterMessages = [
+      { type: "structured_output", data: { done: true } },
+      { type: "set_state", data: { cursor: "abc123" } },
+    ];
 
-    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 0 });
+    const flow = makeFlow({});
     await executeFlowInBackground("exec-5", "user-1", "org-1", flow, makePromptContext());
 
-    expect(adapterCallCount).toBe(1);
-    expect(findLogs("output_validation_retry")).toHaveLength(0);
-    // Validation failure logged
+    expect(lastUpdate()!.updates.status).toBe("success");
+    expect(lastUpdate()!.updates.state).toEqual({ cursor: "abc123" });
+    // State should NOT be in result
+    const result = lastUpdate()!.updates.result as { data: Record<string, unknown> };
+    expect(result.data.cursor).toBeUndefined();
+  });
+
+  test("invalid structured_output against schema → validation warning logged, still succeeds", async () => {
+    adapterMessages = [
+      { type: "structured_output", data: { summary: "done" } }, // missing count
+    ];
+
+    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
+    await executeFlowInBackground("exec-6", "user-1", "org-1", flow, makePromptContext());
+
+    // No retries — just a warning
     expect(findLogs("output_validation")).toHaveLength(1);
+    expect(findLogs("output_validation")[0]!.data!.valid).toBe(false);
     expect(lastUpdate()!.updates.status).toBe("success");
   });
 
-  test("timeout during retry → breaks out, uses last result", async () => {
-    const badResult = { summary: "done" }; // missing count
-    mockAdapter = createMockAdapter([badResult, "timeout"]);
+  test("no output tools called → status failed", async () => {
+    adapterMessages = [{ type: "progress", message: "Working..." }];
 
-    const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA, outputRetries: 3 });
-    await executeFlowInBackground("exec-6", "user-1", "org-1", flow, makePromptContext());
+    const flow = makeFlow({});
+    await executeFlowInBackground("exec-7", "user-1", "org-1", flow, makePromptContext());
 
-    // 1 initial + 1 retry that timed out = 2 calls
-    expect(adapterCallCount).toBe(2);
-    expect(findLogs("output_validation_retry")).toHaveLength(1);
-    // Still succeeds with last result
-    expect(lastUpdate()!.updates.status).toBe("success");
+    expect(lastUpdate()!.updates.status).toBe("failed");
   });
 });

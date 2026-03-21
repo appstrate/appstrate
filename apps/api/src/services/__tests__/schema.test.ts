@@ -2,7 +2,6 @@ import { describe, test, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import { validateManifest } from "@appstrate/core/validation";
 import { validateConfig, validateInput, validateOutput, validateFlowContent } from "../schema.ts";
-import { buildRetryPrompt } from "../adapters/prompt-builder.ts";
 
 // --- Fixtures ---
 
@@ -491,57 +490,5 @@ describe("validateFlowContent", () => {
     ]);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("duplicated"))).toBe(true);
-  });
-});
-
-// =====================================================
-// buildRetryPrompt (uses JSONSchemaObject)
-// =====================================================
-
-describe("buildRetryPrompt", () => {
-  test("includes required/optional labels from schema.required array", () => {
-    const prompt = buildRetryPrompt(
-      { summary: "incomplete" },
-      ["Field 'count': must be number"],
-      OUTPUT_SCHEMA,
-    );
-    expect(prompt).toContain("summary");
-    expect(prompt).toContain("count");
-    expect(prompt).toContain("required");
-    expect(prompt).toContain("optional"); // tags is optional
-  });
-
-  test("correctly labels required fields", () => {
-    const prompt = buildRetryPrompt({}, ["missing fields"], OUTPUT_SCHEMA);
-    // summary and count are required, tags is optional
-    expect(prompt).toContain("**summary** (string, required)");
-    expect(prompt).toContain("**count** (number, required)");
-    expect(prompt).toContain("**tags** (array, optional)");
-  });
-
-  test("includes validation errors in output", () => {
-    const errors = ["Field 'count': must be number", "Field 'summary': is required"];
-    const prompt = buildRetryPrompt({}, errors, OUTPUT_SCHEMA);
-    for (const err of errors) {
-      expect(prompt).toContain(err);
-    }
-  });
-
-  test("includes previous bad result as JSON", () => {
-    const badResult = { summary: "partial", extra: true };
-    const prompt = buildRetryPrompt(badResult, ["error"], OUTPUT_SCHEMA);
-    expect(prompt).toContain('"summary": "partial"');
-    expect(prompt).toContain('"extra": true');
-  });
-
-  test("handles schema with no required array (all fields optional)", () => {
-    const schema: JSONSchemaObject = {
-      type: "object",
-      properties: {
-        name: { type: "string", description: "Name" },
-      },
-    };
-    const prompt = buildRetryPrompt({}, ["error"], schema);
-    expect(prompt).toContain("**name** (string, optional)");
   });
 });

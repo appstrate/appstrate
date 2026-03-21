@@ -16,7 +16,7 @@ interface FlowInfo {
   execution?: {
     id: string;
     status: string;
-    result?: Record<string, unknown>;
+    result?: { report?: string; data?: Record<string, unknown> };
     error?: string;
     logs?: RawLog[];
   };
@@ -45,7 +45,9 @@ export function PublicShareRunPage() {
   const { token } = useParams<{ token: string }>();
   const [status, setStatus] = useState<RunCardStatus>("loading");
   const [flowInfo, setFlowInfo] = useState<FlowInfo | null>(null);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [result, setResult] = useState<{ report?: string; data?: Record<string, unknown> } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [rawLogs, setRawLogs] = useState<RawLog[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +73,8 @@ export function PublicShareRunPage() {
           const resolved = resolveExecutionStatus(data.execution.status, t);
           setStatus(resolved.pageStatus);
           if (resolved.error) setError(data.execution.error || resolved.error);
-          if (data.execution.result) setResult(data.execution.result);
+          if (data.execution.result)
+            setResult(data.execution.result as { report?: string; data?: Record<string, unknown> });
           if (data.execution.logs) setRawLogs(data.execution.logs);
         } else if (data.consumed) {
           setStatus("invalid");
@@ -101,7 +104,8 @@ export function PublicShareRunPage() {
       if (resolved.pageStatus !== "running") {
         setStatus(resolved.pageStatus);
         if (resolved.error) setError(data.error || resolved.error);
-        if (data.result) setResult(data.result as Record<string, unknown>);
+        if (data.result)
+          setResult(data.result as { report?: string; data?: Record<string, unknown> });
         stopPolling();
       }
     } catch {
@@ -173,7 +177,6 @@ export function PublicShareRunPage() {
       displayName={flowInfo?.displayName}
       description={flowInfo?.description}
       inputSchema={flowInfo?.input?.schema}
-      outputSchema={flowInfo?.output?.schema}
       providers={flowInfo?.providers}
       status={status}
       error={error}

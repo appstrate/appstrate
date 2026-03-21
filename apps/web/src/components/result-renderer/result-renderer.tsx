@@ -1,78 +1,61 @@
-import { useRef, useCallback, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
-import { SchemaRenderer } from "./schema-renderer";
-import { HeuristicRenderer } from "./heuristic-renderer";
+import { Markdown } from "@/components/markdown";
 import { JsonView } from "@/components/json-view";
 import { CopyButton } from "./components/copy-button";
 
 interface ResultRendererProps {
-  data: Record<string, unknown>;
-  outputSchema?: JSONSchemaObject;
+  report?: string;
+  data?: Record<string, unknown>;
+  reportStreaming?: boolean;
 }
 
-export function ResultRenderer({ data, outputSchema }: ResultRendererProps) {
+export function ResultRenderer({ report, data, reportStreaming }: ResultRendererProps) {
   const { t } = useTranslation(["flows", "common"]);
-  const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [allExpanded, setAllExpanded] = useState(true);
 
-  const hasSchema = outputSchema?.properties && Object.keys(outputSchema.properties).length > 0;
-  const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
+  const hasReport = !!report;
+  const hasData = data && Object.keys(data).length > 0;
 
-  const toggleAll = useCallback((expand: boolean) => {
-    if (!containerRef.current) return;
-    const details = containerRef.current.querySelectorAll("details");
-    details.forEach((d) => {
-      d.open = expand;
-    });
-    setAllExpanded(expand);
-  }, []);
+  const [activeView, setActiveView] = useState<"report" | "data">("report");
+
+  const jsonString = useMemo(() => {
+    const obj: Record<string, unknown> = {};
+    if (report) obj.report = report;
+    if (hasData) obj.data = data;
+    return JSON.stringify(obj, null, 2);
+  }, [report, data, hasData]);
 
   return (
     <div className="mt-4" role="region" aria-label={t("result.title")}>
       {/* Toolbar */}
       <div className="flex items-center gap-1 mb-3">
-        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "formatted" | "json")}>
+        <Tabs value={activeView} onValueChange={(v) => setActiveView(v as "report" | "data")}>
           <TabsList>
-            <TabsTrigger value="formatted">{t("result.formatted")}</TabsTrigger>
-            <TabsTrigger value="json">{t("result.json")}</TabsTrigger>
+            <TabsTrigger value="report" disabled={!hasReport}>
+              {t("result.tabReport")}
+            </TabsTrigger>
+            <TabsTrigger value="data" disabled={!hasData}>
+              {t("result.tabData")}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
-
-        {viewMode === "formatted" && (
-          <>
-            <div className="ml-auto" />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground"
-              onClick={() => toggleAll(allExpanded === true ? false : true)}
-              title={allExpanded === true ? t("result.collapseAll") : t("result.expandAll")}
-            >
-              {allExpanded === true ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-            </Button>
-            <CopyButton text={jsonString} />
-          </>
-        )}
+        <div className="ml-auto" />
+        <CopyButton text={jsonString} />
       </div>
 
       {/* Content */}
-      {viewMode === "formatted" ? (
-        <div ref={containerRef}>
-          <h4 className="text-sm font-semibold mb-2">{t("result.title")}</h4>
-          {hasSchema ? (
-            <SchemaRenderer data={data} schema={outputSchema!} />
-          ) : (
-            <HeuristicRenderer data={data} />
+      {activeView === "report" && hasReport && (
+        <>
+          <Markdown className="max-w-none leading-relaxed text-sm">{report!}</Markdown>
+          {reportStreaming && (
+            <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            </div>
           )}
-        </div>
-      ) : (
-        <JsonView data={data} />
+        </>
       )}
+      {activeView === "data" && hasData && <JsonView data={data!} />}
     </div>
   );
 }
