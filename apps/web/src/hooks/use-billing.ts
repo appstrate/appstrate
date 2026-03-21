@@ -16,6 +16,9 @@ export interface BillingUpgrade {
 export interface BillingInfo {
   plan: BillingPlan;
   usagePercent: number;
+  // TODO(debug): remove budgetUsedCents/budgetLimitCents before production
+  budgetUsedCents?: number;
+  budgetLimitCents?: number;
   periodEnd: string | null;
   status: "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceling" | "canceled" | "none";
   upgrades: BillingUpgrade[];
