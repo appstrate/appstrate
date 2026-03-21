@@ -34,6 +34,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
 import type { AppEnv } from "./types/index.ts";
+import type { AppConfig } from "@appstrate/shared-types";
 
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
@@ -52,21 +53,20 @@ app.route("/", healthRouter);
 app.get("/api/openapi.json", (c) => c.json(openApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
-// Platform config — public (before auth middleware)
+// Platform config — computed once at boot, injected into SPA HTML.
 // In OSS (no cloud module): models & provider keys visible, billing hidden.
 // In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
-app.get("/api/config", (c) => {
+function buildAppConfig(): AppConfig {
   const isCloud = getCloudModule() !== null;
-  return c.json({
-    socialProviders: [] as string[],
+  return {
     platform: isCloud ? "cloud" : "oss",
     features: {
       billing: isCloud,
       models: !isCloud,
       providerKeys: !isCloud,
     },
-  });
-});
+  };
+}
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -89,7 +89,7 @@ function skipAuth(path: string): boolean {
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/auth/callback") return true; // OAuth redirect — no session
-  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return true;
+  if (path === "/api/docs" || path === "/api/openapi.json") return true;
   if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
   return false;
 }
@@ -162,6 +162,9 @@ app.use("*", async (c, next) => {
 // Boot: load system resources, init services, clean up orphans
 await boot();
 
+// Pre-compute config script (config is static after boot — cloud module is loaded or not)
+const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(buildAppConfig())};</script>`;
+
 // Graceful shutdown
 const shutdown = createShutdownHandler(() => {
   shuttingDown = true;
@@ -214,11 +217,22 @@ if (cloud) {
   cloud.registerCloudRoutes(app);
 }
 
-// Static files for UI
-app.use("/*", serveStatic({ root: "./apps/web/dist" }));
+// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
+app.use(
+  "/*",
+  serveStatic({
+    root: "./apps/web/dist",
+    rewriteRequestPath: (path) =>
+      path === "/" || path === "/index.html" ? "/.noop" : path,
+  }),
+);
 
-// SPA fallback — serve index.html for client-side routes
-app.get("/*", serveStatic({ root: "./apps/web/dist", path: "index.html" }));
+// SPA fallback — serve index.html with injected app config for all non-asset routes.
+// Read fresh each time: Vite build --watch rewrites index.html with new asset hashes.
+app.get("/*", async (c) => {
+  const raw = await Bun.file("./apps/web/dist/index.html").text();
+  return c.html(raw.replace("</head>", `${appConfigScript}\n</head>`));
+});
 
 // Start server
 export default {

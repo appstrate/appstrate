@@ -11,6 +11,17 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
 
+// --- App Config Types ---
+
+export interface AppConfig {
+  platform: "oss" | "cloud";
+  features: {
+    billing: boolean;
+    models: boolean;
+    providerKeys: boolean;
+  };
+}
+
 // --- Package Types ---
 
 // --- Execution Types ---
