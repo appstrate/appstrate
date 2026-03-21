@@ -9,6 +9,7 @@ import {
   getExecution,
   getExecutionFull,
   getRunningExecutionsForPackage,
+  getRunningExecutionCountForOrg,
   deletePackageExecutions,
   listPackageExecutions,
   listExecutionLogs,
@@ -28,6 +29,7 @@ import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "../services/flow-readiness.ts";
+import { getCloudModule } from "../lib/cloud-loader.ts";
 
 const MIN_RETRY_TIME_MS = 5_000;
 
@@ -55,6 +57,10 @@ export async function executeFlowInBackground(
   const controller = trackExecution(executionId);
   const { signal } = controller;
 
+  const cloud = getCloudModule();
+  let accumulatedCost = 0;
+  let executionSucceeded = false;
+
   try {
     // Update status to running
     await updateExecution(executionId, { status: "running" });
@@ -66,7 +72,6 @@ export async function executeFlowInBackground(
     let result: Record<string, unknown> | null = null;
     let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
-    let accumulatedCost = 0;
 
     try {
       for await (const msg of adapter.execute(
@@ -281,6 +286,7 @@ export async function executeFlowInBackground(
           : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
+      executionSucceeded = true;
 
       await appendExecutionLog(
         executionId,
@@ -371,6 +377,21 @@ export async function executeFlowInBackground(
       "error",
     );
   } finally {
+    // Post-execution billing (Cloud only) — only charge on successful executions with cost
+    if (cloud && accumulatedCost > 0 && executionSucceeded) {
+      try {
+        await cloud.cloudHooks.recordUsage(orgId, executionId, accumulatedCost);
+      } catch (err) {
+        // Cost persisted in executions.cost for reconciliation.
+        logger.error("Failed to record usage — manual reconciliation needed", {
+          err: err instanceof Error ? err.message : String(err),
+          orgId,
+          executionId,
+          accumulatedCost,
+        });
+      }
+    }
+
     untrackExecution(executionId);
   }
 }
@@ -473,6 +494,20 @@ export function createExecutionsRouter() {
         return c.json({ error: "MODEL_NOT_CONFIGURED", message: err.message }, 400);
       }
       throw err;
+    }
+
+    // Pre-execution quota check (Cloud only — reject before creating the execution record)
+    const cloud = getCloudModule();
+    if (cloud) {
+      try {
+        const runningCount = await getRunningExecutionCountForOrg(orgId);
+        await cloud.cloudHooks.checkQuota(orgId, runningCount);
+      } catch (err) {
+        if (err instanceof cloud.QuotaExceededError) {
+          return c.json({ error: "QUOTA_EXCEEDED", message: err.message }, 402);
+        }
+        throw err;
+      }
     }
 
     // Create execution record

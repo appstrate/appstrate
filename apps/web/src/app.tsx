@@ -26,6 +26,7 @@ import { RegisterPage } from "./pages/register";
 import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
+import { UsageBadge } from "./components/usage-badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "./hooks/use-theme";
 import { useAuth } from "./hooks/use-auth";
@@ -174,6 +175,7 @@ function MainLayout() {
           <LayoutGrid size={18} />
         </Link>
         <NotificationBell />
+        <UsageBadge />
         <div className="mx-2 h-5 w-px bg-border" />
         <UserMenu
           displayName={profile?.displayName || user!.email || ""}

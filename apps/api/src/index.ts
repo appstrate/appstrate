@@ -83,18 +83,30 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
+// Paths that skip both auth and org-context middleware (handled by other means or public)
+function skipAuth(path: string): boolean {
+  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return true;
+  if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
+  if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
+  if (path === "/auth/callback") return true; // OAuth redirect — no session
+  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return true;
+  if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
+  return false;
+}
+
+// Paths that need auth but not org-context (user-scoped or self-resolving)
+function skipOrgContext(path: string): boolean {
+  if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
+  if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
+  if (path === "/api/profile" || path === "/api/profile/") return true;
+  if (path === "/api/profiles/batch") return true;
+  if (path === "/api/welcome/setup") return true;
+  return false;
+}
+
 // Auth middleware: verify Bearer API key OR Better Auth session (cookie-based)
 app.use("*", async (c, next) => {
-  const path = c.req.path;
-  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
-  // Better Auth endpoints are handled above
-  if (path.startsWith("/api/auth/")) return next();
-  // Realtime SSE endpoints handle their own auth (cookie-based, no X-Org-Id header)
-  if (path.startsWith("/api/realtime/")) return next();
-  // OAuth callback is a redirect from the provider — no session
-  if (path === "/auth/callback") return next();
-  // OpenAPI docs and config are public
-  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return next();
+  if (skipAuth(c.req.path)) return next();
 
   // Try Bearer API key first
   const authHeader = c.req.header("Authorization");
@@ -136,28 +148,13 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Org context middleware: require X-Org-Id for all /api/* and /auth/* routes
-// EXCEPT: /api/orgs (list/create without org context), /health, /share/*, /internal/*
+// Org context middleware: require X-Org-Id for org-scoped /api/* routes
 app.use("*", async (c, next) => {
   const path = c.req.path;
-
-  // Skip org context for routes that don't need it
-  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return next();
-  if (path.startsWith("/api/auth/")) return next();
-  if (path.startsWith("/api/realtime/")) return next();
-  if (path === "/auth/callback") return next();
-  // OpenAPI docs and config are public
-  if (path === "/api/docs" || path === "/api/openapi.json" || path === "/api/config") return next();
-  if (path === "/api/orgs" || path === "/api/orgs/") return next();
-  // Allow /api/orgs/:orgId/* routes (they handle their own auth)
-  if (path.startsWith("/api/orgs/")) return next();
-  // Profile routes are user-scoped, not org-scoped
-  if (path === "/api/profile" || path === "/api/profile/") return next();
-  if (path === "/api/profiles/batch") return next();
-  // Welcome setup is user-scoped, not org-scoped
-  if (path === "/api/welcome/setup") return next();
-  // API key auth already resolved orgId
-  if (c.get("authMethod") === "api_key") return next();
+  if (skipAuth(path)) return next(); // public paths also skip org context
+  if (!c.get("user")) return next(); // no auth resolved — nothing to do
+  if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId
+  if (skipOrgContext(path)) return next();
 
   return requireOrgContext()(c, next);
 });
