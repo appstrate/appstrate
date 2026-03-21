@@ -1,31 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
+import type { AppConfig } from "@appstrate/shared-types";
 
-export interface AppConfig {
-  socialProviders: string[];
-  platform: "oss" | "cloud";
-  features: {
-    billing: boolean;
-    models: boolean;
-    providerKeys: boolean;
-  };
+declare global {
+  interface Window {
+    __APP_CONFIG__: AppConfig;
+  }
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  socialProviders: [],
   platform: "oss",
   features: { billing: false, models: true, providerKeys: true },
 };
 
-export function useAppConfig(): AppConfig {
-  const { data } = useQuery({
-    queryKey: ["app-config"],
-    queryFn: async () => {
-      const res = await fetch("/api/config");
-      if (!res.ok) return DEFAULT_CONFIG;
-      return res.json() as Promise<AppConfig>;
-    },
-    staleTime: Infinity,
-  });
+export type { AppConfig };
 
-  return data ?? DEFAULT_CONFIG;
+export function useAppConfig(): AppConfig {
+  return window.__APP_CONFIG__ ?? DEFAULT_CONFIG;
 }
