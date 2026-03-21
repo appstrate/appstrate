@@ -7,7 +7,7 @@ export interface BillingPlan {
   name: string;
 }
 
-export interface BillingUpgrade {
+export interface BillingPlanDetail {
   id: string;
   name: string;
   price: number;
@@ -15,13 +15,14 @@ export interface BillingUpgrade {
 
 export interface BillingInfo {
   plan: BillingPlan;
+  plans: BillingPlanDetail[];
   usagePercent: number;
   // TODO(debug): remove budgetUsedCents/budgetLimitCents before production
   budgetUsedCents?: number;
   budgetLimitCents?: number;
   periodEnd: string | null;
   status: "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceling" | "canceled" | "none";
-  upgrades: BillingUpgrade[];
+  upgrades: BillingPlanDetail[];
 }
 
 export function useBilling(options?: { enabled?: boolean }) {
@@ -37,10 +38,10 @@ export function useBilling(options?: { enabled?: boolean }) {
 
 export function useCheckout() {
   return useMutation({
-    mutationFn: async (planId: string) => {
+    mutationFn: async ({ planId, returnUrl }: { planId: string; returnUrl?: string }) => {
       const res = await api<{ url: string }>("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify({ planId }),
+        body: JSON.stringify({ planId, ...(returnUrl && { returnUrl }) }),
       });
       return res.url;
     },

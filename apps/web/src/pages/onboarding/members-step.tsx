@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
+import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { api } from "../../api";
 import { Spinner } from "../../components/spinner";
@@ -23,6 +23,7 @@ export function OnboardingMembersStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const orgId = useOnboardingGuard();
+  const { nextRoute, prevRoute } = useOnboardingNav("members");
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
@@ -54,7 +55,7 @@ export function OnboardingMembersStep() {
     },
   });
 
-  const goNext = () => navigate("/onboarding/complete");
+  const goNext = () => nextRoute && navigate(nextRoute);
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +73,7 @@ export function OnboardingMembersStep() {
       title={t("onboarding.membersTitle")}
       subtitle={t("onboarding.membersSubtitle")}
       onNext={goNext}
-      onBack={() => navigate("/onboarding/providers")}
+      onBack={prevRoute ? () => navigate(prevRoute) : undefined}
     >
       <div className="flex flex-col gap-4">
         {/* Invite form — fixed above scroll */}

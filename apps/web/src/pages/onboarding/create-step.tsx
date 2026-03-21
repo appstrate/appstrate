@@ -9,13 +9,14 @@ import { api } from "../../api";
 import { useOrg } from "../../hooks/use-org";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { useFormErrors } from "../../hooks/use-form-errors";
-import { OnboardingLayout } from "../../components/onboarding-layout";
+import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 
 export function OnboardingCreateStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { switchOrg, currentOrg, loading } = useOrg();
+  const { nextRoute } = useOnboardingNav("create");
 
   const location = useLocation();
   const fromSwitcher = (location.state as { fromSwitcher?: boolean })?.fromSwitcher;
@@ -25,10 +26,10 @@ export function OnboardingCreateStep() {
   // to avoid redirect loops with stale IDs from deleted orgs
   // When arriving from the org switcher, let the user create a new org
   useEffect(() => {
-    if (!loading && currentOrg && !fromSwitcher) {
-      navigate("/onboarding/model", { replace: true });
+    if (!loading && currentOrg && !fromSwitcher && nextRoute) {
+      navigate(nextRoute, { replace: true });
     }
-  }, [currentOrg, loading, navigate, fromSwitcher]);
+  }, [currentOrg, loading, navigate, fromSwitcher, nextRoute]);
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -72,7 +73,7 @@ export function OnboardingCreateStep() {
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ["orgs"] });
       switchOrg(data.id);
-      navigate("/onboarding/model");
+      if (nextRoute) navigate(nextRoute);
     },
     onError: (err: Error) => {
       setServerError(err.message);

@@ -12,6 +12,7 @@ import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
 import { OnboardingCreateStep } from "./pages/onboarding/create-step";
+import { OnboardingPlanStep } from "./pages/onboarding/plan-step";
 import { OnboardingModelStep } from "./pages/onboarding/model-step";
 import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
@@ -270,6 +271,7 @@ export function App() {
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
+          <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
           <Route path="/onboarding/model" element={<OnboardingModelStep />} />
           <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
           <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
