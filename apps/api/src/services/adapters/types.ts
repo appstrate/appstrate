@@ -14,12 +14,21 @@ export interface TokenUsage {
 }
 
 export interface ExecutionMessage {
-  type: "progress" | "result" | "error";
+  type:
+    | "progress"
+    | "usage"
+    | "error"
+    | "report"
+    | "report_final"
+    | "structured_output"
+    | "set_state"
+    | "add_memory";
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;
   cost?: number;
   level?: "debug" | "info" | "warn" | "error";
+  content?: string;
 }
 
 export interface UploadedFile {

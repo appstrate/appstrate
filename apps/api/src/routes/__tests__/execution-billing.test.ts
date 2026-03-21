@@ -145,7 +145,6 @@ mock.module("../../services/adapters/index.ts", () => ({
     },
   }),
   TimeoutError: MockTimeoutError,
-  buildRetryPrompt: () => "mock retry prompt",
 }));
 
 mock.module("../../services/package-storage.ts", () => ({
@@ -238,7 +237,7 @@ describe("executeFlowInBackground — billing integration", () => {
 
     setAdapterMessages([
       { type: "progress", message: "Working..." },
-      { type: "result", data: { answer: "done" } },
+      { type: "structured_output", data: { answer: "done" } },
     ]);
 
     const flow = makeFlow();
@@ -260,7 +259,7 @@ describe("executeFlowInBackground — billing integration", () => {
 
     setAdapterMessages([
       { type: "progress", message: "Working...", cost: 0.01 },
-      { type: "result", data: { answer: "done" }, cost: 0.02 },
+      { type: "structured_output", data: { answer: "done" }, cost: 0.02 },
     ]);
 
     const flow = makeFlow();
@@ -347,7 +346,7 @@ describe("executeFlowInBackground — billing integration", () => {
 
     setAdapterMessages([
       { type: "progress", message: "Working...", cost: 0.01 },
-      { type: "result", data: { answer: "done" }, cost: 0.02 },
+      { type: "structured_output", data: { answer: "done" }, cost: 0.02 },
     ]);
 
     const flow = makeFlow();

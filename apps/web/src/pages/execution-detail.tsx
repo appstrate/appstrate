@@ -89,14 +89,19 @@ export function ExecutionDetailPage() {
   );
   const hasUserSelected = useRef(false);
 
-  const { historicalLogs, historicalResult } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], historicalResult: null };
-    const { entries, result } = buildLogEntries(logs as RawLog[]);
-    return { historicalLogs: entries, historicalResult: result };
+  const { historicalLogs, report, reportComplete, structuredData } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], report: "", reportComplete: false, structuredData: null };
+    const { entries, report, reportComplete, data } = buildLogEntries(logs as RawLog[]);
+    return { historicalLogs: entries, report, reportComplete, structuredData: data };
   }, [logs]);
 
-  // Use result from logs or execution object
-  const resultData = historicalResult || (execution?.result as Record<string, unknown> | null);
+  const execResult = execution?.result as {
+    report?: string;
+    data?: Record<string, unknown>;
+  } | null;
+  const finalReport = report || execResult?.report || "";
+  const finalData = structuredData || execResult?.data || null;
+  const hasResult = !!finalReport || (finalData && Object.keys(finalData).length > 0);
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
   const publicLogs = useMemo(
@@ -109,12 +114,12 @@ export function ExecutionDetailPage() {
     hasUserSelected.current = false;
   }, [execId]);
 
-  // Auto-switch to result when execution completes (unless user manually picked a tab)
+  // Auto-switch to result tab when result data arrives (including during streaming)
   useEffect(() => {
-    if (resultData && !isRunning && !hasUserSelected.current) {
+    if (hasResult && !hasUserSelected.current) {
       setActiveTab("result");
     }
-  }, [resultData, isRunning, setActiveTab]);
+  }, [hasResult, setActiveTab]);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -287,8 +292,12 @@ export function ExecutionDetailPage() {
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
       {activeTab === "result" &&
-        (resultData ? (
-          <ResultRenderer data={resultData} outputSchema={flow?.output?.schema} />
+        (hasResult ? (
+          <ResultRenderer
+            report={finalReport || undefined}
+            data={finalData ?? undefined}
+            reportStreaming={isRunning && !!finalReport && !reportComplete}
+          />
         ) : (
           <EmptyState message={t("exec.emptyResult")} icon={FileText} compact />
         ))}

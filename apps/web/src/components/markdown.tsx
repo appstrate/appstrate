@@ -31,7 +31,7 @@ interface MarkdownProps {
 
 export function Markdown({ children, className }: MarkdownProps) {
   return (
-    <div className={className}>
+    <div className={`prose prose-sm max-w-none ${className ?? ""}`}>
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {children}
       </ReactMarkdown>

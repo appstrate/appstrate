@@ -34,7 +34,9 @@ export function ShareableRunPage() {
 
   const [executionId, setExecutionId] = useState<string | null>(urlExecId ?? null);
   const [status, setStatus] = useState<RunCardStatus>(urlExecId ? "running" : "idle");
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [result, setResult] = useState<{ report?: string; data?: Record<string, unknown> } | null>(
+    null,
+  );
   const [execError, setExecError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [apiKeyService, setApiKeyService] = useState<{
@@ -53,7 +55,8 @@ export function ShareableRunPage() {
     const s = execution.status;
     if (s === "success") {
       setStatus("success");
-      if (execution.result) setResult(execution.result as Record<string, unknown>);
+      if (execution.result)
+        setResult(execution.result as { report?: string; data?: Record<string, unknown> });
     } else if (s === "failed") {
       setStatus("failed");
       setExecError((execution.error as string) || t("shareable.errorFailed"));
@@ -179,7 +182,6 @@ export function ShareableRunPage() {
         displayName={flow?.displayName}
         description={flow?.description}
         inputSchema={flow?.input?.schema}
-        outputSchema={flow?.output?.schema}
         providers={providers}
         status={cardStatus}
         error={execError ?? loadError?.message}

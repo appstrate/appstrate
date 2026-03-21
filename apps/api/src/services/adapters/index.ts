@@ -4,7 +4,6 @@ import { getEnv } from "@appstrate/env";
 
 export { TimeoutError } from "./types.ts";
 export type { TokenUsage } from "./types.ts";
-export { buildRetryPrompt } from "./prompt-builder.ts";
 
 export function getAdapter(): ExecutionAdapter {
   const type = getEnv().EXECUTION_ADAPTER;

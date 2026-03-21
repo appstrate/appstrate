@@ -30,19 +30,28 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 
 /**
  * Transform raw execution logs into LogEntry[], merging consecutive text-only
- * progress entries and extracting result data.
+ * progress entries and extracting report chunks and structured data.
  */
 export function buildLogEntries(rawLogs: RawLog[]): {
   entries: LogEntry[];
-  result: Record<string, unknown> | null;
+  report: string;
+  reportComplete: boolean;
+  data: Record<string, unknown> | null;
 } {
   const entries: LogEntry[] = [];
-  let result: Record<string, unknown> | null = null;
+  let report = "";
+  let reportComplete = false;
+  let data: Record<string, unknown> | null = null;
   let lastWasPlainText = false;
 
   for (const log of rawLogs) {
-    if (log.event === "result" && log.data) {
-      result = log.data as Record<string, unknown>;
+    if (log.event === "report_chunk" || log.event === "report_final") {
+      report += (log.message || "") + "\n\n";
+      if (log.event === "report_final") reportComplete = true;
+      lastWasPlainText = false;
+    } else if (log.event === "structured_output" && log.data) {
+      if (!data) data = {};
+      Object.assign(data, log.data);
       lastWasPlainText = false;
     } else if (log.event === "execution_completed") {
       lastWasPlainText = false;
@@ -70,7 +79,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
     }
   }
 
-  return { entries, result };
+  return { entries, report, reportComplete, data };
 }
 
 export function formatTimestamp(d: Date | string | null | undefined, lang: string): string {

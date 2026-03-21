@@ -16,7 +16,7 @@ import {
   addPackageMemories,
 } from "../services/state/index.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { getAdapter, TimeoutError, buildRetryPrompt } from "../services/adapters/index.ts";
+import { getAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
@@ -30,8 +30,6 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-
-const MIN_RETRY_TIME_MS = 5_000;
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
@@ -68,7 +66,10 @@ export async function executeFlowInBackground(
     const adapter = getAdapter();
 
     const timeout = (flow.manifest.timeout as number | undefined) ?? 300;
-    let result: Record<string, unknown> | null = null;
+    let report = "";
+    const structuredData: Record<string, unknown> = {};
+    let state: Record<string, unknown> | null = null;
+    const memories: string[] = [];
     let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
@@ -83,31 +84,71 @@ export async function executeFlowInBackground(
       )) {
         if (msg.usage) accumulateUsage(accumulated, msg.usage);
         if (msg.cost != null) accumulatedCost += msg.cost;
-        if (msg.type === "progress") {
-          await appendExecutionLog(
-            executionId,
-            userId,
-            orgId,
-            "progress",
-            "progress",
-            msg.message ?? null,
-            msg.data ?? null,
-            msg.level ?? "debug",
-          );
-        } else if (msg.type === "error") {
-          lastAdapterError = msg.message ?? null;
-          await appendExecutionLog(
-            executionId,
-            userId,
-            orgId,
-            "system",
-            "adapter_error",
-            msg.message ?? null,
-            msg.data ?? null,
-            "error",
-          );
-        } else if (msg.type === "result" && msg.data) {
-          result = msg.data;
+
+        switch (msg.type) {
+          case "progress":
+            await appendExecutionLog(
+              executionId,
+              userId,
+              orgId,
+              "progress",
+              "progress",
+              msg.message ?? null,
+              msg.data ?? null,
+              msg.level ?? "debug",
+            );
+            break;
+
+          case "error":
+            lastAdapterError = msg.message ?? null;
+            await appendExecutionLog(
+              executionId,
+              userId,
+              orgId,
+              "system",
+              "adapter_error",
+              msg.message ?? null,
+              msg.data ?? null,
+              "error",
+            );
+            break;
+
+          case "report":
+          case "report_final":
+            report += (msg.content ?? "") + "\n\n";
+            await appendExecutionLog(
+              executionId,
+              userId,
+              orgId,
+              "report",
+              msg.type === "report_final" ? "report_final" : "report_chunk",
+              msg.content ?? null,
+              null,
+              "info",
+            );
+            break;
+
+          case "structured_output":
+            if (msg.data) Object.assign(structuredData, msg.data);
+            await appendExecutionLog(
+              executionId,
+              userId,
+              orgId,
+              "result",
+              "structured_output",
+              null,
+              msg.data ?? null,
+              "info",
+            );
+            break;
+
+          case "set_state":
+            if (msg.data) state = msg.data;
+            break;
+
+          case "add_memory":
+            if (msg.content) memories.push(msg.content);
+            break;
         }
       }
     } catch (err) {
@@ -149,83 +190,15 @@ export async function executeFlowInBackground(
       throw err;
     }
 
-    if (result) {
-      // Validate against output schema and retry if invalid
+    const hasReport = report.length > 0;
+    const hasData = Object.keys(structuredData).length > 0;
+    const hasResult = hasReport || hasData;
+
+    if (hasResult) {
+      // Validate structured output against schema (if defined)
       const outputSchema = flow.manifest.output?.schema;
-      if (outputSchema) {
-        const maxRetries = (flow.manifest["x-outputRetries"] as number | undefined) ?? 2;
-        const timeoutMs = timeout * 1000;
-        let retriesLeft = maxRetries;
-        let outputValidation = validateOutput(result, outputSchema);
-
-        while (!outputValidation.valid && retriesLeft > 0) {
-          const remaining = timeoutMs - (Date.now() - startTime);
-          if (remaining < MIN_RETRY_TIME_MS) break;
-
-          // Brief pause before retrying to avoid hammering on identical invalid results
-          await new Promise((r) => setTimeout(r, 1_000));
-
-          const attempt = maxRetries - retriesLeft + 1;
-          await appendExecutionLog(
-            executionId,
-            userId,
-            orgId,
-            "system",
-            "output_validation_retry",
-            null,
-            {
-              attempt,
-              maxRetries,
-              errors: outputValidation.errors,
-            },
-            "debug",
-          );
-
-          const retryPrompt = buildRetryPrompt(result, outputValidation.errors, outputSchema);
-          const retryCtx: PromptContext = {
-            rawPrompt: retryPrompt,
-            tokens: promptContext.tokens,
-            config: {},
-            previousState: null,
-            input: {},
-            schemas: { output: outputSchema },
-            providers: [],
-            llmModel: promptContext.llmModel,
-            llmConfig: promptContext.llmConfig,
-          };
-
-          try {
-            for await (const msg of adapter.execute(
-              executionId,
-              retryCtx,
-              Math.min(60, Math.floor(remaining / 1000)),
-            )) {
-              if (msg.usage) accumulateUsage(accumulated, msg.usage);
-              if (msg.cost != null) accumulatedCost += msg.cost;
-              if (msg.type === "progress") {
-                await appendExecutionLog(
-                  executionId,
-                  userId,
-                  orgId,
-                  "progress",
-                  "progress",
-                  msg.message ?? null,
-                  msg.data ?? null,
-                  msg.level ?? "debug",
-                );
-              } else if (msg.type === "result" && msg.data) {
-                result = msg.data;
-              }
-            }
-          } catch (err) {
-            if (err instanceof TimeoutError) break;
-            throw err;
-          }
-
-          retriesLeft--;
-          outputValidation = validateOutput(result, outputSchema);
-        }
-
+      if (outputSchema && hasData) {
+        const outputValidation = validateOutput(structuredData, outputSchema);
         if (!outputValidation.valid) {
           await appendExecutionLog(
             executionId,
@@ -234,44 +207,34 @@ export async function executeFlowInBackground(
             "system",
             "output_validation",
             null,
-            {
-              valid: false,
-              errors: outputValidation.errors,
-            },
+            { valid: false, errors: outputValidation.errors },
             "warn",
           );
-          logger.warn("Output validation failed", {
-            executionId,
-            errors: outputValidation.errors,
-          });
+          logger.warn("Output validation failed", { executionId, errors: outputValidation.errors });
         }
       }
 
-      // Guard: don't overwrite "cancelled" status written by the cancel route
+      // Guard: don't overwrite "cancelled" status
       if (signal.aborted) return;
 
       const duration = Date.now() - startTime;
       const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-      const resultState =
-        result.state && typeof result.state === "object"
-          ? (result.state as Record<string, unknown>)
-          : undefined;
 
-      // Extract and persist memories
-      const resultMemories = Array.isArray(result.memories)
-        ? result.memories.filter((m): m is string => typeof m === "string" && m.trim().length > 0)
-        : undefined;
-      if (resultMemories && resultMemories.length > 0) {
-        await addPackageMemories(flow.id, orgId, resultMemories, executionId);
+      // Build result object
+      const result: Record<string, unknown> = {};
+      if (hasReport) result.report = report;
+      if (hasData) result.data = structuredData;
+
+      // Persist memories
+      if (memories.length > 0) {
+        await addPackageMemories(flow.id, orgId, memories, executionId);
       }
 
-      // Record billing BEFORE status update so the budget is current when
-      // pg_notify fires execution_update and the frontend refetches billing.
+      // Record billing (keep existing cloud billing logic exactly as-is)
       if (cloud && accumulatedCost > 0) {
         try {
           await cloud.cloudHooks.recordUsage(orgId, executionId, accumulatedCost);
         } catch (err) {
-          // Cost persisted in executions.cost for reconciliation.
           logger.error("Failed to record usage — manual reconciliation needed", {
             err: err instanceof Error ? err.message : String(err),
             orgId,
@@ -284,21 +247,12 @@ export async function executeFlowInBackground(
       await updateExecution(executionId, {
         status: "success",
         result,
-        ...(resultState ? { state: resultState } : {}),
+        ...(state ? { state } : {}),
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
-        tokensUsed:
-          totalTokens > 0
-            ? totalTokens
-            : typeof result.tokensUsed === "number"
-              ? result.tokensUsed
-              : undefined,
-        ...(totalTokens > 0
-          ? {
-              tokenUsage: { ...accumulated } as Record<string, unknown>,
-            }
-          : {}),
+        tokensUsed: totalTokens > 0 ? totalTokens : undefined,
+        ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
@@ -319,20 +273,16 @@ export async function executeFlowInBackground(
         "system",
         "execution_completed",
         null,
-        {
-          executionId,
-          status: "success",
-        },
+        { executionId, status: "success" },
         "info",
       );
     } else {
-      // Guard: don't overwrite "cancelled" status written by the cancel route
+      // Keep the existing no-result/failed path but update variable references
       if (signal.aborted) return;
 
       const duration = Date.now() - startTime;
       const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
 
-      // Prefer the precise adapter error over generic heuristics
       const error =
         lastAdapterError ??
         (totalTokens === 0

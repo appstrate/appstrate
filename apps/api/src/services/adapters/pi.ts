@@ -1,6 +1,6 @@
 import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
-import { buildEnrichedPrompt, extractJsonResult } from "./prompt-builder.ts";
+import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
@@ -75,6 +75,13 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.MODEL_REASONING = llmConfig.reasoning ? "true" : "false";
       if (llmConfig.cost) {
         containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
+      }
+
+      // Disable structured_output tool when no output schema is defined
+      const hasOutputSchema =
+        ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
+      if (!hasOutputSchema) {
+        containerEnv.DISABLED_TOOLS = "structured-output";
       }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
@@ -233,14 +240,20 @@ export function parsePiStreamLine(line: string): ExecutionMessage | null {
       case "text_delta":
         return { type: "progress", message: obj.text || "" };
 
-      case "assistant_message": {
-        const text = obj.text || "";
-        const jsonResult = extractJsonResult(text);
-        if (jsonResult) {
-          return { type: "result", data: jsonResult };
-        }
+      case "assistant_message":
         return null;
-      }
+
+      case "report":
+        return { type: obj.final ? "report_final" : "report", content: obj.content || "" };
+
+      case "structured_output":
+        return { type: "structured_output", data: obj.data };
+
+      case "set_state":
+        return { type: "set_state", data: obj.state };
+
+      case "add_memory":
+        return { type: "add_memory", content: obj.content || "" };
 
       case "tool_start":
         return {
@@ -255,7 +268,7 @@ export function parsePiStreamLine(line: string): ExecutionMessage | null {
       case "usage": {
         const t = obj.tokens || {};
         return {
-          type: "result",
+          type: "usage",
           usage: {
             input_tokens: t.input ?? 0,
             output_tokens: t.output ?? 0,

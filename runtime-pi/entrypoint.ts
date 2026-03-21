@@ -64,9 +64,13 @@ async function initGitWorkspace(): Promise<void> {
 
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
+const disabledTools = new Set(
+  (process.env.DISABLED_TOOLS || "").split(",").map((s) => s.trim()).filter(Boolean),
+);
 
 /**
- * Load all .ts extension files from a directory, skipping already-loaded IDs.
+ * Load all .ts extension files from a directory, skipping already-loaded IDs
+ * and tools listed in the DISABLED_TOOLS env var.
  * Uses native import() — Bun handles TypeScript natively without tsx.
  */
 async function loadExtensionsFromDir(dir: string, label: string) {
@@ -75,7 +79,10 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
   const results = await Promise.allSettled(
     entries
-      .filter((e) => !loadedExtensionIds.has(e.replace(/\.ts$/, "")))
+      .filter((e) => {
+        const id = e.replace(/\.ts$/, "");
+        return !loadedExtensionIds.has(id) && !disabledTools.has(id);
+      })
       .map(async (entry) => {
         const id = entry.replace(/\.ts$/, "");
         const mod = await import(path.join(dir, entry));

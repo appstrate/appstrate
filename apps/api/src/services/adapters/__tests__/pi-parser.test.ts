@@ -12,7 +12,7 @@ describe("parsePiStreamLine", () => {
 
       const msg = parsePiStreamLine(line);
       expect(msg).toEqual({
-        type: "result",
+        type: "usage",
         usage: {
           input_tokens: 100,
           output_tokens: 50,
@@ -79,6 +79,49 @@ describe("parsePiStreamLine", () => {
         cache_read_input_tokens: 0,
       });
       expect(msg!.cost).toBe(0.01);
+    });
+  });
+
+  describe("output tool events", () => {
+    test("report returns report message with content", () => {
+      const line = JSON.stringify({ type: "report", content: "## Summary\n\nAll good." });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "report", content: "## Summary\n\nAll good." });
+    });
+
+    test("report with final flag returns report_final type", () => {
+      const line = JSON.stringify({ type: "report", content: "Done.", final: true });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "report_final", content: "Done." });
+    });
+
+    test("report with empty content", () => {
+      const line = JSON.stringify({ type: "report" });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "report", content: "" });
+    });
+
+    test("structured_output returns data", () => {
+      const line = JSON.stringify({ type: "structured_output", data: { count: 42, items: ["a"] } });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "structured_output", data: { count: 42, items: ["a"] } });
+    });
+
+    test("set_state returns state as data", () => {
+      const line = JSON.stringify({ type: "set_state", state: { cursor: "abc" } });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "set_state", data: { cursor: "abc" } });
+    });
+
+    test("add_memory returns content", () => {
+      const line = JSON.stringify({ type: "add_memory", content: "Gmail paginates at 100" });
+      const msg = parsePiStreamLine(line);
+      expect(msg).toEqual({ type: "add_memory", content: "Gmail paginates at 100" });
+    });
+
+    test("assistant_message returns null (no JSON extraction)", () => {
+      const line = JSON.stringify({ type: "assistant_message", text: '```json\n{"summary":"test"}\n```' });
+      expect(parsePiStreamLine(line)).toBeNull();
     });
   });
 
