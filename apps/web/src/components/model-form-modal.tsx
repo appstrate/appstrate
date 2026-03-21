@@ -37,7 +37,7 @@ import {
 } from "@/lib/model-presets";
 import { PROVIDER_ICONS } from "./icons";
 
-interface ModelFormData {
+export interface ModelFormData {
   label: string;
   api: string;
   baseUrl: string;

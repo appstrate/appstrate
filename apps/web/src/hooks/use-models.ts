@@ -2,6 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import type { ModelFormData } from "../components/model-form-modal";
+import { useCreateProviderKey } from "./use-provider-keys";
+import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 export function useModels() {
   const orgId = useCurrentOrgId();
@@ -158,4 +161,52 @@ export function useSetFlowModel(packageId: string) {
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
   });
+}
+
+/**
+ * Handles ModelFormModal submission: creates provider key inline if needed,
+ * then creates or updates the model.
+ */
+export function useModelFormHandler(opts: {
+  editModel?: OrgModelInfo | null;
+  onSuccess: () => void;
+}) {
+  const createModel = useCreateModel();
+  const updateModel = useUpdateModel();
+  const createPk = useCreateProviderKey();
+
+  const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
+
+  const onSubmit = (data: ModelFormData) => {
+    if (opts.editModel) {
+      updateModel.mutate(
+        { id: opts.editModel.id, data },
+        { onSuccess: opts.onSuccess },
+      );
+    } else if (data.newProviderKey) {
+      const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
+      const providerLabel = provider?.label ?? "Custom";
+      createPk.mutate(
+        {
+          label: providerLabel,
+          api: data.api,
+          baseUrl: data.baseUrl,
+          apiKey: data.newProviderKey.apiKey,
+        },
+        {
+          onSuccess: (result) => {
+            const { newProviderKey: _, ...modelData } = data;
+            createModel.mutate(
+              { ...modelData, providerKeyId: result.id },
+              { onSuccess: opts.onSuccess },
+            );
+          },
+        },
+      );
+    } else {
+      createModel.mutate(data, { onSuccess: opts.onSuccess });
+    }
+  };
+
+  return { onSubmit, isPending };
 }

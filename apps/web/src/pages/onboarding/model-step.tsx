@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { useModels, useCreateModel } from "../../hooks/use-models";
+import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
@@ -27,7 +27,9 @@ export function OnboardingModelStep() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const { data: models } = useModels();
-  const createModel = useCreateModel();
+  const { onSubmit, isPending } = useModelFormHandler({
+    onSuccess: () => setModalOpen(false),
+  });
 
   const goNext = () => navigate("/onboarding/providers");
 
@@ -74,14 +76,8 @@ export function OnboardingModelStep() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         model={null}
-        isPending={createModel.isPending}
-        onSubmit={(data) => {
-          createModel.mutate(data, {
-            onSuccess: () => {
-              setModalOpen(false);
-            },
-          });
-        }}
+        isPending={isPending}
+        onSubmit={onSubmit}
       />
     </OnboardingLayout>
   );

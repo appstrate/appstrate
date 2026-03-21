@@ -37,11 +37,10 @@ import {
 } from "../hooks/use-proxies";
 import {
   useModels,
-  useCreateModel,
-  useUpdateModel,
   useDeleteModel,
   useSetDefaultModel,
   useTestModel,
+  useModelFormHandler,
 } from "../hooks/use-models";
 import {
   useProviderKeys,
@@ -114,10 +113,12 @@ export function OrgSettingsPage() {
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [editModel, setEditModel] = useState<OrgModelInfo | null>(null);
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
-  const createModelMutation = useCreateModel();
-  const updateModelMutation = useUpdateModel();
   const deleteModelMutation = useDeleteModel();
   const setDefaultModelMutation = useSetDefaultModel();
+  const modelForm = useModelFormHandler({
+    editModel,
+    onSuccess: () => setModelModalOpen(false),
+  });
 
   // Provider Keys
   const [pkModalOpen, setPkModalOpen] = useState(false);
@@ -692,41 +693,8 @@ export function OrgSettingsPage() {
         open={modelModalOpen}
         onClose={() => setModelModalOpen(false)}
         model={editModel}
-        isPending={
-          createModelMutation.isPending ||
-          updateModelMutation.isPending ||
-          createPkMutation.isPending
-        }
-        onSubmit={(data) => {
-          if (editModel) {
-            updateModelMutation.mutate(
-              { id: editModel.id, data },
-              { onSuccess: () => setModelModalOpen(false) },
-            );
-          } else if (data.newProviderKey) {
-            const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
-            const providerLabel = provider?.label ?? "Custom";
-            createPkMutation.mutate(
-              {
-                label: providerLabel,
-                api: data.api,
-                baseUrl: data.baseUrl,
-                apiKey: data.newProviderKey.apiKey,
-              },
-              {
-                onSuccess: (result) => {
-                  const { newProviderKey: _, ...modelData } = data;
-                  createModelMutation.mutate(
-                    { ...modelData, providerKeyId: result.id },
-                    { onSuccess: () => setModelModalOpen(false) },
-                  );
-                },
-              },
-            );
-          } else {
-            createModelMutation.mutate(data, { onSuccess: () => setModelModalOpen(false) });
-          }
-        }}
+        isPending={modelForm.isPending}
+        onSubmit={modelForm.onSubmit}
       />
 
       <ProviderKeyFormModal
@@ -1278,7 +1246,15 @@ function BillingTab() {
         <div className="mb-2">
           <div className="flex items-center justify-between text-sm mb-1">
             <span className="text-muted-foreground">{t("billing.usage")}</span>
-            <span className="font-medium">{billing.usagePercent}%</span>
+            <span className="font-medium">
+              {billing.usagePercent}%
+              {/* TODO(debug): remove raw cents display before production */}
+              {billing.budgetUsedCents != null && billing.budgetLimitCents != null && (
+                <span className="ml-2 text-xs text-muted-foreground font-normal">
+                  ({billing.budgetUsedCents}¢ / {billing.budgetLimitCents}¢)
+                </span>
+              )}
+            </span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div
