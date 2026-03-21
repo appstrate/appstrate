@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -13,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { useTestProviderKeyInline } from "../hooks/use-provider-keys";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -39,6 +39,13 @@ interface ProviderKeyFormModalProps {
   onSubmit: (data: ProviderKeyFormData) => void;
 }
 
+interface ProviderKeyFormFields {
+  label: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 function detectProviderFromKey(key: OrgProviderKeyInfo | null): string {
   if (!key) return "";
   const match = findProviderByApiAndBaseUrl(key.api, key.baseUrl);
@@ -58,35 +65,30 @@ function ProviderKeyFormBody({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [providerId, setProviderId] = useState(() => detectProviderFromKey(providerKey));
-  const [label, setLabel] = useState(providerKey?.label ?? "");
-  const [api, setApi] = useState(providerKey?.api ?? "");
-  const [baseUrl, setBaseUrl] = useState(providerKey?.baseUrl ?? "");
-  const [apiKey, setApiKey] = useState("");
 
   const isCustom = providerId === CUSTOM_ID;
 
-  const rules = useMemo(
-    () => ({
-      label: (v: string) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
-      apiKey: (v: string) =>
-        !providerKey && !v.trim() ? t("validation.required", { ns: "common" }) : undefined,
-      baseUrl: (v: string) => {
-        if (!isCustom) return undefined;
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        try {
-          new URL(v.trim());
-        } catch {
-          return t("validation.required", { ns: "common" });
-        }
-        return undefined;
-      },
-      api: (v: string) =>
-        isCustom && !v.trim() ? t("validation.required", { ns: "common" }) : undefined,
-    }),
-    [t, providerKey, isCustom],
-  );
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = useForm<ProviderKeyFormFields>({
+    defaultValues: {
+      label: providerKey?.label ?? "",
+      api: providerKey?.api ?? "",
+      baseUrl: providerKey?.baseUrl ?? "",
+      apiKey: "",
+    },
+    mode: "onBlur",
+  });
 
-  const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
+  const [api, baseUrl, apiKey, label] = useWatch({
+    control,
+    name: ["api", "baseUrl", "apiKey", "label"],
+  });
 
   const testMutation = useTestProviderKeyInline();
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -118,29 +120,27 @@ function ProviderKeyFormBody({
     setProviderId(id);
     clearErrors();
     if (id === CUSTOM_ID) {
-      setApi("");
-      setBaseUrl("");
-      setLabel("");
+      setValue("api", "");
+      setValue("baseUrl", "");
+      setValue("label", "");
     } else {
       const provider = PROVIDER_PRESETS.find((p) => p.id === id);
       if (provider) {
-        setApi(provider.api);
-        setBaseUrl(provider.baseUrl);
-        if (!label.trim()) setLabel(provider.label);
+        setValue("api", provider.api);
+        setValue("baseUrl", provider.baseUrl);
+        if (!label.trim()) setValue("label", provider.label);
       }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!validateAll({ label, api, baseUrl, apiKey })) return;
+  const onFormSubmit = handleSubmit((data) => {
     onSubmit({
-      label: label.trim(),
-      api: api.trim(),
-      baseUrl: baseUrl.trim(),
-      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      label: data.label.trim(),
+      api: data.api.trim(),
+      baseUrl: data.baseUrl.trim(),
+      ...(data.apiKey.trim() ? { apiKey: data.apiKey.trim() } : {}),
     });
-  };
+  });
 
   const title = providerKey ? t("providerKeys.form.editTitle") : t("providerKeys.form.title");
 
@@ -177,7 +177,7 @@ function ProviderKeyFormBody({
         </>
       }
     >
-      <form id="pk-form" onSubmit={handleSubmit} className="space-y-4">
+      <form id="pk-form" onSubmit={onFormSubmit} className="space-y-4">
         {/* Provider select */}
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
@@ -208,17 +208,16 @@ function ProviderKeyFormBody({
           <Input
             id="pk-label"
             type="text"
-            value={label}
-            onChange={(e) => {
-              setLabel(e.target.value);
-              clearField("label");
-            }}
-            onBlur={() => onBlur("label", label)}
+            {...register("label", {
+              validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
+            })}
             placeholder="ex: My Anthropic Key"
             aria-invalid={errors.label ? true : undefined}
             className={cn(errors.label && "border-destructive")}
           />
-          {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
+          {errors.label?.message && (
+            <div className="text-sm text-destructive">{errors.label.message}</div>
+          )}
         </div>
 
         {/* Custom provider fields */}
@@ -229,8 +228,8 @@ function ProviderKeyFormBody({
               <Select
                 value={api}
                 onValueChange={(v) => {
-                  setApi(v);
-                  clearField("api");
+                  setValue("api", v);
+                  clearErrors("api");
                 }}
               >
                 <SelectTrigger id="pk-api" className={cn(errors.api && "border-destructive")}>
@@ -244,24 +243,34 @@ function ProviderKeyFormBody({
                   ))}
                 </SelectContent>
               </Select>
-              {errors.api && <div className="text-sm text-destructive">{errors.api}</div>}
+              {errors.api?.message && (
+                <div className="text-sm text-destructive">{errors.api.message}</div>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="pk-baseUrl">{t("providerKeys.form.baseUrl")}</Label>
               <Input
                 id="pk-baseUrl"
                 type="url"
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value);
-                  clearField("baseUrl");
-                }}
-                onBlur={() => onBlur("baseUrl", baseUrl)}
+                {...register("baseUrl", {
+                  validate: (v) => {
+                    if (!isCustom) return undefined;
+                    if (!v.trim()) return t("validation.required", { ns: "common" });
+                    try {
+                      new URL(v.trim());
+                    } catch {
+                      return t("validation.required", { ns: "common" });
+                    }
+                    return undefined;
+                  },
+                })}
                 placeholder="https://api.openai.com/v1"
                 aria-invalid={errors.baseUrl ? true : undefined}
                 className={cn(errors.baseUrl && "border-destructive")}
               />
-              {errors.baseUrl && <div className="text-sm text-destructive">{errors.baseUrl}</div>}
+              {errors.baseUrl?.message && (
+                <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
+              )}
             </div>
           </>
         )}
@@ -273,12 +282,12 @@ function ProviderKeyFormBody({
             <Input
               id="pk-apiKey"
               type="password"
-              value={apiKey}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                clearField("apiKey");
-              }}
-              onBlur={() => onBlur("apiKey", apiKey)}
+              {...register("apiKey", {
+                validate: (v) =>
+                  !providerKey && !v.trim()
+                    ? t("validation.required", { ns: "common" })
+                    : undefined,
+              })}
               placeholder="sk-..."
               aria-invalid={errors.apiKey ? true : undefined}
               className={cn(errors.apiKey && "border-destructive")}
@@ -288,7 +297,9 @@ function ProviderKeyFormBody({
                 {t("providerKeys.form.apiKeyHint")}
               </div>
             )}
-            {errors.apiKey && <div className="text-sm text-destructive">{errors.apiKey}</div>}
+            {errors.apiKey?.message && (
+              <div className="text-sm text-destructive">{errors.apiKey.message}</div>
+            )}
           </div>
         )}
       </form>

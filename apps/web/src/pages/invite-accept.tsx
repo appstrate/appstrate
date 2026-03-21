@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,6 @@ import { refreshAuth } from "../hooks/use-auth";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
-import { useFormErrors } from "../hooks/use-form-errors";
 
 interface InviteInfo {
   email: string;
@@ -20,6 +20,12 @@ interface InviteInfo {
   isNewUser: boolean;
 }
 
+interface InviteFormData {
+  displayName: string;
+  password: string;
+  confirmPassword: string;
+}
+
 export function InviteAcceptPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { token } = useParams<{ token: string }>();
@@ -28,27 +34,20 @@ export function InviteAcceptPage() {
   const [info, setInfo] = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  const rules = useMemo(
-    () => ({
-      password: (v: string) => {
-        if (!v) return t("validation.required", { ns: "common" });
-        if (v.length < 8) return t("validation.minLength", { ns: "common", min: 8 });
-        return undefined;
-      },
-      confirmPassword: (v: string) => {
-        if (v !== password) return t("validation.passwordMismatch", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t, password],
-  );
+  const {
+    register,
+    trigger,
+    getValues,
+    control,
+    formState: { errors },
+  } = useForm<InviteFormData>({
+    defaultValues: { displayName: "", password: "", confirmPassword: "" },
+    mode: "onBlur",
+  });
 
-  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
+  const passwordValue = useWatch({ control, name: "password" });
 
   useEffect(() => {
     if (!token) return;
@@ -67,13 +66,13 @@ export function InviteAcceptPage() {
       .catch((err) => {
         const code = err instanceof Error ? err.message : "INVITATION_NOT_FOUND";
         if (code === "INVITATION_EXPIRED") {
-          setError(t("invite.expired"));
+          setServerError(t("invite.expired"));
         } else if (code === "INVITATION_ACCEPTED") {
-          setError(t("invite.alreadyAccepted"));
+          setServerError(t("invite.alreadyAccepted"));
         } else if (code === "INVITATION_CANCELLED") {
-          setError(t("invite.cancelled"));
+          setServerError(t("invite.cancelled"));
         } else {
-          setError(t("invite.invalid"));
+          setServerError(t("invite.invalid"));
         }
         setLoading(false);
       });
@@ -83,17 +82,19 @@ export function InviteAcceptPage() {
     if (!token) return;
 
     if (info?.isNewUser) {
-      if (!validateAll({ password, confirmPassword })) return;
+      const valid = await trigger(["password", "confirmPassword"]);
+      if (!valid) return;
     }
 
     setAccepting(true);
-    setError(null);
+    setServerError(null);
 
     try {
       const body: Record<string, string> = {};
       if (info?.isNewUser) {
-        body.password = password;
-        if (displayName.trim()) body.displayName = displayName.trim();
+        const values = getValues();
+        body.password = values.password;
+        if (values.displayName.trim()) body.displayName = values.displayName.trim();
       }
 
       const res = await fetch(`/invite/${token}/accept`, {
@@ -122,7 +123,7 @@ export function InviteAcceptPage() {
         window.location.reload();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("invite.error"));
+      setServerError(err instanceof Error ? err.message : t("invite.error"));
       setAccepting(false);
     }
   };
@@ -137,7 +138,7 @@ export function InviteAcceptPage() {
     );
   }
 
-  if (error && !info) {
+  if (serverError && !info) {
     return (
       <AuthLayout>
         <div className="flex flex-col gap-6">
@@ -146,7 +147,7 @@ export function InviteAcceptPage() {
               <span>App</span>strate
             </h1>
           </div>
-          <p className="text-sm text-destructive text-center">{error}</p>
+          <p className="text-sm text-destructive text-center">{serverError}</p>
           <Button className="w-full" onClick={() => navigate("/")}>
             {t("invite.goHome")}
           </Button>
@@ -190,8 +191,7 @@ export function InviteAcceptPage() {
               <Input
                 id="displayName"
                 type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                {...register("displayName")}
                 placeholder={t("login.namePlaceholder")}
                 autoComplete="name"
               />
@@ -202,19 +202,22 @@ export function InviteAcceptPage() {
               <Input
                 id="password"
                 type="password"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  clearField("password");
-                }}
-                onBlur={() => onBlur("password", password)}
+                {...register("password", {
+                  required: t("validation.required", { ns: "common" }),
+                  minLength: {
+                    value: 6,
+                    message: t("validation.minLength", { ns: "common", min: 6 }),
+                  },
+                })}
                 placeholder="••••••••"
-                minLength={8}
+                minLength={6}
                 autoComplete="new-password"
                 aria-invalid={errors.password ? true : undefined}
                 className={cn(errors.password && "border-destructive")}
               />
-              {errors.password && <div className="text-sm text-destructive">{errors.password}</div>}
+              {errors.password && (
+                <div className="text-sm text-destructive">{errors.password.message}</div>
+              )}
             </div>
 
             <div className="grid gap-2">
@@ -222,26 +225,24 @@ export function InviteAcceptPage() {
               <Input
                 id="confirmPassword"
                 type="password"
-                value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  clearField("confirmPassword");
-                }}
-                onBlur={() => onBlur("confirmPassword", confirmPassword)}
+                {...register("confirmPassword", {
+                  validate: (v) =>
+                    v === passwordValue || t("validation.passwordMismatch", { ns: "common" }),
+                })}
                 placeholder="••••••••"
-                minLength={8}
+                minLength={6}
                 autoComplete="new-password"
                 aria-invalid={errors.confirmPassword ? true : undefined}
                 className={cn(errors.confirmPassword && "border-destructive")}
               />
               {errors.confirmPassword && (
-                <div className="text-sm text-destructive">{errors.confirmPassword}</div>
+                <div className="text-sm text-destructive">{errors.confirmPassword.message}</div>
               )}
             </div>
           </div>
         )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {serverError && <p className="text-sm text-destructive">{serverError}</p>}
 
         <Button className="w-full" onClick={handleAccept} disabled={accepting}>
           {accepting ? (

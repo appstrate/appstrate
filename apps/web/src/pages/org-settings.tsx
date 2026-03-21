@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import {
   BrainCircuit,
   Building,
@@ -95,10 +96,11 @@ export function OrgSettingsPage() {
   const [newName, setNewName] = useState("");
   const [modelsSubTab, setModelsSubTab] = useState<"models-list" | "provider-keys">("models-list");
 
-  // Members
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
-  const [inviteError, setInviteError] = useState<string | null>(null);
+  // Members — invite form
+  const inviteForm = useForm<{ email: string; role: "member" | "admin" }>({
+    defaultValues: { email: "", role: "member" },
+  });
+  const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
 
   // Proxies
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
@@ -177,12 +179,10 @@ export function OrgSettingsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
-      setInviteEmail("");
-      setInviteRole("member");
-      setInviteError(null);
+      inviteForm.reset();
     },
     onError: (err: Error) => {
-      setInviteError(err.message);
+      inviteForm.setError("root", { message: err.message });
     },
   });
 
@@ -293,12 +293,10 @@ export function OrgSettingsPage() {
     updateNameMutation.mutate(trimmed);
   };
 
-  const handleInvite = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setInviteError(null);
-    const trimmed = inviteEmail.trim();
+  const handleInvite = (data: { email: string; role: "member" | "admin" }) => {
+    const trimmed = data.email.trim();
     if (!trimmed) return;
-    addMemberMutation.mutate({ email: trimmed, role: inviteRole });
+    addMemberMutation.mutate({ email: trimmed, role: data.role });
   };
 
   const handleRemove = (member: OrganizationMember) => {
@@ -416,22 +414,20 @@ export function OrgSettingsPage() {
       {tab === "members" && (
         <>
           {/* Add member form */}
-          <form onSubmit={handleInvite} className="flex gap-2 mb-4 items-start">
+          <form
+            onSubmit={inviteForm.handleSubmit(handleInvite)}
+            className="flex gap-2 mb-4 items-start"
+          >
             <div className="flex-1">
               <div className="flex gap-2">
                 <Input
                   type="email"
-                  value={inviteEmail}
-                  onChange={(e) => {
-                    setInviteEmail(e.target.value);
-                    setInviteError(null);
-                  }}
+                  {...inviteForm.register("email", { required: true })}
                   placeholder="email@example.com"
-                  required
                 />
                 <Select
                   value={inviteRole}
-                  onValueChange={(v) => setInviteRole(v as "member" | "admin")}
+                  onValueChange={(v) => inviteForm.setValue("role", v as "member" | "admin")}
                 >
                   <SelectTrigger className="w-[140px]">
                     <SelectValue />
@@ -442,7 +438,11 @@ export function OrgSettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              {inviteError && <p className="text-sm text-destructive mt-1">{inviteError}</p>}
+              {inviteForm.formState.errors.root && (
+                <p className="text-sm text-destructive mt-1">
+                  {inviteForm.formState.errors.root.message}
+                </p>
+              )}
             </div>
             <Button type="submit" disabled={addMemberMutation.isPending}>
               {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
@@ -1201,7 +1201,10 @@ function BillingTab() {
           window.location.href = url;
         },
         onError: (err: Error) => {
-          toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
+          toast({
+            title: t("error.prefix", { ns: "common", message: err.message }),
+            variant: "destructive",
+          });
         },
       },
     );
@@ -1213,7 +1216,10 @@ function BillingTab() {
         window.location.href = url;
       },
       onError: (err: Error) => {
-        toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
+        toast({
+          title: t("error.prefix", { ns: "common", message: err.message }),
+          variant: "destructive",
+        });
       },
     });
   };
@@ -1250,8 +1256,7 @@ function BillingTab() {
           <div className="flex items-center justify-between text-sm mb-1">
             <span className="text-muted-foreground">{t("billing.usage")}</span>
             <span className="font-medium">
-              {billing.usagePercent}%
-              {/* TODO(debug): remove raw cents display before production */}
+              {billing.usagePercent}%{/* TODO(debug): remove raw cents display before production */}
               {billing.budgetUsedCents != null && billing.budgetLimitCents != null && (
                 <span className="ml-2 text-xs text-muted-foreground font-normal">
                   ({billing.budgetUsedCents}¢ / {billing.budgetLimitCents}¢)

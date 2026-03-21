@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,11 @@ interface ProviderCredentialsFormProps {
   footer?: ReactNode;
 }
 
+type CredentialsFormData = {
+  enabled: boolean;
+  credentials: Record<string, string>;
+};
+
 export function ProviderCredentialsForm({
   provider,
   callbackUrl,
@@ -25,10 +31,8 @@ export function ProviderCredentialsForm({
 }: ProviderCredentialsFormProps) {
   const { t } = useTranslation(["settings", "common"]);
   const mutation = useConfigureProviderCredentials();
-  const [values, setValues] = useState<Record<string, string>>({});
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
-  const [enabled, setEnabled] = useState(!!provider.enabled);
 
   const schema = provider.adminCredentialSchema;
   const properties = schema?.properties ?? {};
@@ -36,8 +40,22 @@ export function ProviderCredentialsForm({
   const fieldKeys = Object.keys(properties);
   const hasSchemaFields = fieldKeys.length > 0;
 
+  const { register, handleSubmit, control, setValue } = useForm<CredentialsFormData>({
+    defaultValues: {
+      enabled: !!provider.enabled,
+      credentials: {},
+    },
+  });
+
+  const [credentials, enabled] = useWatch({
+    control,
+    name: ["credentials", "enabled"],
+  });
+
   const allRequiredFilled =
-    !hasSchemaFields || provider.hasCredentials || required.every((key) => values[key]?.trim());
+    !hasSchemaFields ||
+    provider.hasCredentials ||
+    required.every((key) => credentials[key]?.trim());
 
   const guide = provider.setupGuide;
   const resolvedCallbackHint = guide?.callbackUrlHint?.replace(
@@ -56,24 +74,24 @@ export function ProviderCredentialsForm({
     setVisibleFields((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleSubmit = () => {
+  const onFormSubmit = (data: CredentialsFormData) => {
     if (hasSchemaFields && !allRequiredFilled) return;
 
     const payload: {
       providerId: string;
       credentials?: Record<string, string>;
       enabled: boolean;
-    } = { providerId: provider.id, enabled };
+    } = { providerId: provider.id, enabled: data.enabled };
 
     if (hasSchemaFields) {
-      const credentials: Record<string, string> = {};
+      const creds: Record<string, string> = {};
       for (const key of fieldKeys) {
-        if (values[key]?.trim()) {
-          credentials[key] = values[key].trim();
+        if (data.credentials[key]?.trim()) {
+          creds[key] = data.credentials[key].trim();
         }
       }
-      if (Object.keys(credentials).length > 0) {
-        payload.credentials = credentials;
+      if (Object.keys(creds).length > 0) {
+        payload.credentials = creds;
       }
     }
 
@@ -81,7 +99,7 @@ export function ProviderCredentialsForm({
   };
 
   return (
-    <div>
+    <form onSubmit={handleSubmit(onFormSubmit)}>
       <div className="space-y-4">
         {/* Enabled toggle */}
         <label
@@ -91,7 +109,7 @@ export function ProviderCredentialsForm({
           <Checkbox
             id="provider-enabled"
             checked={enabled}
-            onCheckedChange={(checked) => setEnabled(!!checked)}
+            onCheckedChange={(checked) => setValue("enabled", !!checked)}
             className="mt-0.5"
           />
           <div className="space-y-0.5">
@@ -167,12 +185,11 @@ export function ProviderCredentialsForm({
                     <Input
                       id={`admin-cred-${key}`}
                       type={isVisible ? "text" : "password"}
-                      value={values[key] ?? ""}
-                      onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
                       placeholder={
                         provider.hasCredentials ? t("providers.form.secretUnchanged") : undefined
                       }
                       autoFocus={key === fieldKeys[0]}
+                      {...register(`credentials.${key}` as const)}
                     />
                     <Button
                       type="button"
@@ -195,13 +212,12 @@ export function ProviderCredentialsForm({
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
         {footer}
         <Button
-          type="button"
+          type="submit"
           disabled={mutation.isPending || (hasSchemaFields && !allRequiredFilled)}
-          onClick={handleSubmit}
         >
           {mutation.isPending ? <Spinner /> : t("common:btn.save")}
         </Button>
       </div>
-    </div>
+    </form>
   );
 }
