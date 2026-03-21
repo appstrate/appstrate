@@ -59,7 +59,6 @@ export async function executeFlowInBackground(
 
   const cloud = getCloudModule();
   let accumulatedCost = 0;
-  let executionSucceeded = false;
 
   try {
     // Update status to running
@@ -266,6 +265,22 @@ export async function executeFlowInBackground(
         await addPackageMemories(flow.id, orgId, resultMemories, executionId);
       }
 
+      // Record billing BEFORE status update so the budget is current when
+      // pg_notify fires execution_update and the frontend refetches billing.
+      if (cloud && accumulatedCost > 0) {
+        try {
+          await cloud.cloudHooks.recordUsage(orgId, executionId, accumulatedCost);
+        } catch (err) {
+          // Cost persisted in executions.cost for reconciliation.
+          logger.error("Failed to record usage — manual reconciliation needed", {
+            err: err instanceof Error ? err.message : String(err),
+            orgId,
+            executionId,
+            accumulatedCost,
+          });
+        }
+      }
+
       await updateExecution(executionId, {
         status: "success",
         result,
@@ -286,7 +301,6 @@ export async function executeFlowInBackground(
           : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
-      executionSucceeded = true;
 
       await appendExecutionLog(
         executionId,
@@ -377,21 +391,6 @@ export async function executeFlowInBackground(
       "error",
     );
   } finally {
-    // Post-execution billing (Cloud only) — only charge on successful executions with cost
-    if (cloud && accumulatedCost > 0 && executionSucceeded) {
-      try {
-        await cloud.cloudHooks.recordUsage(orgId, executionId, accumulatedCost);
-      } catch (err) {
-        // Cost persisted in executions.cost for reconciliation.
-        logger.error("Failed to record usage — manual reconciliation needed", {
-          err: err instanceof Error ? err.message : String(err),
-          orgId,
-          executionId,
-          accumulatedCost,
-        });
-      }
-    }
-
     untrackExecution(executionId);
   }
 }
