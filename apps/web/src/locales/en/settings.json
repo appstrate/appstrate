@@ -118,6 +118,7 @@
   "providers.title": "Providers",
   "providers.adminOnly": "Access restricted to organization administrators.",
   "providers.addProvider": "Add provider",
+  "providers.newProvider": "New provider",
   "providers.configure": "Configure",
   "providers.credentials": "Credentials",
   "providers.deleteCredentials": "Delete configuration",

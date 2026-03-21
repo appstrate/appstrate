@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import CreatableSelect from "react-select/creatable";
 import type { StylesConfig, MultiValue } from "react-select";
@@ -14,6 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ProviderIcon } from "../provider-icon";
+import { ProviderConfigBadge } from "../provider-config-badge";
+import { ProviderCredentialsModal } from "../provider-credentials-modal";
+import { Modal } from "../modal";
 import { useProviders } from "../../hooks/use-providers";
 import { useOrg } from "../../hooks/use-org";
 import type { ProviderEntry } from "./types";
@@ -185,6 +188,9 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   const providers = providersData?.providers;
   const { isOrgAdmin } = useOrg();
 
+  const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
+  const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
+
   const update = (index: number, patch: Partial<ProviderEntry>) => {
     const next = value.map((s, i) => (i === index ? { ...s, ...patch } : s));
     onChange(next);
@@ -210,6 +216,14 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   };
 
   const selectedIds = new Set(value.map((s) => s.id));
+
+  // Only show enabled (configured + active) providers in the available grid
+  const enabledProviders = useMemo(
+    () => (providers ?? []).filter((p) => p.enabled),
+    [providers],
+  );
+
+  const allProviders = providers ?? [];
 
   return (
     <div>
@@ -286,7 +300,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
         </div>
       )}
 
-      {/* Available providers */}
+      {/* Available providers (only enabled ones) */}
       <div
         className={cn("text-sm font-medium text-muted-foreground mb-4", value.length > 0 && "mt-6")}
       >
@@ -296,20 +310,24 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
         <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
           {t("loading")}
         </div>
-      ) : !providers || providers.length === 0 ? (
+      ) : enabledProviders.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
           {t("editor.noIntegration")}
-          <div className="mt-3">
-            <Link to="/providers">
-              <Button variant="outline" size="sm">
-                {t("editor.goToConnectors")}
+          {isOrgAdmin && (
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfigurePickerOpen(true)}
+              >
+                {t("providers.addProvider", { ns: "settings" })}
               </Button>
-            </Link>
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
-          {providers.map((p) => {
+          {enabledProviders.map((p) => {
             const isSelected = selectedIds.has(p.id);
             return (
               <Button
@@ -333,9 +351,10 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
             );
           })}
           {isOrgAdmin && (
-            <Link
-              to="/providers"
-              className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground no-underline"
+            <button
+              type="button"
+              className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+              onClick={() => setConfigurePickerOpen(true)}
             >
               <span className="text-2xl leading-none">+</span>
               <div className="flex flex-col min-w-0 flex-1">
@@ -343,9 +362,69 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                   {t("providers.addProvider", { ns: "settings" })}
                 </span>
               </div>
-            </Link>
+            </button>
           )}
         </div>
+      )}
+
+      {/* Configure provider picker modal (same as providers page) */}
+      <Modal
+        open={configurePickerOpen}
+        onClose={() => setConfigurePickerOpen(false)}
+        title={t("providers.configureProvider", { ns: "settings" })}
+      >
+        <p className="text-sm text-muted-foreground mb-4">
+          {t("providers.selectProvider", { ns: "settings" })}
+        </p>
+        {allProviders.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            {t("providers.allConfigured", { ns: "settings" })}
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {allProviders.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                onClick={() => {
+                  setConfigurePickerOpen(false);
+                  setConfigureProvider(p);
+                }}
+              >
+                {p.iconUrl ? (
+                  <ProviderIcon src={p.iconUrl} className="w-6 h-6" />
+                ) : (
+                  <div className="w-6 h-6 rounded bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
+                    {p.displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{p.displayName}</span>
+                </div>
+                <ProviderConfigBadge enabled={p.enabled} />
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-4 pt-3 border-t border-border">
+          <Link
+            to="/providers"
+            className="flex items-center justify-center gap-2 w-full rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors no-underline"
+          >
+            <span className="text-lg leading-none">+</span>
+            {t("providers.newProvider", { ns: "settings" })}
+          </Link>
+        </div>
+      </Modal>
+
+      {/* Provider credentials configuration modal */}
+      {configureProvider && (
+        <ProviderCredentialsModal
+          provider={configureProvider}
+          callbackUrl={providersData?.callbackUrl}
+          onClose={() => setConfigureProvider(null)}
+        />
       )}
     </div>
   );
