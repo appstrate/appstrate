@@ -12,6 +12,7 @@ import { FormField } from "../form-field";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useOrg } from "../../hooks/use-org";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -89,12 +90,13 @@ function ConfigSection({
 
 function ModelSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
+  const { features } = useAppConfig();
   const { data: orgModels } = useModels();
   const { data: flowModel } = useFlowModel(packageId);
   const setFlowModel = useSetFlowModel(packageId);
   const { isOrgAdmin } = useOrg();
 
-  if (!isOrgAdmin || !orgModels || orgModels.length === 0) return null;
+  if (!features.models || !isOrgAdmin || !orgModels || orgModels.length === 0) return null;
 
   const flowModelId = flowModel?.modelId;
   const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);

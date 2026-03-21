@@ -1194,14 +1194,17 @@ function BillingTab() {
   const hasSubscription = billing.status !== "none";
 
   const handleUpgrade = (planId: string) => {
-    checkoutMutation.mutate(planId, {
-      onSuccess: (url) => {
-        window.location.href = url;
+    checkoutMutation.mutate(
+      { planId },
+      {
+        onSuccess: (url) => {
+          window.location.href = url;
+        },
+        onError: (err: Error) => {
+          toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
+        },
       },
-      onError: (err: Error) => {
-        toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
-      },
-    });
+    );
   };
 
   const handleManage = () => {

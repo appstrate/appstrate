@@ -1,10 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
+import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
 import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
+import { useBilling } from "../../hooks/use-billing";
 import { useProviders } from "../../hooks/use-providers";
 import { api } from "../../api";
 import { CheckCircle2 } from "lucide-react";
@@ -16,8 +17,10 @@ export function OnboardingDoneStep() {
   const orgId = useOnboardingGuard();
   const { currentOrg } = useOrg();
   const { features } = useAppConfig();
+  const { prevRoute } = useOnboardingNav("complete");
 
   const { data: models } = useModels();
+  const { data: billing } = useBilling({ enabled: features.billing });
   const { data: providersData } = useProviders();
   const { data: orgData } = useQuery({
     queryKey: ["org-members", orgId],
@@ -36,7 +39,7 @@ export function OnboardingDoneStep() {
       step="complete"
       title={t("onboarding.doneTitle")}
       subtitle={t("onboarding.doneSubtitle")}
-      onBack={() => navigate("/onboarding/members")}
+      onBack={prevRoute ? () => navigate(prevRoute) : undefined}
       onNext={() => navigate("/")}
       nextLabel={t("onboarding.goToDashboard")}
     >
@@ -51,6 +54,18 @@ export function OnboardingDoneStep() {
             </div>
           </div>
         </div>
+
+        {features.billing && billing && (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 size={20} className="text-green-500 shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold">{t("onboarding.summaryPlan")}</h3>
+                <span className="text-sm text-muted-foreground">{billing.plan.name}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {features.models && (
           <div className="rounded-lg border border-border bg-card p-4">

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
+import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
 import { useProviders } from "../../hooks/use-providers";
 import { useIntegrations } from "../../hooks/use-integrations";
 import { useConnect, useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";
@@ -20,6 +20,7 @@ export function OnboardingProvidersStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
+  const { nextRoute, prevRoute } = useOnboardingNav("providers");
 
   const { data: providersData, isLoading: providersLoading } = useProviders();
   const { data: integrations } = useIntegrations();
@@ -66,7 +67,7 @@ export function OnboardingProvidersStep() {
     }
   };
 
-  const goNext = () => navigate("/onboarding/members");
+  const goNext = () => nextRoute && navigate(nextRoute);
 
   if (!orgId) return null;
 
@@ -76,7 +77,7 @@ export function OnboardingProvidersStep() {
       title={t("onboarding.providersTitle")}
       subtitle={t("onboarding.providersSubtitle")}
       onNext={goNext}
-      onBack={() => navigate("/onboarding/model")}
+      onBack={prevRoute ? () => navigate(prevRoute) : undefined}
     >
       {providersLoading ? (
         <div className="flex justify-center py-8">

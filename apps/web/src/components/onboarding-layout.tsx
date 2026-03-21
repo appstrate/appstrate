@@ -1,25 +1,64 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { useTheme } from "../hooks/use-theme";
+import { useAppConfig } from "../hooks/use-app-config";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
+export type StepKey = "create" | "plan" | "model" | "providers" | "members" | "complete";
+
+interface StepDef {
+  key: StepKey;
+  route: string;
+}
+
+const ALL_STEPS: (StepDef & { showWhen?: "models" | "billing" })[] = [
+  { key: "create", route: "/onboarding/create" },
+  { key: "plan", route: "/onboarding/plan", showWhen: "billing" },
+  { key: "model", route: "/onboarding/model", showWhen: "models" },
+  { key: "providers", route: "/onboarding/providers" },
+  { key: "members", route: "/onboarding/members" },
+  { key: "complete", route: "/onboarding/complete" },
+];
+
+/**
+ * Returns the active onboarding steps filtered by feature flags.
+ * OSS: create → model → providers → members → complete
+ * Cloud: create → plan → providers → members → complete
+ */
 // eslint-disable-next-line react-refresh/only-export-components
-export const ONBOARDING_STEPS = [
-  { key: "create" },
-  { key: "model" },
-  { key: "providers" },
-  { key: "members" },
-  { key: "complete" },
-] as const;
+export function useOnboardingSteps(): StepDef[] {
+  const { features } = useAppConfig();
+  return useMemo(
+    () =>
+      ALL_STEPS.filter((s) => {
+        if (!s.showWhen) return true;
+        return features[s.showWhen];
+      }),
+    [features],
+  );
+}
 
-export type StepKey = (typeof ONBOARDING_STEPS)[number]["key"];
-
-function getStepIndex(key: StepKey): number {
-  return ONBOARDING_STEPS.findIndex((s) => s.key === key);
+/**
+ * Navigation helpers for a given step within the active onboarding flow.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOnboardingNav(current: StepKey) {
+  const steps = useOnboardingSteps();
+  const idx = steps.findIndex((s) => s.key === current);
+  return useMemo(
+    () => ({
+      steps,
+      index: idx,
+      total: steps.length,
+      nextRoute: idx < steps.length - 1 ? steps[idx + 1]!.route : null,
+      prevRoute: idx > 0 ? steps[idx - 1]!.route : null,
+    }),
+    [steps, idx],
+  );
 }
 
 /**
@@ -70,8 +109,7 @@ export function OnboardingLayout({
 }: OnboardingLayoutProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { resolvedTheme } = useTheme();
-  const currentIndex = getStepIndex(step);
-  const totalSteps = ONBOARDING_STEPS.length;
+  const { steps, index: currentIndex, total: totalSteps } = useOnboardingNav(step);
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
@@ -87,7 +125,7 @@ export function OnboardingLayout({
 
         {/* Progress bar */}
         <div className="flex items-center gap-2 mb-8">
-          {ONBOARDING_STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <div key={s.key} className="flex-1 flex items-center gap-2">
               <div
                 className={cn(

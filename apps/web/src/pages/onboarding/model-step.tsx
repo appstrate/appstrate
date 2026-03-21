@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { OnboardingLayout, useOnboardingGuard } from "../../components/onboarding-layout";
+import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -17,13 +17,14 @@ export function OnboardingModelStep() {
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
   const { features } = useAppConfig();
+  const { nextRoute } = useOnboardingNav("model");
 
   // Skip this step in cloud mode (models are managed by the platform)
   useEffect(() => {
-    if (!features.models) {
-      navigate("/onboarding/providers", { replace: true });
+    if (!features.models && nextRoute) {
+      navigate(nextRoute, { replace: true });
     }
-  }, [features.models, navigate]);
+  }, [features.models, navigate, nextRoute]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const { data: models } = useModels();
@@ -31,7 +32,7 @@ export function OnboardingModelStep() {
     onSuccess: () => setModalOpen(false),
   });
 
-  const goNext = () => navigate("/onboarding/providers");
+  const goNext = () => nextRoute && navigate(nextRoute);
 
   if (!orgId) return null;
 
