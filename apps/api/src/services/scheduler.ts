@@ -15,6 +15,8 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "./flow-readiness.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
+import { getRunningExecutionCountForOrg } from "./state/index.ts";
+import { getCloudModule } from "../lib/cloud-loader.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -249,6 +251,26 @@ async function triggerScheduledExecution(
         return;
       }
       throw err;
+    }
+
+    // Pre-execution quota check (Cloud only — skip silently if quota exceeded)
+    const cloud = getCloudModule();
+    if (cloud) {
+      try {
+        const runningCount = await getRunningExecutionCountForOrg(orgId);
+        await cloud.cloudHooks.checkQuota(orgId, runningCount);
+      } catch (err) {
+        if (err instanceof cloud.QuotaExceededError) {
+          logger.warn("Quota exceeded, skipping scheduled execution", {
+            scheduleId,
+            packageId,
+            orgId,
+            reason: err.message,
+          });
+          return;
+        }
+        throw err;
+      }
     }
 
     // Create execution record with schedule_id and version
