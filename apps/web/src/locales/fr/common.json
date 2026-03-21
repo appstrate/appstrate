@@ -58,5 +58,9 @@
   "btn.install": "Installer",
   "btn.installing": "Installation...",
   "btn.download": "Télécharger",
-  "viewDefinition": "Voir la définition"
+  "viewDefinition": "Voir la définition",
+  "unsaved.title": "Modifications non enregistrées",
+  "unsaved.message": "Vous avez des modifications non enregistrées. Que souhaitez-vous faire ?",
+  "unsaved.saveDraft": "Enregistrer le brouillon",
+  "unsaved.discard": "Quitter sans enregistrer"
 }

@@ -58,5 +58,9 @@
   "btn.install": "Install",
   "btn.installing": "Installing...",
   "btn.download": "Download",
-  "viewDefinition": "View definition"
+  "viewDefinition": "View definition",
+  "unsaved.title": "Unsaved changes",
+  "unsaved.message": "You have unsaved changes. What would you like to do?",
+  "unsaved.saveDraft": "Save draft",
+  "unsaved.discard": "Leave without saving"
 }
