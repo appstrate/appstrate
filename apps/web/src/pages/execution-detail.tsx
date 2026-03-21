@@ -12,7 +12,7 @@ import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Database, FileText, Shield } from "lucide-react";
+import { Coins, Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer, ExecutionTimeline } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
@@ -84,7 +84,7 @@ export function ExecutionDetailPage() {
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["execution", "logs", "result", "state"] as const,
+    ["execution", "logs", "result", "state", "usage"] as const,
     "execution",
   );
   const hasUserSelected = useRef(false);
@@ -200,11 +200,6 @@ export function ExecutionDetailPage() {
         )}
         <span className="text-xs text-muted-foreground">{date}</span>
         {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
-        {!isRunning && execution.tokensUsed != null && (
-          <span className="text-xs text-muted-foreground">
-            {execution.tokensUsed.toLocaleString()} tokens
-          </span>
-        )}
       </div>
 
       {flow && (
@@ -231,7 +226,7 @@ export function ExecutionDetailPage() {
           value={activeTab}
           onValueChange={(v) => {
             hasUserSelected.current = true;
-            setActiveTab(v as "execution" | "logs" | "result" | "state");
+            setActiveTab(v as "execution" | "logs" | "result" | "state" | "usage");
           }}
         >
           <TabsList>
@@ -253,6 +248,8 @@ export function ExecutionDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
             <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
+            {/* TODO: hide in Cloud mode (visible OSS only) — use useAppConfig().features */}
+            <TabsTrigger value="usage">{t("exec.tabUsage")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
@@ -302,6 +299,72 @@ export function ExecutionDetailPage() {
         ) : (
           <EmptyState message={t("exec.emptyState")} icon={Database} compact />
         ))}
+
+      {activeTab === "usage" &&
+        (() => {
+          const usage = execution.tokenUsage as {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+          } | null;
+
+          const hasData =
+            execution.cost != null || execution.tokensUsed != null || execution.modelLabel != null;
+
+          if (!hasData) {
+            return <EmptyState message={t("exec.emptyUsage")} icon={Coins} compact />;
+          }
+
+          return (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {execution.modelLabel != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageModel")}</p>
+                  <p className="text-sm font-medium">{execution.modelLabel}</p>
+                </div>
+              )}
+              {execution.cost != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageCost")}</p>
+                  <p className="text-sm font-medium">${execution.cost.toFixed(4)}</p>
+                </div>
+              )}
+              {usage?.input_tokens != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageInputTokens")}</p>
+                  <p className="text-sm font-medium">{usage.input_tokens.toLocaleString()}</p>
+                </div>
+              )}
+              {usage?.output_tokens != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {t("exec.usageOutputTokens")}
+                  </p>
+                  <p className="text-sm font-medium">{usage.output_tokens.toLocaleString()}</p>
+                </div>
+              )}
+              {usage?.cache_creation_input_tokens != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {t("exec.usageCacheCreation")}
+                  </p>
+                  <p className="text-sm font-medium">
+                    {usage.cache_creation_input_tokens.toLocaleString()}
+                  </p>
+                </div>
+              )}
+              {usage?.cache_read_input_tokens != null && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageCacheRead")}</p>
+                  <p className="text-sm font-medium">
+                    {usage.cache_read_input_tokens.toLocaleString()}
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
     </>
   );
 }
