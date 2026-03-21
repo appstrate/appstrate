@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, Building, Globe, KeyRound, ShieldAlert, Users } from "lucide-react";
+import {
+  BrainCircuit,
+  Building,
+  CreditCard,
+  Globe,
+  KeyRound,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -53,6 +61,8 @@ import { CopyLinkButton } from "../components/copy-link-button";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
+import { useBilling, useCheckout, usePortal } from "../hooks/use-billing";
+import { toast } from "../hooks/use-toast";
 import type {
   OrganizationMember,
   OrgRole,
@@ -78,8 +88,9 @@ export function OrgSettingsPage() {
     ...(features.models ? ["models" as const] : []),
     "proxies",
     "api-keys",
+    ...(features.billing ? ["billing" as const] : []),
   ] as const;
-  type Tab = "general" | "members" | "models" | "proxies" | "api-keys";
+  type Tab = "general" | "members" | "models" | "proxies" | "api-keys" | "billing";
   const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -319,6 +330,7 @@ export function OrgSettingsPage() {
           {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
           <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
           <TabsTrigger value="api-keys">{t("orgSettings.tabApiKeys")}</TabsTrigger>
+          {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
         </TabsList>
       </Tabs>
 
@@ -654,6 +666,8 @@ export function OrgSettingsPage() {
           }}
         />
       )}
+
+      {tab === "billing" && features.billing && <BillingTab />}
 
       <ApiKeyCreateModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
 
@@ -1168,6 +1182,159 @@ function ApiKeysTab({
         >
           <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
         </EmptyState>
+      )}
+    </>
+  );
+}
+
+// --- Billing Tab ---
+
+const STATUS_I18N: Record<string, string> = {
+  past_due: "billing.statusPastDue",
+  unpaid: "billing.statusUnpaid",
+  paused: "billing.statusPaused",
+  canceling: "billing.statusCanceling",
+  canceled: "billing.statusCanceled",
+  active: "billing.statusActive",
+  trialing: "billing.statusTrialing",
+  none: "billing.noSubscription",
+};
+
+function BillingTab() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { data: billing, isLoading, error } = useBilling();
+  const checkoutMutation = useCheckout();
+  const portalMutation = usePortal();
+
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+  if (!billing) {
+    return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
+  }
+
+  const statusLabel =
+    billing.status === "canceling" && billing.periodEnd
+      ? t("billing.statusCanceling", {
+          date: new Date(billing.periodEnd).toLocaleDateString(),
+        })
+      : billing.status === "active" && billing.periodEnd
+        ? t("billing.cycleReset", {
+            date: new Date(billing.periodEnd).toLocaleDateString(),
+          })
+        : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
+
+  const hasSubscription = billing.status !== "none";
+
+  const handleUpgrade = (planId: string) => {
+    checkoutMutation.mutate(planId, {
+      onSuccess: (url) => {
+        window.location.href = url;
+      },
+      onError: (err: Error) => {
+        toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
+      },
+    });
+  };
+
+  const handleManage = () => {
+    portalMutation.mutate(undefined, {
+      onSuccess: (url) => {
+        window.location.href = url;
+      },
+      onError: (err: Error) => {
+        toast({ title: t("error.prefix", { ns: "common", message: err.message }), variant: "destructive" });
+      },
+    });
+  };
+
+  return (
+    <>
+      {/* Current plan */}
+      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-[0.95rem] font-semibold">
+              {t("billing.currentPlan")}: {billing.plan.name}
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">{statusLabel}</p>
+          </div>
+          {hasSubscription ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleManage}
+              disabled={portalMutation.isPending}
+            >
+              {t("billing.manage")}
+            </Button>
+          ) : billing.upgrades.length > 0 ? (
+            <Button size="sm" onClick={() => handleUpgrade(billing.upgrades[0]!.id)}>
+              {t("billing.upgrade")}
+            </Button>
+          ) : null}
+        </div>
+
+        {/* Usage bar */}
+        <div className="mb-2">
+          <div className="flex items-center justify-between text-sm mb-1">
+            <span className="text-muted-foreground">{t("billing.usage")}</span>
+            <span className="font-medium">{billing.usagePercent}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                billing.usagePercent >= 90
+                  ? "bg-destructive"
+                  : billing.usagePercent >= 70
+                    ? "bg-yellow-500"
+                    : "bg-primary"
+              }`}
+              style={{ width: `${billing.usagePercent}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Warning banners */}
+      {billing.status === "past_due" && (
+        <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 mb-4 text-sm">
+          <p className="font-medium text-yellow-600 dark:text-yellow-400">
+            {t("billing.pastDueWarning")}
+          </p>
+          <p className="text-muted-foreground mt-1">{t("billing.pastDueDescription")}</p>
+        </div>
+      )}
+
+      {billing.status === "canceling" && billing.periodEnd && (
+        <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 mb-4 text-sm">
+          <p className="font-medium text-yellow-600 dark:text-yellow-400">
+            {t("billing.cancelingWarning", {
+              date: new Date(billing.periodEnd).toLocaleDateString(),
+            })}
+          </p>
+        </div>
+      )}
+
+      {/* Upgrade options */}
+      {billing.upgrades.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-5 mb-4">
+          <h3 className="text-[0.95rem] font-semibold mb-3">{t("billing.upgradePlans")}</h3>
+          <div className="flex gap-3">
+            {billing.upgrades.map((plan) => (
+              <button
+                key={plan.id}
+                className="flex-1 rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
+                onClick={() => handleUpgrade(plan.id)}
+                disabled={checkoutMutation.isPending}
+              >
+                <div className="font-semibold">{plan.name}</div>
+                <div className="text-sm font-medium mt-1">
+                  ${plan.price}/{t("billing.month")}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </>
   );

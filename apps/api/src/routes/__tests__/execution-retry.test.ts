@@ -45,6 +45,7 @@ mock.module("../../services/state/index.ts", () => ({
   createExecution: mock(async () => {}),
   getAdminConnections: mock(async () => ({})),
   getRunningExecutionsForPackage: mock(async () => 0),
+  getRunningExecutionCountForOrg: mock(async () => 0),
   getExecution: mock(async () => null),
   getExecutionFull: mock(async () => null),
   deletePackageExecutions: mock(async () => {}),
@@ -136,6 +137,10 @@ mock.module("../../services/package-storage.ts", () => ({
 
 mock.module("../../services/file-storage.ts", () => ({
   sanitizeStorageKey: (name: string) => name,
+}));
+
+mock.module("../../lib/cloud-loader.ts", () => ({
+  getCloudModule: () => null,
 }));
 
 // Import after mocks are set up

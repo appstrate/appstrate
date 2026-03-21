@@ -218,6 +218,14 @@ export async function getRunningExecutionsForPackage(
   return row?.count ?? 0;
 }
 
+export async function getRunningExecutionCountForOrg(orgId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: count() })
+    .from(executions)
+    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])));
+  return row?.count ?? 0;
+}
+
 export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: executions.packageId, count: count() })
