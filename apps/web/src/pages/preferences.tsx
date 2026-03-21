@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useForm, useWatch } from "react-hook-form";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,6 @@ import { useTheme } from "../hooks/use-theme";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth, refreshAuth } from "../hooks/use-auth";
 import { authClient } from "../lib/auth-client";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { useDisconnect, useDeleteAllConnections } from "../hooks/use-mutations";
 import {
   useConnectionProfiles,
@@ -165,64 +165,59 @@ function SecurityTab() {
 function EmailChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { user } = useAuth();
-  const [newEmail, setNewEmail] = useState("");
-  const [serverError, setServerError] = useState("");
   const [success, setSuccess] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
-  const isDirty = newEmail.trim() !== "" && newEmail.trim() !== user?.email;
-  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim());
-  const canSubmit = isDirty && isValidEmail && !submitting;
+  const {
+    register,
+    handleSubmit,
+    setError,
+    reset,
+    control,
+    formState: { errors, isSubmitting },
+  } = useForm<{ newEmail: string }>({
+    defaultValues: { newEmail: "" },
+  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setServerError("");
+  const newEmailValue = useWatch({ control, name: "newEmail" });
+  const isDirty = newEmailValue.trim() !== "" && newEmailValue.trim() !== user?.email;
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailValue.trim());
+  const canSubmit = isDirty && isValidEmail && !isSubmitting;
+
+  const onSubmit = async (data: { newEmail: string }) => {
     setSuccess("");
-    setSubmitting(true);
     try {
-      const result = await authClient.changeEmail({ newEmail: newEmail.trim() });
+      const result = await authClient.changeEmail({ newEmail: data.newEmail.trim() });
       if (result.error) {
         if (result.error.status === 409) {
-          setServerError(t("preferences.emailConflict"));
+          setError("root", { message: t("preferences.emailConflict") });
         } else {
-          setServerError(result.error.message || t("login.error"));
+          setError("root", { message: result.error.message || t("login.error") });
         }
       } else {
         setSuccess(t("preferences.emailChanged"));
-        setNewEmail("");
+        reset();
         await refreshAuth();
       }
     } catch {
-      setServerError(t("login.error"));
-    } finally {
-      setSubmitting(false);
+      setError("root", { message: t("login.error") });
     }
   };
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 mb-4">
-      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.email")}</Label>
           <Input type="email" value={user?.email ?? ""} disabled />
         </div>
         <div className="space-y-2">
           <Label>{t("preferences.newEmail")}</Label>
-          <Input
-            type="email"
-            value={newEmail}
-            onChange={(e) => {
-              setNewEmail(e.target.value);
-              setServerError("");
-              setSuccess("");
-            }}
-            placeholder={user?.email ?? ""}
-          />
+          <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
-        {serverError && <div className="text-sm text-destructive">{serverError}</div>}
+        {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}
         {success && <div className="text-sm text-success">{success}</div>}
         <Button type="submit" disabled={!canSubmit}>
-          {submitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
+          {isSubmitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
         </Button>
       </form>
     </div>
@@ -233,16 +228,19 @@ function DisplayNameForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { profile } = useAuth();
   const updateDisplayName = useUpdateDisplayName();
-  const [name, setName] = useState(profile?.displayName ?? "");
   const [success, setSuccess] = useState("");
 
-  const isDirty = name.trim() !== (profile?.displayName ?? "");
-  const canSubmit = name.trim().length > 0 && isDirty && !updateDisplayName.isPending;
+  const { register, handleSubmit, control } = useForm<{ name: string }>({
+    defaultValues: { name: profile?.displayName ?? "" },
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const nameValue = useWatch({ control, name: "name" });
+  const isDirty = nameValue.trim() !== (profile?.displayName ?? "");
+  const canSubmit = nameValue.trim().length > 0 && isDirty && !updateDisplayName.isPending;
+
+  const onSubmit = (data: { name: string }) => {
     setSuccess("");
-    updateDisplayName.mutate(name.trim(), {
+    updateDisplayName.mutate(data.name.trim(), {
       onSuccess: () => {
         setSuccess(t("preferences.displayNameChanged"));
       },
@@ -251,14 +249,14 @@ function DisplayNameForm() {
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 mb-4">
-      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.displayName")}</Label>
           <Input
             type="text"
-            value={name}
+            {...register("name")}
             onChange={(e) => {
-              setName(e.target.value);
+              register("name").onChange(e);
               setSuccess("");
             }}
             maxLength={100}
@@ -275,126 +273,103 @@ function DisplayNameForm() {
   );
 }
 
+interface PasswordFormData {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 function PasswordChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { updatePassword } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [serverError, setServerError] = useState("");
   const [success, setSuccess] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
-  const rules = useMemo(
-    () => ({
-      currentPassword: (v: string) => {
-        if (!v) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-      newPassword: (v: string) => {
-        if (!v) return t("validation.required", { ns: "common" });
-        if (v.length < 6) return t("validation.minLength", { ns: "common", min: 6 });
-        return undefined;
-      },
-      confirmPassword: (v: string) => {
-        if (!v) return t("validation.required", { ns: "common" });
-        if (v !== newPassword) return t("validation.passwordMismatch", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t, newPassword],
-  );
+  const {
+    register,
+    handleSubmit,
+    setError,
+    reset,
+    control,
+    formState: { errors, isSubmitting },
+  } = useForm<PasswordFormData>({
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+    mode: "onBlur",
+  });
 
-  const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
+  const newPasswordValue = useWatch({ control, name: "newPassword" });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setServerError("");
+  const onSubmit = async (data: PasswordFormData) => {
     setSuccess("");
-
-    if (!validateAll({ currentPassword, newPassword, confirmPassword })) return;
-
-    setSubmitting(true);
     try {
-      await updatePassword(currentPassword, newPassword);
+      await updatePassword(data.currentPassword, data.newPassword);
       setSuccess(t("preferences.passwordChanged"));
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      clearErrors();
+      reset();
     } catch (err: unknown) {
-      setServerError(err instanceof Error ? err.message : t("login.error"));
-    } finally {
-      setSubmitting(false);
+      setError("root", {
+        message: err instanceof Error ? err.message : t("login.error"),
+      });
     }
   };
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 mb-4">
-      <form onSubmit={handleSubmit} className="space-y-4 py-1">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.currentPassword")}</Label>
           <Input
             type="password"
-            value={currentPassword}
-            onChange={(e) => {
-              setCurrentPassword(e.target.value);
-              clearField("currentPassword");
-              setServerError("");
-              setSuccess("");
-            }}
-            onBlur={() => onBlur("currentPassword", currentPassword)}
+            {...register("currentPassword", {
+              required: t("validation.required", { ns: "common" }),
+            })}
             autoComplete="current-password"
             aria-invalid={errors.currentPassword ? true : undefined}
             className={cn(errors.currentPassword && "border-destructive")}
           />
           {errors.currentPassword && (
-            <p className="text-xs text-destructive">{errors.currentPassword}</p>
+            <div className="text-sm text-destructive">{errors.currentPassword.message}</div>
           )}
         </div>
         <div className="space-y-2">
           <Label>{t("preferences.newPassword")}</Label>
           <Input
             type="password"
-            value={newPassword}
-            onChange={(e) => {
-              setNewPassword(e.target.value);
-              clearField("newPassword");
-              setServerError("");
-              setSuccess("");
-            }}
-            onBlur={() => onBlur("newPassword", newPassword)}
+            {...register("newPassword", {
+              required: t("validation.required", { ns: "common" }),
+              minLength: {
+                value: 6,
+                message: t("validation.minLength", { ns: "common", min: 6 }),
+              },
+            })}
             minLength={6}
             autoComplete="new-password"
             aria-invalid={errors.newPassword ? true : undefined}
             className={cn(errors.newPassword && "border-destructive")}
           />
-          {errors.newPassword && <p className="text-xs text-destructive">{errors.newPassword}</p>}
+          {errors.newPassword && (
+            <div className="text-sm text-destructive">{errors.newPassword.message}</div>
+          )}
         </div>
         <div className="space-y-2">
           <Label>{t("preferences.confirmPassword")}</Label>
           <Input
             type="password"
-            value={confirmPassword}
-            onChange={(e) => {
-              setConfirmPassword(e.target.value);
-              clearField("confirmPassword");
-              setServerError("");
-              setSuccess("");
-            }}
-            onBlur={() => onBlur("confirmPassword", confirmPassword)}
+            {...register("confirmPassword", {
+              required: t("validation.required", { ns: "common" }),
+              validate: (v) =>
+                v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
+            })}
             autoComplete="new-password"
             aria-invalid={errors.confirmPassword ? true : undefined}
             className={cn(errors.confirmPassword && "border-destructive")}
           />
           {errors.confirmPassword && (
-            <p className="text-xs text-destructive">{errors.confirmPassword}</p>
+            <div className="text-sm text-destructive">{errors.confirmPassword.message}</div>
           )}
         </div>
-        {serverError && <div className="text-sm text-destructive">{serverError}</div>}
+        {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}
         {success && <div className="text-sm text-success">{success}</div>}
-        <Button type="submit" disabled={submitting}>
-          {submitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
       </form>
     </div>

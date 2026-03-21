@@ -1,12 +1,11 @@
-import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useFormErrors } from "../hooks/use-form-errors";
 import type { OrgProxyInfo } from "@appstrate/shared-types";
 
 interface ProxyFormModalProps {
@@ -16,6 +15,11 @@ interface ProxyFormModalProps {
   isPending: boolean;
   onSubmit: (data: { label: string; url: string }) => void;
 }
+
+type ProxyFormData = {
+  label: string;
+  url: string;
+};
 
 function ProxyFormBody({
   proxy,
@@ -29,34 +33,21 @@ function ProxyFormBody({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const [label, setLabel] = useState(proxy?.label ?? "");
-  const [url, setUrl] = useState("");
 
-  const rules = useMemo(
-    () => ({
-      label: (v: string) => {
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-      url: (v: string) => {
-        if (!proxy && !v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t, proxy],
-  );
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<ProxyFormData>({
+    defaultValues: { label: proxy?.label ?? "", url: "" },
+    mode: "onBlur",
+  });
 
-  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!validateAll({ label, url })) return;
-
+  const onFormSubmit = (data: ProxyFormData) => {
     onSubmit({
-      label: label.trim(),
-      ...(url.trim() ? { url: url.trim() } : {}),
-    } as { label: string; url: string });
+      label: data.label.trim(),
+      url: data.url.trim(),
+    });
   };
 
   const title = proxy ? t("proxies.modal.editTitle") : t("proxies.modal.createTitle");
@@ -77,44 +68,41 @@ function ProxyFormBody({
         </>
       }
     >
-      <form id="proxy-form" onSubmit={handleSubmit} className="space-y-4">
+      <form id="proxy-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="px-label">{t("proxies.modal.label")}</Label>
           <Input
             id="px-label"
             type="text"
-            value={label}
-            onChange={(e) => {
-              setLabel(e.target.value);
-              clearField("label");
-            }}
-            onBlur={() => onBlur("label", label)}
             placeholder={t("proxies.modal.labelPlaceholder")}
             autoFocus
             aria-invalid={errors.label ? true : undefined}
             className={cn(errors.label && "border-destructive")}
+            {...register("label", {
+              required: t("validation.required", { ns: "common" }),
+            })}
           />
-          {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
+          {errors.label && <div className="text-sm text-destructive">{errors.label.message}</div>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="px-url">{t("proxies.modal.url")}</Label>
           <Input
             id="px-url"
             type="text"
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value);
-              clearField("url");
-            }}
-            onBlur={() => onBlur("url", url)}
             placeholder={t("proxies.modal.urlPlaceholder")}
             aria-invalid={errors.url ? true : undefined}
             className={cn(errors.url && "border-destructive")}
+            {...register("url", {
+              validate: (v) => {
+                if (!proxy && !v.trim()) return t("validation.required", { ns: "common" });
+                return true;
+              },
+            })}
           />
           {proxy && (
             <div className="text-sm text-muted-foreground">{t("proxies.modal.urlHint")}</div>
           )}
-          {errors.url && <div className="text-sm text-destructive">{errors.url}</div>}
+          {errors.url && <div className="text-sm text-destructive">{errors.url.message}</div>}
         </div>
       </form>
     </Modal>

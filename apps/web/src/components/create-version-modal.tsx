@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -45,37 +45,48 @@ interface CreateVersionModalProps {
   packageId: string;
 }
 
+type FormData = { selectedBump: BumpType };
+
 export function CreateVersionModal({ open, onClose, type, packageId }: CreateVersionModalProps) {
   const { t } = useTranslation("flows");
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedBump, setSelectedBump] = useState<BumpType>("patch");
+
+  const {
+    setValue,
+    setError,
+    control,
+    formState: { errors },
+  } = useForm<FormData>({
+    defaultValues: { selectedBump: "patch" },
+  });
+
+  const selectedBump = useWatch({ control, name: "selectedBump" });
 
   const latestVersion = versionInfo?.latestVersion ?? null;
   const draftVersion = versionInfo?.draftVersion ?? null;
 
-  // Mode A: draft === latest → show bump selector
+  // Mode A: draft === latest -> show bump selector
   const needsBump = !!draftVersion && !!latestVersion && semverEq(draftVersion, latestVersion);
-  // Mode B: draft > latest or no latest → direct create
+  // Mode B: draft > latest or no latest -> direct create
   const canCreateDirect =
     !!draftVersion && (!latestVersion || semverGt(draftVersion, latestVersion));
-  // Mode C: draft < latest (but not equal) → blocked
+  // Mode C: draft < latest (but not equal) -> blocked
   const isBlocked = !!draftVersion && !!latestVersion && !needsBump && !canCreateDirect;
 
   const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : draftVersion;
 
   const canCreate = needsBump || canCreateDirect;
 
-  const handleSubmit = () => {
-    setError(null);
+  const handleFormSubmit = () => {
+    setError("root", { message: "" });
     const versionArg = needsBump ? targetVersion : undefined;
     createVersion.mutate(versionArg ?? undefined, {
       onSuccess: () => {
         onClose();
       },
       onError: (err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError("root", { message: err instanceof Error ? err.message : String(err) });
       },
     });
   };
@@ -92,7 +103,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
       onClose={onClose}
       title={t("version.createVersion")}
       actions={
-        <Button onClick={handleSubmit} disabled={!canCreate || createVersion.isPending}>
+        <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
           {createVersion.isPending && <Spinner />}{" "}
           {targetVersion
             ? t("version.createVersionX", { version: targetVersion })
@@ -126,7 +137,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
                   <button
                     key={opt.type}
                     type="button"
-                    onClick={() => setSelectedBump(opt.type)}
+                    onClick={() => setValue("selectedBump", opt.type)}
                     className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
                       isSelected
                         ? "border-primary bg-primary/10 text-primary"
@@ -135,7 +146,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
                   >
                     <div className="font-medium">{opt.label}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      {latestVersion} → {bumped}
+                      {latestVersion} &rarr; {bumped}
                     </div>
                   </button>
                 );
@@ -150,7 +161,9 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
         {!draftVersion && (
           <p className="text-sm text-warning">{t("version.noVersionInManifest")}</p>
         )}
-        {error && <span className="text-sm text-destructive">{error}</span>}
+        {errors.root?.message && (
+          <div className="text-sm text-destructive">{errors.root.message}</div>
+        )}
       </div>
     </Modal>
   );

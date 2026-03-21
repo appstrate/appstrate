@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, Controller } from "react-hook-form";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,41 +21,57 @@ interface Props {
   onKeyCreated?: (rawKey: string) => void;
 }
 
+type FormData = { name: string; expiresIn: string };
+
+function computeExpiresAt(expiresIn: string): string | null {
+  if (expiresIn === "never") return null;
+  return new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateApiKey();
 
-  const [name, setName] = useState("");
-  const [expiresIn, setExpiresIn] = useState("90");
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const {
+    register,
+    handleSubmit,
+    reset,
+    control,
+    setError,
+    formState: { errors },
+  } = useForm<FormData>({
+    defaultValues: { name: "", expiresIn: "90" },
+  });
+
   const handleClose = () => {
-    setName("");
-    setExpiresIn("90");
+    reset({ name: "", expiresIn: "90" });
     setCreatedKey(null);
     setCopied(false);
     createMutation.reset();
     onClose();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const expiresAt =
-      expiresIn === "never"
-        ? null
-        : new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
+  function onFormSubmit(data: FormData) {
+    const expiresAt = computeExpiresAt(data.expiresIn);
 
     createMutation.mutate(
-      { name: name.trim(), expiresAt },
+      { name: data.name.trim(), expiresAt },
       {
-        onSuccess: (data) => {
-          setCreatedKey(data.key);
-          onKeyCreated?.(data.key);
+        onSuccess: (result) => {
+          setCreatedKey(result.key);
+          onKeyCreated?.(result.key);
+        },
+        onError: (err) => {
+          setError("root", { message: err instanceof Error ? err.message : String(err) });
         },
       },
     );
-  };
+  }
+
+  const onSubmit = handleSubmit(onFormSubmit);
 
   const handleCopy = () => {
     if (createdKey) {
@@ -100,24 +117,19 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           <Button variant="outline" type="button" onClick={handleClose}>
             {t("btn.cancel")}
           </Button>
-          <Button
-            type="submit"
-            form="create-api-key-form"
-            disabled={createMutation.isPending || !name.trim()}
-          >
+          <Button type="submit" form="create-api-key-form" disabled={createMutation.isPending}>
             {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
           </Button>
         </>
       }
     >
-      <form id="create-api-key-form" onSubmit={handleSubmit}>
+      <form id="create-api-key-form" onSubmit={onSubmit}>
         <div className="space-y-2">
           <Label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</Label>
           <Input
             id="api-key-name"
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            {...register("name", { required: true })}
             placeholder={t("apiKeys.namePlaceholder")}
             maxLength={100}
             required
@@ -126,22 +138,26 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
         </div>
         <div className="space-y-2">
           <Label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</Label>
-          <Select value={expiresIn} onValueChange={setExpiresIn}>
-            <SelectTrigger id="api-key-expires">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="30">{t("apiKeys.expires30")}</SelectItem>
-              <SelectItem value="90">{t("apiKeys.expires90")}</SelectItem>
-              <SelectItem value="180">{t("apiKeys.expires180")}</SelectItem>
-              <SelectItem value="365">{t("apiKeys.expires365")}</SelectItem>
-              <SelectItem value="never">{t("apiKeys.expiresNever")}</SelectItem>
-            </SelectContent>
-          </Select>
+          <Controller
+            name="expiresIn"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger id="api-key-expires">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">{t("apiKeys.expires30")}</SelectItem>
+                  <SelectItem value="90">{t("apiKeys.expires90")}</SelectItem>
+                  <SelectItem value="180">{t("apiKeys.expires180")}</SelectItem>
+                  <SelectItem value="365">{t("apiKeys.expires365")}</SelectItem>
+                  <SelectItem value="never">{t("apiKeys.expiresNever")}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
-        {createMutation.isError && (
-          <p className="text-sm text-destructive">{createMutation.error.message}</p>
-        )}
+        {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
       </form>
     </Modal>
   );

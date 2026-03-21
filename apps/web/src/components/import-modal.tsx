@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import { Modal } from "./modal";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,11 +15,11 @@ interface ImportModalProps {
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
+type FormData = { file: File | null; githubUrl: string };
+
 export function ImportModal({ open, onClose }: ImportModalProps) {
   const { t } = useTranslation(["flows", "common"]);
-  const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [error, setError] = useState("");
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     packageId: string;
     draftVersion: string | null;
@@ -27,10 +28,22 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     packageId: string;
     version: string;
   } | null>(null);
-  const [githubUrl, setGithubUrl] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const importPackage = useImportPackage();
   const importGithub = useImportFromGithub();
+
+  const {
+    setValue,
+    setError,
+    reset,
+    control,
+    formState: { errors },
+  } = useForm<FormData>({
+    defaultValues: { file: null, githubUrl: "" },
+  });
+
+  const file = useWatch({ control, name: "file" });
+  const githubUrl = useWatch({ control, name: "githubUrl" });
 
   const isPending = importPackage.isPending || importGithub.isPending;
   const hasFile = !!file;
@@ -51,16 +64,16 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       const err = validateFile(f);
       setConfirmOverwrite(null);
       setConfirmIntegrity(null);
-      setGithubUrl("");
+      setValue("githubUrl", "");
       if (err) {
-        setError(err);
-        setFile(null);
+        setError("root", { message: err });
+        setValue("file", null);
       } else {
-        setError("");
-        setFile(f);
+        setError("root", { message: "" });
+        setValue("file", f);
       }
     },
-    [validateFile],
+    [validateFile, setValue, setError],
   );
 
   const handleDrop = useCallback(
@@ -74,16 +87,16 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   );
 
   const handleUrlChange = (value: string) => {
-    setGithubUrl(value);
-    setError("");
+    setValue("githubUrl", value);
+    setError("root", { message: "" });
     if (value.trim()) {
-      setFile(null);
+      setValue("file", null);
       setConfirmOverwrite(null);
       setConfirmIntegrity(null);
     }
   };
 
-  const handleSubmit = () => {
+  const handleFormSubmit = () => {
     if (hasFile) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
@@ -117,18 +130,16 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           resetAndClose();
         },
         onError: (err) => {
-          setError(err.message);
+          setError("root", { message: err.message });
         },
       });
     }
   };
 
   const resetAndClose = () => {
-    setFile(null);
-    setError("");
+    reset({ file: null, githubUrl: "" });
     setConfirmOverwrite(null);
     setConfirmIntegrity(null);
-    setGithubUrl("");
     onClose();
   };
 
@@ -145,6 +156,8 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         ? t("import.forceIntegrity")
         : t("import.submit");
 
+  const errorMessage = errors.root?.message;
+
   return (
     <Modal
       open={open}
@@ -155,7 +168,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           <Button variant="outline" onClick={handleClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button onClick={handleFormSubmit} disabled={!canSubmit}>
             {submitLabel}
           </Button>
         </>
@@ -219,14 +232,14 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              handleSubmit();
+              handleFormSubmit();
             }
           }}
         />
       </div>
 
       {/* --- Errors & confirmations --- */}
-      {error && <p className="text-sm text-destructive mt-3">{error}</p>}
+      {errorMessage && <p className="text-sm text-destructive mt-3">{errorMessage}</p>}
       {confirmOverwrite && (
         <p className="text-sm text-destructive mt-3">
           {t("import.confirmOverwrite", { draftVersion: confirmOverwrite.draftVersion ?? "?" })}

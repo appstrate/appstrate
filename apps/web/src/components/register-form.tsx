@@ -1,67 +1,48 @@
-import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "../hooks/use-theme";
 import { useAuth } from "../hooks/use-auth";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { AppleIcon, GoogleIcon } from "./icons";
+
+type RegisterFormData = {
+  displayName: string;
+  email: string;
+  password: string;
+};
 
 export function RegisterForm({ className, ...props }: React.ComponentPropsWithoutRef<"div">) {
   const { t } = useTranslation(["settings", "common"]);
   const { resolvedTheme } = useTheme();
   const { signup } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  const rules = useMemo(
-    () => ({
-      email: (v: string) => {
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
-          return t("validation.emailFormat", { ns: "common" });
-        return undefined;
-      },
-      password: (v: string) => {
-        if (!v) return t("validation.required", { ns: "common" });
-        if (v.length < 6) return t("validation.minLength", { ns: "common", min: 6 });
-        return undefined;
-      },
-      displayName: (v: string) => {
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t],
-  );
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterFormData>({
+    defaultValues: { displayName: "", email: "", password: "" },
+    mode: "onBlur",
+  });
 
-  const { errors, onBlur, validateAll, clearField } = useFormErrors(rules);
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setServerError(null);
-
-    if (!validateAll({ email, password, displayName })) return;
-
-    setLoading(true);
+  const onSubmit = async (data: RegisterFormData) => {
     try {
-      await signup(email, password, displayName || undefined);
+      await signup(data.email, data.password, data.displayName.trim() || undefined);
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : t("login.error"));
-    } finally {
-      setLoading(false);
+      setError("root", {
+        message: err instanceof Error ? err.message : t("login.error"),
+      });
     }
   };
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-6">
           <div className="flex flex-col items-center gap-2">
             <Link to="/" className="flex flex-col items-center gap-2 font-medium">
@@ -85,19 +66,16 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
                 <Input
                   id="displayName"
                   type="text"
-                  value={displayName}
-                  onChange={(e) => {
-                    setDisplayName(e.target.value);
-                    clearField("displayName");
-                  }}
-                  onBlur={() => onBlur("displayName", displayName)}
                   placeholder={t("login.namePlaceholder")}
                   autoComplete="name"
                   aria-invalid={errors.displayName ? true : undefined}
                   className={cn(errors.displayName && "border-destructive")}
+                  {...register("displayName", {
+                    required: t("validation.required", { ns: "common" }),
+                  })}
                 />
                 {errors.displayName && (
-                  <div className="text-sm text-destructive">{errors.displayName}</div>
+                  <div className="text-sm text-destructive">{errors.displayName.message}</div>
                 )}
               </div>
               <div className="grid gap-2">
@@ -105,43 +83,47 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
                 <Input
                   id="email"
                   type="email"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    clearField("email");
-                  }}
-                  onBlur={() => onBlur("email", email)}
                   placeholder="email@example.com"
                   autoComplete="email"
                   aria-invalid={errors.email ? true : undefined}
                   className={cn(errors.email && "border-destructive")}
+                  {...register("email", {
+                    required: t("validation.required", { ns: "common" }),
+                    pattern: {
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                      message: t("validation.emailFormat", { ns: "common" }),
+                    },
+                  })}
                 />
-                {errors.email && <div className="text-sm text-destructive">{errors.email}</div>}
+                {errors.email && (
+                  <div className="text-sm text-destructive">{errors.email.message}</div>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="password">{t("login.password")}</Label>
                 <Input
                   id="password"
                   type="password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    clearField("password");
-                  }}
-                  onBlur={() => onBlur("password", password)}
                   placeholder="••••••••"
                   autoComplete="new-password"
                   aria-invalid={errors.password ? true : undefined}
                   className={cn(errors.password && "border-destructive")}
+                  {...register("password", {
+                    required: t("validation.required", { ns: "common" }),
+                    minLength: {
+                      value: 6,
+                      message: t("validation.minLength", { ns: "common", min: 6 }),
+                    },
+                  })}
                 />
                 {errors.password && (
-                  <div className="text-sm text-destructive">{errors.password}</div>
+                  <div className="text-sm text-destructive">{errors.password.message}</div>
                 )}
               </div>
-              {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+              {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
             </div>
-            <Button size="lg" className="w-full mt-2" type="submit" disabled={loading}>
-              {loading ? t("loading") : t("login.signup")}
+            <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? t("loading") : t("login.signup")}
             </Button>
             <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
               <span className="relative z-10 bg-background px-2 text-muted-foreground">

@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { InputFields } from "./input-fields";
@@ -50,6 +50,11 @@ export function InputModal({
   );
 }
 
+type InputFormData = {
+  values: Record<string, string>;
+  fileValues: Record<string, File[]>;
+};
+
 function InputModalForm({
   flow,
   onClose,
@@ -66,73 +71,78 @@ function InputModalForm({
   const { t } = useTranslation(["flows", "common"]);
   const schema = flow.input?.schema || { type: "object" as const, properties: {} };
 
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    initInputValues(schema, initialValues),
-  );
-  const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const {
+    setValue,
+    setError,
+    clearErrors,
+    control,
+    formState: { errors },
+  } = useForm<InputFormData>({
+    defaultValues: {
+      values: initInputValues(schema, initialValues),
+      fileValues: {},
+    },
+  });
 
-  const clearFieldError = (key: string) => {
-    setErrors((prev) => {
-      if (!prev[key]) return prev;
-      const { [key]: _, ...rest } = prev;
-      return rest;
-    });
+  const values = useWatch({ control, name: "values" });
+  const fileValues = useWatch({ control, name: "fileValues" });
+
+  const handleFieldChange = (key: string, v: string) => {
+    setValue("values", { ...values, [key]: v });
+    clearErrors("root");
   };
 
-  const handleSubmit = () => {
+  const handleFileChange = (key: string, files: File[]) => {
+    setValue("fileValues", { ...fileValues, [key]: files });
+    clearErrors("root");
+  };
+
+  const computeFieldErrors = (): Record<string, string> => {
     const input = buildInputPayload(schema, values);
-    const newErrors: Record<string, string> = {};
-
-    // Validate required text fields
+    const fieldErrs: Record<string, string> = {};
     for (const key of Object.keys(schema.properties)) {
       const prop = schema.properties[key]!;
-      if (prop.type === "file") continue;
-      if (schema.required?.includes(key) && (!input[key] || input[key] === "")) {
-        newErrors[key] = t("input.fieldRequired", { field: key });
+      if (prop.type === "file") {
+        if (schema.required?.includes(key) && (!fileValues[key] || fileValues[key]!.length === 0)) {
+          fieldErrs[key] = t("input.fileRequired", { field: key });
+        }
+      } else {
+        if (schema.required?.includes(key) && (!input[key] || input[key] === "")) {
+          fieldErrs[key] = t("input.fieldRequired", { field: key });
+        }
       }
     }
+    return fieldErrs;
+  };
 
-    // Validate required file fields
-    for (const key of Object.keys(schema.properties)) {
-      const prop = schema.properties[key]!;
-      if (prop.type !== "file") continue;
-      if (schema.required?.includes(key) && (!fileValues[key] || fileValues[key]!.length === 0)) {
-        newErrors[key] = t("input.fileRequired", { field: key });
-      }
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+  const handleFormSubmit = () => {
+    const fieldErrs = computeFieldErrors();
+    if (Object.keys(fieldErrs).length > 0) {
+      setError("root", { message: "validation" });
       return;
     }
-
-    // Check if we have any files
+    const input = buildInputPayload(schema, values);
     const hasFiles = Object.values(fileValues).some((f) => f.length > 0);
     onSubmit(input, hasFiles ? fileValues : undefined);
   };
+
+  const fieldErrors = errors.root ? computeFieldErrors() : {};
 
   return (
     <>
       <InputFields
         schema={schema}
         values={values}
-        onChange={(key, v) => {
-          setValues((prev) => ({ ...prev, [key]: v }));
-          clearFieldError(key);
-        }}
+        onChange={handleFieldChange}
         fileValues={fileValues}
-        onFileChange={(key, files) => {
-          setFileValues((prev) => ({ ...prev, [key]: files }));
-          clearFieldError(key);
-        }}
-        errors={errors}
+        onFileChange={handleFileChange}
+        errors={fieldErrors}
       />
       <div className="flex justify-end gap-2 pt-4">
         <Button variant="outline" onClick={onClose} disabled={isPending}>
           {t("btn.cancel")}
         </Button>
-        <Button onClick={handleSubmit} disabled={isPending}>
+        <Button onClick={handleFormSubmit} disabled={isPending}>
           {isPending ? <Spinner /> : t("input.run")}
         </Button>
       </div>

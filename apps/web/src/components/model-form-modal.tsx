@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -23,7 +24,6 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, KeyRound, X } from "lucide-react";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { useOpenRouterModels, type OpenRouterModel, type ModelCost } from "../hooks/use-models";
 import { useProviderKeys } from "../hooks/use-provider-keys";
 import type { OrgModelInfo } from "@appstrate/shared-types";
@@ -57,6 +57,20 @@ interface ModelFormModalProps {
   model: OrgModelInfo | null;
   isPending: boolean;
   onSubmit: (data: ModelFormData) => void;
+}
+
+interface ModelFormFields {
+  label: string;
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  providerKeyId: string;
+  inlineApiKey: string;
+  inputText: boolean;
+  inputImage: boolean;
+  contextWindow: string;
+  maxTokens: string;
+  reasoning: boolean;
 }
 
 function detectProvider(model: OrgModelInfo | null): string {
@@ -199,20 +213,47 @@ function ModelFormBody({
 
   const [providerId, setProviderId] = useState(() => detectProvider(model));
   const [selectedModelId, setSelectedModelId] = useState(() => detectModel(model));
-
-  const [label, setLabel] = useState(model?.label ?? "");
-  const [api, setApi] = useState(model?.api ?? "");
-  const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "");
-  const [modelId, setModelId] = useState(model?.modelId ?? "");
-  const [inputText, setInputText] = useState(model?.input?.includes("text") !== false);
-  const [inputImage, setInputImage] = useState(model?.input?.includes("image") ?? false);
-  const [contextWindow, setContextWindow] = useState(model?.contextWindow?.toString() ?? "");
-  const [maxTokens, setMaxTokens] = useState(model?.maxTokens?.toString() ?? "");
-  const [reasoning, setReasoning] = useState(model?.reasoning ?? false);
   const [cost, setCost] = useState<ModelCost | null>(null);
 
-  const [providerKeyId, setProviderKeyId] = useState(model?.providerKeyId ?? "");
-  const [inlineApiKey, setInlineApiKey] = useState("");
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = useForm<ModelFormFields>({
+    defaultValues: {
+      label: model?.label ?? "",
+      api: model?.api ?? "",
+      baseUrl: model?.baseUrl ?? "",
+      modelId: model?.modelId ?? "",
+      providerKeyId: model?.providerKeyId ?? "",
+      inlineApiKey: "",
+      inputText: model?.input?.includes("text") !== false,
+      inputImage: model?.input?.includes("image") ?? false,
+      contextWindow: model?.contextWindow?.toString() ?? "",
+      maxTokens: model?.maxTokens?.toString() ?? "",
+      reasoning: model?.reasoning ?? false,
+    },
+    mode: "onBlur",
+  });
+
+  const [api, baseUrl, modelId, providerKeyId, inlineApiKey, inputText, inputImage, reasoning] =
+    useWatch({
+      control,
+      name: [
+        "api",
+        "baseUrl",
+        "modelId",
+        "providerKeyId",
+        "inlineApiKey",
+        "inputText",
+        "inputImage",
+        "reasoning",
+      ],
+    });
+
   const providerKeysQuery = useProviderKeys();
 
   const availableProviderKeys = useMemo(() => {
@@ -246,53 +287,14 @@ function ModelFormBody({
 
   const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId);
 
-  const rules = useMemo(
-    () => ({
-      label: (v: string) => {
-        if (isPreset) return undefined;
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-      api: (v: string) => {
-        if (!isCustomProvider) return undefined;
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-      baseUrl: (v: string) => {
-        if (isPreset) return undefined;
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        try {
-          new URL(v.trim());
-        } catch {
-          return t("validation.required", { ns: "common" });
-        }
-        return undefined;
-      },
-      modelId: (v: string) => {
-        if (isPreset) return undefined;
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-      providerKeyId: (v: string) => {
-        if (inlineKeyMode && inlineApiKey.trim()) return undefined;
-        if (model) return undefined; // optional when editing
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t, model, isPreset, isCustomProvider, inlineKeyMode, inlineApiKey],
-  );
-
-  const { errors, onBlur, validateAll, clearErrors, clearField } = useFormErrors(rules);
-
   const resetModelFields = () => {
-    setLabel("");
-    setModelId("");
-    setInputText(true);
-    setInputImage(false);
-    setContextWindow("");
-    setMaxTokens("");
-    setReasoning(false);
+    setValue("label", "");
+    setValue("modelId", "");
+    setValue("inputText", true);
+    setValue("inputImage", false);
+    setValue("contextWindow", "");
+    setValue("maxTokens", "");
+    setValue("reasoning", false);
     setCost(null);
   };
 
@@ -302,14 +304,14 @@ function ModelFormBody({
 
     if (id === CUSTOM_ID) {
       setSelectedModelId(CUSTOM_ID);
-      setApi("");
-      setBaseUrl("");
+      setValue("api", "");
+      setValue("baseUrl", "");
     } else {
       setSelectedModelId("");
       const provider = getProviderById(id);
       if (provider) {
-        setApi(provider.api);
-        setBaseUrl(provider.baseUrl);
+        setValue("api", provider.api);
+        setValue("baseUrl", provider.baseUrl);
       }
     }
     resetModelFields();
@@ -328,41 +330,39 @@ function ModelFormBody({
     const preset = selectedProvider?.models.find((m) => m.modelId === id);
     if (!preset) return;
 
-    setLabel(preset.label);
-    setModelId(preset.modelId);
-    setInputText(preset.input.includes("text"));
-    setInputImage(preset.input.includes("image"));
-    setContextWindow(preset.contextWindow.toString());
-    setMaxTokens(preset.maxTokens.toString());
-    setReasoning(preset.reasoning);
+    setValue("label", preset.label);
+    setValue("modelId", preset.modelId);
+    setValue("inputText", preset.input.includes("text"));
+    setValue("inputImage", preset.input.includes("image"));
+    setValue("contextWindow", preset.contextWindow.toString());
+    setValue("maxTokens", preset.maxTokens.toString());
+    setValue("reasoning", preset.reasoning);
     setCost(preset.cost ?? null);
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-
-    if (!validateAll({ label, api, baseUrl, modelId, providerKeyId })) return;
-
-    const inputArr = [inputText && "text", inputImage && "image"].filter(Boolean) as string[];
-    const cw = contextWindow.trim() ? parseInt(contextWindow.trim(), 10) : undefined;
-    const mt = maxTokens.trim() ? parseInt(maxTokens.trim(), 10) : undefined;
+  const onFormSubmit = handleSubmit((data) => {
+    const inputArr = [data.inputText && "text", data.inputImage && "image"].filter(
+      Boolean,
+    ) as string[];
+    const cw = data.contextWindow.trim() ? parseInt(data.contextWindow.trim(), 10) : undefined;
+    const mt = data.maxTokens.trim() ? parseInt(data.maxTokens.trim(), 10) : undefined;
 
     onSubmit({
-      label: label.trim(),
-      api: api.trim(),
-      baseUrl: baseUrl.trim(),
-      modelId: modelId.trim(),
-      providerKeyId: inlineKeyMode ? "" : providerKeyId,
-      ...(inlineKeyMode && inlineApiKey.trim()
-        ? { newProviderKey: { apiKey: inlineApiKey.trim() } }
+      label: data.label.trim(),
+      api: data.api.trim(),
+      baseUrl: data.baseUrl.trim(),
+      modelId: data.modelId.trim(),
+      providerKeyId: inlineKeyMode ? "" : data.providerKeyId,
+      ...(inlineKeyMode && data.inlineApiKey.trim()
+        ? { newProviderKey: { apiKey: data.inlineApiKey.trim() } }
         : {}),
       ...(inputArr.length > 0 ? { input: inputArr } : {}),
       ...(cw ? { contextWindow: cw } : {}),
       ...(mt ? { maxTokens: mt } : {}),
-      ...(reasoning ? { reasoning: true } : {}),
+      ...(data.reasoning ? { reasoning: true } : {}),
       ...(cost ? { cost } : {}),
     });
-  };
+  });
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
 
@@ -382,7 +382,7 @@ function ModelFormBody({
         </>
       }
     >
-      <form id="model-form" onSubmit={handleSubmit} className="space-y-4">
+      <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
         {/* Provider select */}
         <div className="space-y-2">
           <Label htmlFor="mdl-provider">{t("models.form.provider")}</Label>
@@ -442,13 +442,13 @@ function ModelFormBody({
               searchingText={t("models.form.openRouterSearching")}
               onSelect={(m) => {
                 setSelectedModelId(m.id);
-                setModelId(m.id);
-                setLabel(m.name);
-                if (m.contextWindow) setContextWindow(m.contextWindow.toString());
-                if (m.maxTokens) setMaxTokens(m.maxTokens.toString());
-                setInputText(m.input?.includes("text") !== false);
-                setInputImage(m.input?.includes("image") ?? false);
-                setReasoning(m.reasoning ?? false);
+                setValue("modelId", m.id);
+                setValue("label", m.name);
+                if (m.contextWindow) setValue("contextWindow", m.contextWindow.toString());
+                if (m.maxTokens) setValue("maxTokens", m.maxTokens.toString());
+                setValue("inputText", m.input?.includes("text") !== false);
+                setValue("inputImage", m.input?.includes("image") ?? false);
+                setValue("reasoning", m.reasoning ?? false);
                 setCost(m.cost ?? null);
               }}
             />
@@ -462,18 +462,21 @@ function ModelFormBody({
             <Input
               id="mdl-label"
               type="text"
-              value={label}
-              onChange={(e) => {
-                setLabel(e.target.value);
-                clearField("label");
-              }}
-              onBlur={() => onBlur("label", label)}
+              {...register("label", {
+                validate: (v) => {
+                  if (isPreset) return undefined;
+                  if (!v.trim()) return t("validation.required", { ns: "common" });
+                  return undefined;
+                },
+              })}
               placeholder="ex: Claude Sonnet"
               autoFocus
               aria-invalid={errors.label ? true : undefined}
               className={cn(errors.label && "border-destructive")}
             />
-            {errors.label && <div className="text-sm text-destructive">{errors.label}</div>}
+            {errors.label?.message && (
+              <div className="text-sm text-destructive">{errors.label.message}</div>
+            )}
           </div>
         )}
 
@@ -493,8 +496,8 @@ function ModelFormBody({
                   size="icon"
                   className="shrink-0 h-9 w-9"
                   onClick={() => {
-                    setProviderKeyId("");
-                    setInlineApiKey("");
+                    setValue("providerKeyId", "");
+                    setValue("inlineApiKey", "");
                   }}
                 >
                   <X className="size-4" />
@@ -505,11 +508,7 @@ function ModelFormBody({
               <div className="flex gap-2">
                 <Input
                   type="password"
-                  value={inlineApiKey}
-                  onChange={(e) => {
-                    setInlineApiKey(e.target.value);
-                    clearField("providerKeyId");
-                  }}
+                  {...register("inlineApiKey")}
                   placeholder="sk-..."
                   className={cn("flex-1", errors.providerKeyId && "border-destructive")}
                   aria-invalid={errors.providerKeyId ? true : undefined}
@@ -518,8 +517,8 @@ function ModelFormBody({
                   <Select
                     value=""
                     onValueChange={(id) => {
-                      setProviderKeyId(id);
-                      setInlineApiKey("");
+                      setValue("providerKeyId", id);
+                      setValue("inlineApiKey", "");
                     }}
                   >
                     <SelectTrigger className="w-auto shrink-0">
@@ -541,8 +540,8 @@ function ModelFormBody({
                 {t("models.form.createProviderKeyHint")}
               </div>
             )}
-            {errors.providerKeyId && (
-              <div className="text-sm text-destructive">{errors.providerKeyId}</div>
+            {errors.providerKeyId?.message && (
+              <div className="text-sm text-destructive">{errors.providerKeyId.message}</div>
             )}
           </div>
         )}
@@ -556,8 +555,8 @@ function ModelFormBody({
                 <Select
                   value={api}
                   onValueChange={(v) => {
-                    setApi(v);
-                    clearField("api");
+                    setValue("api", v);
+                    clearErrors("api");
                   }}
                 >
                   <SelectTrigger id="mdl-api" className={cn(errors.api && "border-destructive")}>
@@ -571,7 +570,9 @@ function ModelFormBody({
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.api && <div className="text-sm text-destructive">{errors.api}</div>}
+                {errors.api?.message && (
+                  <div className="text-sm text-destructive">{errors.api.message}</div>
+                )}
               </div>
             )}
 
@@ -580,18 +581,26 @@ function ModelFormBody({
               <Input
                 id="mdl-baseUrl"
                 type="url"
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value);
-                  clearField("baseUrl");
-                }}
-                onBlur={() => onBlur("baseUrl", baseUrl)}
+                {...register("baseUrl", {
+                  validate: (v) => {
+                    if (isPreset) return undefined;
+                    if (!v.trim()) return t("validation.required", { ns: "common" });
+                    try {
+                      new URL(v.trim());
+                    } catch {
+                      return t("validation.required", { ns: "common" });
+                    }
+                    return undefined;
+                  },
+                })}
                 placeholder="https://api.openai.com/v1"
                 aria-invalid={errors.baseUrl ? true : undefined}
                 className={cn(errors.baseUrl && "border-destructive")}
               />
               <div className="text-sm text-muted-foreground">{t("models.form.baseUrlHint")}</div>
-              {errors.baseUrl && <div className="text-sm text-destructive">{errors.baseUrl}</div>}
+              {errors.baseUrl?.message && (
+                <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -599,17 +608,20 @@ function ModelFormBody({
               <Input
                 id="mdl-modelId"
                 type="text"
-                value={modelId}
-                onChange={(e) => {
-                  setModelId(e.target.value);
-                  clearField("modelId");
-                }}
-                onBlur={() => onBlur("modelId", modelId)}
+                {...register("modelId", {
+                  validate: (v) => {
+                    if (isPreset) return undefined;
+                    if (!v.trim()) return t("validation.required", { ns: "common" });
+                    return undefined;
+                  },
+                })}
                 placeholder="ex: claude-sonnet-4-5-20250929"
                 aria-invalid={errors.modelId ? true : undefined}
                 className={cn(errors.modelId && "border-destructive")}
               />
-              {errors.modelId && <div className="text-sm text-destructive">{errors.modelId}</div>}
+              {errors.modelId?.message && (
+                <div className="text-sm text-destructive">{errors.modelId.message}</div>
+              )}
             </div>
           </>
         )}
@@ -627,7 +639,7 @@ function ModelFormBody({
                   <input
                     type="checkbox"
                     checked={inputText}
-                    onChange={(e) => setInputText(e.target.checked)}
+                    onChange={(e) => setValue("inputText", e.target.checked)}
                   />
                   {t("models.form.inputText")}
                 </label>
@@ -635,7 +647,7 @@ function ModelFormBody({
                   <input
                     type="checkbox"
                     checked={inputImage}
-                    onChange={(e) => setInputImage(e.target.checked)}
+                    onChange={(e) => setValue("inputImage", e.target.checked)}
                   />
                   {t("models.form.inputImage")}
                 </label>
@@ -647,8 +659,7 @@ function ModelFormBody({
                 <Input
                   id="mdl-ctx"
                   type="number"
-                  value={contextWindow}
-                  onChange={(e) => setContextWindow(e.target.value)}
+                  {...register("contextWindow")}
                   placeholder="200000"
                 />
               </div>
@@ -657,8 +668,7 @@ function ModelFormBody({
                 <Input
                   id="mdl-maxtok"
                   type="number"
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(e.target.value)}
+                  {...register("maxTokens")}
                   placeholder="16384"
                 />
               </div>
@@ -668,7 +678,7 @@ function ModelFormBody({
                 id="mdl-reasoning"
                 type="checkbox"
                 checked={reasoning}
-                onChange={(e) => setReasoning(e.target.checked)}
+                onChange={(e) => setValue("reasoning", e.target.checked)}
               />
               <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
             </div>

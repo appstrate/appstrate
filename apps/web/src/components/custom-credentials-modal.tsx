@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useForm, useWatch } from "react-hook-form";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,8 +27,13 @@ export function CustomCredentialsModal({
   onSubmit,
 }: CustomCredentialsModalProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const [values, setValues] = useState<Record<string, string>>({});
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+
+  const { setValue, reset, handleSubmit, control } = useForm<Record<string, string>>({
+    defaultValues: {},
+  });
+
+  const values = useWatch({ control });
 
   const properties = schema?.properties ?? {};
   const required = schema?.required ?? [];
@@ -40,20 +46,20 @@ export function CustomCredentialsModal({
   };
 
   const handleClose = () => {
-    setValues({});
+    reset({});
     setVisibleFields({});
     onClose();
   };
 
-  const handleSubmit = () => {
+  const onFormSubmit = handleSubmit((data) => {
     const credentials: Record<string, string> = {};
     for (const key of Object.keys(properties)) {
-      if (values[key]?.trim()) {
-        credentials[key] = values[key].trim();
+      if (data[key]?.trim()) {
+        credentials[key] = data[key].trim();
       }
     }
     onSubmit(credentials);
-  };
+  });
 
   return (
     <Modal
@@ -76,10 +82,10 @@ export function CustomCredentialsModal({
                 id={`cred-${key}`}
                 type={isVisible ? "text" : "password"}
                 value={values[key] ?? ""}
-                onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                onChange={(e) => setValue(key, e.target.value)}
                 placeholder={key}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && allRequiredFilled && !isPending) handleSubmit();
+                  if (e.key === "Enter" && allRequiredFilled && !isPending) onFormSubmit();
                 }}
               />
               <Button
@@ -90,7 +96,7 @@ export function CustomCredentialsModal({
                 onClick={() => toggleVisibility(key)}
                 tabIndex={-1}
               >
-                {isVisible ? "◡" : "⦿"}
+                {isVisible ? "\u25E1" : "\u29BF"}
               </Button>
             </div>
           </div>
@@ -100,7 +106,7 @@ export function CustomCredentialsModal({
         <Button variant="outline" onClick={handleClose}>
           {t("btn.cancel")}
         </Button>
-        <Button onClick={handleSubmit} disabled={!allRequiredFilled || isPending}>
+        <Button onClick={onFormSubmit} disabled={!allRequiredFilled || isPending}>
           {t("btn.save")}
         </Button>
       </div>

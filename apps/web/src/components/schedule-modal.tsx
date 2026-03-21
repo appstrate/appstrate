@@ -1,7 +1,7 @@
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { useFormErrors } from "../hooks/use-form-errors";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,6 +109,13 @@ export function ScheduleModal({
   );
 }
 
+interface ScheduleFormFields {
+  name: string;
+  cronExpression: string;
+  timezone: string;
+  enabled: boolean;
+}
+
 function ScheduleForm({
   schedule,
   inputSchema,
@@ -127,10 +134,6 @@ function ScheduleForm({
   const { t } = useTranslation(["flows", "common"]);
   const cronPresets = getCronPresets(t);
 
-  const [name, setName] = useState(schedule?.name ?? "");
-  const [cronExpression, setCronExpression] = useState(schedule?.cronExpression ?? "0 9 * * *");
-  const [timezone, setTimezone] = useState(schedule?.timezone ?? "UTC");
-  const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const schema = inputSchema || { type: "object" as const, properties: {} };
@@ -140,32 +143,40 @@ function ScheduleForm({
     initInputValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),
   );
 
-  const rules = useMemo(
-    () => ({
-      cronExpression: (v: string) => {
-        if (!v.trim()) return t("validation.required", { ns: "common" });
-        return undefined;
-      },
-    }),
-    [t],
-  );
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = useForm<ScheduleFormFields>({
+    defaultValues: {
+      name: schedule?.name ?? "",
+      cronExpression: schedule?.cronExpression ?? "0 9 * * *",
+      timezone: schedule?.timezone ?? "UTC",
+      enabled: schedule?.enabled ?? true,
+    },
+    mode: "onBlur",
+  });
 
-  const { errors, validateAll, clearField } = useFormErrors(rules);
+  const [cronExpression, timezone, enabled] = useWatch({
+    control,
+    name: ["cronExpression", "timezone", "enabled"],
+  });
 
-  const handleSubmit = () => {
-    if (!validateAll({ cronExpression })) return;
-
+  const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? buildInputPayload(schema, inputValues) : undefined;
 
     onSave({
-      name: name || undefined,
-      cronExpression,
-      timezone,
+      name: data.name || undefined,
+      cronExpression: data.cronExpression,
+      timezone: data.timezone,
       input,
-      ...(schedule ? { enabled } : {}),
+      ...(schedule ? { enabled: data.enabled } : {}),
     });
     onClose();
-  };
+  });
 
   return (
     <>
@@ -174,8 +185,7 @@ function ScheduleForm({
         <Input
           id="sched-name"
           type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          {...register("name")}
           placeholder={t("schedule.namePlaceholder")}
         />
       </div>
@@ -196,8 +206,8 @@ function ScheduleForm({
                   : "text-muted-foreground",
               )}
               onClick={() => {
-                setCronExpression(p.cron);
-                clearField("cronExpression");
+                setValue("cronExpression", p.cron);
+                clearErrors("cronExpression");
               }}
             >
               {p.label}
@@ -211,24 +221,25 @@ function ScheduleForm({
         <Input
           id="sched-cron"
           type="text"
-          value={cronExpression}
-          onChange={(e) => {
-            setCronExpression(e.target.value);
-            clearField("cronExpression");
-          }}
+          {...register("cronExpression", {
+            validate: (v) => {
+              if (!v.trim()) return t("validation.required", { ns: "common" });
+              return undefined;
+            },
+          })}
           placeholder="*/30 * * * *"
           aria-invalid={errors.cronExpression ? true : undefined}
           className={cn(errors.cronExpression && "border-destructive")}
         />
         <div className="text-sm text-muted-foreground">{t("schedule.cronHint")}</div>
-        {errors.cronExpression && (
-          <div className="text-sm text-destructive">{errors.cronExpression}</div>
+        {errors.cronExpression?.message && (
+          <div className="text-sm text-destructive">{errors.cronExpression.message}</div>
         )}
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="sched-tz">{t("schedule.timezone")}</Label>
-        <Select value={timezone} onValueChange={setTimezone}>
+        <Select value={timezone} onValueChange={(v) => setValue("timezone", v)}>
           <SelectTrigger id="sched-tz">
             <SelectValue />
           </SelectTrigger>
@@ -248,7 +259,7 @@ function ScheduleForm({
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
+              onChange={(e) => setValue("enabled", e.target.checked)}
             />
             {t("schedule.enabled")}
           </Label>
@@ -296,7 +307,7 @@ function ScheduleForm({
         <Button variant="outline" onClick={onClose}>
           {t("btn.cancel")}
         </Button>
-        <Button onClick={handleSubmit} disabled={isPending}>
+        <Button onClick={onFormSubmit} disabled={isPending}>
           {schedule ? t("btn.save") : t("btn.create")}
         </Button>
       </div>
