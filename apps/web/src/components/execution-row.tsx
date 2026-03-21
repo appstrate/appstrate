@@ -60,11 +60,6 @@ export function ExecutionRow({
         )}
         <span className="text-muted-foreground text-xs">{date}</span>
         {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
-        {execution.tokensUsed != null && (
-          <span className="text-muted-foreground text-xs">
-            {execution.tokensUsed.toLocaleString()} tok
-          </span>
-        )}
         <UIBadge variant={execution.packageVersion ? "outline" : "secondary"}>
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </UIBadge>
