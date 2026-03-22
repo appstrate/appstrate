@@ -19,12 +19,11 @@ export function ResultRenderer({ report, data, reportStreaming }: ResultRenderer
 
   const [activeView, setActiveView] = useState<"report" | "data">("report");
 
-  const jsonString = useMemo(() => {
-    const obj: Record<string, unknown> = {};
-    if (report) obj.report = report;
-    if (hasData) obj.data = data;
-    return JSON.stringify(obj, null, 2);
-  }, [report, data, hasData]);
+  const copyText = useMemo(() => {
+    if (activeView === "report" && report) return report;
+    if (activeView === "data" && hasData) return JSON.stringify(data, null, 2);
+    return "";
+  }, [activeView, report, data, hasData]);
 
   return (
     <div className="mt-4" role="region" aria-label={t("result.title")}>
@@ -41,7 +40,7 @@ export function ResultRenderer({ report, data, reportStreaming }: ResultRenderer
           </TabsList>
         </Tabs>
         <div className="ml-auto" />
-        <CopyButton text={jsonString} />
+        <CopyButton text={copyText} />
       </div>
 
       {/* Content */}

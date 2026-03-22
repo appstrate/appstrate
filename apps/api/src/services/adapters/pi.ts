@@ -77,11 +77,14 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
       }
 
-      // Disable structured_output tool when no output schema is defined
+      // Conditionally disable tools based on flow manifest
+      const disabledTools: string[] = [];
       const hasOutputSchema =
         ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
-      if (!hasOutputSchema) {
-        containerEnv.DISABLED_TOOLS = "structured-output";
+      if (!hasOutputSchema) disabledTools.push("structured-output");
+      if (ctx.logsEnabled === false) disabledTools.push("log");
+      if (disabledTools.length > 0) {
+        containerEnv.DISABLED_TOOLS = disabledTools.join(",");
       }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.

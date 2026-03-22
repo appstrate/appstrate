@@ -14,7 +14,7 @@ import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-rea
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Coins, Database, FileText, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
-import { LogViewer, ExecutionTimeline } from "../components/log-viewer";
+import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
@@ -84,8 +84,8 @@ export function ExecutionDetailPage() {
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["execution", "logs", "result", "state", "usage"] as const,
-    "execution",
+    ["logs", "result", "state", "usage"] as const,
+    "logs",
   );
   const hasUserSelected = useRef(false);
 
@@ -104,10 +104,6 @@ export function ExecutionDetailPage() {
   const hasResult = !!finalReport || (finalData && Object.keys(finalData).length > 0);
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
-  const publicLogs = useMemo(
-    () => allLogs.filter((e) => e.level && e.level !== "debug"),
-    [allLogs],
-  );
 
   // Reset hasUserSelected when switching executions
   useEffect(() => {
@@ -231,18 +227,10 @@ export function ExecutionDetailPage() {
           value={activeTab}
           onValueChange={(v) => {
             hasUserSelected.current = true;
-            setActiveTab(v as "execution" | "logs" | "result" | "state" | "usage");
+            setActiveTab(v as "logs" | "result" | "state" | "usage");
           }}
         >
           <TabsList>
-            <TabsTrigger value="execution">
-              {t("exec.tabExecution")}
-              {publicLogs.length > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-                  {publicLogs.length}
-                </span>
-              )}
-            </TabsTrigger>
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
               {allLogs.length > 0 && (
@@ -284,10 +272,6 @@ export function ExecutionDetailPage() {
           )}
         </div>
       </div>
-
-      {activeTab === "execution" && (
-        <ExecutionTimeline entries={publicLogs} isRunning={isRunning} />
-      )}
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 

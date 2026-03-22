@@ -31,7 +31,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, outputRetries: 2 },
+    execution: { timeout: 300, outputRetries: 2, logs: true },
     _manifestBase: {
       $schema: AFPS_SCHEMA_URLS.flow,
       schemaVersion: "1.0",
@@ -185,6 +185,7 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     execution: {
       timeout: (m.timeout as number) ?? 300,
       outputRetries: (m["x-outputRetries"] as number) ?? 2,
+      logs: (m["x-logs"] as boolean | undefined) ?? true,
     },
     _manifestBase: { ...m },
   };
@@ -319,6 +320,11 @@ export function assemblePayload(state: FlowFormState) {
   } else {
     delete manifest["x-outputRetries"];
   }
+  if ("x-logs" in state._manifestBase || state.execution.logs !== true) {
+    manifest["x-logs"] = state.execution.logs;
+  } else {
+    delete manifest["x-logs"];
+  }
 
   return {
     manifest,
@@ -380,6 +386,7 @@ export function payloadToFormState(payload: {
     execution: {
       timeout: (manifest.timeout as number) ?? 300,
       outputRetries: (manifest["x-outputRetries"] as number) ?? 2,
+      logs: (manifest["x-logs"] as boolean | undefined) ?? true,
     },
     _manifestBase: { ...manifest },
   };
