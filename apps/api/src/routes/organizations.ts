@@ -14,8 +14,8 @@ import {
   findUserByEmail,
   slugify,
   isSlugAvailable,
-  getAllowedRedirectDomains,
-  setAllowedRedirectDomains,
+  getOrgSettings,
+  updateOrgSettings,
 } from "../services/organizations.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
@@ -350,8 +350,8 @@ router.put("/:orgId/members/:userId", async (c) => {
   return c.json({ userId: targetUserId, role: body.role });
 });
 
-// GET /api/orgs/:orgId/settings/redirect-domains — get allowed redirect domains
-router.get("/:orgId/settings/redirect-domains", async (c) => {
+// GET /api/orgs/:orgId/settings — get org settings
+router.get("/:orgId/settings", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
@@ -360,12 +360,12 @@ router.get("/:orgId/settings/redirect-domains", async (c) => {
     throw forbidden("Admin access required");
   }
 
-  const domains = await getAllowedRedirectDomains(orgId);
-  return c.json({ allowedRedirectDomains: domains });
+  const settings = await getOrgSettings(orgId);
+  return c.json(settings);
 });
 
-// PUT /api/orgs/:orgId/settings/redirect-domains — set allowed redirect domains
-router.put("/:orgId/settings/redirect-domains", async (c) => {
+// PUT /api/orgs/:orgId/settings — update org settings (merge)
+router.put("/:orgId/settings", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
@@ -374,19 +374,17 @@ router.put("/:orgId/settings/redirect-domains", async (c) => {
     throw forbidden("Admin access required");
   }
 
-  const body = await c.req.json<{ allowedRedirectDomains: string[] }>();
+  const body = await c.req.json<{ allowedRedirectDomains?: string[] }>();
 
-  if (!body.allowedRedirectDomains) {
-    throw invalidRequest("allowedRedirectDomains is required");
+  if (body.allowedRedirectDomains !== undefined) {
+    const validationError = validateDomainList(body.allowedRedirectDomains);
+    if (validationError) {
+      throw invalidRequest(validationError);
+    }
   }
 
-  const validationError = validateDomainList(body.allowedRedirectDomains);
-  if (validationError) {
-    throw invalidRequest(validationError);
-  }
-
-  const domains = await setAllowedRedirectDomains(orgId, body.allowedRedirectDomains);
-  return c.json({ allowedRedirectDomains: domains });
+  const settings = await updateOrgSettings(orgId, body);
+  return c.json(settings);
 });
 
 export default router;

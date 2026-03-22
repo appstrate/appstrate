@@ -14,6 +14,7 @@ import { createVersionAndUpload } from "../services/package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/index.ts";
 import { markOrphanExecutionsFailed } from "../services/state/index.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
+import { initWebhookWorker } from "../services/webhooks.ts";
 import { initCancelSubscriber } from "../services/execution-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
@@ -94,6 +95,11 @@ export async function boot(): Promise<void> {
     }),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize scheduler", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+    Promise.resolve(initWebhookWorker()).catch((err) => {
+      logger.warn("Could not initialize webhook worker", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),

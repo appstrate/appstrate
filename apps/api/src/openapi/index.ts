@@ -31,6 +31,8 @@ import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
+import { usersPaths } from "./paths/users.ts";
+import { webhooksPaths } from "./paths/webhooks.ts";
 
 export const openApiSpec = {
   ...openApiInfo,
@@ -57,6 +59,8 @@ export const openApiSpec = {
     ...metaPaths,
     ...notificationsPaths,
     ...packagesPaths,
+    ...usersPaths,
+    ...webhooksPaths,
   },
   components: {
     securitySchemes,

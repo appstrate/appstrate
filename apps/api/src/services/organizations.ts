@@ -112,27 +112,34 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
-export async function getAllowedRedirectDomains(orgId: string): Promise<string[]> {
+export interface OrgSettings {
+  allowedRedirectDomains?: string[];
+}
+
+export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
-    .select({ allowedRedirectDomains: organizations.allowedRedirectDomains })
+    .select({ settings: organizations.settings })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return row?.allowedRedirectDomains ?? [];
+  return (row?.settings as OrgSettings) ?? {};
 }
 
-export async function setAllowedRedirectDomains(
+export async function updateOrgSettings(
   orgId: string,
-  domains: string[],
-): Promise<string[]> {
+  updates: Partial<OrgSettings>,
+): Promise<OrgSettings> {
+  const current = await getOrgSettings(orgId);
+  const merged = { ...current, ...updates };
+
   const [row] = await db
     .update(organizations)
-    .set({ allowedRedirectDomains: domains, updatedAt: new Date() })
+    .set({ settings: merged, updatedAt: new Date() })
     .where(eq(organizations.id, orgId))
-    .returning({ allowedRedirectDomains: organizations.allowedRedirectDomains });
+    .returning({ settings: organizations.settings });
 
-  return row?.allowedRedirectDomains ?? [];
+  return (row?.settings as OrgSettings) ?? {};
 }
 
 export async function getOrgMembers(

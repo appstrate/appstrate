@@ -153,7 +153,7 @@ export async function createUser(
     .values({
       id: userId,
       name: params.name ?? "",
-      email: params.email ?? `${userId}@headless.appstrate.local`,
+      email: params.email ?? `${userId}@api.appstrate.local`,
       emailVerified: false,
       source: "api",
       externalId: params.externalId ?? null,

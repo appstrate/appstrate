@@ -228,6 +228,27 @@ const expectedEndpoints = [
   "POST /api/packages/import-github",
   "GET /api/packages/{scope}/{name}/{version}/download",
   "POST /api/packages/{scope}/{name}/fork",
+
+  // Organization settings
+  "GET /api/orgs/{orgId}/settings",
+  "PUT /api/orgs/{orgId}/settings",
+
+  // Users (headless)
+  "POST /api/users",
+  "GET /api/users",
+  "GET /api/users/{id}",
+  "PATCH /api/users/{id}",
+  "DELETE /api/users/{id}",
+
+  // Webhooks
+  "POST /api/webhooks",
+  "GET /api/webhooks",
+  "GET /api/webhooks/{id}",
+  "PUT /api/webhooks/{id}",
+  "DELETE /api/webhooks/{id}",
+  "POST /api/webhooks/{id}/test",
+  "POST /api/webhooks/{id}/rotate",
+  "GET /api/webhooks/{id}/deliveries",
 ];
 
 const specEndpoints = new Set<string>();

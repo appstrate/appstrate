@@ -1,1 +1,0 @@
-ALTER TABLE "organizations" ADD COLUMN "allowed_redirect_domains" text[] DEFAULT '{}'::text[];

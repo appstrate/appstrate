@@ -167,7 +167,7 @@ export const schemaStubs = {
     id: "id",
     name: "name",
     slug: "slug",
-    allowedRedirectDomains: "allowed_redirect_domains",
+    settings: "settings",
     createdBy: "created_by",
     createdAt: "created_at",
     updatedAt: "updated_at",
@@ -440,6 +440,34 @@ export const schemaStubs = {
     redirectUri: "redirect_uri",
     createdAt: "created_at",
     expiresAt: "expires_at",
+  },
+
+  // --- webhooks.ts ---
+  webhooks: {
+    id: "id",
+    orgId: "org_id",
+    url: "url",
+    events: "events",
+    flowId: "flow_id",
+    payloadMode: "payload_mode",
+    active: "active",
+    secret: "secret",
+    previousSecret: "previous_secret",
+    previousSecretExpiresAt: "previous_secret_expires_at",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  },
+  webhookDeliveries: {
+    id: "id",
+    webhookId: "webhook_id",
+    eventId: "event_id",
+    eventType: "event_type",
+    status: "status",
+    statusCode: "status_code",
+    latency: "latency",
+    attempt: "attempt",
+    error: "error",
+    createdAt: "created_at",
   },
 
   // --- enums (string values, needed for Drizzle column references) ---
