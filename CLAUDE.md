@@ -24,6 +24,9 @@ bun run build                 # turbo build → apps/web/dist/
 bun run dev                   # turbo dev → Hono on :3000
 
 # 7. First signup creates an organization automatically
+
+# 8. Run tests (requires Docker from step 2)
+bun test                          # All 1000+ tests across all packages
 ```
 
 ### Docker Compose Structure
@@ -157,7 +160,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
 - **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
-- **Tests**: `bun test` in `apps/api/`. Framework: `bun:test` (NOT vitest/jest). Tests in `services/__tests__/` and `routes/__tests__/`. Mocking pattern: call `mock.module("../../services/foo.ts", () => ({ fn: mock(...) }))` BEFORE `const { handler } = await import("../route.ts")` — dynamic import is required so mocks take effect. No frontend tests currently.
+- **Tests**: `bun test` from monorepo root runs all 1000+ tests across all packages in a single process. See **Testing** section below for structure, conventions, and patterns.
 
 ### Frontend
 
@@ -200,6 +203,154 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Execution History API) + appends raw `prompt.md`. No Handlebars.
 - **Output validation**: If `output.schema` exists, AJV validates the result. On mismatch, `buildRetryPrompt()` re-executes up to `execution.outputRetries` times. Final failure = accepted with warning.
 - **State persistence**: `result.state` → persisted to execution record. Only latest state injected as `## Previous State` next run. Historical executions available via `$SIDECAR_URL/execution-history`.
+
+## Testing
+
+### Running Tests
+
+```sh
+bun test                          # All tests (1000+), all packages, single process
+bun test apps/api/test/unit/      # API unit tests only
+bun test apps/api/test/           # API unit + integration
+bun test runtime-pi/              # Runtime Pi + sidecar tests
+bun test packages/connect/        # Connect package tests
+```
+
+Requires Docker (PostgreSQL, Redis, MinIO, DinD started automatically by preload).
+
+### Configuration
+
+Single `bunfig.toml` at monorepo root — no per-package bunfig:
+
+```toml
+[test]
+preload = ["./test/setup/preload.ts"]   # Starts Docker infra, sets env, runs migrations
+timeout = 15000
+```
+
+The preload (`test/setup/preload.ts`) is shared infrastructure: Docker Compose (PostgreSQL on :5433, Redis on :6380, MinIO on :9002, DinD on :2375), env vars, Drizzle migrations, alpine image pre-pull. Non-API tests (runtime-pi, connect) don't use the DB but the overhead is negligible (~5s one-time).
+
+### Test Structure
+
+All packages use `test/` directories (not `__tests__/` or `tests/`):
+
+```
+apps/api/test/
+├── unit/                  # Pure logic, no DB (guards, parsers, validators, prompt builder)
+├── integration/
+│   ├── middleware/         # org-context, guards (with real DB)
+│   ├── routes/            # HTTP integration per route domain + error-paths.test.ts
+│   └── services/          # Service-level (Docker API, scheduler, OAuth, packages)
+└── helpers/               # Shared test utilities (app, auth, db, seed, assertions, sse, redis, oauth-server)
+
+apps/web/src/**/test/      # Frontend unit tests (colocated with components)
+runtime-pi/test/           # Extension wrapper tests
+runtime-pi/sidecar/test/   # Sidecar proxy, helpers, forward proxy tests
+packages/connect/test/     # Provider doc heuristic tests
+```
+
+### Conventions
+
+| Convention | Rule |
+|---|---|
+| Framework | `bun:test` — NOT vitest/jest |
+| Test function | `it()` — NOT `test()` (consistent across all packages) |
+| Import order | `import { describe, it, expect, beforeEach, mock } from "bun:test"` |
+| File naming | `*.test.ts` — NOT `*.spec.ts` |
+| Isolation | `beforeEach(async () => { await truncateAll(); })` for DB tests |
+| App testing | `app.request()` via Hono — NOT `Bun.serve()`, no port binding |
+| Auth in tests | Real Better Auth sign-up → session cookie (not mock auth) |
+| DB cleanup | `DELETE FROM` in FK-safe order (not `TRUNCATE` — avoids deadlocks) |
+
+### Mocking Policy — No `mock.module()`
+
+**Never use `mock.module()` in this codebase.** It replaces the entire module globally and permanently within a test run, breaking other tests that import from the same barrel export. This was the source of 37 test failures that were difficult to diagnose.
+
+**Use dependency injection instead:**
+
+```typescript
+// ✅ Good — optional deps parameter with production defaults
+export async function validateFlowDependencies(
+  providers: FlowProviderRequirement[],
+  profiles: Record<string, string>,
+  orgId: string,
+  deps: DependencyValidationDeps = defaultDeps,  // Tests inject mocks here
+): Promise<void> { ... }
+
+// ✅ Good — constructor injection
+export class PiAdapter implements ExecutionAdapter {
+  constructor(orchestrator?: ContainerOrchestrator) {
+    this._orchestrator = orchestrator;  // Tests inject mock, production uses default
+  }
+}
+
+// ✅ Good — function parameter (runtime-pi pattern)
+export function wrapExtensionFactory(
+  factory: ExtensionFactory,
+  extensionId: string,
+  emitFn: EmitFn = defaultEmit,  // Tests inject spy
+): ExtensionFactory { ... }
+```
+
+For testing middleware that calls services (e.g., `requireFlow` calls `getPackage`), use **integration tests with real DB** instead of mocking the service layer.
+
+### Test Helpers (`apps/api/test/helpers/`)
+
+| Helper | Purpose |
+|---|---|
+| `app.ts` | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler) |
+| `auth.ts` | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
+| `db.ts` | `truncateAll()` — DELETE FROM all 30 tables in FK-safe order |
+| `seed.ts` | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
+| `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification |
+| `redis.ts` | `getRedis()`, `flushRedis()` — test Redis client |
+| `sse.ts` | SSE stream parsing utilities |
+| `oauth-server.ts` | Mock OAuth2 provider for connection tests |
+
+### Writing New Tests
+
+**Unit test** (no DB, fast):
+```typescript
+import { describe, it, expect } from "bun:test";
+import { myFunction } from "../../src/services/my-service.ts";
+
+describe("myFunction", () => {
+  it("does the thing", () => {
+    expect(myFunction("input")).toBe("expected");
+  });
+});
+```
+
+**Integration test** (real DB, real HTTP):
+```typescript
+import { describe, it, expect, beforeEach } from "bun:test";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+
+const app = getTestApp();
+
+describe("GET /api/my-resource", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "testorg" });
+  });
+
+  it("returns 200 with data", async () => {
+    const res = await app.request("/api/my-resource", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 401 without auth", async () => {
+    const res = await app.request("/api/my-resource");
+    expect(res.status).toBe(401);
+  });
+});
+```
 
 ## API Reference
 

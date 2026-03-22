@@ -5,6 +5,7 @@ import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import {
   getOrchestrator,
+  type ContainerOrchestrator,
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
@@ -12,6 +13,12 @@ import {
 import { getEnv } from "@appstrate/env";
 
 export class PiAdapter implements ExecutionAdapter {
+  private readonly _orchestrator?: ContainerOrchestrator;
+
+  constructor(orchestrator?: ContainerOrchestrator) {
+    this._orchestrator = orchestrator;
+  }
+
   async *execute(
     executionId: string,
     ctx: PromptContext,
@@ -25,7 +32,7 @@ export class PiAdapter implements ExecutionAdapter {
     const llmConfig = ctx.llmConfig;
     const modelId = llmConfig.modelId;
 
-    const orchestrator = getOrchestrator();
+    const orchestrator = this._orchestrator ?? getOrchestrator();
     let boundary: IsolationBoundary | undefined;
     let sidecarHandle: WorkloadHandle | undefined;
 
@@ -233,6 +240,12 @@ async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<Exec
   const remaining = emitBuffer();
   if (remaining) yield remaining;
 }
+
+/** @internal Exported for testing */
+export { processPiLogs as _processPiLogsForTesting };
+
+/** @internal Exported for testing */
+export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
 
 /** @internal Exported for testing */
 export function parsePiStreamLine(line: string): ExecutionMessage | null {

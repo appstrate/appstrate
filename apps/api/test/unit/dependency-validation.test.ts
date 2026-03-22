@@ -1,0 +1,208 @@
+import { describe, it, expect, beforeEach } from "bun:test";
+import { ApiError } from "../../src/lib/errors.ts";
+import {
+  validateFlowDependencies,
+  type DependencyValidationDeps,
+} from "../../src/services/dependency-validation.ts";
+
+function createMockDeps(overrides?: Partial<DependencyValidationDeps>): DependencyValidationDeps {
+  return {
+    isProviderEnabled: async () => true,
+    getConnectionStatus: async (provider) => ({
+      provider,
+      status: "connected" as const,
+      scopesGranted: ["read", "write"],
+    }),
+    validateScopes: () => ({ sufficient: true }),
+    ...overrides,
+  };
+}
+
+describe("validateFlowDependencies", () => {
+  it("succeeds when all providers are connected with sufficient scopes", async () => {
+    const deps = createMockDeps();
+    const providers = [
+      { id: "@test/gmail", provider: "@test/gmail", scopes: ["read"] },
+      { id: "@test/clickup", provider: "@test/clickup" },
+    ];
+    const profiles = { "@test/gmail": "profile-1", "@test/clickup": "profile-2" };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
+  });
+
+  it("throws when provider is not enabled", async () => {
+    const deps = createMockDeps({ isProviderEnabled: async () => false });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("provider_not_enabled");
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).message).toContain("@test/gmail");
+    }
+  });
+
+  it("throws when profile is missing for user-mode provider", async () => {
+    const deps = createMockDeps();
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const profiles = {};
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("dependency_not_satisfied");
+      expect((err as ApiError).message).toContain("not connected");
+    }
+  });
+
+  it("throws when profile is missing for admin-mode provider", async () => {
+    const deps = createMockDeps();
+    const providers = [
+      { id: "@test/service", provider: "@test/service", connectionMode: "admin" as const },
+    ];
+    const profiles = {};
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("dependency_not_satisfied");
+      expect((err as ApiError).message).toContain("administrator");
+    }
+  });
+
+  it("throws when provider connection status is not_connected", async () => {
+    const deps = createMockDeps({
+      getConnectionStatus: async (provider) => ({
+        provider,
+        status: "not_connected" as const,
+      }),
+    });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("dependency_not_satisfied");
+      expect((err as ApiError).message).toContain("not connected");
+    }
+  });
+
+  it("throws when provider needs reconnection", async () => {
+    const deps = createMockDeps({
+      getConnectionStatus: async (provider) => ({
+        provider,
+        status: "needs_reconnection" as const,
+        scopesGranted: ["read"],
+      }),
+    });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("needs_reconnection");
+    }
+  });
+
+  it("throws when scopes are insufficient", async () => {
+    const deps = createMockDeps({
+      validateScopes: () => ({ sufficient: false }),
+    });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail", scopes: ["read", "write"] }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    try {
+      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("scope_insufficient");
+    }
+  });
+
+  it("skips scope validation when provider has no required scopes", async () => {
+    let scopesCalled = false;
+    const deps = createMockDeps({
+      validateScopes: () => {
+        scopesCalled = true;
+        return { sufficient: true };
+      },
+    });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    expect(scopesCalled).toBe(false);
+  });
+
+  it("skips scope validation when scopes array is empty", async () => {
+    let scopesCalled = false;
+    const deps = createMockDeps({
+      validateScopes: () => {
+        scopesCalled = true;
+        return { sufficient: true };
+      },
+    });
+    const providers = [{ id: "@test/gmail", provider: "@test/gmail", scopes: [] }];
+    const profiles = { "@test/gmail": "profile-1" };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    expect(scopesCalled).toBe(false);
+  });
+
+  it("validates multiple providers in parallel", async () => {
+    let statusCallCount = 0;
+    const deps = createMockDeps({
+      getConnectionStatus: async (provider) => {
+        statusCallCount++;
+        return { provider, status: "connected" as const, scopesGranted: [] };
+      },
+    });
+    const providers = [
+      { id: "@test/gmail", provider: "@test/gmail" },
+      { id: "@test/clickup", provider: "@test/clickup" },
+      { id: "@test/stripe", provider: "@test/stripe" },
+    ];
+    const profiles = { "@test/gmail": "p1", "@test/clickup": "p2", "@test/stripe": "p3" };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    expect(statusCallCount).toBe(3);
+  });
+
+  it("deduplicates provider enabled checks", async () => {
+    let enabledCallCount = 0;
+    const deps = createMockDeps({
+      isProviderEnabled: async () => {
+        enabledCallCount++;
+        return true;
+      },
+    });
+    const providers = [
+      { id: "@test/gmail-read", provider: "@test/gmail" },
+      { id: "@test/gmail-write", provider: "@test/gmail" },
+    ];
+    const profiles = { "@test/gmail-read": "p1", "@test/gmail-write": "p2" };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    expect(enabledCallCount).toBe(1);
+  });
+
+  it("succeeds with empty providers list", async () => {
+    const deps = createMockDeps();
+    await validateFlowDependencies([], {}, "org-1", deps);
+  });
+});

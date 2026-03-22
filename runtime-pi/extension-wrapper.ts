@@ -1,5 +1,7 @@
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { emit } from "./lib/emit.ts";
+import { emit as defaultEmit } from "./lib/emit.ts";
+
+type EmitFn = (obj: Record<string, unknown>) => void;
 
 /**
  * Wrap an extension factory to catch errors thrown by tool execute functions.
@@ -13,6 +15,7 @@ import { emit } from "./lib/emit.ts";
 export function wrapExtensionFactory(
   factory: ExtensionFactory,
   extensionId: string,
+  emitFn: EmitFn = defaultEmit,
 ): ExtensionFactory {
   return (pi) => {
     const wrappedPi = {
@@ -35,7 +38,7 @@ export function wrapExtensionFactory(
           } catch (err) {
             const message =
               err instanceof Error ? err.message : String(err);
-            emit({
+            emitFn({
               type: "error",
               message: `[extension-wrapper] Extension '${extensionId}' tool '${toolName}': ${message}`,
             });

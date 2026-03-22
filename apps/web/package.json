@@ -6,7 +6,8 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --recursive src/"
   },
   "dependencies": {
     "@appstrate/core": "^2.8.4",

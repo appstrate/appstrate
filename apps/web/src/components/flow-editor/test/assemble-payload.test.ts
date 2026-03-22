@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { assemblePayload } from "../utils";
 import type { FlowFormState } from "../types";
 
@@ -31,7 +31,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
 // --- Tests ---
 
 describe("assemblePayload", () => {
-  test("returns only manifest and prompt (no skillIds/toolIds)", () => {
+  it("returns only manifest and prompt (no skillIds/toolIds)", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
@@ -47,7 +47,7 @@ describe("assemblePayload", () => {
     expect(result).not.toHaveProperty("toolIds");
   });
 
-  test("includes skills in manifest.dependencies as record", () => {
+  it("includes skills in manifest.dependencies as record", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
@@ -61,7 +61,7 @@ describe("assemblePayload", () => {
     expect(deps.skills).toEqual({ "@my-org/skill-a": "1.0.0", "@my-org/skill-b": "2.0.0" });
   });
 
-  test("includes tools in manifest.dependencies as record", () => {
+  it("includes tools in manifest.dependencies as record", () => {
     const state = makeState({
       tools: [
         { id: "@my-org/ext-1", version: "0.1.0" },
@@ -75,7 +75,7 @@ describe("assemblePayload", () => {
     expect(deps.tools).toEqual({ "@my-org/ext-1": "0.1.0", "@my-org/ext-2": "1.0.0" });
   });
 
-  test("omits skills from manifest.dependencies when empty and not in base", () => {
+  it("omits skills from manifest.dependencies when empty and not in base", () => {
     const state = makeState({ skills: [] });
 
     const result = assemblePayload(state);
@@ -84,7 +84,7 @@ describe("assemblePayload", () => {
     expect(deps).not.toHaveProperty("skills");
   });
 
-  test("omits tools from manifest.dependencies when empty and not in base", () => {
+  it("omits tools from manifest.dependencies when empty and not in base", () => {
     const state = makeState({ tools: [] });
 
     const result = assemblePayload(state);
@@ -93,7 +93,7 @@ describe("assemblePayload", () => {
     expect(deps).not.toHaveProperty("tools");
   });
 
-  test("preserves empty skills object when present in base manifest", () => {
+  it("preserves empty skills object when present in base manifest", () => {
     const state = makeState({
       skills: [],
       _manifestBase: {
@@ -109,7 +109,7 @@ describe("assemblePayload", () => {
     expect(deps.skills).toEqual({});
   });
 
-  test("filters out empty skill/tool IDs", () => {
+  it("filters out empty skill/tool IDs", () => {
     const state = makeState({
       skills: [
         { id: "@my-org/skill-a", version: "1.0.0" },
@@ -129,7 +129,7 @@ describe("assemblePayload", () => {
     expect(deps.tools).toEqual({ "@my-org/ext-1": "0.1.0" });
   });
 
-  test("builds correct manifest name from scope and id", () => {
+  it("builds correct manifest name from scope and id", () => {
     const state = makeState();
 
     const result = assemblePayload(state);
@@ -137,7 +137,7 @@ describe("assemblePayload", () => {
     expect(result.manifest.name).toBe("@my-org/test-flow");
   });
 
-  test("passes prompt through", () => {
+  it("passes prompt through", () => {
     const state = makeState({ prompt: "My custom prompt" });
 
     const result = assemblePayload(state);
@@ -145,7 +145,7 @@ describe("assemblePayload", () => {
     expect(result.prompt).toBe("My custom prompt");
   });
 
-  test("includes providers in manifest.dependencies as record", () => {
+  it("includes providers in manifest.dependencies as record", () => {
     const state = makeState({
       providers: [{ id: "@my-org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" }],
     });
@@ -157,7 +157,7 @@ describe("assemblePayload", () => {
     expect(providers).toEqual({ "@my-org/gmail": "1.0.0" });
   });
 
-  test("filters out providers without id", () => {
+  it("filters out providers without id", () => {
     const state = makeState({
       providers: [
         { id: "@my-org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" },
@@ -173,7 +173,7 @@ describe("assemblePayload", () => {
     expect(providers["@my-org/gmail"]).toBe("1.0.0");
   });
 
-  test("writes providersConfiguration for non-default config", () => {
+  it("writes providersConfiguration for non-default config", () => {
     const state = makeState({
       providers: [
         {
@@ -199,7 +199,7 @@ describe("assemblePayload", () => {
     expect(provCfg["@my-org/slack"]).toBeUndefined(); // default values, no config needed
   });
 
-  test("omits timeout and outputRetries when defaults and not in base", () => {
+  it("omits timeout and outputRetries when defaults and not in base", () => {
     const state = makeState({
       execution: { timeout: 300, outputRetries: 2, logs: true },
     });
@@ -210,7 +210,7 @@ describe("assemblePayload", () => {
     expect(result.manifest).not.toHaveProperty("x-outputRetries");
   });
 
-  test("includes timeout and outputRetries when values differ from defaults", () => {
+  it("includes timeout and outputRetries when values differ from defaults", () => {
     const state = makeState({
       execution: { timeout: 600, outputRetries: 3, logs: true },
     });
@@ -221,7 +221,7 @@ describe("assemblePayload", () => {
     expect(result.manifest["x-outputRetries"]).toBe(3);
   });
 
-  test("preserves timeout and outputRetries when present in base manifest", () => {
+  it("preserves timeout and outputRetries when present in base manifest", () => {
     const state = makeState({
       execution: { timeout: 300, outputRetries: 2, logs: true },
       _manifestBase: {

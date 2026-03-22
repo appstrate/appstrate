@@ -1,2 +1,3 @@
 [test]
-preload = ["./scripts/test-guard.ts"]
+preload = ["./test/setup/preload.ts"]
+timeout = 15000

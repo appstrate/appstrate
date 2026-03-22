@@ -1,4 +1,4 @@
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { createServer } from "node:http";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
 import { connect as netConnect } from "node:net";
@@ -128,7 +128,7 @@ function connectViaProxy(
 // --- HTTP forwarding ---
 
 describe("HTTP forwarding", () => {
-  test("forwards GET to echo server", async () => {
+  it("forwards GET to echo server", async () => {
     const echo = await startEchoServer();
     const proxy = makeProxy();
     await proxy.ready;
@@ -141,7 +141,7 @@ describe("HTTP forwarding", () => {
     expect(body.url).toBe("/test?q=1");
   });
 
-  test("blocks 127.0.0.1 with real isBlockedHost", async () => {
+  it("blocks 127.0.0.1 with real isBlockedHost", async () => {
     const proxy = makeProxy({ isBlockedHostFn: undefined });
     await proxy.ready;
     const { port } = proxy.address();
@@ -151,7 +151,7 @@ describe("HTTP forwarding", () => {
     expect(res.body).toContain("Blocked");
   });
 
-  test("blocks 169.254.x.x with real isBlockedHost", async () => {
+  it("blocks 169.254.x.x with real isBlockedHost", async () => {
     const proxy = makeProxy({ isBlockedHostFn: undefined });
     await proxy.ready;
     const { port } = proxy.address();
@@ -160,7 +160,7 @@ describe("HTTP forwarding", () => {
     expect(res.status).toBe(403);
   });
 
-  test("returns 400 for invalid URL", async () => {
+  it("returns 400 for invalid URL", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const { port } = proxy.address();
@@ -186,7 +186,7 @@ describe("HTTP forwarding", () => {
     expect(res.status).toBe(400);
   });
 
-  test("strips hop-by-hop headers", async () => {
+  it("strips hop-by-hop headers", async () => {
     const echo = await startEchoServer();
     const proxy = makeProxy();
     await proxy.ready;
@@ -219,7 +219,7 @@ describe("HTTP forwarding", () => {
     expect(body.headers["x-custom"]).toBe("keep-me");
   });
 
-  test("returns 502 on upstream connection error", async () => {
+  it("returns 502 on upstream connection error", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const { port } = proxy.address();
@@ -233,7 +233,7 @@ describe("HTTP forwarding", () => {
 // --- CONNECT tunneling ---
 
 describe("CONNECT tunneling", () => {
-  test("establishes tunnel to allowed host", async () => {
+  it("establishes tunnel to allowed host", async () => {
     const echo = await startEchoServer();
     const proxy = makeProxy();
     await proxy.ready;
@@ -244,7 +244,7 @@ describe("CONNECT tunneling", () => {
     expect(res.statusLine).toContain("Connection Established");
   });
 
-  test("blocks loopback with real isBlockedHost", async () => {
+  it("blocks loopback with real isBlockedHost", async () => {
     const proxy = makeProxy({ isBlockedHostFn: undefined });
     await proxy.ready;
     const { port } = proxy.address();
@@ -253,7 +253,7 @@ describe("CONNECT tunneling", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  test("blocks metadata service with real isBlockedHost", async () => {
+  it("blocks metadata service with real isBlockedHost", async () => {
     const proxy = makeProxy({ isBlockedHostFn: undefined });
     await proxy.ready;
     const { port } = proxy.address();
@@ -262,7 +262,7 @@ describe("CONNECT tunneling", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  test("returns 400 for empty host", async () => {
+  it("returns 400 for empty host", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const { port } = proxy.address();
@@ -271,7 +271,7 @@ describe("CONNECT tunneling", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  test("returns 400 for malformed bracket notation", async () => {
+  it("returns 400 for malformed bracket notation", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const { port } = proxy.address();
@@ -280,7 +280,7 @@ describe("CONNECT tunneling", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  test("blocks IPv6 loopback with real isBlockedHost", async () => {
+  it("blocks IPv6 loopback with real isBlockedHost", async () => {
     const proxy = makeProxy({ isBlockedHostFn: undefined });
     await proxy.ready;
     const { port } = proxy.address();
@@ -293,13 +293,13 @@ describe("CONNECT tunneling", () => {
 // --- Lifecycle ---
 
 describe("lifecycle", () => {
-  test("ready promise resolves", async () => {
+  it("ready promise resolves", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     expect(proxy.readySync).toBe(true);
   });
 
-  test("address returns ephemeral port", async () => {
+  it("address returns ephemeral port", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const addr = proxy.address();
@@ -307,7 +307,7 @@ describe("lifecycle", () => {
     expect(addr.host).toBe("127.0.0.1");
   });
 
-  test("server.close stops listening", async () => {
+  it("server.close stops listening", async () => {
     const proxy = makeProxy();
     await proxy.ready;
     const { port } = proxy.address();
@@ -318,7 +318,7 @@ describe("lifecycle", () => {
     if (idx !== -1) servers.splice(idx, 1);
   });
 
-  test("readySync is false before listen", () => {
+  it("readySync is false before listen", () => {
     const proxy = makeProxy();
     // May already be true if listen is instant, but at least verify the property exists
     expect(typeof proxy.readySync).toBe("boolean");
