@@ -26,6 +26,7 @@ import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts"
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
+import { createUsersRouter } from "./routes/users.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -36,6 +37,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
+import { isOrgMember } from "./services/users.ts";
 import type { AppEnv } from "./types/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
@@ -136,6 +138,36 @@ app.use("*", async (c, next) => {
     c.set("orgRole", "admin");
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);
+
+    // Appstrate-User header: impersonate a user (API key only)
+    const targetUserId = c.req.header("Appstrate-User");
+    if (targetUserId) {
+      const targetUser = await isOrgMember(keyInfo.orgId, targetUserId);
+      if (!targetUser) {
+        throw new ApiError({
+          status: 403,
+          code: "invalid_user",
+          title: "Invalid User",
+          detail: `User '${targetUserId}' does not exist or is not a member of this organization`,
+          param: "Appstrate-User",
+        });
+      }
+      logger.info("Appstrate-User impersonation", {
+        requestId: c.get("requestId"),
+        apiKeyId: keyInfo.keyId,
+        apiKeyOwner: keyInfo.userId,
+        targetUserId,
+        method: c.req.method,
+        path: c.req.path,
+        ip:
+          c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+          c.req.header("x-real-ip") ||
+          "unknown",
+        userAgent: c.req.header("user-agent") || "unknown",
+      });
+      c.set("user", { id: targetUser.id, email: targetUser.email, name: targetUser.name });
+    }
+
     return next();
   }
 
@@ -144,6 +176,18 @@ app.use("*", async (c, next) => {
   if (!session?.user) {
     throw unauthorized("Invalid or missing session");
   }
+
+  // Appstrate-User header is NOT allowed with cookie auth
+  if (c.req.header("Appstrate-User")) {
+    throw new ApiError({
+      status: 400,
+      code: "header_not_allowed",
+      title: "Header Not Allowed",
+      detail: "Appstrate-User header is not allowed with cookie authentication",
+      param: "Appstrate-User",
+    });
+  }
+
   c.set("user", {
     id: session.user.id,
     email: session.user.email ?? "",
@@ -201,6 +245,7 @@ app.route("/api", createNotificationsRouter()); // Must be before executionsRout
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
+app.route("/api/users", createUsersRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
