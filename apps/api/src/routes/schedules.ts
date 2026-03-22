@@ -11,6 +11,7 @@ import {
 import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
@@ -45,19 +46,16 @@ export function createSchedulesRouter() {
     // Block scheduling for flows with file inputs
     const inputSchema = flow.manifest.input?.schema;
     if (schemaHasFileFields(inputSchema)) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Cannot schedule flows with file inputs" },
-        400,
-      );
+      throw invalidRequest("Cannot schedule flows with file inputs");
     }
 
     if (!body.cronExpression) {
-      return c.json({ error: "VALIDATION_ERROR", message: "cronExpression is required" }, 400);
+      throw invalidRequest("cronExpression is required", "cronExpression");
     }
 
     // Validate cron expression
     if (!isValidCron(body.cronExpression)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
+      throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
     // Validate input against flow's input schema if provided
@@ -65,7 +63,7 @@ export function createSchedulesRouter() {
       const inputValidation = validateInput(body.input, inputSchema);
       if (!inputValidation.valid) {
         const first = inputValidation.errors[0]!;
-        return c.json({ error: "VALIDATION_ERROR", message: first.message }, 400);
+        throw invalidRequest(first.message);
       }
     }
 
@@ -78,7 +76,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id");
     const existing = await getSchedule(id);
     if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `Schedule '${id}' not found` }, 404);
+      throw notFound(`Schedule '${id}' not found`);
     }
 
     const body = await c.req.json<{
@@ -91,7 +89,7 @@ export function createSchedulesRouter() {
 
     // Validate cron expression if provided
     if (body.cronExpression && !isValidCron(body.cronExpression)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Invalid cron expression" }, 400);
+      throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
     const schedule = await updateSchedule(id, body);
@@ -103,7 +101,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id");
     const deleted = await deleteSchedule(id);
     if (!deleted) {
-      return c.json({ error: "NOT_FOUND", message: `Schedule '${id}' not found` }, 404);
+      throw notFound(`Schedule '${id}' not found`);
     }
     return c.json({ ok: true });
   });

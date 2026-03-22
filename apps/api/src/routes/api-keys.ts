@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
+import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import {
   generateApiKey,
   hashApiKey,
@@ -42,7 +43,7 @@ export function createApiKeysRouter() {
     const parsed = createApiKeySchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     const { name, expiresAt } = parsed.data;
@@ -65,7 +66,7 @@ export function createApiKeysRouter() {
       logger.error("API key creation failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to create API key" }, 500);
+      throw internalError("Failed to create API key");
     }
   });
 
@@ -77,15 +78,16 @@ export function createApiKeysRouter() {
     try {
       const revoked = await revokeApiKey(keyId, orgId);
       if (!revoked) {
-        return c.json({ error: "NOT_FOUND", message: "API key not found or already revoked" }, 404);
+        throw notFound("API key not found or already revoked");
       }
       return c.body(null, 204);
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("API key revocation failed", {
         keyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to revoke API key" }, 500);
+      throw internalError("Failed to revoke API key");
     }
   });
 

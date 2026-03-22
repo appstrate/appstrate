@@ -13,6 +13,7 @@ import {
   testProxyConnection,
 } from "../services/org-proxies.ts";
 import { logger } from "../lib/logger.ts";
+import { ApiError, invalidRequest, notFound, internalError } from "../lib/errors.ts";
 
 const createProxySchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -50,7 +51,7 @@ export function createProxiesRouter() {
     const parsed = createProxySchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     try {
@@ -59,10 +60,10 @@ export function createProxiesRouter() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("blocked network")) {
-        return c.json({ error: "BLOCKED_URL", message: msg }, 400);
+        throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
       logger.error("Proxy create failed", { error: msg });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to create proxy" }, 500);
+      throw internalError("Failed to create proxy");
     }
   });
 
@@ -74,7 +75,7 @@ export function createProxiesRouter() {
     const parsed = setDefaultSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     try {
@@ -84,7 +85,7 @@ export function createProxiesRouter() {
       logger.error("Set default proxy failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to set default proxy" }, 500);
+      throw internalError("Failed to set default proxy");
     }
   });
 
@@ -94,16 +95,16 @@ export function createProxiesRouter() {
     const proxyId = c.req.param("id")!;
     try {
       const result = await testProxyConnection(orgId, proxyId);
-      return c.json(result, result.error === "PROXY_NOT_FOUND" ? 404 : 200);
+      if (result.error === "PROXY_NOT_FOUND") {
+        throw notFound("Proxy not found");
+      }
+      return c.json(result);
     } catch (err) {
       logger.error("Proxy test failed", {
         proxyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json(
-        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
-        500,
-      );
+      throw internalError("Test failed");
     }
   });
 
@@ -115,14 +116,16 @@ export function createProxiesRouter() {
     const parsed = updateProxySchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     if (isSystemProxy(proxyId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `Cannot modify built-in proxy '${proxyId}'` },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot modify built-in proxy '${proxyId}'`,
+      });
     }
 
     try {
@@ -131,10 +134,10 @@ export function createProxiesRouter() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("blocked network")) {
-        return c.json({ error: "BLOCKED_URL", message: msg }, 400);
+        throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
       logger.error("Proxy update failed", { proxyId, error: msg });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to update proxy" }, 500);
+      throw internalError("Failed to update proxy");
     }
   });
 
@@ -144,10 +147,12 @@ export function createProxiesRouter() {
     const proxyId = c.req.param("id");
 
     if (isSystemProxy(proxyId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `Cannot delete built-in proxy '${proxyId}'` },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot delete built-in proxy '${proxyId}'`,
+      });
     }
 
     try {
@@ -158,7 +163,7 @@ export function createProxiesRouter() {
         proxyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to delete proxy" }, 500);
+      throw internalError("Failed to delete proxy");
     }
   });
 

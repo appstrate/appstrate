@@ -15,11 +15,6 @@ const { parseRequestInput } = await import("../input-parser.ts");
 
 // --- Helpers ---
 
-interface ParseResult {
-  ok: boolean;
-  data: ParsedInput;
-}
-
 function jsonApp(body: unknown) {
   const app = new Hono();
   app.post("/", async (c) => {
@@ -42,38 +37,34 @@ describe("parseRequestInput", () => {
       modelId: "model-abc",
       proxyId: "proxy-def",
     });
-    const json = (await res.json()) as ParseResult;
+    const json = (await res.json()) as ParsedInput;
 
-    expect(json.ok).toBe(true);
-    expect(json.data.input).toEqual({ text: "hello" });
-    expect(json.data.modelId).toBe("model-abc");
-    expect(json.data.proxyId).toBe("proxy-def");
+    expect(json.input).toEqual({ text: "hello" });
+    expect(json.modelId).toBe("model-abc");
+    expect(json.proxyId).toBe("proxy-def");
   });
 
   test("modelId and proxyId are undefined when not provided", async () => {
     const res = await jsonApp({ input: { text: "hello" } });
-    const json = (await res.json()) as ParseResult;
+    const json = (await res.json()) as ParsedInput;
 
-    expect(json.ok).toBe(true);
-    expect(json.data.modelId).toBeUndefined();
-    expect(json.data.proxyId).toBeUndefined();
+    expect(json.modelId).toBeUndefined();
+    expect(json.proxyId).toBeUndefined();
   });
 
   test("works with empty body", async () => {
     const res = await jsonApp({});
-    const json = (await res.json()) as ParseResult;
+    const json = (await res.json()) as ParsedInput;
 
-    expect(json.ok).toBe(true);
-    expect(json.data.input).toBeUndefined();
-    expect(json.data.modelId).toBeUndefined();
-    expect(json.data.proxyId).toBeUndefined();
+    expect(json.input).toBeUndefined();
+    expect(json.modelId).toBeUndefined();
+    expect(json.proxyId).toBeUndefined();
   });
 
   test("proxyId 'none' is passed through as string", async () => {
     const res = await jsonApp({ proxyId: "none" });
-    const json = (await res.json()) as ParseResult;
+    const json = (await res.json()) as ParsedInput;
 
-    expect(json.ok).toBe(true);
-    expect(json.data.proxyId).toBe("none");
+    expect(json.proxyId).toBe("none");
   });
 });

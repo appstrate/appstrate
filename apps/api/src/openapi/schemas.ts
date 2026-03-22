@@ -2,50 +2,35 @@
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
-  Error: {
+  ProblemDetail: {
     type: "object",
+    description: "RFC 9457 Problem Details for HTTP APIs",
+    required: ["type", "title", "status", "detail", "code", "requestId"],
     properties: {
-      error: {
+      type: { type: "string", format: "uri", description: "URI reference to error documentation" },
+      title: { type: "string", description: "Short summary of the error type" },
+      status: { type: "integer", description: "HTTP status code" },
+      detail: { type: "string", description: "Human-readable explanation of this occurrence" },
+      instance: {
         type: "string",
-        description: "Error code (e.g. VALIDATION_ERROR, UNAUTHORIZED)",
+        description: "URI reference identifying this specific occurrence",
       },
-      message: { type: "string", description: "Human-readable error message" },
-    },
-  },
-  FlowReadinessError: {
-    type: "object",
-    description:
-      "Pre-execution validation error. Returned when a flow is misconfigured and cannot be executed.",
-    required: ["error", "message"],
-    properties: {
-      error: {
-        type: "string",
-        enum: [
-          "EMPTY_PROMPT",
-          "MISSING_SKILL",
-          "MISSING_TOOL",
-          "PROVIDER_NOT_ENABLED",
-          "DEPENDENCY_NOT_SATISFIED",
-          "NEEDS_RECONNECTION",
-          "SCOPE_INSUFFICIENT",
-          "CONFIG_INCOMPLETE",
-        ],
-        description: "Specific readiness check that failed",
+      code: { type: "string", description: "Machine-readable error code (snake_case)" },
+      requestId: { type: "string", description: "Unique request identifier (req_ prefix)" },
+      param: { type: "string", description: "Parameter that caused the error" },
+      retryAfter: { type: "integer", description: "Seconds before retry (on 429)" },
+      errors: {
+        type: "array",
+        description: "Field-level validation errors",
+        items: {
+          type: "object",
+          properties: {
+            field: { type: "string" },
+            code: { type: "string" },
+            message: { type: "string" },
+          },
+        },
       },
-      message: { type: "string", description: "Human-readable error message" },
-      providerId: {
-        type: "string",
-        description: "Provider ID (present for provider-related errors)",
-      },
-      connectUrl: {
-        type: "string",
-        description: "URL to connect the missing provider (present for provider errors)",
-      },
-      configUrl: {
-        type: "string",
-        description: "URL to the flow config endpoint (present for CONFIG_INCOMPLETE)",
-      },
-      details: { type: "object", description: "Additional error context" },
     },
   },
   User: {

@@ -13,6 +13,7 @@ import { getPackage, packageExists } from "./flow-service.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "./flow-readiness.ts";
+import { ApiError } from "../lib/errors.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
@@ -205,20 +206,24 @@ async function triggerScheduledExecution(
     ]);
 
     // Validate flow readiness (prompt, skills, tools, providers, config)
-    const readinessError = await validateFlowReadiness({
-      flow,
-      providerProfiles,
-      orgId,
-      config,
-    });
-    if (readinessError) {
-      logger.warn("Flow readiness check failed, skipping schedule", {
-        scheduleId,
-        packageId,
-        error: readinessError.error,
-        message: readinessError.message,
+    try {
+      await validateFlowReadiness({
+        flow,
+        providerProfiles,
+        orgId,
+        config,
       });
-      return;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        logger.warn("Flow readiness check failed, skipping schedule", {
+          scheduleId,
+          packageId,
+          code: err.code,
+          detail: err.message,
+        });
+        return;
+      }
+      throw err;
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;

@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
-import { queues, resetQueues, db } from "./_db-mock.ts";
+import { queues, resetQueues, db, schemaStubs } from "./_db-mock.ts";
 
 // --- Mocks (must be before dynamic import) ---
 
@@ -58,6 +58,7 @@ const providerCredentialsStub = {
 };
 
 mock.module("@appstrate/db/schema", () => ({
+  ...schemaStubs,
   userProviderConnections: userProviderConnectionsStub,
   connectionProfiles: connectionProfilesStub,
   organizationMembers: organizationMembersStub,

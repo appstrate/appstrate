@@ -1,5 +1,10 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { Hono } from "hono";
+import type { AppEnv } from "../../types/index.ts";
+
+mock.module("../../lib/logger.ts", () => ({
+  logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+}));
 
 // Mock redis to avoid env validation (we use in-memory backend for tests).
 // Must export ALL redis functions since mock.module is process-global in bun:test.
@@ -15,6 +20,9 @@ mock.module("../../lib/redis.ts", () => ({
   }),
 }));
 
+const { requestId } = await import("../request-id.ts");
+const { errorHandler } = await import("../error-handler.ts");
+
 const {
   rateLimit,
   rateLimitByIp,
@@ -26,6 +34,14 @@ const {
 // Use in-memory backend for tests (no Redis required)
 _setMemoryBackendForTesting(true);
 
+/** Create an app with error handler + request-id to properly catch thrown ApiErrors. */
+function baseApp() {
+  const app = new Hono<AppEnv>();
+  app.onError(errorHandler);
+  app.use("*", requestId());
+  return app;
+}
+
 describe("rate-limit", () => {
   beforeEach(() => {
     _resetBucketsForTesting();
@@ -33,12 +49,12 @@ describe("rate-limit", () => {
 
   describe("rateLimit (by user)", () => {
     function createApp(limit: number) {
-      const app = new Hono();
+      const app = baseApp();
       app.use("*", async (c, next) => {
-        c.set("user" as never, { id: "user1", email: "test@test.com", name: "Test" });
-        c.set("orgId" as never, "org1");
-        c.set("orgRole" as never, "admin");
-        c.set("authMethod" as never, "session");
+        c.set("user", { id: "user1", email: "test@test.com", name: "Test" });
+        c.set("orgId", "org1");
+        c.set("orgRole", "admin");
+        c.set("authMethod", "session");
         await next();
       });
       app.get("/test", rateLimit(limit) as never, (c) => c.json({ ok: true }));
@@ -62,18 +78,18 @@ describe("rate-limit", () => {
 
       const res = await app.request("/test");
       expect(res.status).toBe(429);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe("RATE_LIMITED");
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe("rate_limited");
     });
 
     test("uses different buckets for different users", async () => {
       let userId = "user-a";
-      const app = new Hono();
+      const app = baseApp();
       app.use("*", async (c, next) => {
-        c.set("user" as never, { id: userId, email: "test@test.com", name: "Test" });
-        c.set("orgId" as never, "org1");
-        c.set("orgRole" as never, "admin");
-        c.set("authMethod" as never, "session");
+        c.set("user", { id: userId, email: "test@test.com", name: "Test" });
+        c.set("orgId", "org1");
+        c.set("orgRole", "admin");
+        c.set("authMethod", "session");
         await next();
       });
       app.get("/test", rateLimit(2) as never, (c) => c.json({ ok: true }));
@@ -89,12 +105,12 @@ describe("rate-limit", () => {
     });
 
     test("uses different buckets for different paths", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.use("*", async (c, next) => {
-        c.set("user" as never, { id: "user1", email: "test@test.com", name: "Test" });
-        c.set("orgId" as never, "org1");
-        c.set("orgRole" as never, "admin");
-        c.set("authMethod" as never, "session");
+        c.set("user", { id: "user1", email: "test@test.com", name: "Test" });
+        c.set("orgId", "org1");
+        c.set("orgRole", "admin");
+        c.set("authMethod", "session");
         await next();
       });
       app.get("/a", rateLimit(1) as never, (c) => c.json({ ok: true }));
@@ -108,7 +124,7 @@ describe("rate-limit", () => {
 
   describe("rateLimitByIp", () => {
     test("allows requests under limit", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByIp(5) as never, (c) => c.json({ ok: true }));
 
       const res = await app.request("/test", {
@@ -118,7 +134,7 @@ describe("rate-limit", () => {
     });
 
     test("blocks after exceeding limit", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByIp(2) as never, (c) => c.json({ ok: true }));
 
       for (let i = 0; i < 2; i++) {
@@ -134,7 +150,7 @@ describe("rate-limit", () => {
     });
 
     test("uses x-forwarded-for for IP", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByIp(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {
@@ -148,7 +164,7 @@ describe("rate-limit", () => {
     });
 
     test("uses x-real-ip as fallback", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByIp(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {
@@ -161,8 +177,8 @@ describe("rate-limit", () => {
       expect(res.status).toBe(429);
     });
 
-    test("returns RATE_LIMITED error body", async () => {
-      const app = new Hono();
+    test("returns RFC 9457 error body", async () => {
+      const app = baseApp();
       app.get("/test", rateLimitByIp(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {
@@ -172,15 +188,15 @@ describe("rate-limit", () => {
       const res = await app.request("/test", {
         headers: { "x-forwarded-for": "99.99.99.99" },
       });
-      const body = (await res.json()) as { error: string; message: string };
-      expect(body.error).toBe("RATE_LIMITED");
-      expect(body.message).toContain("Too many requests");
+      const body = (await res.json()) as { code: string; detail: string };
+      expect(body.code).toBe("rate_limited");
+      expect(body.detail).toContain("Too many requests");
     });
   });
 
   describe("rateLimitByBearer", () => {
     test("allows requests with different tokens", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByBearer(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {
@@ -194,7 +210,7 @@ describe("rate-limit", () => {
     });
 
     test("blocks same token after exceeding limit", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByBearer(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {
@@ -210,7 +226,7 @@ describe("rate-limit", () => {
 
   describe("_resetBucketsForTesting", () => {
     test("clears all buckets", async () => {
-      const app = new Hono();
+      const app = baseApp();
       app.get("/test", rateLimitByIp(1) as never, (c) => c.json({ ok: true }));
 
       await app.request("/test", {

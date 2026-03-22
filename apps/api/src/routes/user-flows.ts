@@ -3,6 +3,7 @@ import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items/index.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
+import { invalidRequest } from "../lib/errors.ts";
 
 export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -22,27 +23,21 @@ export function createUserFlowsRouter() {
       const { skillIds } = body;
 
       if (!Array.isArray(skillIds)) {
-        return c.json({ error: "VALIDATION_ERROR", message: "skillIds must be an array" }, 400);
+        throw invalidRequest("skillIds must be an array", "skillIds");
       }
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-          },
-          400,
+        throw invalidRequest(
+          `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+          "skillIds",
         );
       }
 
       try {
         await setFlowItems(packageId, orgId, skillIds, SKILL_CONFIG);
       } catch (err) {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
-          400,
-        );
+        throw invalidRequest(err instanceof Error ? err.message : String(err));
       }
 
       return c.json({ packageId, skillIds, message: "Skill references updated" });
@@ -64,27 +59,21 @@ export function createUserFlowsRouter() {
       const { toolIds } = body;
 
       if (!Array.isArray(toolIds)) {
-        return c.json({ error: "VALIDATION_ERROR", message: "toolIds must be an array" }, 400);
+        throw invalidRequest("toolIds must be an array", "toolIds");
       }
 
       const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-          },
-          400,
+        throw invalidRequest(
+          `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+          "toolIds",
         );
       }
 
       try {
         await setFlowItems(packageId, orgId, toolIds, TOOL_CONFIG);
       } catch (err) {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: err instanceof Error ? err.message : String(err) },
-          400,
-        );
+        throw invalidRequest(err instanceof Error ? err.message : String(err));
       }
 
       return c.json({ packageId, toolIds, message: "Tool references updated" });

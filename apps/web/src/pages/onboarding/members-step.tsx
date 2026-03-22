@@ -12,7 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
+import {
+  OnboardingLayout,
+  useOnboardingGuard,
+  useOnboardingNav,
+} from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { api } from "../../api";
 import { Spinner } from "../../components/spinner";

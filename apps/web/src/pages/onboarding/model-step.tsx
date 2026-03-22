@@ -3,7 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
+import {
+  OnboardingLayout,
+  useOnboardingGuard,
+  useOnboardingNav,
+} from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useAppConfig } from "../../hooks/use-app-config";

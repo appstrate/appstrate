@@ -3,7 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
+import {
+  OnboardingLayout,
+  useOnboardingGuard,
+  useOnboardingNav,
+} from "../../components/onboarding-layout";
 import { useProviders } from "../../hooks/use-providers";
 import { useIntegrations } from "../../hooks/use-integrations";
 import { useConnect, useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";

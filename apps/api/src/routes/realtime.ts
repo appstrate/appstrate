@@ -6,6 +6,7 @@ import { auth } from "../lib/auth.ts";
 import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
+import { unauthorized } from "../lib/errors.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -60,7 +61,7 @@ export function createRealtimeRouter() {
   router.get("/executions/:id", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid session or org" }, 401);
+      throw unauthorized("Invalid session or org");
     }
 
     const executionId = c.req.param("id");
@@ -96,7 +97,7 @@ export function createRealtimeRouter() {
   router.get("/flows/:packageId/executions", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid session or org" }, 401);
+      throw unauthorized("Invalid session or org");
     }
 
     const packageId = c.req.param("packageId");
@@ -131,7 +132,7 @@ export function createRealtimeRouter() {
   router.get("/executions", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid session or org" }, 401);
+      throw unauthorized("Invalid session or org");
     }
 
     const subId = `all-exec-${crypto.randomUUID().slice(0, 8)}`;

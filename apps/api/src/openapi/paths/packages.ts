@@ -272,8 +272,8 @@ export const packagesPaths = {
         "500": {
           description: "Integrity check failed",
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/Error" },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },

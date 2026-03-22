@@ -120,7 +120,10 @@ describe("parsePiStreamLine", () => {
     });
 
     test("assistant_message returns null (no JSON extraction)", () => {
-      const line = JSON.stringify({ type: "assistant_message", text: '```json\n{"summary":"test"}\n```' });
+      const line = JSON.stringify({
+        type: "assistant_message",
+        text: '```json\n{"summary":"test"}\n```',
+      });
       expect(parsePiStreamLine(line)).toBeNull();
     });
   });

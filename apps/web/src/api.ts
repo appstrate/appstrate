@@ -16,16 +16,17 @@ export class ApiError extends Error {
 
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: res.statusText }));
-    if (body.error) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    // RFC 9457 format: { code, detail, status, ... }
+    if (body.code) {
       throw new ApiError(
-        body.error,
-        body.message || `API Error: ${res.status}`,
+        body.code,
+        body.detail || `API Error: ${res.status}`,
         res.status,
-        body.details,
+        body.errors,
       );
     }
-    throw new Error(body.message || `API Error: ${res.status}`);
+    throw new Error(body.detail || `API Error: ${res.status}`);
   }
 }
 

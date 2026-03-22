@@ -5,6 +5,7 @@ import { db } from "../lib/db.ts";
 import { profiles, user as userTable } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
+import { invalidRequest, internalError, notFound } from "../lib/errors.ts";
 
 const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
@@ -18,7 +19,7 @@ profileRouter.get("/profile", async (c) => {
   const rows = await db.select().from(profiles).where(eq(profiles.id, user.id)).limit(1);
 
   if (!rows[0]) {
-    return c.json({ error: "NOT_FOUND", message: "Profile not found" }, 404);
+    throw notFound("Profile not found");
   }
 
   return c.json({
@@ -34,10 +35,7 @@ profileRouter.patch("/profile", async (c) => {
 
   const parsed = profileUpdateSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid input" },
-      400,
-    );
+    throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
   const { language, displayName } = parsed.data;
@@ -59,7 +57,7 @@ profileRouter.patch("/profile", async (c) => {
       userId: user.id,
       error: err instanceof Error ? err.message : String(err),
     });
-    return c.json({ error: "UPDATE_FAILED", message: "Failed to update profile" }, 500);
+    throw internalError("Failed to update profile");
   }
 
   return c.json({ ok: true, ...(language && { language }), ...(displayName && { displayName }) });

@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { OnboardingLayout, useOnboardingGuard, useOnboardingNav } from "../../components/onboarding-layout";
+import {
+  OnboardingLayout,
+  useOnboardingGuard,
+  useOnboardingNav,
+} from "../../components/onboarding-layout";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout } from "../../hooks/use-billing";
 import { Spinner } from "../../components/spinner";

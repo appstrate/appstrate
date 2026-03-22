@@ -11,48 +11,36 @@ import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 
 /**
  * Verify the execution token from the Authorization header.
- * Returns the execution data or an HTTP error response.
+ * Returns the execution data or throws an ApiError.
  */
-async function verifyExecutionToken(c: Context): Promise<
-  | {
-      ok: true;
-      executionId: string;
-      execution: {
-        packageId: string;
-        userId: string;
-        orgId: string;
-        status: string;
-        connectionProfileId: string | null;
-      };
-    }
-  | { ok: false; response: Response }
-> {
+async function verifyExecutionToken(c: Context): Promise<{
+  executionId: string;
+  execution: {
+    packageId: string;
+    userId: string;
+    orgId: string;
+    status: string;
+    connectionProfileId: string | null;
+  };
+}> {
   const authHeader = c.req.header("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return {
-      ok: false,
-      response: c.json({ error: "UNAUTHORIZED", message: "Missing execution token" }, 401),
-    };
+    throw unauthorized("Missing execution token");
   }
 
   const rawToken = authHeader.slice(7);
   if (!rawToken) {
-    return {
-      ok: false,
-      response: c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401),
-    };
+    throw unauthorized("Invalid execution token");
   }
 
   // Verify HMAC signature before DB lookup
   const executionId = parseSignedToken(rawToken);
   if (!executionId) {
-    return {
-      ok: false,
-      response: c.json({ error: "UNAUTHORIZED", message: "Invalid execution token" }, 401),
-    };
+    throw unauthorized("Invalid execution token");
   }
 
   const rows = await db
@@ -69,21 +57,14 @@ async function verifyExecutionToken(c: Context): Promise<
 
   const execution = rows[0];
   if (!execution) {
-    return {
-      ok: false,
-      response: c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404),
-    };
+    throw notFound("Execution not found");
   }
 
   if (execution.status !== "running") {
-    return {
-      ok: false,
-      response: c.json({ error: "FORBIDDEN", message: "Execution is not running" }, 403),
-    };
+    throw forbidden("Execution is not running");
   }
 
   return {
-    ok: true,
     executionId,
     execution: {
       packageId: execution.packageId!,
@@ -104,10 +85,7 @@ export function createInternalRouter() {
   // GET /internal/execution-history — called from inside containers
   // Auth: Bearer <signedToken> (HMAC-verified, then checked against executions table)
   router.get("/execution-history", async (c) => {
-    const auth = await verifyExecutionToken(c);
-    if (!auth.ok) return auth.response;
-
-    const { executionId, execution } = auth;
+    const { executionId, execution } = await verifyExecutionToken(c);
 
     // Parse query parameters
     const limitParam = c.req.query("limit");
@@ -142,7 +120,7 @@ export function createInternalRouter() {
         executionId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to fetch execution history" }, 500);
+      throw internalError("Failed to fetch execution history");
     }
   });
 
@@ -150,16 +128,13 @@ export function createInternalRouter() {
   // Auth: Bearer <signedToken> (same HMAC mechanism as execution-history)
   // Returns unified format: { credentials: Record<string, string>, authorizedUris: string[] | null }
   router.get("/credentials/:scope{@[^/]+}/:name", async (c) => {
-    const auth = await verifyExecutionToken(c);
-    if (!auth.ok) return auth.response;
-
-    const { executionId, execution } = auth;
+    const { executionId, execution } = await verifyExecutionToken(c);
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
     // Load the flow to validate the requested provider
     const flow = await getPackage(execution.packageId, execution.orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: "Flow not found" }, 404);
+      throw notFound("Flow not found");
     }
 
     const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
@@ -169,13 +144,7 @@ export function createInternalRouter() {
         providerId,
         packageId: execution.packageId,
       });
-      return c.json(
-        {
-          error: "PROVIDER_NOT_FOUND",
-          message: `Provider '${providerId}' is not required by this flow`,
-        },
-        404,
-      );
+      throw notFound(`Provider '${providerId}' is not required by this flow`);
     }
 
     try {
@@ -187,13 +156,7 @@ export function createInternalRouter() {
         const adminConns = await getAdminConnections(execution.orgId, execution.packageId);
         const adminProfileId = adminConns[providerId];
         if (!adminProfileId) {
-          return c.json(
-            {
-              error: "TOKEN_NOT_AVAILABLE",
-              message: `No admin binding for provider '${providerId}'`,
-            },
-            404,
-          );
+          throw notFound(`No admin binding for provider '${providerId}'`);
         }
         profileId = adminProfileId;
       } else {
@@ -212,13 +175,7 @@ export function createInternalRouter() {
       );
 
       if (!result) {
-        return c.json(
-          {
-            error: "TOKEN_NOT_AVAILABLE",
-            message: `No credentials for provider '${providerId}'`,
-          },
-          404,
-        );
+        throw notFound(`No credentials for provider '${providerId}'`);
       }
 
       logger.info("Credential access", {
@@ -237,7 +194,7 @@ export function createInternalRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to resolve credentials" }, 500);
+      throw internalError("Failed to resolve credentials");
     }
   });
 

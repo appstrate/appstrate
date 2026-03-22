@@ -19,6 +19,7 @@ import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { getEnv } from "@appstrate/env";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
+import { notFound } from "../lib/errors.ts";
 
 export async function flowDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
@@ -33,7 +34,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   ]);
 
   if (!flow) {
-    return c.json({ error: "NOT_FOUND", message: `Flow '${itemId}' not found` }, 404);
+    throw notFound(`Flow '${itemId}' not found`);
   }
 
   const m = flow.manifest;

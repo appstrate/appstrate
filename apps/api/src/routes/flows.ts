@@ -26,6 +26,7 @@ import {
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -73,14 +74,7 @@ export function createFlowsRouter() {
     // Validate config with AJV
     const validation = validateConfig(body, schema);
     if (!validation.valid) {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: "Invalid configuration",
-          details: validation.errors.map((e) => ({ field: e.field, error: e.message })),
-        },
-        400,
-      );
+      throw invalidRequest("Invalid configuration");
     }
 
     // Merge with defaults
@@ -111,19 +105,10 @@ export function createFlowsRouter() {
       // Verify the provider exists and is in admin mode
       const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
       if (!svc) {
-        return c.json(
-          { error: "PROVIDER_NOT_FOUND", message: `Provider '${providerId}' not found` },
-          404,
-        );
+        throw notFound(`Provider '${providerId}' not found`);
       }
       if ((svc.connectionMode ?? "user") !== "admin") {
-        return c.json(
-          {
-            error: "INVALID_CONNECTION_MODE",
-            message: `Provider '${providerId}' is not in admin mode`,
-          },
-          400,
-        );
+        throw invalidRequest(`Provider '${providerId}' is not in admin mode`);
       }
 
       // Get profile from body or default
@@ -140,13 +125,7 @@ export function createFlowsRouter() {
       const orgId = c.get("orgId");
       const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
       if (conn.status !== "connected") {
-        return c.json(
-          {
-            error: "ADMIN_NOT_CONNECTED",
-            message: `No active connection for '${svc.provider}'`,
-          },
-          400,
-        );
+        throw invalidRequest(`No active connection for '${svc.provider}'`);
       }
 
       await bindAdminConnection(orgId, flow.id, providerId, effectiveProfileId);
@@ -165,10 +144,7 @@ export function createFlowsRouter() {
 
       const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
       if (!svc) {
-        return c.json(
-          { error: "PROVIDER_NOT_FOUND", message: `Provider '${providerId}' not found` },
-          404,
-        );
+        throw notFound(`Provider '${providerId}' not found`);
       }
 
       await unbindAdminConnection(c.get("orgId"), flow.id, providerId);
@@ -182,7 +158,7 @@ export function createFlowsRouter() {
     const user = c.get("user");
     const body = await c.req.json<{ profileId: string }>();
     if (!body.profileId) {
-      return c.json({ error: "VALIDATION_ERROR", message: "profileId is required" }, 400);
+      throw invalidRequest("profileId is required", "profileId");
     }
     await setPackageProfileOverride(user.id, flow.id, body.profileId);
     return c.json({ success: true });
@@ -269,11 +245,11 @@ export function createFlowsRouter() {
       const orgId = c.get("orgId");
       const memoryId = parseInt(c.req.param("memoryId")!, 10);
       if (isNaN(memoryId)) {
-        return c.json({ error: "VALIDATION_ERROR", message: "Invalid memory ID" }, 400);
+        throw invalidRequest("Invalid memory ID", "memoryId");
       }
       const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
       if (!deleted) {
-        return c.json({ error: "NOT_FOUND", message: "Memory not found" }, 404);
+        throw notFound("Memory not found");
       }
       return c.json({ deleted: true });
     },
@@ -291,10 +267,7 @@ export function createFlowsRouter() {
     if (versionQuery && flow.source !== "system") {
       const versionManifest = await resolveVersionManifest(flow.id, versionQuery);
       if (!versionManifest) {
-        return c.json(
-          { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-          404,
-        );
+        throw notFound(`Version '${versionQuery}' not found`);
       }
       manifest = versionManifest;
     }
@@ -305,13 +278,8 @@ export function createFlowsRouter() {
       // Check for user-mode providers
       const userModeService = providers.find((s) => (s.connectionMode ?? "user") === "user");
       if (userModeService) {
-        return c.json(
-          {
-            error: "SHARE_NOT_ALLOWED",
-            message:
-              "This flow cannot be shared publicly because it requires user-mode connections.",
-          },
-          400,
+        throw invalidRequest(
+          "This flow cannot be shared publicly because it requires user-mode connections.",
         );
       }
 
@@ -319,12 +287,8 @@ export function createFlowsRouter() {
       const adminConns = await getAdminConnections(orgId, flow.id);
       for (const svc of providers) {
         if (!adminConns[svc.id]) {
-          return c.json(
-            {
-              error: "SHARE_NOT_READY",
-              message: "All admin providers must be bound before generating a public link.",
-            },
-            400,
+          throw invalidRequest(
+            "All admin providers must be bound before generating a public link.",
           );
         }
       }

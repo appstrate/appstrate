@@ -112,6 +112,29 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
+export async function getAllowedRedirectDomains(orgId: string): Promise<string[]> {
+  const [row] = await db
+    .select({ allowedRedirectDomains: organizations.allowedRedirectDomains })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+
+  return row?.allowedRedirectDomains ?? [];
+}
+
+export async function setAllowedRedirectDomains(
+  orgId: string,
+  domains: string[],
+): Promise<string[]> {
+  const [row] = await db
+    .update(organizations)
+    .set({ allowedRedirectDomains: domains, updatedAt: new Date() })
+    .where(eq(organizations.id, orgId))
+    .returning({ allowedRedirectDomains: organizations.allowedRedirectDomains });
+
+  return row?.allowedRedirectDomains ?? [];
+}
+
 export async function getOrgMembers(
   orgId: string,
 ): Promise<(OrgMemberResult & { displayName?: string; email?: string })[]> {

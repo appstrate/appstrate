@@ -179,10 +179,7 @@ export function useModelFormHandler(opts: {
 
   const onSubmit = (data: ModelFormData) => {
     if (opts.editModel) {
-      updateModel.mutate(
-        { id: opts.editModel.id, data },
-        { onSuccess: opts.onSuccess },
-      );
+      updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
     } else if (data.newProviderKey) {
       const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
       const providerLabel = provider?.label ?? "Custom";

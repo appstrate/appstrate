@@ -9,6 +9,8 @@ import { createShutdownHandler } from "./lib/shutdown.ts";
 import { validateApiKey } from "./services/api-keys.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
+import { requestId } from "./middleware/request-id.ts";
+import { errorHandler } from "./middleware/error-handler.ts";
 import { createFlowsRouter } from "./routes/flows.ts";
 import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
@@ -33,6 +35,7 @@ import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
+import { ApiError, unauthorized } from "./lib/errors.ts";
 import type { AppEnv } from "./types/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
@@ -40,6 +43,12 @@ import type { AppConfig } from "@appstrate/shared-types";
 const env = getEnv();
 
 const app = new Hono<AppEnv>();
+
+// Error handler — converts ApiError to RFC 9457 application/problem+json
+app.onError(errorHandler);
+
+// Request-Id — generates req_ prefixed ID, sets header + context variable
+app.use("*", requestId());
 
 // Middleware
 const trustedOrigins = env.TRUSTED_ORIGINS;
@@ -73,7 +82,12 @@ let shuttingDown = false;
 
 app.use("*", async (c, next) => {
   if (shuttingDown && c.req.method === "POST") {
-    return c.json({ error: "SHUTTING_DOWN", message: "Server is shutting down" }, 503);
+    throw new ApiError({
+      status: 503,
+      code: "shutting_down",
+      title: "Service Unavailable",
+      detail: "Server is shutting down",
+    });
   }
   return next();
 });
@@ -114,7 +128,7 @@ app.use("*", async (c, next) => {
     const rawKey = authHeader.slice(7); // "Bearer ".length
     const keyInfo = await validateApiKey(rawKey);
     if (!keyInfo) {
-      return c.json({ error: "UNAUTHORIZED", message: "Invalid or expired API key" }, 401);
+      throw unauthorized("Invalid or expired API key");
     }
     c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
     c.set("orgId", keyInfo.orgId);
@@ -128,7 +142,7 @@ app.use("*", async (c, next) => {
   // Fallback: cookie session
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) {
-    return c.json({ error: "UNAUTHORIZED", message: "Invalid or missing session" }, 401);
+    throw unauthorized("Invalid or missing session");
   }
   c.set("user", {
     id: session.user.id,
@@ -222,8 +236,7 @@ app.use(
   "/*",
   serveStatic({
     root: "./apps/web/dist",
-    rewriteRequestPath: (path) =>
-      path === "/" || path === "/index.html" ? "/.noop" : path,
+    rewriteRequestPath: (path) => (path === "/" || path === "/index.html" ? "/.noop" : path),
   }),
 );
 

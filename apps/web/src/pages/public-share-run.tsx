@@ -152,12 +152,12 @@ export function PublicShareRunPage() {
       }
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: res.statusText }));
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
         if (res.status === 410) {
           setStatus("invalid");
           return;
         }
-        setError(err.message || `Error ${res.status}`);
+        setError(err.detail || `Error ${res.status}`);
         return;
       }
 

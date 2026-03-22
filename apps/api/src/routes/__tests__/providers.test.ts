@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { Hono } from "hono";
+import type { AppEnv } from "../../types/index.ts";
 import {
   queues,
   resetQueues,
@@ -118,11 +119,15 @@ mock.module("../../services/package-versions.ts", () => ({
 
 // --- Dynamic import (after all mocks) ---
 
+const { requestId } = await import("../../middleware/request-id.ts");
+const { errorHandler } = await import("../../middleware/error-handler.ts");
 const { createProvidersRouter } = await import("../providers.ts");
 
 // --- Test app ---
 
-const app = new Hono();
+const app = new Hono<AppEnv>();
+app.onError(errorHandler);
+app.use("*", requestId());
 app.use("*", async (c, next) => {
   c.set("orgId" as never, "org-1" as never);
   c.set("orgSlug" as never, "test" as never);
@@ -268,8 +273,8 @@ describe("POST /api/providers", () => {
   test("returns 400 on missing required fields", async () => {
     const res = await jsonRequest("/api/providers", "POST", { displayName: "Test" });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invalid_request");
   });
 
   test("returns 403 when ID conflicts with system provider (source: system)", async () => {
@@ -277,18 +282,18 @@ describe("POST /api/providers", () => {
 
     const res = await jsonRequest("/api/providers", "POST", validCreateBody());
     expect(res.status).toBe(403);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("OPERATION_NOT_ALLOWED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("operation_not_allowed");
   });
 
-  test("returns 400 on duplicate ID (NAME_COLLISION)", async () => {
+  test("returns 400 on duplicate ID (name_collision)", async () => {
     queues.select.push([]); // isSystemProviderInDb → not system
     queues.select.push([{ id: "@test/new-provider" }]); // existing check → found
 
     const res = await jsonRequest("/api/providers", "POST", validCreateBody());
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("NAME_COLLISION");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("name_collision");
   });
 
   test("encrypts admin credentials when clientId/clientSecret provided", async () => {
@@ -361,8 +366,8 @@ describe("PUT /api/providers/:scope/:name", () => {
       displayName: "New Name",
     });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invalid_request");
   });
 
   test("returns 403 for system provider", async () => {
@@ -373,8 +378,8 @@ describe("PUT /api/providers/:scope/:name", () => {
       authMode: "oauth2",
     });
     expect(res.status).toBe(403);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("OPERATION_NOT_ALLOWED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("operation_not_allowed");
   });
 
   test("returns 404 when not found", async () => {
@@ -474,8 +479,8 @@ describe("DELETE /api/providers/:scope/:name", () => {
 
     const res = await app.request("/api/providers/@test/provider", { method: "DELETE" });
     expect(res.status).toBe(403);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("OPERATION_NOT_ALLOWED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("operation_not_allowed");
   });
 
   test("returns 409 when provider in use by 1 flow", async () => {
@@ -484,9 +489,9 @@ describe("DELETE /api/providers/:scope/:name", () => {
 
     const res = await app.request("/api/providers/@test/provider", { method: "DELETE" });
     expect(res.status).toBe(409);
-    const json = (await res.json()) as { error: string; message: string };
-    expect(json.error).toBe("PROVIDER_IN_USE");
-    expect(json.message).toContain("1 flow(s)");
+    const json = (await res.json()) as { code: string; detail: string };
+    expect(json.code).toBe("provider_in_use");
+    expect(json.detail).toContain("1 flow(s)");
   });
 
   test("returns 409 with correct count for multiple flows", async () => {
@@ -499,8 +504,8 @@ describe("DELETE /api/providers/:scope/:name", () => {
 
     const res = await app.request("/api/providers/@test/provider", { method: "DELETE" });
     expect(res.status).toBe(409);
-    const json = (await res.json()) as { message: string };
-    expect(json.message).toContain("2 flow(s)");
+    const json = (await res.json()) as { detail: string };
+    expect(json.detail).toContain("2 flow(s)");
   });
 });
 
@@ -527,8 +532,8 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
       credentials: { clientId: "id", clientSecret: "secret" },
     });
     expect(res.status).toBe(404);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("NOT_FOUND");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("not_found");
   });
 
   test("returns 400 when required fields missing (oauth2 default schema)", async () => {
@@ -540,9 +545,9 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
       credentials: { clientId: "id" }, // missing clientSecret
     });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string; message: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
-    expect(json.message).toContain("clientSecret");
+    const json = (await res.json()) as { code: string; detail: string };
+    expect(json.code).toBe("invalid_request");
+    expect(json.detail).toContain("clientSecret");
   });
 
   test("supports partial update (only enabled flag)", async () => {
@@ -596,8 +601,8 @@ describe("PUT /api/providers/credentials/:scope/:name", () => {
       credentials: { someOtherField: "value" }, // missing apiToken
     });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { message: string };
-    expect(json.message).toContain("apiToken");
+    const json = (await res.json()) as { detail: string };
+    expect(json.detail).toContain("apiToken");
   });
 });
 

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
+import { ApiError, invalidRequest, forbidden, internalError } from "../lib/errors.ts";
 import {
   listUserConnections,
   initiateConnection,
@@ -36,10 +37,7 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
-    return c.json(
-      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
-      403,
-    );
+    throw forbidden(`Provider '${provider}' is not configured`);
   }
 
   try {
@@ -57,8 +55,9 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
     const result = await initiateConnection(provider, orgId, user.id, effectiveProfileId, scopes);
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
+    if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : "Failed to create connect session";
-    return c.json({ error: "CONNECT_SESSION_FAILED", message }, 500);
+    throw internalError(message);
   }
 });
 
@@ -69,23 +68,21 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
-    return c.json(
-      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
-      403,
-    );
+    throw forbidden(`Provider '${provider}' is not configured`);
   }
 
   try {
     const body = await c.req.json<{ apiKey?: string; profileId?: string }>();
     if (!body.apiKey || !body.apiKey.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "API key is required" }, 400);
+      throw invalidRequest("API key is required", "apiKey");
     }
     const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
     await saveApiKeyConnection(provider, body.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
+    if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : "Failed to create API key connection";
-    return c.json({ error: "API_KEY_CONNECTION_FAILED", message }, 500);
+    throw internalError(message);
   }
 });
 
@@ -96,16 +93,13 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
-    return c.json(
-      { error: "PROVIDER_NOT_ENABLED", message: `Provider '${provider}' is not configured` },
-      403,
-    );
+    throw forbidden(`Provider '${provider}' is not configured`);
   }
 
   try {
     const body = await c.req.json<{ credentials?: Record<string, string>; profileId?: string }>();
     if (!body.credentials || typeof body.credentials !== "object") {
-      return c.json({ error: "VALIDATION_ERROR", message: "Field 'credentials' is required" }, 400);
+      throw invalidRequest("Field 'credentials' is required", "credentials");
     }
 
     // Resolve the auth mode from the provider
@@ -116,8 +110,9 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
     await saveCredentialsConnection(provider, mode, body.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
+    if (err instanceof ApiError) throw err;
     const message = err instanceof Error ? err.message : "Failed to save credentials";
-    return c.json({ error: "CREDENTIALS_FAILED", message }, 500);
+    throw internalError(message);
   }
 });
 
@@ -202,7 +197,7 @@ router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {
     return c.json({ success: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete connection";
-    return c.json({ error: "DELETE_FAILED", message }, 500);
+    throw internalError(message);
   }
 });
 

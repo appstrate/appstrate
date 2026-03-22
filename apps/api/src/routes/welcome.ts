@@ -3,6 +3,7 @@ import { db } from "../lib/db.ts";
 import { profiles, user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
+import { unauthorized } from "../lib/errors.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -10,7 +11,7 @@ const router = new Hono<AppEnv>();
 router.post("/welcome/setup", async (c) => {
   const currentUser = c.get("user");
   if (!currentUser?.id) {
-    return c.json({ error: "UNAUTHORIZED", message: "Not authenticated" }, 401);
+    throw unauthorized("Not authenticated");
   }
 
   const body = await c.req.json<{ displayName?: string }>();
