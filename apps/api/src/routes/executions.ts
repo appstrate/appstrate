@@ -31,6 +31,7 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
+import { dispatchWebhookEvents } from "../services/webhooks.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
@@ -39,6 +40,25 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+}
+
+/** Fire-and-forget webhook dispatch after execution status change. */
+function dispatchWebhooks(
+  orgId: string,
+  status: string,
+  executionId: string,
+  packageId: string,
+  extra?: Record<string, unknown>,
+): void {
+  const eventType = `execution.${status}` as Parameters<typeof dispatchWebhookEvents>[1];
+  dispatchWebhookEvents(orgId, eventType, { id: executionId, packageId, status, ...extra }).catch(
+    (err) => {
+      logger.warn("Webhook dispatch failed", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    },
+  );
 }
 
 // --- Background execution (decoupled from client) ---
@@ -62,6 +82,7 @@ export async function executeFlowInBackground(
   try {
     // Update status to running
     await updateExecution(executionId, { status: "running" });
+    dispatchWebhooks(orgId, "started", executionId, flow.id);
 
     // Execute via adapter
     const adapter = getAdapter();
@@ -186,6 +207,7 @@ export async function executeFlowInBackground(
           },
           "error",
         );
+        dispatchWebhooks(orgId, "timeout", executionId, flow.id, { duration });
         return;
       }
       throw err;
@@ -277,6 +299,7 @@ export async function executeFlowInBackground(
         { executionId, status: "success" },
         "info",
       );
+      dispatchWebhooks(orgId, "completed", executionId, flow.id, { result, duration });
     } else {
       // Keep the existing no-result/failed path but update variable references
       if (signal.aborted) return;
@@ -313,6 +336,7 @@ export async function executeFlowInBackground(
         },
         "error",
       );
+      dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration });
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -341,6 +365,7 @@ export async function executeFlowInBackground(
       },
       "error",
     );
+    dispatchWebhooks(orgId, "failed", executionId, flow.id, { error: errorMessage, duration });
   } finally {
     untrackExecution(executionId);
   }
@@ -589,6 +614,8 @@ export function createExecutionsRouter() {
     getOrchestrator()
       .stopByExecutionId(execId)
       .catch(() => {});
+
+    dispatchWebhooks(orgId, "cancelled", execId, execution.packageId);
 
     return c.json({ ok: true });
   });

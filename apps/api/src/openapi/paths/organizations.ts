@@ -264,4 +264,51 @@ export const organizationsPaths = {
       },
     },
   },
+  "/api/orgs/{orgId}/settings": {
+    get: {
+      operationId: "getOrgSettings",
+      tags: ["Organizations"],
+      summary: "Get organization settings",
+      description: "Get organization settings (redirect domains, etc.). Admin only.",
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      responses: {
+        "200": {
+          description: "Organization settings",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgSettings" },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+    put: {
+      operationId: "updateOrgSettings",
+      tags: ["Organizations"],
+      summary: "Update organization settings",
+      description:
+        "Update organization settings (merge — only provided fields are updated). Admin only.",
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/OrgSettings" },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Settings updated",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgSettings" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
 } as const;

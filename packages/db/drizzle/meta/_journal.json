@@ -19,15 +19,8 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1774140165032,
-      "tag": "0002_groovy_lake",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1774142969167,
-      "tag": "0003_large_kingpin",
+      "when": 1774147473749,
+      "tag": "0002_eager_sharon_carter",
       "breakpoints": true
     }
   ]

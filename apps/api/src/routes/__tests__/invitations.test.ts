@@ -51,13 +51,36 @@ mock.module("../../services/invitations.ts", () => ({
   },
   getOrgName: async () => mockOrgName,
   getInviterName: async () => mockInviterName,
+  createInvitation: async () => ({}),
+  getOrgInvitations: async () => [],
+  cancelInvitation: async () => {},
+  updateInvitationRole: async () => null,
 }));
 
+// Must include ALL exports — mock.module is process-global and other test files
+// import from this module. Only addMember needs test-specific behavior.
+// Uses the already-imported `queues` from _db-mock to provide queue-driven responses.
 mock.module("../../services/organizations.ts", () => ({
   addMember: async (orgId: string, userId: string, role: string) => {
     addMemberCalls.push({ orgId, userId, role });
     if (addMemberError) throw addMemberError;
   },
+  createOrganization: async () => ({}),
+  getUserOrganizations: async () => [],
+  getOrgById: async () => queues.select.shift()?.[0] ?? null,
+  updateOrganization: async () => queues.update.shift()?.[0] ?? null,
+  deleteOrganization: async () => {},
+  getOrgMembers: async () => queues.select.shift() ?? [],
+  getOrgMember: async () => queues.select.shift()?.[0] ?? null,
+  removeMember: async () => {},
+  updateMemberRole: async () => {},
+  findUserByEmail: async () => queues.select.shift()?.[0] ?? null,
+  slugify: (s: string) => s.toLowerCase().replace(/\s+/g, "-"),
+  isSlugAvailable: async () => true,
+  getOrgSettings: async () =>
+    (queues.select.shift()?.[0] as Record<string, unknown>)?.settings ?? {},
+  updateOrgSettings: async () =>
+    (queues.update.shift()?.[0] as Record<string, unknown>)?.settings ?? {},
 }));
 
 mock.module("../../lib/auth.ts", () => ({

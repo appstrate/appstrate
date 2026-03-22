@@ -2,6 +2,7 @@ import { closeDb } from "./db.ts";
 import { closeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
+import { shutdownWebhookWorker } from "../services/webhooks.ts";
 import {
   getInFlightCount,
   waitForInFlight,
@@ -19,8 +20,8 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     called = true;
     setShuttingDown();
 
-    logger.info("Shutdown initiated, stopping scheduler and sidecar pool...");
-    await shutdownScheduleWorker();
+    logger.info("Shutdown initiated, stopping scheduler, webhook worker, and sidecar pool...");
+    await Promise.all([shutdownScheduleWorker(), shutdownWebhookWorker()]);
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing

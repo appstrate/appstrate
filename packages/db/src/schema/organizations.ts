@@ -18,9 +18,7 @@ export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   slug: text("slug").unique().notNull(),
-  allowedRedirectDomains: text("allowed_redirect_domains")
-    .array()
-    .default(sql`'{}'::text[]`),
+  settings: jsonb("settings").notNull().default({}),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

@@ -41,6 +41,49 @@ export const schemas = {
       email: { type: "string" },
     },
   },
+  UserObject: {
+    type: "object",
+    description: "User object returned by the Users API",
+    properties: {
+      id: { type: "string", description: "User ID (usr_ prefix)" },
+      object: { type: "string", enum: ["user"] },
+      name: { type: ["string", "null"] },
+      email: { type: ["string", "null"] },
+      externalId: { type: ["string", "null"], description: "External ID for mapping" },
+      source: { type: "string", enum: ["dashboard", "api"] },
+      metadata: {
+        type: ["object", "null"],
+        additionalProperties: { type: "string" },
+      },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  WebhookObject: {
+    type: "object",
+    description: "Webhook configuration object",
+    properties: {
+      id: { type: "string", description: "Webhook ID (wh_ prefix)" },
+      object: { type: "string", enum: ["webhook"] },
+      url: { type: "string", format: "uri" },
+      events: { type: "array", items: { type: "string" } },
+      flowId: { type: ["string", "null"] },
+      payloadMode: { type: "string", enum: ["full", "summary"] },
+      active: { type: "boolean" },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  OrgSettings: {
+    type: "object",
+    description: "Organization settings (extensible)",
+    properties: {
+      allowedRedirectDomains: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 20,
+        description: "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com)",
+      },
+    },
+  },
   ProfileBatchItem: {
     type: "object",
     properties: {
