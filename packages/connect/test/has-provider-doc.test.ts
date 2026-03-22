@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, it, expect } from "bun:test";
 
 /**
  * Test the hasProviderDoc heuristic used by getProvider() in registry.ts.
@@ -12,31 +12,31 @@ function hasProviderDoc(draftContent: string | null | undefined): boolean {
 }
 
 describe("hasProviderDoc heuristic", () => {
-  test("returns true for PROVIDER.md content", () => {
+  it("returns true for PROVIDER.md content", () => {
     expect(hasProviderDoc("# Gmail API\n\nBase URL: ...")).toBe(true);
   });
 
-  test("returns false for manifest JSON content", () => {
+  it("returns false for manifest JSON content", () => {
     expect(hasProviderDoc('{"name":"@test/provider","version":"1.0.0"}')).toBe(false);
   });
 
-  test("returns false for empty string", () => {
+  it("returns false for empty string", () => {
     expect(hasProviderDoc("")).toBe(false);
   });
 
-  test("returns false for null", () => {
+  it("returns false for null", () => {
     expect(hasProviderDoc(null)).toBe(false);
   });
 
-  test("returns false for undefined", () => {
+  it("returns false for undefined", () => {
     expect(hasProviderDoc(undefined)).toBe(false);
   });
 
-  test("returns false for whitespace-only content", () => {
+  it("returns false for whitespace-only content", () => {
     expect(hasProviderDoc("   \n  ")).toBe(false);
   });
 
-  test("returns true for markdown starting with text (no heading)", () => {
+  it("returns true for markdown starting with text (no heading)", () => {
     expect(hasProviderDoc("This provider connects to the Gmail API.")).toBe(true);
   });
 });

@@ -67,7 +67,7 @@ Bun.spawnSync(
 // Run drizzle-kit migrate as a subprocess from the packages/db directory,
 // since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
 
-const dbDir = resolve(import.meta.dir, "../../../../packages/db");
+const dbDir = resolve(import.meta.dir, "../../packages/db");
 const result = Bun.spawnSync(["bunx", "drizzle-kit", "migrate"], {
   cwd: dbDir,
   env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },

@@ -1,14 +1,12 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
+import { wrapExtensionFactory } from "../extension-wrapper.ts";
 
-// Mock emit before importing the wrapper
+// --- Emit spy via DI (no mock.module needed) ---
+
 const emitCalls: Record<string, unknown>[] = [];
-mock.module("../lib/emit.ts", () => ({
-  emit(obj: Record<string, unknown>) {
-    emitCalls.push(obj);
-  },
-}));
-
-const { wrapExtensionFactory } = await import("../extension-wrapper.ts");
+const emitSpy = (obj: Record<string, unknown>) => {
+  emitCalls.push(obj);
+};
 
 // --- Helpers ---
 
@@ -42,11 +40,11 @@ describe("wrapExtensionFactory", () => {
     emitCalls.length = 0;
   });
 
-  test("passes through a correct 3-param execute and its return value", async () => {
+  it("passes through a correct 3-param execute and its return value", async () => {
     const expected = { content: [{ type: "text", text: "ok" }] };
     const factory = makeFactory(async (_id: string, _params: unknown, _signal: unknown) => expected);
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-1");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-1", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -57,12 +55,12 @@ describe("wrapExtensionFactory", () => {
     expect(emitCalls.filter((c) => c.type === "error")).toHaveLength(0);
   });
 
-  test("catches errors thrown by execute and returns an error result", async () => {
+  it("catches errors thrown by execute and returns an error result", async () => {
     const factory = makeFactory(async () => {
       throw new Error("something broke");
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-err");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-err", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -79,12 +77,12 @@ describe("wrapExtensionFactory", () => {
     expect(errorEmits[0].message).toContain("something broke");
   });
 
-  test("catches non-Error thrown values", async () => {
+  it("catches non-Error thrown values", async () => {
     const factory = makeFactory(async () => {
       throw "raw string error";
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-raw");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-raw", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -92,12 +90,12 @@ describe("wrapExtensionFactory", () => {
     expect(result.content[0].text).toContain("raw string error");
   });
 
-  test("skips wrapping when execute is not a function", () => {
+  it("skips wrapping when execute is not a function", () => {
     const factory = (pi: any) => {
       pi.registerTool({ name: "no-exec", description: "test" });
     };
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-noexec");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-noexec", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -105,14 +103,14 @@ describe("wrapExtensionFactory", () => {
     expect(pi.registeredTools[0].execute).toBeUndefined();
   });
 
-  test("forwards all three arguments to the original execute", async () => {
+  it("forwards all three arguments to the original execute", async () => {
     let receivedArgs: unknown[] = [];
     const factory = makeFactory(async (id: string, params: unknown, signal: unknown) => {
       receivedArgs = [id, params, signal];
       return { content: [{ type: "text", text: "done" }] };
     });
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-args");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-args", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 
@@ -125,7 +123,7 @@ describe("wrapExtensionFactory", () => {
     expect(receivedArgs[2]).toBe(signal);
   });
 
-  test("includes tool name in error result", async () => {
+  it("includes tool name in error result", async () => {
     const factory = makeFactory(
       async () => {
         throw new Error("fail");
@@ -133,7 +131,7 @@ describe("wrapExtensionFactory", () => {
       "my_special_tool",
     );
 
-    const wrapped = wrapExtensionFactory(factory as any, "ext-name");
+    const wrapped = wrapExtensionFactory(factory as any, "ext-name", emitSpy);
     const pi = createMockPi();
     wrapped(pi as any);
 

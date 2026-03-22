@@ -181,11 +181,13 @@ bun run build-sidecar    # Build sidecar Docker image
 ### Testing
 
 ```sh
-cd apps/api
-bun test                 # Full suite (requires PostgreSQL + Docker)
+bun test                          # All tests (~1000), all packages — requires Docker
+bun test apps/api/test/unit/      # API unit tests only (fast, no DB)
+bun test apps/api/test/           # API unit + integration
+bun test runtime-pi/              # Runtime + sidecar tests
 ```
 
-Tests use `bun:test` (built-in). Mocking pattern: `mock.module()` before dynamic `import()`.
+Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by the preload script on first run. Framework: `bun:test`. See `CLAUDE.md` Testing section for conventions and patterns.
 
 ## Tech Stack
 

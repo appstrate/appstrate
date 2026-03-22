@@ -4,10 +4,23 @@
  */
 
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
+import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
+
+export interface DependencyValidationDeps {
+  isProviderEnabled: (orgId: string, providerId: string) => Promise<boolean>;
+  getConnectionStatus: (provider: string, profileId: string, orgId: string) => Promise<ConnectionStatus>;
+  validateScopes: (granted: string[], required: string[]) => { sufficient: boolean };
+}
+
+const defaultDeps: DependencyValidationDeps = {
+  isProviderEnabled: (orgId, providerId) => isProviderEnabled(db, orgId, providerId),
+  getConnectionStatus,
+  validateScopes,
+};
 
 /**
  * Validate that all required provider dependencies are satisfied.
@@ -18,11 +31,12 @@ export async function validateFlowDependencies(
   providers: FlowProviderRequirement[],
   providerProfiles: Record<string, string>,
   orgId: string,
+  deps: DependencyValidationDeps = defaultDeps,
 ): Promise<void> {
   // Check provider enabled status
   const uniqueProviders = [...new Set(providers.map((s) => s.provider))];
   for (const providerId of uniqueProviders) {
-    const enabled = await isProviderEnabled(db, orgId, providerId);
+    const enabled = await deps.isProviderEnabled(orgId, providerId);
     if (!enabled) {
       throw new ApiError({
         status: 400,
@@ -57,7 +71,7 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((svc) => getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId)),
+    providers.map((svc) => deps.getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId)),
   );
 
   for (let i = 0; i < providers.length; i++) {
@@ -83,7 +97,7 @@ export async function validateFlowDependencies(
     }
 
     if (svc.scopes && svc.scopes.length > 0 && conn.scopesGranted) {
-      const scopeResult = validateScopes(conn.scopesGranted, svc.scopes);
+      const scopeResult = deps.validateScopes(conn.scopesGranted, svc.scopes);
       if (!scopeResult.sufficient) {
         throw new ApiError({
           status: 400,

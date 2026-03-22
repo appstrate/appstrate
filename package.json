@@ -4,7 +4,9 @@
   "packageManager": "bun@1.3.9",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "runtime-pi",
+    "runtime-pi/sidecar"
   ],
   "scripts": {
     "dev": "turbo dev",
@@ -21,7 +23,7 @@
     "docker:dev": "docker compose up -d",
     "docker:prod": "docker compose --profile prod up -d",
     "verify:openapi": "bun scripts/verify-openapi.ts",
-    "test": "cd apps/api && bun run test"
+    "test": "bun test"
   },
   "dependencies": {
     "@appstrate/core": "^2.8.4"
