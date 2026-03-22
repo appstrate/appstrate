@@ -7,7 +7,12 @@ import { db } from "../lib/db.ts";
 import { getEnv } from "@appstrate/env";
 import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state/index.ts";
+import {
+  getPackageConfig,
+  getFlowOverrides,
+  getLastExecutionState,
+  getPackageMemories,
+} from "./state/index.ts";
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
@@ -121,6 +126,8 @@ export async function buildExecutionContext(params: {
   input?: Record<string, unknown>;
   files?: FileReference[];
   config?: Record<string, unknown>;
+  modelId?: string | null;
+  proxyId?: string | null;
   overrideVersionId?: number;
 }): Promise<{
   promptContext: PromptContext;
@@ -132,19 +139,21 @@ export async function buildExecutionContext(params: {
   const { executionId, flow, providerProfiles, orgId, userId, input, files } = params;
 
   const manifestProviders = resolveManifestProviders(flow.manifest);
+
+  // Step 1: load config, flow overrides, and independent data in parallel
   const [
     tokens,
     config,
+    flowOverrides,
     previousState,
     providerDefs,
     flowPackage,
     latestVersion,
-    proxyResult,
-    modelResult,
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
     params.config ?? getPackageConfig(orgId, flow.id),
+    getFlowOverrides(orgId, flow.id),
     getLastExecutionState(flow.id, userId, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
     getPackageZip(flow, orgId),
@@ -153,9 +162,16 @@ export async function buildExecutionContext(params: {
       : flow.source !== "system"
         ? getLatestVersionWithManifest(flow.id).catch(() => null)
         : null,
-    resolveProxy(orgId, flow.id, params.config),
-    resolveModel(orgId, flow.id, params.config),
     getPackageMemories(flow.id, orgId),
+  ]);
+
+  // Step 2: resolve model and proxy with cascade (request override → flow column → org/system default)
+  const effectiveModelId = params.modelId ?? flowOverrides.modelId;
+  const effectiveProxyId = params.proxyId ?? flowOverrides.proxyId;
+
+  const [proxyResult, modelResult] = await Promise.all([
+    resolveProxy(orgId, flow.id, effectiveProxyId),
+    resolveModel(orgId, flow.id, effectiveModelId),
   ]);
 
   if (!modelResult) {

@@ -8,6 +8,13 @@
       "when": 1774116745298,
       "tag": "0000_burly_reavers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774138329060,
+      "tag": "0001_crazy_mentallo",
+      "breakpoints": true
     }
   ]
 }

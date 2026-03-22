@@ -3,7 +3,6 @@ import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import type { ModelCost } from "./adapters/types.ts";
-import { getPackageConfig } from "./state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
@@ -220,23 +219,19 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
 export async function resolveModel(
   orgId: string,
   packageId: string,
-  config?: Record<string, unknown>,
+  modelId: string | null,
 ): Promise<ResolvedModel | null> {
-  // 1. Check flow config for __modelId
-  const resolved = config ?? (await getPackageConfig(orgId, packageId));
-  const configModelId = resolved.__modelId as string | undefined | null;
-
-  if (configModelId) {
-    // Load specific model
-    const result = await loadModel(orgId, configModelId);
+  // 1. Explicit override (flow column or per-execution)
+  if (modelId) {
+    const result = await loadModel(orgId, modelId);
     if (result) return result;
     logger.warn("Flow model override not found, falling through to org default", {
       packageId,
-      modelId: configModelId,
+      modelId,
     });
   }
 
-  // 2. Find org default — check DB first
+  // 2. Org default
   const [dbDefault] = await db
     .select()
     .from(orgModels)
@@ -263,7 +258,7 @@ export async function resolveModel(
     }
   }
 
-  // 3. Check system models for a default
+  // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
@@ -271,7 +266,7 @@ export async function resolveModel(
     }
   }
 
-  // 4. No fallback — model is required
+  // 4. No model configured
   return null;
 }
 

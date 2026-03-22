@@ -16,6 +16,8 @@ import {
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: UploadedFile[];
+  modelId?: string;
+  proxyId?: string;
 }
 
 export interface InputError {
@@ -34,7 +36,7 @@ export async function parseRequestInput(
 ): Promise<{ ok: true; data: ParsedInput } | { ok: false; error: InputError; status: 400 }> {
   const hasFileFields = schemaHasFileFields(inputSchema);
 
-  let body: { input?: Record<string, unknown> };
+  let body: { input?: Record<string, unknown>; modelId?: string; proxyId?: string };
   let uploadedFiles: UploadedFile[] | undefined;
 
   if (hasFileFields) {
@@ -67,7 +69,11 @@ export async function parseRequestInput(
     }
   } else {
     try {
-      body = await c.req.json<{ input?: Record<string, unknown> }>();
+      body = await c.req.json<{
+        input?: Record<string, unknown>;
+        modelId?: string;
+        proxyId?: string;
+      }>();
     } catch {
       body = {};
     }
@@ -86,5 +92,8 @@ export async function parseRequestInput(
     }
   }
 
-  return { ok: true, data: { input: body.input, uploadedFiles } };
+  return {
+    ok: true,
+    data: { input: body.input, uploadedFiles, modelId: body.modelId, proxyId: body.proxyId },
+  };
 }

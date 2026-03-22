@@ -34,6 +34,16 @@ export const executionsPaths = {
               type: "object",
               properties: {
                 input: { type: "object", description: "Execution input values" },
+                modelId: {
+                  type: "string",
+                  description:
+                    "Model ID override for this execution. Takes priority over flow and org defaults.",
+                },
+                proxyId: {
+                  type: "string",
+                  description:
+                    'Proxy ID override for this execution, or "none" to disable proxying. Takes priority over flow and org defaults.',
+                },
               },
             },
           },
