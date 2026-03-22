@@ -58,8 +58,8 @@ export const sharePaths = {
           description:
             "Flow readiness validation failed (empty prompt, missing skill/tool, provider not connected, or incomplete config)",
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/FlowReadinessError" },
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },

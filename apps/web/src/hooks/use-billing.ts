@@ -21,7 +21,15 @@ export interface BillingInfo {
   budgetUsedCents?: number;
   budgetLimitCents?: number;
   periodEnd: string | null;
-  status: "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceling" | "canceled" | "none";
+  status:
+    | "active"
+    | "trialing"
+    | "past_due"
+    | "unpaid"
+    | "paused"
+    | "canceling"
+    | "canceled"
+    | "none";
   upgrades: BillingPlanDetail[];
 }
 

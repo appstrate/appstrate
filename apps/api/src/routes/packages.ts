@@ -54,6 +54,14 @@ import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
+import {
+  ApiError,
+  invalidRequest,
+  forbidden,
+  notFound,
+  conflict,
+  internalError,
+} from "../lib/errors.ts";
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -97,7 +105,7 @@ interface ParsedUpload {
 
 /**
  * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
- * Returns parsed data or a 400 Response on validation error.
+ * Throws ApiError on validation errors.
  */
 async function parsePackageUpload(
   c: Context<AppEnv>,
@@ -107,59 +115,44 @@ async function parsePackageUpload(
     /** Find the content file by extension (e.g. ".ts") — null to use requiredFile */
     contentFileExt: string | null;
   },
-): Promise<ParsedUpload | Response> {
+): Promise<ParsedUpload> {
   const contentType = c.req.header("content-type") ?? "";
 
   if (contentType.includes("multipart/form-data")) {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "File is required" }, 400);
+      throw invalidRequest("File is required", "file");
     }
 
     if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
-        400,
-      );
+      throw invalidRequest("Only .afps and .zip files are accepted", "file");
     }
 
     const id = file.name.replace(/\.(afps|zip)$/i, "");
     if (!SLUG_RE.test(id)) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Invalid file name (kebab-case slug required)" },
-        400,
-      );
+      throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
     }
 
     let normalizedFiles: Record<string, Uint8Array>;
     try {
       normalizedFiles = unzipAndNormalize(Buffer.from(await file.arrayBuffer()));
     } catch {
-      return c.json({ error: "VALIDATION_ERROR", message: "Invalid ZIP file" }, 400);
+      throw invalidRequest("Invalid ZIP file", "file");
     }
 
     // Find the content file
     let contentFile: string | undefined;
     if (opts.requiredFile) {
       if (!normalizedFiles[opts.requiredFile]) {
-        return c.json(
-          { error: "VALIDATION_ERROR", message: `ZIP must contain ${opts.requiredFile}` },
-          400,
-        );
+        throw invalidRequest(`ZIP must contain ${opts.requiredFile}`, "file");
       }
       contentFile = opts.requiredFile;
     }
     if (opts.contentFileExt) {
       contentFile = Object.keys(normalizedFiles).find((p) => p.endsWith(opts.contentFileExt!));
       if (!contentFile) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: `ZIP must contain a ${opts.contentFileExt} file`,
-          },
-          400,
-        );
+        throw invalidRequest(`ZIP must contain a ${opts.contentFileExt} file`, "file");
       }
     }
 
@@ -206,14 +199,11 @@ async function parsePackageUpload(
   }>();
 
   if (!body.id || !body.content) {
-    return c.json({ error: "VALIDATION_ERROR", message: "id and content are required" }, 400);
+    throw invalidRequest("id and content are required");
   }
 
   if (!SLUG_RE.test(body.id)) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: "Invalid id (kebab-case slug required)" },
-      400,
-    );
+    throw invalidRequest("Invalid id (kebab-case slug required)", "id");
   }
 
   const { name, description } = body;
@@ -374,36 +364,33 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Validate manifest
       const manifestResult = validateManifest(manifest);
       if (!manifestResult.valid) {
-        return c.json(
-          {
-            error: "INVALID_MANIFEST",
-            message: "Invalid manifest",
-            details: manifestResult.errors,
-          },
-          400,
-        );
+        throw new ApiError({
+          status: 400,
+          code: "invalid_manifest",
+          title: "Invalid Manifest",
+          detail: manifestResult.errors[0] ?? "Invalid manifest",
+        });
       }
       const validatedManifest = manifestResult.manifest;
 
       if (!content.trim()) {
-        return c.json({ error: "VALIDATION_ERROR", message: "Content cannot be empty" }, 400);
+        throw invalidRequest("Content cannot be empty", "content");
       }
 
       const packageId = validatedManifest.name;
 
       const scopeErr = checkScopeMatch(c, packageId);
-      if (scopeErr) return scopeErr;
+      if (scopeErr) throw scopeErr;
 
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
       if (existingIds.includes(packageId)) {
-        return c.json(
-          {
-            error: "NAME_COLLISION",
-            message: `A ${rcfg.cfg.type} with identifier '${packageId}' already exists`,
-          },
-          400,
-        );
+        throw new ApiError({
+          status: 400,
+          code: "name_collision",
+          title: "Name Collision",
+          detail: `A ${rcfg.cfg.type} with identifier '${packageId}' already exists`,
+        });
       }
 
       const item = await createOrgItem(
@@ -440,15 +427,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // Skill/Tool create — uses parsePackageUpload (ZIP or JSON body)
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
-    if (parsed instanceof Response) return parsed;
 
     if (isSystemPackage(parsed.id)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is a system package and cannot be modified`,
-        },
-        403,
+      throw forbidden(
+        `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is a system package and cannot be modified`,
       );
     }
 
@@ -456,14 +438,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (parsed.manifest) {
       const manifestResult = validateManifest(parsed.manifest);
       if (!manifestResult.valid) {
-        return c.json(
-          {
-            error: "INVALID_MANIFEST",
-            message: "Invalid manifest",
-            details: manifestResult.errors,
-          },
-          400,
-        );
+        throw new ApiError({
+          status: 400,
+          code: "invalid_manifest",
+          title: "Invalid Manifest",
+          detail: manifestResult.errors[0] ?? "Invalid manifest",
+        });
       }
     }
 
@@ -471,15 +451,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
       if (!validation.valid) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: validation.errors[0],
-            details: validation.errors,
-            warnings: validation.warnings,
-          },
-          400,
-        );
+        throw invalidRequest(validation.errors[0] ?? "Validation failed");
       }
       warnings = validation.warnings;
     }
@@ -507,7 +479,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
     } catch (err) {
       if (err instanceof PackageAlreadyExistsError) {
-        return c.json({ error: "NAME_COLLISION", message: err.message }, 409);
+        throw conflict("name_collision", err.message);
       }
       throw err;
     }
@@ -563,13 +535,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     ]);
 
     if (!item) {
-      return c.json(
-        {
-          error: "NOT_FOUND",
-          message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`,
-        },
-        404,
-      );
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
     const hasUnpublishedChanges =
@@ -598,18 +564,12 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `${label} '${itemId}' is a system package and cannot be modified`,
-        },
-        403,
-      );
+      throw forbidden(`${label} '${itemId}' is a system package and cannot be modified`);
     }
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!existing) {
-      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+      throw notFound(`${label} '${itemId}' not found`);
     }
 
     const body = await c.req.json<{
@@ -619,13 +579,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }>();
 
     if (body.lockVersion == null || typeof body.lockVersion !== "number") {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: "lockVersion (integer) is required for updates",
-        },
-        400,
-      );
+      throw invalidRequest("lockVersion (integer) is required for updates", "lockVersion");
     }
 
     const manifest =
@@ -635,25 +589,23 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Validate manifest
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
-      return c.json(
-        {
-          error: "INVALID_MANIFEST",
-          message: "Invalid manifest",
-          details: manifestResult.errors,
-        },
-        400,
-      );
+      throw new ApiError({
+        status: 400,
+        code: "invalid_manifest",
+        title: "Invalid Manifest",
+        detail: manifestResult.errors[0] ?? "Invalid manifest",
+      });
     }
 
     // Ensure ID immutability (all types)
     const newScopedName = (manifest as { name?: string }).name;
     if (newScopedName && newScopedName !== itemId) {
-      return c.json({ error: "VALIDATION_ERROR", message: "name cannot change" }, 400);
+      throw invalidRequest("name cannot change", "name");
     }
 
     // Content cannot be empty (all types)
     if (!content.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Content cannot be empty" }, 400);
+      throw invalidRequest("Content cannot be empty", "content");
     }
 
     // Content validation (tools)
@@ -661,15 +613,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
       if (!validation.valid) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: validation.errors[0],
-            details: validation.errors,
-            warnings: validation.warnings,
-          },
-          400,
-        );
+        throw invalidRequest(validation.errors[0] ?? "Validation failed");
       }
       warnings = validation.warnings;
     }
@@ -681,13 +625,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     );
 
     if (!updated) {
-      return c.json(
-        {
-          error: "CONFLICT",
-          message: `${label} was modified concurrently. Reload and try again.`,
-        },
-        409,
-      );
+      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
     // Update storage files (merge with existing to preserve ancillary files)
@@ -721,25 +659,16 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `${label} '${itemId}' is a system package and cannot be deleted`,
-        },
-        403,
-      );
+      throw forbidden(`${label} '${itemId}' is a system package and cannot be deleted`);
     }
 
     // For flows, check running executions
     if (rcfg.requireMutableForVersionOps) {
       const running = await getRunningExecutionsForPackage(itemId);
       if (running > 0) {
-        return c.json(
-          {
-            error: "FLOW_IN_USE",
-            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
-          },
-          409,
+        throw conflict(
+          "flow_in_use",
+          `${running} execution(s) running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -747,23 +676,12 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
       if (result.error === "DEPENDED_ON") {
-        return c.json(
-          {
-            error: "DEPENDED_ON",
-            message: `${label} '${itemId}' is required by ${result.dependents!.length} package(s)`,
-            dependents: result.dependents,
-          },
-          409,
+        throw conflict(
+          "depended_on",
+          `${label} '${itemId}' is required by ${result.dependents!.length} package(s)`,
         );
       }
-      return c.json(
-        {
-          error: "IN_USE",
-          message: `${label} '${itemId}' is used by ${result.flows!.length} flow(s)`,
-          flows: result.flows,
-        },
-        409,
-      );
+      throw conflict("in_use", `${label} '${itemId}' is used by ${result.flows!.length} flow(s)`);
     }
 
     return c.body(null, 204);
@@ -776,10 +694,7 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const item = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!item) {
-      return c.json(
-        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
-        404,
-      );
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
     const versions = await listPackageVersions(itemId);
     return c.json({ versions });
@@ -794,18 +709,12 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!existing) {
-      return c.json(
-        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
-        404,
-      );
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
     const detail = await getVersionDetail(itemId, versionQuery);
     if (!detail) {
-      return c.json(
-        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-        404,
-      );
+      throw notFound(`Version '${versionQuery}' not found`);
     }
 
     const matchingTags = await getMatchingDistTags(itemId, detail.version);
@@ -841,10 +750,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const item = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!item) {
-      return c.json(
-        { error: "NOT_FOUND", message: `${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found` },
-        404,
-      );
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
     const info = await getVersionInfo(itemId);
     return c.json(info);
@@ -859,29 +765,23 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
-        403,
-      );
+      throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
     // Mutable check: no running executions for flows
     if (rcfg.requireMutableForVersionOps) {
       const running = await getRunningExecutionsForPackage(itemId);
       if (running > 0) {
-        return c.json(
-          {
-            error: "FLOW_IN_USE",
-            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
-          },
-          409,
+        throw conflict(
+          "flow_in_use",
+          `${running} execution(s) running for this ${label.toLowerCase()}`,
         );
       }
     }
 
     const item = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!item) {
-      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+      throw notFound(`${label} '${itemId}' not found`);
     }
 
     // Parse optional version override from request body
@@ -903,10 +803,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     if (!result) {
-      return c.json(
-        { error: "VERSION_FAILED", message: "Failed to create version (invalid or duplicate)" },
-        400,
-      );
+      throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
     return c.json(
@@ -923,22 +820,16 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
-        403,
-      );
+      throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
     // Mutable check: no running executions for flows
     if (rcfg.requireMutableForVersionOps) {
       const running = await getRunningExecutionsForPackage(itemId);
       if (running > 0) {
-        return c.json(
-          {
-            error: "FLOW_IN_USE",
-            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
-          },
-          409,
+        throw conflict(
+          "flow_in_use",
+          `${running} execution(s) running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -946,15 +837,12 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     const versionQuery = c.req.param("version")!;
     const detail = await getVersionDetail(itemId, versionQuery);
     if (!detail) {
-      return c.json(
-        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-        404,
-      );
+      throw notFound(`Version '${versionQuery}' not found`);
     }
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
     if (!existing || !existing.lockVersion) {
-      return c.json({ error: "NOT_FOUND", message: `${label} '${itemId}' not found` }, 404);
+      throw notFound(`${label} '${itemId}' not found`);
     }
 
     // Extract content from version ZIP
@@ -974,10 +862,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     );
 
     if (!updated) {
-      return c.json(
-        { error: "CONFLICT", message: "Package was modified concurrently. Reload and try again." },
-        409,
-      );
+      throw conflict("conflict", "Package was modified concurrently. Reload and try again.");
     }
 
     // If restoring the latest version, align updatedAt so the draft
@@ -1019,21 +904,15 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `${label} '${itemId}' is a system package` },
-        403,
-      );
+      throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
     if (rcfg.requireMutableForVersionOps) {
       const running = await getRunningExecutionsForPackage(itemId);
       if (running > 0) {
-        return c.json(
-          {
-            error: "FLOW_IN_USE",
-            message: `${running} execution(s) running for this ${label.toLowerCase()}`,
-          },
-          409,
+        throw conflict(
+          "flow_in_use",
+          `${running} execution(s) running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -1041,10 +920,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     const versionQuery = c.req.param("version")!;
     const deleted = await deletePackageVersion(itemId, versionQuery);
     if (!deleted) {
-      return c.json(
-        { error: "VERSION_NOT_FOUND", message: `Version '${versionQuery}' not found` },
-        404,
-      );
+      throw notFound(`Version '${versionQuery}' not found`);
     }
 
     return c.body(null, 204);
@@ -1117,7 +993,7 @@ export function createPackagesRouter() {
 
     if (customName !== undefined) {
       if (!SLUG_REGEX.test(customName)) {
-        return c.json({ error: "INVALID_NAME", message: "Name must match slug format" }, 400);
+        throw invalidRequest("Name must match slug format", "name");
       }
     }
 
@@ -1126,30 +1002,20 @@ export function createPackagesRouter() {
     if ("code" in result) {
       switch (result.code) {
         case "ALREADY_OWNED":
-          return c.json({ error: "ALREADY_OWNED", message: "You already own this package" }, 400);
+          throw invalidRequest("You already own this package");
         case "NOT_FOUND":
-          return c.json({ error: "NOT_FOUND", message: "Package not found" }, 404);
+          throw notFound("Package not found");
         case "NAME_COLLISION":
-          return c.json(
-            {
-              error: "NAME_COLLISION",
-              message: "A package with this name already exists in your organization",
-            },
-            400,
-          );
+          throw new ApiError({
+            status: 400,
+            code: "name_collision",
+            title: "Name Collision",
+            detail: "A package with this name already exists in your organization",
+          });
         case "UNKNOWN_TYPE":
-          return c.json(
-            { error: "UNKNOWN_TYPE", message: `Unsupported package type: ${result.type}` },
-            400,
-          );
+          throw invalidRequest(`Unsupported package type: ${result.type}`);
         case "NO_PUBLISHED_VERSION":
-          return c.json(
-            {
-              error: "NO_PUBLISHED_VERSION",
-              message: "Source package has no published version",
-            },
-            400,
-          );
+          throw invalidRequest("Source package has no published version");
       }
     }
 
@@ -1170,38 +1036,32 @@ export function createPackagesRouter() {
   async function parseZipWithSkillFallback(
     zipBytes: Uint8Array,
     orgSlug: string,
-    c: Context<AppEnv>,
-  ) {
+  ): Promise<ReturnType<typeof parsePackageZip>> {
     try {
-      return { parsed: parsePackageZip(zipBytes), error: null };
+      return parsePackageZip(zipBytes);
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
         const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);
         if (result.ok) {
-          return { parsed: result.parsed, error: null };
+          return result.parsed;
         }
         if (result.reason === "unchanged") {
-          return {
-            parsed: null,
-            error: c.json(
-              {
-                error: "SKILL_UNCHANGED",
-                message: "This skill already exists with the same content",
-              },
-              409,
-            ),
-          };
+          throw conflict("skill_unchanged", "This skill already exists with the same content");
         }
-        return {
-          parsed: null,
-          error: c.json({ error: err.code, message: err.message, details: err.details }, 400),
-        };
+        throw new ApiError({
+          status: 400,
+          code: err.code.toLowerCase(),
+          title: "Package Error",
+          detail: err.message,
+        });
       }
       if (err instanceof PackageZipError) {
-        return {
-          parsed: null,
-          error: c.json({ error: err.code, message: err.message, details: err.details }, 400),
-        };
+        throw new ApiError({
+          status: 400,
+          code: err.code.toLowerCase(),
+          title: "Package Error",
+          detail: err.message,
+        });
       }
       throw err;
     }
@@ -1219,17 +1079,16 @@ export function createPackagesRouter() {
     const packageId = manifest.name as string;
 
     const scopeErr = checkScopeMatch(c, packageId);
-    if (scopeErr) return scopeErr;
+    if (scopeErr) throw scopeErr;
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
-      return c.json(
-        {
-          error: "NAME_COLLISION",
-          message: `'${packageId}' is a system package and cannot be overwritten`,
-        },
-        400,
-      );
+      throw new ApiError({
+        status: 400,
+        code: "name_collision",
+        title: "Name Collision",
+        detail: `'${packageId}' is a system package and cannot be overwritten`,
+      });
     }
 
     // Check for existing user package
@@ -1237,22 +1096,20 @@ export function createPackagesRouter() {
 
     if (existing) {
       if (existing.orgId !== orgId) {
-        return c.json(
-          {
-            error: "NAME_COLLISION",
-            message: `A package with identifier '${packageId}' already exists`,
-          },
-          400,
-        );
+        throw new ApiError({
+          status: 400,
+          code: "name_collision",
+          title: "Name Collision",
+          detail: `A package with identifier '${packageId}' already exists`,
+        });
       }
       if (existing.type !== packageType) {
-        return c.json(
-          {
-            error: "TYPE_MISMATCH",
-            message: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
-          },
-          400,
-        );
+        throw new ApiError({
+          status: 400,
+          code: "type_mismatch",
+          title: "Type Mismatch",
+          detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
+        });
       }
       // Draft overwrite protection
       if (!force) {
@@ -1265,17 +1122,9 @@ export function createPackagesRouter() {
             ? (existing.updatedAt ?? new Date()) > latestDate
             : false;
         if (hasUnpublishedChanges) {
-          return c.json(
-            {
-              error: "DRAFT_OVERWRITE",
-              message:
-                "This package has unpublished changes that will be overwritten by the import.",
-              details: {
-                packageId,
-                draftVersion: (existing.draftManifest as Record<string, unknown>)?.version ?? null,
-              },
-            },
-            409,
+          throw conflict(
+            "draft_overwrite",
+            "This package has unpublished changes that will be overwritten by the import.",
           );
         }
       }
@@ -1287,14 +1136,9 @@ export function createPackagesRouter() {
         if (existingVer) {
           const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
           if (existingVer.integrity !== importedIntegrity) {
-            return c.json(
-              {
-                error: "INTEGRITY_MISMATCH",
-                message:
-                  "This version already exists with different content. Use the force option to replace.",
-                details: { packageId, version: importedVersion },
-              },
-              409,
+            throw conflict(
+              "integrity_mismatch",
+              "This version already exists with different content. Use the force option to replace.",
             );
           }
         }
@@ -1309,10 +1153,7 @@ export function createPackagesRouter() {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
       if (!cfg) {
-        return c.json(
-          { error: "INVALID_TYPE", message: `Unknown package type '${packageType}'` },
-          400,
-        );
+        throw invalidRequest(`Unknown package type '${packageType}'`);
       }
       try {
         await createOrgItem(
@@ -1323,7 +1164,7 @@ export function createPackagesRouter() {
         );
       } catch (err) {
         if (err instanceof PackageAlreadyExistsError) {
-          return c.json({ error: "NAME_COLLISION", message: err.message }, 409);
+          throw conflict("name_collision", err.message);
         }
         throw err;
       }
@@ -1343,7 +1184,12 @@ export function createPackagesRouter() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
-      return c.json({ error: "POST_INSTALL_FAILED", message }, 400);
+      throw new ApiError({
+        status: 400,
+        code: "post_install_failed",
+        title: "Post-Install Failed",
+        detail: message,
+      });
     }
 
     // Sync flow dependency junction table after import (providers included)
@@ -1382,20 +1228,16 @@ export function createPackagesRouter() {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
-      return c.json({ error: "VALIDATION_ERROR", message: "No file provided" }, 400);
+      throw invalidRequest("No file provided");
     }
     if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Only .afps and .zip files are accepted" },
-        400,
-      );
+      throw invalidRequest("Only .afps and .zip files are accepted");
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const zipBytes = new Uint8Array(buffer);
 
-    const { parsed, error } = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"), c);
-    if (!parsed) return error!;
+    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
 
     return handleImport(c, parsed, buffer, c.req.query("force") === "true");
   });
@@ -1404,7 +1246,7 @@ export function createPackagesRouter() {
   router.post("/import-github", rateLimit(10), requireAdmin(), async (c) => {
     const body = await c.req.json<{ url?: string }>();
     if (!body.url || typeof body.url !== "string") {
-      return c.json({ error: "VALIDATION_ERROR", message: "Missing 'url' field" }, 400);
+      throw invalidRequest("Missing 'url' field", "url");
     }
 
     let zipBytes: Uint8Array;
@@ -1412,15 +1254,19 @@ export function createPackagesRouter() {
       zipBytes = await fetchGithubDirectory(body.url);
     } catch (err) {
       if (err instanceof GithubImportError) {
-        return c.json({ error: err.code, message: err.message }, 400);
+        throw new ApiError({
+          status: 400,
+          code: err.code,
+          title: "Import Failed",
+          detail: err.message,
+        });
       }
       throw err;
     }
 
     const buffer = Buffer.from(zipBytes);
 
-    const { parsed, error } = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"), c);
-    if (!parsed) return error!;
+    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
 
     return handleImport(c, parsed, buffer, false);
   });
@@ -1432,17 +1278,17 @@ export function createPackagesRouter() {
 
     const ver = await getVersionForDownload(packageId, versionQuery);
     if (!ver) {
-      return c.json({ error: "NOT_FOUND", message: "Version not found" }, 404);
+      throw notFound("Version not found");
     }
 
     let data: Buffer | null;
     try {
       data = await downloadVersionZip(packageId, ver.version, ver.integrity);
     } catch {
-      return c.json({ error: "INTEGRITY_ERROR", message: "Artifact integrity check failed" }, 500);
+      throw internalError("Artifact integrity check failed");
     }
     if (!data) {
-      return c.json({ error: "NOT_FOUND", message: "Artifact not found in storage" }, 404);
+      throw notFound("Artifact not found in storage");
     }
 
     const downloadHeaders = buildDownloadHeaders({

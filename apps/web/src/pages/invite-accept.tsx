@@ -55,7 +55,7 @@ export function InviteAcceptPage() {
       .then(async (res) => {
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || "INVITATION_NOT_FOUND");
+          throw new Error(data.code || "invitation_not_found");
         }
         return res.json();
       })
@@ -64,12 +64,12 @@ export function InviteAcceptPage() {
         setLoading(false);
       })
       .catch((err) => {
-        const code = err instanceof Error ? err.message : "INVITATION_NOT_FOUND";
-        if (code === "INVITATION_EXPIRED") {
+        const code = err instanceof Error ? err.message : "invitation_not_found";
+        if (code === "invitation_expired") {
           setServerError(t("invite.expired"));
-        } else if (code === "INVITATION_ACCEPTED") {
+        } else if (code === "invitation_accepted") {
           setServerError(t("invite.alreadyAccepted"));
-        } else if (code === "INVITATION_CANCELLED") {
+        } else if (code === "invitation_cancelled") {
           setServerError(t("invite.cancelled"));
         } else {
           setServerError(t("invite.invalid"));
@@ -106,7 +106,7 @@ export function InviteAcceptPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Erreur");
+        throw new Error(data.detail || "Erreur");
       }
 
       const data = await res.json();

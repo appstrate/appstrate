@@ -5,19 +5,10 @@
 
 import type { LoadedFlow } from "../types/index.ts";
 import { validateFlowDependencies } from "./dependency-validation.ts";
-import type { DependencyError } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "../lib/flow-readiness.ts";
-
-export interface ReadinessError {
-  error: string;
-  message: string;
-  providerId?: string;
-  connectUrl?: string;
-  configUrl?: string;
-  details?: Record<string, unknown>;
-}
+import { ApiError } from "../lib/errors.ts";
 
 /**
  * Validate that a flow is ready for execution.
@@ -28,22 +19,26 @@ export interface ReadinessError {
  * 3. Missing required tools
  * 4. Provider dependencies (delegates to validateFlowDependencies)
  * 5. Config validation (if config provided)
+ *
+ * Throws ApiError on first validation failure.
  */
 export async function validateFlowReadiness(params: {
   flow: LoadedFlow;
   providerProfiles: Record<string, string>;
   orgId: string;
   config?: Record<string, unknown>;
-}): Promise<ReadinessError | null> {
+}): Promise<void> {
   const { flow, providerProfiles, orgId, config } = params;
   const { manifest } = flow;
 
   // 1. Empty prompt
   if (isPromptEmpty(flow.prompt)) {
-    return {
-      error: "EMPTY_PROMPT",
-      message: "Flow prompt is empty",
-    };
+    throw new ApiError({
+      status: 400,
+      code: "empty_prompt",
+      title: "Empty Prompt",
+      detail: "Flow prompt is empty",
+    });
   }
 
   // 2. Missing skills
@@ -52,11 +47,12 @@ export async function validateFlowReadiness(params: {
     flow.skills.map((s) => s.id),
   );
   if (missingSkills.length > 0) {
-    return {
-      error: "MISSING_SKILL",
-      message: `Required skill '${missingSkills[0]}' is not installed`,
-      details: { skillId: missingSkills[0] },
-    };
+    throw new ApiError({
+      status: 400,
+      code: "missing_skill",
+      title: "Missing Skill",
+      detail: `Required skill '${missingSkills[0]}' is not installed`,
+    });
   }
 
   // 3. Missing tools
@@ -65,23 +61,17 @@ export async function validateFlowReadiness(params: {
     flow.tools.map((e) => e.id),
   );
   if (missingTools.length > 0) {
-    return {
-      error: "MISSING_TOOL",
-      message: `Required tool '${missingTools[0]}' is not installed`,
-      details: { toolId: missingTools[0] },
-    };
+    throw new ApiError({
+      status: 400,
+      code: "missing_tool",
+      title: "Missing Tool",
+      detail: `Required tool '${missingTools[0]}' is not installed`,
+    });
   }
 
   // 4. Provider dependencies
   const manifestProviders = resolveManifestProviders(manifest);
-  const depError: DependencyError | null = await validateFlowDependencies(
-    manifestProviders,
-    providerProfiles,
-    orgId,
-  );
-  if (depError) {
-    return depError;
-  }
+  await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
 
   // 5. Config validation
   if (config) {
@@ -92,13 +82,12 @@ export async function validateFlowReadiness(params: {
     const configValidation = validateConfig(config, configSchema);
     if (!configValidation.valid) {
       const first = configValidation.errors[0]!;
-      return {
-        error: "CONFIG_INCOMPLETE",
-        message: `Parameter '${first.field}' is required`,
-        configUrl: `/api/flows/${flow.id}/config`,
-      };
+      throw new ApiError({
+        status: 400,
+        code: "config_incomplete",
+        title: "Config Incomplete",
+        detail: `Parameter '${first.field}' is required`,
+      });
     }
   }
-
-  return null;
 }

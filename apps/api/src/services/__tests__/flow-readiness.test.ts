@@ -1,17 +1,19 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import type { LoadedFlow } from "../../types/index.ts";
-import type { DependencyError } from "../dependency-validation.ts";
+import { ApiError } from "../../lib/errors.ts";
 
 // --- Mock state ---
 
-let mockDepError: DependencyError | null = null;
+let mockDepThrow: ApiError | null = null;
 let mockConfigResult = { valid: true, errors: [] as { field: string; message: string }[] };
 let mockManifestProviders: { id: string; provider: string }[] = [];
 
 // --- Mocks (before dynamic import) ---
 
 mock.module("../dependency-validation.ts", () => ({
-  validateFlowDependencies: mock(async () => mockDepError),
+  validateFlowDependencies: mock(async () => {
+    if (mockDepThrow) throw mockDepThrow;
+  }),
 }));
 
 mock.module("../schema.ts", () => ({
@@ -62,59 +64,69 @@ function makeParams(overrides: Partial<Parameters<typeof validateFlowReadiness>[
   };
 }
 
+async function expectApiError(fn: () => Promise<void>, code: string): Promise<ApiError> {
+  try {
+    await fn();
+    throw new Error(`Expected ApiError with code '${code}' but no error was thrown`);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      expect(err.code).toBe(code);
+      return err;
+    }
+    throw err;
+  }
+}
+
 // --- Tests ---
 
 beforeEach(() => {
-  mockDepError = null;
+  mockDepThrow = null;
   mockConfigResult = { valid: true, errors: [] };
   mockManifestProviders = [];
 });
 
 describe("validateFlowReadiness", () => {
-  test("returns null when flow is valid", async () => {
-    const result = await validateFlowReadiness(makeParams());
-    expect(result).toBeNull();
+  test("resolves when flow is valid", async () => {
+    await validateFlowReadiness(makeParams());
   });
 
   // --- Empty prompt ---
 
   describe("empty prompt check", () => {
-    test("returns EMPTY_PROMPT for empty string", async () => {
-      const result = await validateFlowReadiness(makeParams({ flow: makeFlow({ prompt: "" }) }));
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("EMPTY_PROMPT");
+    test("throws empty_prompt for empty string", async () => {
+      await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow: makeFlow({ prompt: "" }) })),
+        "empty_prompt",
+      );
     });
 
-    test("returns EMPTY_PROMPT for whitespace-only", async () => {
-      const result = await validateFlowReadiness(
-        makeParams({ flow: makeFlow({ prompt: "   \n\t  " }) }),
+    test("throws empty_prompt for whitespace-only", async () => {
+      await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow: makeFlow({ prompt: "   \n\t  " }) })),
+        "empty_prompt",
       );
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("EMPTY_PROMPT");
     });
 
     test("passes for non-empty prompt", async () => {
-      const result = await validateFlowReadiness(
-        makeParams({ flow: makeFlow({ prompt: "Hello" }) }),
-      );
-      expect(result).toBeNull();
+      await validateFlowReadiness(makeParams({ flow: makeFlow({ prompt: "Hello" }) }));
     });
   });
 
   // --- Missing skills ---
 
   describe("missing skills check", () => {
-    test("returns MISSING_SKILL when required skill is not installed", async () => {
+    test("throws missing_skill when required skill is not installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
           dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
         }),
         skills: [],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("MISSING_SKILL");
-      expect(result!.message).toContain("@test/skill-a");
+      const err = await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow })),
+        "missing_skill",
+      );
+      expect(err.message).toContain("@test/skill-a");
     });
 
     test("passes when required skill is installed", async () => {
@@ -124,11 +136,10 @@ describe("validateFlowReadiness", () => {
         }),
         skills: [{ id: "@test/skill-a", description: "Skill A" }],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result).toBeNull();
+      await validateFlowReadiness(makeParams({ flow }));
     });
 
-    test("returns error for first missing skill when multiple required", async () => {
+    test("throws for first missing skill when multiple required", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
           dependencies: {
@@ -140,27 +151,29 @@ describe("validateFlowReadiness", () => {
         }),
         skills: [{ id: "@test/skill-a", description: "Skill A" }],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("MISSING_SKILL");
-      expect(result!.message).toContain("@test/skill-b");
+      const err = await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow })),
+        "missing_skill",
+      );
+      expect(err.message).toContain("@test/skill-b");
     });
   });
 
   // --- Missing tools ---
 
   describe("missing tools check", () => {
-    test("returns MISSING_TOOL when required tool is not installed", async () => {
+    test("throws missing_tool when required tool is not installed", async () => {
       const flow = makeFlow({
         manifest: makeManifest({
           dependencies: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
         tools: [],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("MISSING_TOOL");
-      expect(result!.message).toContain("@test/ext-a");
+      const err = await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow })),
+        "missing_tool",
+      );
+      expect(err.message).toContain("@test/ext-a");
     });
 
     test("passes when required tool is installed", async () => {
@@ -170,36 +183,33 @@ describe("validateFlowReadiness", () => {
         }),
         tools: [{ id: "@test/ext-a", description: "Ext A" }],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result).toBeNull();
+      await validateFlowReadiness(makeParams({ flow }));
     });
   });
 
   // --- Provider dependencies ---
 
   describe("provider dependencies check", () => {
-    test("returns dependency error when validateFlowDependencies fails", async () => {
-      mockDepError = {
-        error: "PROVIDER_NOT_ENABLED",
-        message: "Provider 'gmail' is not configured",
-        providerId: "gmail",
-      };
-      const result = await validateFlowReadiness(makeParams());
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("PROVIDER_NOT_ENABLED");
+    test("throws when validateFlowDependencies throws", async () => {
+      mockDepThrow = new ApiError({
+        status: 400,
+        code: "provider_not_enabled",
+        title: "Provider Not Enabled",
+        detail: "Provider 'gmail' is not configured",
+      });
+      await expectApiError(() => validateFlowReadiness(makeParams()), "provider_not_enabled");
     });
 
     test("passes when all providers are satisfied", async () => {
-      mockDepError = null;
-      const result = await validateFlowReadiness(makeParams());
-      expect(result).toBeNull();
+      mockDepThrow = null;
+      await validateFlowReadiness(makeParams());
     });
   });
 
   // --- Config validation ---
 
   describe("config validation check", () => {
-    test("returns CONFIG_INCOMPLETE when config fails validation", async () => {
+    test("throws config_incomplete when config fails validation", async () => {
       mockConfigResult = {
         valid: false,
         errors: [{ field: "apiKey", message: "is required" }],
@@ -215,11 +225,11 @@ describe("validateFlowReadiness", () => {
           },
         }),
       });
-      const result = await validateFlowReadiness(makeParams({ flow, config: {} }));
-      expect(result).not.toBeNull();
-      expect(result!.error).toBe("CONFIG_INCOMPLETE");
-      expect(result!.message).toContain("apiKey");
-      expect(result!.configUrl).toBe("/api/flows/@test/my-flow/config");
+      const err = await expectApiError(
+        () => validateFlowReadiness(makeParams({ flow, config: {} })),
+        "config_incomplete",
+      );
+      expect(err.message).toContain("apiKey");
     });
 
     test("skips config validation when config is not provided", async () => {
@@ -227,14 +237,12 @@ describe("validateFlowReadiness", () => {
         valid: false,
         errors: [{ field: "apiKey", message: "is required" }],
       };
-      const result = await validateFlowReadiness(makeParams());
-      expect(result).toBeNull();
+      await validateFlowReadiness(makeParams());
     });
 
     test("passes when config is valid", async () => {
       mockConfigResult = { valid: true, errors: [] };
-      const result = await validateFlowReadiness(makeParams({ config: { apiKey: "abc" } }));
-      expect(result).toBeNull();
+      await validateFlowReadiness(makeParams({ config: { apiKey: "abc" } }));
     });
   });
 
@@ -249,8 +257,7 @@ describe("validateFlowReadiness", () => {
         }),
         skills: [],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result!.error).toBe("EMPTY_PROMPT");
+      await expectApiError(() => validateFlowReadiness(makeParams({ flow })), "empty_prompt");
     });
 
     test("missing skill takes priority over missing tool", async () => {
@@ -264,38 +271,40 @@ describe("validateFlowReadiness", () => {
         skills: [],
         tools: [],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result!.error).toBe("MISSING_SKILL");
+      await expectApiError(() => validateFlowReadiness(makeParams({ flow })), "missing_skill");
     });
 
     test("missing tool takes priority over provider error", async () => {
-      mockDepError = {
-        error: "PROVIDER_NOT_ENABLED",
-        message: "Provider 'gmail' is not configured",
-        providerId: "gmail",
-      };
+      mockDepThrow = new ApiError({
+        status: 400,
+        code: "provider_not_enabled",
+        title: "Provider Not Enabled",
+        detail: "Provider 'gmail' is not configured",
+      });
       const flow = makeFlow({
         manifest: makeManifest({
           dependencies: { tools: { "@test/ext-a": "^1.0.0" } },
         }),
         tools: [],
       });
-      const result = await validateFlowReadiness(makeParams({ flow }));
-      expect(result!.error).toBe("MISSING_TOOL");
+      await expectApiError(() => validateFlowReadiness(makeParams({ flow })), "missing_tool");
     });
 
     test("provider error takes priority over config error", async () => {
-      mockDepError = {
-        error: "DEPENDENCY_NOT_SATISFIED",
-        message: "Provider 'gmail' is not connected",
-        providerId: "gmail",
-      };
+      mockDepThrow = new ApiError({
+        status: 400,
+        code: "dependency_not_satisfied",
+        title: "Dependency Not Satisfied",
+        detail: "Provider 'gmail' is not connected",
+      });
       mockConfigResult = {
         valid: false,
         errors: [{ field: "apiKey", message: "is required" }],
       };
-      const result = await validateFlowReadiness(makeParams({ config: {} }));
-      expect(result!.error).toBe("DEPENDENCY_NOT_SATISFIED");
+      await expectApiError(
+        () => validateFlowReadiness(makeParams({ config: {} })),
+        "dependency_not_satisfied",
+      );
     });
   });
 });

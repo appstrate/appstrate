@@ -8,6 +8,7 @@ import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 import { getEnv } from "@appstrate/env";
 import { requireAdmin, checkScopeMatch } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
+import { ApiError, invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -129,23 +130,22 @@ export function createProvidersRouter() {
     const parsed = createProviderSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     const data = parsed.data;
 
     const scopeErr = checkScopeMatch(c, data.id);
-    if (scopeErr) return scopeErr;
+    if (scopeErr) throw scopeErr;
 
     // Block creation if ID matches a system provider
     if (await isSystemProviderInDb(data.id)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot create provider '${data.id}': conflicts with a system provider`,
-        },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot create provider '${data.id}': conflicts with a system provider`,
+      });
     }
 
     // Check ID doesn't already exist for this org
@@ -158,10 +158,12 @@ export function createProvidersRouter() {
       .limit(1);
 
     if (existing.length > 0) {
-      return c.json(
-        { error: "NAME_COLLISION", message: `Provider '${data.id}' already exists` },
-        400,
-      );
+      throw new ApiError({
+        status: 400,
+        code: "name_collision",
+        title: "Bad Request",
+        detail: `Provider '${data.id}' already exists`,
+      });
     }
 
     // Build the nested definition object for manifest.definition
@@ -263,7 +265,7 @@ export function createProvidersRouter() {
       logger.error("Provider create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to create provider" }, 500);
+      throw internalError("Failed to create provider");
     }
 
     // Create initial version (non-fatal)
@@ -311,18 +313,17 @@ export function createProvidersRouter() {
     const parsed = updateProviderSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     // Block editing system providers (DB-based guard)
     if (await isSystemProviderInDb(providerId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot modify system provider '${providerId}'`,
-        },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot modify system provider '${providerId}'`,
+      });
     }
 
     // Fetch existing package
@@ -339,7 +340,7 @@ export function createProvidersRouter() {
       .limit(1);
 
     if (!existingPkg) {
-      return c.json({ error: "NOT_FOUND", message: `Provider '${providerId}' not found` }, 404);
+      throw notFound(`Provider '${providerId}' not found`);
     }
 
     const data = parsed.data;
@@ -436,7 +437,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to update provider" }, 500);
+      throw internalError("Failed to update provider");
     }
 
     return c.json({ id: providerId });
@@ -454,7 +455,7 @@ export function createProvidersRouter() {
     });
     const parsed = credSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     // Verify the provider exists and get its admin credential schema
@@ -465,7 +466,7 @@ export function createProvidersRouter() {
       .limit(1);
 
     if (!pkg) {
-      return c.json({ error: "NOT_FOUND", message: "Provider not found" }, 404);
+      throw notFound("Provider not found");
     }
 
     const hasCredentials =
@@ -482,13 +483,7 @@ export function createProvidersRouter() {
       if (adminSchema?.required) {
         const missing = adminSchema.required.filter((k) => !parsed.data.credentials![k]);
         if (missing.length > 0) {
-          return c.json(
-            {
-              error: "VALIDATION_ERROR",
-              message: `Missing required fields: ${missing.join(", ")}`,
-            },
-            400,
-          );
+          throw invalidRequest(`Missing required fields: ${missing.join(", ")}`);
         }
       }
     }
@@ -539,13 +534,12 @@ export function createProvidersRouter() {
 
     // Block deleting system providers (DB-based guard)
     if (await isSystemProviderInDb(providerId)) {
-      return c.json(
-        {
-          error: "OPERATION_NOT_ALLOWED",
-          message: `Cannot delete system provider '${providerId}'`,
-        },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot delete system provider '${providerId}'`,
+      });
     }
 
     // Block deleting providers that are in use by flows
@@ -560,12 +554,9 @@ export function createProvidersRouter() {
       }
     }
     if (usageCount > 0) {
-      return c.json(
-        {
-          error: "PROVIDER_IN_USE",
-          message: `Cannot delete provider '${providerId}': used by ${usageCount} flow(s)`,
-        },
-        409,
+      throw conflict(
+        "provider_in_use",
+        `Cannot delete provider '${providerId}': used by ${usageCount} flow(s)`,
       );
     }
 
@@ -577,7 +568,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to delete provider" }, 500);
+      throw internalError("Failed to delete provider");
     }
 
     return c.body(null, 204);

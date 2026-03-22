@@ -14,7 +14,11 @@ import {
   findUserByEmail,
   slugify,
   isSlugAvailable,
+  getAllowedRedirectDomains,
+  setAllowedRedirectDomains,
 } from "../services/organizations.ts";
+import { validateDomainList } from "../services/redirect-validation.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import {
   createInvitation,
   getOrgInvitations,
@@ -49,19 +53,21 @@ router.post("/", async (c) => {
   const body = await c.req.json<{ name: string; slug?: string }>();
 
   if (!body.name?.trim()) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Name is required" }, 400);
+    throw invalidRequest("Name is required");
   }
 
   const slug = body.slug?.trim() || slugify(body.name);
   if (!slug || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)) {
-    return c.json(
-      { error: "VALIDATION_ERROR", message: "Invalid slug (kebab-case required)" },
-      400,
-    );
+    throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
   if (!(await isSlugAvailable(slug))) {
-    return c.json({ error: "SLUG_TAKEN", message: `Slug '${slug}' is already in use` }, 400);
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+    });
   }
 
   const org = await createOrganization(body.name.trim(), slug, user.id);
@@ -100,7 +106,7 @@ router.get("/:orgId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member) {
-    return c.json({ error: "FORBIDDEN", message: "Not a member of this organization" }, 403);
+    throw forbidden("Not a member of this organization");
   }
 
   const [org, members, invitations] = await Promise.all([
@@ -109,7 +115,7 @@ router.get("/:orgId", async (c) => {
     getOrgInvitations(orgId),
   ]);
   if (!org) {
-    return c.json({ error: "NOT_FOUND", message: "Organization not found" }, 404);
+    throw notFound("Organization not found");
   }
 
   return c.json({
@@ -142,23 +148,22 @@ router.put("/:orgId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json(
-      { error: "FORBIDDEN", message: "Only the owner can modify the organization" },
-      403,
-    );
+    throw forbidden("Only the owner can modify the organization");
   }
 
   const body = await c.req.json<{ name?: string; slug?: string }>();
 
   if (body.slug) {
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
-      return c.json(
-        { error: "VALIDATION_ERROR", message: "Invalid slug (kebab-case required)" },
-        400,
-      );
+      throw invalidRequest("Invalid slug (kebab-case required)");
     }
     if (!(await isSlugAvailable(body.slug))) {
-      return c.json({ error: "SLUG_TAKEN", message: `Slug '${body.slug}' is already in use` }, 400);
+      throw new ApiError({
+        status: 400,
+        code: "slug_taken",
+        title: "Bad Request",
+        detail: `Slug '${body.slug}' is already in use`,
+      });
     }
   }
 
@@ -177,10 +182,7 @@ router.delete("/:orgId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json(
-      { error: "FORBIDDEN", message: "Only the owner can delete the organization" },
-      403,
-    );
+    throw forbidden("Only the owner can delete the organization");
   }
 
   try {
@@ -197,7 +199,7 @@ router.delete("/:orgId", async (c) => {
     await deleteOrganization(orgId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete organization";
-    return c.json({ error: "DELETE_FAILED", message: msg }, 400);
+    throw new ApiError({ status: 400, code: "delete_failed", title: "Bad Request", detail: msg });
   }
 
   return c.json({ ok: true });
@@ -210,17 +212,17 @@ router.post("/:orgId/members", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json({ error: "FORBIDDEN", message: "Only admins can add members" }, 403);
+    throw forbidden("Only admins can add members");
   }
 
   const body = await c.req.json<{ email: string; role?: string }>();
   if (!body.email?.trim()) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Email is required" }, 400);
+    throw invalidRequest("Email is required");
   }
 
   const role = (body.role as "member" | "admin") || "member";
   if (!["member", "admin"].includes(role)) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
+    throw invalidRequest("Role must be 'member' or 'admin'");
   }
 
   const targetUser = await findUserByEmail(body.email.trim());
@@ -230,13 +232,12 @@ router.post("/:orgId/members", async (c) => {
     try {
       await addMember(orgId, targetUser.id, role);
     } catch (err) {
-      return c.json(
-        {
-          error: "ADD_MEMBER_FAILED",
-          message: err instanceof Error ? err.message : "Failed to add member",
-        },
-        400,
-      );
+      throw new ApiError({
+        status: 400,
+        code: "add_member_failed",
+        title: "Bad Request",
+        detail: err instanceof Error ? err.message : "Failed to add member",
+      });
     }
     return c.json({ userId: targetUser.id, role, added: true }, 201);
   }
@@ -252,13 +253,12 @@ router.post("/:orgId/members", async (c) => {
 
     return c.json({ invited: true, email: invitation.email, role, token: invitation.token }, 201);
   } catch (err) {
-    return c.json(
-      {
-        error: "INVITATION_FAILED",
-        message: err instanceof Error ? err.message : "Failed to send invitation",
-      },
-      500,
-    );
+    throw new ApiError({
+      status: 500,
+      code: "invitation_failed",
+      title: "Internal Error",
+      detail: err instanceof Error ? err.message : "Failed to send invitation",
+    });
   }
 });
 
@@ -270,7 +270,7 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json({ error: "FORBIDDEN", message: "Only admins can cancel invitations" }, 403);
+    throw forbidden("Only admins can cancel invitations");
   }
 
   await cancelInvitation(invitationId);
@@ -285,17 +285,17 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json({ error: "FORBIDDEN", message: "Only the owner can change roles" }, 403);
+    throw forbidden("Only the owner can change roles");
   }
 
   const body = await c.req.json<{ role: string }>();
   if (!["member", "admin"].includes(body.role)) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
+    throw invalidRequest("Role must be 'member' or 'admin'");
   }
 
   const updated = await updateInvitationRole(invitationId, orgId, body.role as "member" | "admin");
   if (!updated) {
-    return c.json({ error: "NOT_FOUND", message: "Invitation not found or already accepted" }, 404);
+    throw notFound("Invitation not found or already accepted");
   }
 
   return c.json({ id: updated.id, role: updated.role });
@@ -309,16 +309,16 @@ router.delete("/:orgId/members/:userId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || !["owner", "admin"].includes(member.role)) {
-    return c.json({ error: "FORBIDDEN", message: "Only admins can remove members" }, 403);
+    throw forbidden("Only admins can remove members");
   }
 
   // Cannot remove the owner
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
-    return c.json({ error: "NOT_FOUND", message: "Member not found" }, 404);
+    throw notFound("Member not found");
   }
   if (target.role === "owner") {
-    return c.json({ error: "FORBIDDEN", message: "Cannot remove the owner" }, 403);
+    throw forbidden("Cannot remove the owner");
   }
 
   await removeMember(orgId, targetUserId);
@@ -333,21 +333,60 @@ router.put("/:orgId/members/:userId", async (c) => {
 
   const member = await getOrgMember(orgId, user.id);
   if (!member || member.role !== "owner") {
-    return c.json({ error: "FORBIDDEN", message: "Only the owner can change roles" }, 403);
+    throw forbidden("Only the owner can change roles");
   }
 
   const body = await c.req.json<{ role: string }>();
   if (!["member", "admin"].includes(body.role)) {
-    return c.json({ error: "VALIDATION_ERROR", message: "Role must be 'member' or 'admin'" }, 400);
+    throw invalidRequest("Role must be 'member' or 'admin'");
   }
 
   // Cannot change own role
   if (targetUserId === user.id) {
-    return c.json({ error: "FORBIDDEN", message: "Cannot change your own role" }, 400);
+    throw forbidden("Cannot change your own role");
   }
 
   await updateMemberRole(orgId, targetUserId, body.role as "member" | "admin");
   return c.json({ userId: targetUserId, role: body.role });
+});
+
+// GET /api/orgs/:orgId/settings/redirect-domains — get allowed redirect domains
+router.get("/:orgId/settings/redirect-domains", async (c) => {
+  const user = c.get("user");
+  const orgId = c.req.param("orgId");
+
+  const member = await getOrgMember(orgId, user.id);
+  if (!member || !["owner", "admin"].includes(member.role)) {
+    throw forbidden("Admin access required");
+  }
+
+  const domains = await getAllowedRedirectDomains(orgId);
+  return c.json({ allowedRedirectDomains: domains });
+});
+
+// PUT /api/orgs/:orgId/settings/redirect-domains — set allowed redirect domains
+router.put("/:orgId/settings/redirect-domains", async (c) => {
+  const user = c.get("user");
+  const orgId = c.req.param("orgId");
+
+  const member = await getOrgMember(orgId, user.id);
+  if (!member || !["owner", "admin"].includes(member.role)) {
+    throw forbidden("Admin access required");
+  }
+
+  const body = await c.req.json<{ allowedRedirectDomains: string[] }>();
+
+  if (!body.allowedRedirectDomains) {
+    throw invalidRequest("allowedRedirectDomains is required");
+  }
+
+  const validationError = validateDomainList(body.allowedRedirectDomains);
+  if (validationError) {
+    throw invalidRequest(validationError);
+  }
+
+  const domains = await setAllowedRedirectDomains(orgId, body.allowedRedirectDomains);
+  return c.json({ allowedRedirectDomains: domains });
 });
 
 export default router;

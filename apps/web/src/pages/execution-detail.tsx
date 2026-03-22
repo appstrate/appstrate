@@ -90,7 +90,8 @@ export function ExecutionDetailPage() {
   const hasUserSelected = useRef(false);
 
   const { historicalLogs, report, reportComplete, structuredData } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], report: "", reportComplete: false, structuredData: null };
+    if (!logs)
+      return { historicalLogs: [], report: "", reportComplete: false, structuredData: null };
     const { entries, report, reportComplete, data } = buildLogEntries(logs as RawLog[]);
     return { historicalLogs: entries, report, reportComplete, structuredData: data };
   }, [logs]);

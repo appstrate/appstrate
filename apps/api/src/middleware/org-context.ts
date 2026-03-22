@@ -3,6 +3,7 @@ import type { AppEnv, OrgRole } from "../types/index.ts";
 import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
+import { invalidRequest, forbidden } from "../lib/errors.ts";
 
 /**
  * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole + orgSlug.
@@ -12,7 +13,7 @@ export function requireOrgContext() {
   return async (c: Context<AppEnv>, next: Next) => {
     const orgId = c.req.header("X-Org-Id");
     if (!orgId) {
-      return c.json({ error: "MISSING_ORG_CONTEXT", message: "X-Org-Id header is required" }, 400);
+      throw invalidRequest("X-Org-Id header is required", "X-Org-Id");
     }
 
     const user = c.get("user");
@@ -24,10 +25,7 @@ export function requireOrgContext() {
       .limit(1);
 
     if (!rows[0]) {
-      return c.json(
-        { error: "FORBIDDEN", message: "You are not a member of this organization" },
-        403,
-      );
+      throw forbidden("You are not a member of this organization");
     }
 
     c.set("orgId", orgId);

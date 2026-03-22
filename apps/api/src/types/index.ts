@@ -48,5 +48,6 @@ export type AppEnv = {
     orgRole: import("@appstrate/shared-types").OrgRole;
     authMethod?: "session" | "api_key";
     apiKeyId?: string;
+    requestId: string;
   };
 };

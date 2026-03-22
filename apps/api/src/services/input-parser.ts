@@ -12,6 +12,7 @@ import {
   schemaHasFileFields,
   parseFormDataFiles,
 } from "./schema.ts";
+import { invalidRequest } from "../lib/errors.ts";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
@@ -20,20 +21,14 @@ export interface ParsedInput {
   proxyId?: string;
 }
 
-export interface InputError {
-  error: string;
-  message: string;
-  field?: string;
-}
-
 /**
  * Parse and validate request input from either FormData (if file fields) or JSON body.
- * Returns parsed input + uploaded files, or an error object.
+ * Returns parsed input + uploaded files. Throws ApiError on validation failure.
  */
 export async function parseRequestInput(
   c: Context,
   inputSchema?: JSONSchemaObject,
-): Promise<{ ok: true; data: ParsedInput } | { ok: false; error: InputError; status: 400 }> {
+): Promise<ParsedInput> {
   const hasFileFields = schemaHasFileFields(inputSchema);
 
   let body: { input?: Record<string, unknown>; modelId?: string; proxyId?: string };
@@ -46,25 +41,16 @@ export async function parseRequestInput(
       body = { input: parsed.input };
       uploadedFiles = parsed.files;
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          error: "VALIDATION_ERROR",
-          message: `FormData parsing error: ${err instanceof Error ? err.message : String(err)}`,
-        },
-        status: 400,
-      };
+      throw invalidRequest(
+        `FormData parsing error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     if (uploadedFiles.length > 0) {
       const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
       if (!fileValidation.valid) {
         const first = fileValidation.errors[0]!;
-        return {
-          ok: false,
-          error: { error: "VALIDATION_ERROR", message: first.message, field: first.field },
-          status: 400,
-        };
+        throw invalidRequest(first.message, first.field);
       }
     }
   } else {
@@ -84,16 +70,9 @@ export async function parseRequestInput(
     const inputValidation = validateInput(body.input, inputSchema);
     if (!inputValidation.valid) {
       const first = inputValidation.errors[0]!;
-      return {
-        ok: false,
-        error: { error: "INPUT_REQUIRED", message: first.message, field: first.field },
-        status: 400,
-      };
+      throw invalidRequest(first.message, first.field);
     }
   }
 
-  return {
-    ok: true,
-    data: { input: body.input, uploadedFiles, modelId: body.modelId, proxyId: body.proxyId },
-  };
+  return { input: body.input, uploadedFiles, modelId: body.modelId, proxyId: body.proxyId };
 }

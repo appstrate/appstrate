@@ -25,6 +25,7 @@ import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -367,10 +368,7 @@ export function createExecutionsRouter() {
     if (versionOverride && flow.source !== "system") {
       const versionDetail = await getVersionDetail(flow.id, versionOverride);
       if (!versionDetail) {
-        return c.json(
-          { error: "VERSION_NOT_FOUND", message: `Version '${versionOverride}' not found` },
-          404,
-        );
+        throw notFound(`Version '${versionOverride}' not found`);
       }
       overrideVersionId = versionDetail.id;
       // Override manifest and content — version manifest replaces draft entirely
@@ -393,26 +391,20 @@ export function createExecutionsRouter() {
       parseRequestInput(c, effectiveFlow.manifest.input?.schema),
     ]);
 
-    // Validate flow readiness (prompt, skills, tools, providers, config)
-    const readinessError = await validateFlowReadiness({
+    // Validate flow readiness (prompt, skills, tools, providers, config) — throws on failure
+    await validateFlowReadiness({
       flow: effectiveFlow,
       providerProfiles,
       orgId,
       config,
     });
-    if (readinessError) {
-      return c.json(readinessError, 400);
-    }
 
-    if (!inputResult.ok) {
-      return c.json(inputResult.error, inputResult.status);
-    }
     const {
       input: parsedInput,
       uploadedFiles,
       modelId: modelIdOverride,
       proxyId: proxyIdOverride,
-    } = inputResult.data;
+    } = inputResult;
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
@@ -447,7 +439,12 @@ export function createExecutionsRouter() {
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {
-        return c.json({ error: "MODEL_NOT_CONFIGURED", message: err.message }, 400);
+        throw new ApiError({
+          status: 400,
+          code: "model_not_configured",
+          title: "Bad Request",
+          detail: err.message,
+        });
       }
       throw err;
     }
@@ -460,7 +457,12 @@ export function createExecutionsRouter() {
         await cloud.cloudHooks.checkQuota(orgId, runningCount);
       } catch (err) {
         if (err instanceof cloud.QuotaExceededError) {
-          return c.json({ error: "QUOTA_EXCEEDED", message: err.message }, 402);
+          throw new ApiError({
+            status: 402,
+            code: "quota_exceeded",
+            title: "Payment Required",
+            detail: err.message,
+          });
         }
         throw err;
       }
@@ -514,7 +516,7 @@ export function createExecutionsRouter() {
     const orgId = c.get("orgId");
     const row = await getExecutionFull(execId);
     if (!row || row.orgId !== orgId) {
-      return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
+      throw notFound("Execution not found");
     }
     return c.json(row);
   });
@@ -525,7 +527,7 @@ export function createExecutionsRouter() {
     const orgId = c.get("orgId");
     const exec = await getExecution(execId);
     if (!exec || exec.orgId !== orgId) {
-      return c.json({ error: "NOT_FOUND", message: "Execution not found" }, 404);
+      throw notFound("Execution not found");
     }
     const logs = await listExecutionLogs(execId, orgId);
 
@@ -545,20 +547,17 @@ export function createExecutionsRouter() {
 
     const execution = await getExecution(execId);
     if (!execution) {
-      return c.json({ error: "EXECUTION_NOT_FOUND", message: "Execution not found" }, 404);
+      throw notFound("Execution not found");
     }
 
     // Verify ownership (same org)
     if (execution.orgId !== orgId) {
-      return c.json({ error: "UNAUTHORIZED", message: "Not authorized" }, 403);
+      throw forbidden("Not authorized");
     }
 
     // Verify cancellable
     if (execution.status !== "pending" && execution.status !== "running") {
-      return c.json(
-        { error: "NOT_CANCELLABLE", message: "This execution cannot be cancelled" },
-        409,
-      );
+      throw conflict("not_cancellable", "This execution cannot be cancelled");
     }
 
     // Update DB
@@ -605,10 +604,7 @@ export function createExecutionsRouter() {
 
       const running = await getRunningExecutionsForPackage(flow.id);
       if (running > 0) {
-        return c.json(
-          { error: "EXECUTION_IN_PROGRESS", message: `${running} execution(s) still running` },
-          409,
-        );
+        throw conflict("execution_in_progress", `${running} execution(s) still running`);
       }
 
       const deleted = await deletePackageExecutions(flow.id, orgId);

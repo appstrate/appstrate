@@ -106,14 +106,14 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             resetAndClose();
           },
           onError: (err) => {
-            if (err instanceof ApiError && err.code === "DRAFT_OVERWRITE" && err.details) {
+            if (err instanceof ApiError && err.code === "draft_overwrite" && err.details) {
               setConfirmOverwrite({
                 packageId: err.details.packageId as string,
                 draftVersion: (err.details.draftVersion as string) ?? null,
               });
               return;
             }
-            if (err instanceof ApiError && err.code === "INTEGRITY_MISMATCH" && err.details) {
+            if (err instanceof ApiError && err.code === "integrity_mismatch" && err.details) {
               setConfirmIntegrity({
                 packageId: err.details.packageId as string,
                 version: err.details.version as string,

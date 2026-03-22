@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 import {
   listProfiles,
   createProfile,
@@ -30,7 +31,7 @@ export function createConnectionProfilesRouter() {
     const user = c.get("user");
     const body = await c.req.json<{ name?: string }>();
     if (!body.name?.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Name is required" }, 400);
+      throw invalidRequest("Name is required", "name");
     }
     const profile = await createProfile(user.id, body.name.trim());
     return c.json({ profile }, 201);
@@ -56,7 +57,7 @@ export function createConnectionProfilesRouter() {
     const profileId = c.req.param("id");
     const body = await c.req.json<{ name?: string }>();
     if (!body.name?.trim()) {
-      return c.json({ error: "VALIDATION_ERROR", message: "Name is required" }, 400);
+      throw invalidRequest("Name is required", "name");
     }
     try {
       await renameProfile(profileId, user.id, body.name.trim());
@@ -64,7 +65,7 @@ export function createConnectionProfilesRouter() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
       logger.warn("Failed to rename profile", { profileId, userId: user.id, error: message });
-      return c.json({ error: "RENAME_FAILED", message }, 400);
+      throw invalidRequest(message);
     }
   });
 
@@ -78,7 +79,7 @@ export function createConnectionProfilesRouter() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
       logger.warn("Failed to delete profile", { profileId, userId: user.id, error: message });
-      return c.json({ error: "DELETE_FAILED", message }, 400);
+      throw invalidRequest(message);
     }
   });
 
@@ -89,7 +90,7 @@ export function createConnectionProfilesRouter() {
     // Verify the profile belongs to the authenticated user (single query, not fetch-all)
     const profile = await getProfileForUser(profileId, user.id);
     if (!profile) {
-      return c.json({ error: "NOT_FOUND", message: "Profile not found" }, 404);
+      throw notFound("Profile not found");
     }
     const orgId = c.get("orgId");
     const connections = await listConnections(db, profileId, orgId);

@@ -4,6 +4,7 @@ import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth.ts";
 import { logger } from "../lib/logger.ts";
+import { ApiError, invalidRequest, internalError, gone } from "../lib/errors.ts";
 import {
   getInvitationByToken,
   markInvitationAccepted,
@@ -20,17 +21,22 @@ router.get("/:token/info", async (c) => {
   const invitation = await getInvitationByToken(token);
 
   if (!invitation) {
-    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation not found" }, 404);
+    throw new ApiError({
+      status: 404,
+      code: "invitation_not_found",
+      title: "Not Found",
+      detail: "Invitation not found",
+    });
   }
 
   if (invitation.status === "accepted") {
-    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation already accepted" }, 410);
+    throw gone("invitation_accepted", "Invitation already accepted");
   }
   if (invitation.status === "cancelled") {
-    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation cancelled" }, 410);
+    throw gone("invitation_cancelled", "Invitation cancelled");
   }
   if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
-    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expired" }, 410);
+    throw gone("invitation_expired", "Invitation expired");
   }
 
   const [orgName, inviterName, [existingUser]] = await Promise.all([
@@ -55,17 +61,22 @@ router.post("/:token/accept", async (c) => {
   const invitation = await getInvitationByToken(token);
 
   if (!invitation) {
-    return c.json({ error: "INVITATION_NOT_FOUND", message: "Invitation not found" }, 404);
+    throw new ApiError({
+      status: 404,
+      code: "invitation_not_found",
+      title: "Not Found",
+      detail: "Invitation not found",
+    });
   }
 
   if (invitation.status === "accepted") {
-    return c.json({ error: "INVITATION_ACCEPTED", message: "Invitation already accepted" }, 410);
+    throw gone("invitation_accepted", "Invitation already accepted");
   }
   if (invitation.status === "cancelled") {
-    return c.json({ error: "INVITATION_CANCELLED", message: "Invitation cancelled" }, 410);
+    throw gone("invitation_cancelled", "Invitation cancelled");
   }
   if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
-    return c.json({ error: "INVITATION_EXPIRED", message: "Invitation expired" }, 410);
+    throw gone("invitation_expired", "Invitation expired");
   }
 
   // Check if user already exists
@@ -82,13 +93,7 @@ router.post("/:token/accept", async (c) => {
       .catch((): { password?: string; displayName?: string } => ({}));
 
     if (!body.password || body.password.length < 8) {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: "Password is required and must be at least 8 characters",
-        },
-        400,
-      );
+      throw invalidRequest("Password is required and must be at least 8 characters");
     }
 
     try {
@@ -105,7 +110,7 @@ router.post("/:token/accept", async (c) => {
         logger.error("Invitation signup failed — no user returned", {
           email: invitation.email,
         });
-        return c.json({ error: "SIGNUP_FAILED", message: "Failed to create account" }, 500);
+        throw internalError("Failed to create account");
       }
 
       const newUserId = signupRes.user.id;
@@ -146,11 +151,12 @@ router.post("/:token/accept", async (c) => {
         { status: 200, headers },
       );
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Invitation accept failed (new user)", {
         error: err instanceof Error ? err.message : String(err),
         email: invitation.email,
       });
-      return c.json({ error: "ACCEPT_FAILED", message: "Failed to accept invitation" }, 500);
+      throw internalError("Failed to accept invitation");
     }
   } else {
     // --- EXISTING USER ---

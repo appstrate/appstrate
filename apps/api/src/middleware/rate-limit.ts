@@ -3,6 +3,7 @@ import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getRedisConnection } from "../lib/redis.ts";
+import { ApiError } from "../lib/errors.ts";
 
 /**
  * Creates a rate limiter — Redis-backed in production, in-memory for tests.
@@ -62,15 +63,18 @@ export function rateLimit(maxPerMinute: number) {
 
       return next();
     } catch (rej) {
-      if (rej && typeof rej === "object" && "msBeforeNext" in rej) {
-        const retryAfter = Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000);
-        c.header("Retry-After", String(retryAfter));
-      }
+      const retryAfter =
+        rej && typeof rej === "object" && "msBeforeNext" in rej
+          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+          : undefined;
 
-      return c.json(
-        { error: "RATE_LIMITED", message: "Too many requests. Please try again shortly." },
-        429,
-      );
+      throw new ApiError({
+        status: 429,
+        code: "rate_limited",
+        title: "Rate Limited",
+        detail: "Too many requests. Please try again shortly.",
+        retryAfter,
+      });
     }
   };
 }
@@ -96,12 +100,18 @@ export function rateLimitByBearer(maxPerMinute: number) {
       await limiter.consume(key);
       return next();
     } catch (rej) {
-      if (rej && typeof rej === "object" && "msBeforeNext" in rej) {
-        const retryAfter = Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000);
-        c.header("Retry-After", String(retryAfter));
-      }
+      const retryAfter =
+        rej && typeof rej === "object" && "msBeforeNext" in rej
+          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+          : undefined;
 
-      return c.json({ error: "RATE_LIMITED", message: "Too many requests" }, 429);
+      throw new ApiError({
+        status: 429,
+        code: "rate_limited",
+        title: "Rate Limited",
+        detail: "Too many requests. Please try again shortly.",
+        retryAfter,
+      });
     }
   };
 }
@@ -126,15 +136,18 @@ export function rateLimitByIp(maxPerMinute: number) {
       await limiter.consume(key);
       return next();
     } catch (rej) {
-      if (rej && typeof rej === "object" && "msBeforeNext" in rej) {
-        const retryAfter = Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000);
-        c.header("Retry-After", String(retryAfter));
-      }
+      const retryAfter =
+        rej && typeof rej === "object" && "msBeforeNext" in rej
+          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+          : undefined;
 
-      return c.json(
-        { error: "RATE_LIMITED", message: "Too many requests. Please try again shortly." },
-        429,
-      );
+      throw new ApiError({
+        status: 429,
+        code: "rate_limited",
+        title: "Rate Limited",
+        detail: "Too many requests. Please try again shortly.",
+        retryAfter,
+      });
     }
   };
 }

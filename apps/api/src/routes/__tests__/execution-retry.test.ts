@@ -6,7 +6,7 @@ import type {
 } from "../../services/adapters/types.ts";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { LoadedFlow } from "../../types/index.ts";
-import { packageVersionsStub } from "../../services/__tests__/_db-mock.ts";
+import { packageVersionsStub, schemaStubs } from "../../services/__tests__/_db-mock.ts";
 
 // --- Mocks ---
 
@@ -18,6 +18,8 @@ mock.module("../../lib/logger.ts", () => ({
 mock.module("../../lib/db.ts", () => ({
   db: {},
 }));
+
+mock.module("@appstrate/db/schema", () => schemaStubs);
 
 const logs: { event: string; data: Record<string, unknown> | null }[] = [];
 const updates: { id: string; updates: Record<string, unknown> }[] = [];

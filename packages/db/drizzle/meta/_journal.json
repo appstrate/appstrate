@@ -15,6 +15,13 @@
       "when": 1774138329060,
       "tag": "0001_crazy_mentallo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774140165032,
+      "tag": "0002_groovy_lake",
+      "breakpoints": true
     }
   ]
 }

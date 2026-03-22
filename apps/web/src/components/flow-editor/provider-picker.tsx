@@ -218,10 +218,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   const selectedIds = new Set(value.map((s) => s.id));
 
   // Only show enabled (configured + active) providers in the available grid
-  const enabledProviders = useMemo(
-    () => (providers ?? []).filter((p) => p.enabled),
-    [providers],
-  );
+  const enabledProviders = useMemo(() => (providers ?? []).filter((p) => p.enabled), [providers]);
 
   const allProviders = providers ?? [];
 
@@ -315,11 +312,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
           {t("editor.noIntegration")}
           {isOrgAdmin && (
             <div className="mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConfigurePickerOpen(true)}
-              >
+              <Button variant="outline" size="sm" onClick={() => setConfigurePickerOpen(true)}>
                 {t("providers.addProvider", { ns: "settings" })}
               </Button>
             </div>

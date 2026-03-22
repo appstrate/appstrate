@@ -3,13 +3,14 @@ import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/flow-service.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
+import { ApiError, forbidden, conflict } from "../lib/errors.ts";
 
 /** Middleware: reject with 403 if the current user is not org admin/owner. */
 export function requireAdmin() {
   return async (c: Context<AppEnv>, next: Next) => {
     const orgRole = c.get("orgRole");
     if (orgRole !== "admin" && orgRole !== "owner") {
-      return c.json({ error: "FORBIDDEN", message: "Admin access required" }, 403);
+      throw forbidden("Admin access required");
     }
     return next();
   };
@@ -24,7 +25,12 @@ export function requireFlow() {
     const orgId = c.get("orgId");
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
-      return c.json({ error: "FLOW_NOT_FOUND", message: `Flow '${packageId}' not found` }, 404);
+      throw new ApiError({
+        status: 404,
+        code: "flow_not_found",
+        title: "Flow Not Found",
+        detail: `Flow '${packageId}' not found`,
+      });
     }
     c.set("flow", flow);
     return next();
@@ -43,29 +49,22 @@ export function requireOwnedPackage() {
 
     const orgSlug = c.get("orgSlug");
     if (!isOwnedByOrg(packageId, orgSlug)) {
-      return c.json(
-        {
-          error: "NOT_OWNED",
-          message: "Cannot modify a package not owned by your organization. Fork it instead.",
-        },
-        403,
-      );
+      throw forbidden("Cannot modify a package not owned by your organization. Fork it instead.");
     }
     return next();
   };
 }
 
-/** Check that a packageId scope matches the current org. Returns a 403 Response or null. */
-export function checkScopeMatch(c: Context<AppEnv>, packageId: string): Response | null {
+/** Check that a packageId scope matches the current org. Returns an ApiError or null. */
+export function checkScopeMatch(c: Context<AppEnv>, packageId: string): ApiError | null {
   const orgSlug = c.get("orgSlug");
   if (!isOwnedByOrg(packageId, orgSlug)) {
-    return c.json(
-      {
-        error: "SCOPE_MISMATCH",
-        message: `Package scope must match your organization (@${orgSlug})`,
-      },
-      403,
-    );
+    return new ApiError({
+      status: 403,
+      code: "scope_mismatch",
+      title: "Scope Mismatch",
+      detail: `Package scope must match your organization (@${orgSlug})`,
+    });
   }
   return null;
 }
@@ -75,17 +74,11 @@ export function requireMutableFlow() {
   return async (c: Context<AppEnv>, next: Next) => {
     const flow = c.get("flow");
     if (flow.source === "system") {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: "Cannot modify a system flow" },
-        403,
-      );
+      throw forbidden("Cannot modify a system flow");
     }
     const running = await getRunningExecutionsForPackage(flow.id);
     if (running > 0) {
-      return c.json(
-        { error: "FLOW_IN_USE", message: `${running} execution(s) running for this flow` },
-        409,
-      );
+      throw conflict("flow_in_use", `${running} execution(s) running for this flow`);
     }
     return next();
   };

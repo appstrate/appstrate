@@ -15,6 +15,7 @@ import {
   loadModel,
 } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
+import { ApiError, invalidRequest, notFound, internalError } from "../lib/errors.ts";
 
 const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -91,7 +92,7 @@ export function createModelsRouter() {
     const parsed = createModelSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     try {
@@ -119,7 +120,7 @@ export function createModelsRouter() {
       logger.error("Model create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to create model" }, 500);
+      throw internalError("Failed to create model");
     }
   });
 
@@ -131,7 +132,7 @@ export function createModelsRouter() {
     const parsed = setDefaultSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     try {
@@ -141,7 +142,7 @@ export function createModelsRouter() {
       logger.error("Set default model failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to set default model" }, 500);
+      throw internalError("Failed to set default model");
     }
   });
 
@@ -155,10 +156,12 @@ export function createModelsRouter() {
       });
 
       if (!res.ok) {
-        return c.json(
-          { error: "PROVIDER_ERROR", message: `OpenRouter returned ${res.status}` },
-          502,
-        );
+        throw new ApiError({
+          status: 502,
+          code: "provider_error",
+          title: "Provider Error",
+          detail: `OpenRouter returned ${res.status}`,
+        });
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -214,13 +217,24 @@ export function createModelsRouter() {
 
       return c.json({ models });
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       if (err instanceof DOMException && err.name === "TimeoutError") {
-        return c.json({ error: "TIMEOUT", message: "OpenRouter request timed out" }, 504);
+        throw new ApiError({
+          status: 504,
+          code: "timeout",
+          title: "Gateway Timeout",
+          detail: "OpenRouter request timed out",
+        });
       }
       logger.error("OpenRouter model search failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "NETWORK_ERROR", message: "Failed to fetch OpenRouter models" }, 502);
+      throw new ApiError({
+        status: 502,
+        code: "network_error",
+        title: "Bad Gateway",
+        detail: "Failed to fetch OpenRouter models",
+      });
     }
   });
 
@@ -232,7 +246,7 @@ export function createModelsRouter() {
     const parsed = testInlineSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     let { apiKey } = parsed.data;
@@ -244,10 +258,7 @@ export function createModelsRouter() {
     }
 
     if (!apiKey) {
-      return c.json(
-        { ok: false, latency: 0, error: "VALIDATION_ERROR", message: "API key is required" },
-        400,
-      );
+      throw invalidRequest("API key is required");
     }
 
     try {
@@ -262,10 +273,7 @@ export function createModelsRouter() {
       logger.error("Model inline test failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json(
-        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
-        500,
-      );
+      throw internalError("Test failed");
     }
   });
 
@@ -275,16 +283,16 @@ export function createModelsRouter() {
     const modelId = c.req.param("id")!;
     try {
       const result = await testModelConnection(orgId, modelId);
-      return c.json(result, result.error === "MODEL_NOT_FOUND" ? 404 : 200);
+      if (result.error === "MODEL_NOT_FOUND") {
+        throw notFound("Model not found");
+      }
+      return c.json(result);
     } catch (err) {
       logger.error("Model test failed", {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json(
-        { ok: false, latency: 0, error: "INTERNAL_ERROR", message: "Test failed" },
-        500,
-      );
+      throw internalError("Test failed");
     }
   });
 
@@ -296,14 +304,16 @@ export function createModelsRouter() {
     const parsed = updateModelSchema.safeParse(body);
 
     if (!parsed.success) {
-      return c.json({ error: "VALIDATION_ERROR", message: parsed.error.issues[0]!.message }, 400);
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
     if (isSystemModel(modelId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `Cannot modify built-in model '${modelId}'` },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot modify built-in model '${modelId}'`,
+      });
     }
 
     try {
@@ -314,7 +324,7 @@ export function createModelsRouter() {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to update model" }, 500);
+      throw internalError("Failed to update model");
     }
   });
 
@@ -324,10 +334,12 @@ export function createModelsRouter() {
     const modelId = c.req.param("id");
 
     if (isSystemModel(modelId)) {
-      return c.json(
-        { error: "OPERATION_NOT_ALLOWED", message: `Cannot delete built-in model '${modelId}'` },
-        403,
-      );
+      throw new ApiError({
+        status: 403,
+        code: "operation_not_allowed",
+        title: "Forbidden",
+        detail: `Cannot delete built-in model '${modelId}'`,
+      });
     }
 
     try {
@@ -338,7 +350,7 @@ export function createModelsRouter() {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.json({ error: "INTERNAL_ERROR", message: "Failed to delete model" }, 500);
+      throw internalError("Failed to delete model");
     }
   });
 

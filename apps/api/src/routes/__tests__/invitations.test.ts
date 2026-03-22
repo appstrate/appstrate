@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { Hono } from "hono";
+import type { AppEnv } from "../../types/index.ts";
 import { queues, resetQueues, db, schemaStubs } from "../../services/__tests__/_db-mock.ts";
 
 // --- Configurable mock state ---
@@ -81,11 +82,15 @@ mock.module("../../lib/auth.ts", () => ({
 
 // --- Dynamic import (after all mocks) ---
 
+const { requestId } = await import("../../middleware/request-id.ts");
+const { errorHandler } = await import("../../middleware/error-handler.ts");
 const { default: router } = await import("../invitations.ts");
 
 // --- Test app ---
 
-const app = new Hono();
+const app = new Hono<AppEnv>();
+app.onError(errorHandler);
+app.use("*", requestId());
 app.route("/invite", router);
 
 // --- Helpers ---
@@ -135,8 +140,8 @@ describe("GET /invite/:token/info", () => {
 
     const res = await app.request("/invite/bad-token/info");
     expect(res.status).toBe(404);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("INVITATION_NOT_FOUND");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invitation_not_found");
   });
 
   test("returns 410 when already accepted", async () => {
@@ -144,8 +149,8 @@ describe("GET /invite/:token/info", () => {
 
     const res = await app.request("/invite/abc123/info");
     expect(res.status).toBe(410);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("INVITATION_ACCEPTED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invitation_accepted");
   });
 
   test("returns 410 when cancelled", async () => {
@@ -153,8 +158,8 @@ describe("GET /invite/:token/info", () => {
 
     const res = await app.request("/invite/abc123/info");
     expect(res.status).toBe(410);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("INVITATION_CANCELLED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invitation_cancelled");
   });
 
   test("returns 410 when expired (status)", async () => {
@@ -162,8 +167,8 @@ describe("GET /invite/:token/info", () => {
 
     const res = await app.request("/invite/abc123/info");
     expect(res.status).toBe(410);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("INVITATION_EXPIRED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invitation_expired");
   });
 
   test("returns 410 when expired (date passed)", async () => {
@@ -171,8 +176,8 @@ describe("GET /invite/:token/info", () => {
 
     const res = await app.request("/invite/abc123/info");
     expect(res.status).toBe(410);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("INVITATION_EXPIRED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invitation_expired");
   });
 
   test("returns isNewUser: true when no existing user", async () => {
@@ -219,15 +224,15 @@ describe("POST /invite/:token/accept — new user", () => {
   test("returns 400 when no password provided", async () => {
     const res = await jsonRequest("/invite/abc123/accept", "POST", {});
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invalid_request");
   });
 
   test("returns 400 when password too short (7 chars)", async () => {
     const res = await jsonRequest("/invite/abc123/accept", "POST", { password: "1234567" });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invalid_request");
   });
 
   test("accepts password at exactly 8 chars", async () => {
@@ -238,8 +243,8 @@ describe("POST /invite/:token/accept — new user", () => {
   test("returns 400 when no body at all", async () => {
     const res = await app.request("/invite/abc123/accept", { method: "POST" });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("VALIDATION_ERROR");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("invalid_request");
   });
 
   test("creates account with valid password → 200", async () => {
@@ -315,8 +320,8 @@ describe("POST /invite/:token/accept — new user", () => {
       password: "securePassword123",
     });
     expect(res.status).toBe(500);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("ACCEPT_FAILED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("internal_error");
   });
 
   test("returns 500 when signup returns no user", async () => {
@@ -326,8 +331,8 @@ describe("POST /invite/:token/accept — new user", () => {
       password: "securePassword123",
     });
     expect(res.status).toBe(500);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toBe("SIGNUP_FAILED");
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe("internal_error");
   });
 });
 
