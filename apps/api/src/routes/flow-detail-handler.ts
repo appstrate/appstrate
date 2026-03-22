@@ -20,10 +20,11 @@ import { getEnv } from "@appstrate/env";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
+import { getActor } from "../lib/actor.ts";
 
 export async function flowDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
-  const user = c.get("user");
+  const actor = getActor(c);
   const itemId = getItemId(c);
 
   const [flow, rawItem, versionCount, latestVersionDate] = await Promise.all([
@@ -42,7 +43,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const [adminConns, userProfileId] = await Promise.all([
     getAdminConnections(orgId, flow.id),
-    queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(user.id, flow.id),
+    queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(actor, flow.id),
   ]);
 
   const manifestProviders = resolveManifestProviders(m);
@@ -101,8 +102,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const [currentConfig, lastExec, runningCount] = await Promise.all([
     getPackageConfig(orgId, flow.id),
-    getLastExecution(flow.id, user.id, orgId),
-    getRunningExecutionsForPackage(flow.id, user.id),
+    getLastExecution(flow.id, actor, orgId),
+    getRunningExecutionsForPackage(flow.id, actor),
   ]);
 
   // Merge defaults with current config

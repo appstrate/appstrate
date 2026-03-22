@@ -1,6 +1,7 @@
 import { db } from "../../lib/db.ts";
 import { logger } from "../../lib/logger.ts";
-import { eq, and, inArray } from "drizzle-orm";
+import { and, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { userProviderConnections, connectionProfiles } from "@appstrate/db/schema";
 import {
   listConnections as listConnectionsRaw,
@@ -8,9 +9,10 @@ import {
   deleteConnectionById as deleteConnectionByIdRaw,
   validateScopes,
 } from "@appstrate/connect";
+import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { ConnectionStatus } from "./status.ts";
 
-export async function listUserConnections(
+export async function listActorConnections(
   profileId: string,
   orgId: string,
 ): Promise<ConnectionStatus[]> {
@@ -33,31 +35,45 @@ export async function disconnectProvider(
   logger.info("Connection deleted", { provider, profileId, orgId });
 }
 
-export async function disconnectConnectionById(
-  connectionId: string,
-  userId: string,
-): Promise<void> {
-  // Verify the connection belongs to a profile owned by this user
+export async function disconnectConnectionById(connectionId: string, actor: Actor): Promise<void> {
+  // Verify the connection belongs to a profile owned by this actor
   const rows = await db
     .select({ id: userProviderConnections.id })
     .from(userProviderConnections)
     .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(and(eq(userProviderConnections.id, connectionId), eq(connectionProfiles.userId, userId)))
+    .where(
+      and(
+        eq(userProviderConnections.id, connectionId),
+        actorFilter(actor, {
+          userId: connectionProfiles.userId,
+          endUserId: connectionProfiles.endUserId,
+        }),
+      ),
+    )
     .limit(1);
 
   if (rows.length === 0) {
-    throw new Error("Connection not found or not owned by user");
+    throw new Error("Connection not found or not owned by actor");
   }
 
   await deleteConnectionByIdRaw(db, connectionId);
-  logger.info("Connection deleted by ID", { connectionId, userId });
+  logger.info("Connection deleted by ID", {
+    connectionId,
+    actorType: actor.type,
+    actorId: actor.id,
+  });
 }
 
-export async function deleteAllUserConnections(userId: string): Promise<void> {
+export async function deleteAllActorConnections(actor: Actor): Promise<void> {
   const profiles = await db
     .select({ id: connectionProfiles.id })
     .from(connectionProfiles)
-    .where(eq(connectionProfiles.userId, userId));
+    .where(
+      actorFilter(actor, {
+        userId: connectionProfiles.userId,
+        endUserId: connectionProfiles.endUserId,
+      }),
+    );
 
   if (profiles.length === 0) return;
 
@@ -68,7 +84,7 @@ export async function deleteAllUserConnections(userId: string): Promise<void> {
     ),
   );
 
-  logger.info("All user connections deleted", { userId });
+  logger.info("All actor connections deleted", { actorType: actor.type, actorId: actor.id });
 }
 
 export { validateScopes };

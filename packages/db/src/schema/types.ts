@@ -8,6 +8,7 @@ import type {
 } from "./packages.ts";
 import type { executions, executionLogs, packageSchedules } from "./executions.ts";
 import type { connectionProfiles } from "./connections.ts";
+import type { applications, endUsers } from "./applications.ts";
 
 export type Profile = InferSelectModel<typeof profiles>;
 
@@ -26,3 +27,7 @@ export type Execution = InferSelectModel<typeof executions>;
 export type ExecutionLog = InferSelectModel<typeof executionLogs>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
+
+export type Application = InferSelectModel<typeof applications>;
+
+export type EndUser = InferSelectModel<typeof endUsers>;

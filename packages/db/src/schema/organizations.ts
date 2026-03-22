@@ -13,6 +13,7 @@ import {
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
+import { applications } from "./applications.ts";
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -77,6 +78,9 @@ export const apiKeys = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     keyHash: text("key_hash").notNull(),
     keyPrefix: text("key_prefix").notNull(),
@@ -91,7 +95,8 @@ export const apiKeys = pgTable(
   },
   (table) => [
     index("idx_api_keys_org_id").on(table.orgId),
-    index("idx_api_keys_key_hash").on(table.keyHash),
+    index("idx_api_keys_application_id").on(table.applicationId),
+    uniqueIndex("idx_api_keys_key_hash").on(table.keyHash),
     index("idx_api_keys_key_prefix").on(table.keyPrefix),
   ],
 );

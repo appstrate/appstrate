@@ -1,12 +1,23 @@
-import { eq, and, isNotNull, isNull, desc, count } from "drizzle-orm";
+import { eq, and, or, isNotNull, isNull, desc, count, type SQL } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { executions, packageVersions } from "@appstrate/db/schema";
 
 // --- Notifications ---
 
+/**
+ * Build the actor ownership filter.
+ * For members: filter by userId.
+ * For end-users: filter by endUserId.
+ * The actorId may be a member userId or an endUserId depending on caller context.
+ * We use OR to match either column, since the caller passes the correct actor ID.
+ */
+function actorOwnershipFilter(actorId: string): SQL {
+  return or(eq(executions.userId, actorId), eq(executions.endUserId, actorId))!;
+}
+
 export async function markNotificationRead(
   executionId: string,
-  userId: string,
+  actorId: string,
   orgId: string,
 ): Promise<boolean> {
   const updated = await db
@@ -15,7 +26,7 @@ export async function markNotificationRead(
     .where(
       and(
         eq(executions.id, executionId),
-        eq(executions.userId, userId),
+        actorOwnershipFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
       ),
@@ -24,13 +35,13 @@ export async function markNotificationRead(
   return updated.length > 0;
 }
 
-export async function markAllNotificationsRead(userId: string, orgId: string): Promise<number> {
+export async function markAllNotificationsRead(actorId: string, orgId: string): Promise<number> {
   const updated = await db
     .update(executions)
     .set({ readAt: new Date() })
     .where(
       and(
-        eq(executions.userId, userId),
+        actorOwnershipFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -40,13 +51,13 @@ export async function markAllNotificationsRead(userId: string, orgId: string): P
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(userId: string, orgId: string): Promise<number> {
+export async function getUnreadNotificationCount(actorId: string, orgId: string): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(executions)
     .where(
       and(
-        eq(executions.userId, userId),
+        actorOwnershipFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -56,7 +67,7 @@ export async function getUnreadNotificationCount(userId: string, orgId: string):
 }
 
 export async function getUnreadCountsByFlow(
-  userId: string,
+  actorId: string,
   orgId: string,
 ): Promise<Record<string, number>> {
   const rows = await db
@@ -67,7 +78,7 @@ export async function getUnreadCountsByFlow(
     .from(executions)
     .where(
       and(
-        eq(executions.userId, userId),
+        actorOwnershipFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -84,7 +95,7 @@ export async function getUnreadCountsByFlow(
 }
 
 export async function listUserExecutions(
-  userId: string,
+  actorId: string,
   orgId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<{ executions: Record<string, unknown>[]; total: number }> {
@@ -94,7 +105,7 @@ export async function listUserExecutions(
   const [countRow] = await db
     .select({ count: count() })
     .from(executions)
-    .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)));
+    .where(and(actorOwnershipFilter(actorId), eq(executions.orgId, orgId)));
 
   const rows = await db
     .select({
@@ -103,7 +114,7 @@ export async function listUserExecutions(
     })
     .from(executions)
     .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(eq(executions.userId, userId), eq(executions.orgId, orgId)))
+    .where(and(actorOwnershipFilter(actorId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit)
     .offset(offset);

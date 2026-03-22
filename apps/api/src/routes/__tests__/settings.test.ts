@@ -32,6 +32,17 @@ mock.module("../../services/default-flow.ts", () => ({
   provisionDefaultFlowForOrg: async () => {},
 }));
 
+mock.module("../../services/applications.ts", () => ({
+  createApplication: async () => ({}),
+  createDefaultApplication: async () => ({ id: "app_default" }),
+  getDefaultApplication: async () => ({ id: "app_default" }),
+  listApplications: async () => [],
+  getApplication: async () => ({ id: "app_default", orgId: "org-1" }),
+  updateApplication: async () => ({}),
+  deleteApplication: async () => {},
+  ensureDefaultApplications: async () => {},
+}));
+
 const { requestId } = await import("../../middleware/request-id.ts");
 const { errorHandler } = await import("../../middleware/error-handler.ts");
 const orgsModule = await import("../organizations.ts");

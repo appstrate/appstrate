@@ -13,6 +13,7 @@ import {
   getLastExecutionState,
   getPackageMemories,
 } from "./state/index.ts";
+import type { Actor } from "../lib/actor.ts";
 import { getPackageZip } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
@@ -122,7 +123,7 @@ export async function buildExecutionContext(params: {
   flow: LoadedFlow;
   providerProfiles: Record<string, string>;
   orgId: string;
-  userId: string;
+  actor: Actor;
   input?: Record<string, unknown>;
   files?: FileReference[];
   config?: Record<string, unknown>;
@@ -136,7 +137,7 @@ export async function buildExecutionContext(params: {
   proxyLabel: string | null;
   modelLabel: string | null;
 }> {
-  const { executionId, flow, providerProfiles, orgId, userId, input, files } = params;
+  const { executionId, flow, providerProfiles, orgId, actor, input, files } = params;
 
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
@@ -154,7 +155,7 @@ export async function buildExecutionContext(params: {
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
     params.config ?? getPackageConfig(orgId, flow.id),
     getFlowOverrides(orgId, flow.id),
-    getLastExecutionState(flow.id, userId, orgId),
+    getLastExecutionState(flow.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
     getPackageZip(flow, orgId),
     params.overrideVersionId

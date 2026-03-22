@@ -1,4 +1,10 @@
-export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
+export type {
+  Profile,
+  ExecutionLog,
+  ConnectionProfile,
+  Application,
+  EndUser,
+} from "@appstrate/db/schema";
 export type {
   AuthMode,
   AvailableScope,

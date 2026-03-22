@@ -26,6 +26,7 @@ import {
   updateInvitationRole,
 } from "../services/invitations.ts";
 import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
+import { createDefaultApplication } from "../services/applications.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -81,6 +82,14 @@ router.post("/", async (c) => {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+
+  // Create default application for the new org (non-fatal)
+  await createDefaultApplication(org.id, user.id).catch((err) => {
+    logger.warn("Failed to create default application for new org", {
+      orgId: org.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   // Provision default hello-world flow for the new org (non-fatal)
   await provisionDefaultFlowForOrg(org.id, org.slug, user.id).catch(() => {});
@@ -273,7 +282,7 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
     throw forbidden("Only admins can cancel invitations");
   }
 
-  await cancelInvitation(invitationId);
+  await cancelInvitation(invitationId, orgId);
   return c.json({ ok: true });
 });
 

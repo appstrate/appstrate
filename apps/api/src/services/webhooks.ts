@@ -187,6 +187,7 @@ export async function buildSignedHeaders(
 
 export async function createWebhook(
   orgId: string,
+  applicationId: string,
   params: {
     url: string;
     events: string[];
@@ -220,6 +221,7 @@ export async function createWebhook(
     .values({
       id,
       orgId,
+      applicationId,
       url: params.url,
       events: validatedEvents,
       flowId: params.flowId ?? null,
@@ -232,7 +234,15 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(orgId: string): Promise<WebhookResponse[]> {
+export async function listWebhooks(
+  orgId: string,
+  applicationId?: string,
+): Promise<WebhookResponse[]> {
+  const conditions = [eq(webhooks.orgId, orgId)];
+  if (applicationId) {
+    conditions.push(eq(webhooks.applicationId, applicationId));
+  }
+
   const rows = await db
     .select({
       id: webhooks.id,
@@ -244,7 +254,7 @@ export async function listWebhooks(orgId: string): Promise<WebhookResponse[]> {
       createdAt: webhooks.createdAt,
     })
     .from(webhooks)
-    .where(eq(webhooks.orgId, orgId))
+    .where(and(...conditions))
     .orderBy(desc(webhooks.createdAt));
 
   return rows.map(toWebhookResponse);
@@ -438,7 +448,17 @@ export async function dispatchWebhookEvents(
   orgId: string,
   eventType: WebhookEventType,
   execution: Record<string, unknown>,
+  applicationId?: string | null,
 ): Promise<void> {
+  // Webhooks are application-scoped — skip dispatch if no application context
+  if (!applicationId) return;
+
+  const conditions = [
+    eq(webhooks.orgId, orgId),
+    eq(webhooks.active, true),
+    eq(webhooks.applicationId, applicationId),
+  ];
+
   const rows = await db
     .select({
       id: webhooks.id,
@@ -447,7 +467,7 @@ export async function dispatchWebhookEvents(
       payloadMode: webhooks.payloadMode,
     })
     .from(webhooks)
-    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true)));
+    .where(and(...conditions));
 
   const queue = getDeliveryQueue();
 

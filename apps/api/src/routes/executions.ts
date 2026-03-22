@@ -32,6 +32,7 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchWebhookEvents } from "../services/webhooks.ts";
+import { type Actor, getActor } from "../lib/actor.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
@@ -49,28 +50,33 @@ function dispatchWebhooks(
   executionId: string,
   packageId: string,
   extra?: Record<string, unknown>,
+  applicationId?: string | null,
 ): void {
   const eventType = `execution.${status}` as Parameters<typeof dispatchWebhookEvents>[1];
-  dispatchWebhookEvents(orgId, eventType, { id: executionId, packageId, status, ...extra }).catch(
-    (err) => {
-      logger.warn("Webhook dispatch failed", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    },
-  );
+  dispatchWebhookEvents(
+    orgId,
+    eventType,
+    { id: executionId, packageId, status, ...extra },
+    applicationId,
+  ).catch((err) => {
+    logger.warn("Webhook dispatch failed", {
+      executionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 // --- Background execution (decoupled from client) ---
 
 export async function executeFlowInBackground(
   executionId: string,
-  userId: string,
+  _actor: Actor,
   orgId: string,
   flow: LoadedFlow,
   promptContext: PromptContext,
   flowPackage?: Buffer | null,
   inputFiles?: UploadedFile[],
+  applicationId?: string | null,
 ) {
   const startTime = Date.now();
   const controller = trackExecution(executionId);
@@ -82,7 +88,7 @@ export async function executeFlowInBackground(
   try {
     // Update status to running
     await updateExecution(executionId, { status: "running" });
-    dispatchWebhooks(orgId, "started", executionId, flow.id);
+    dispatchWebhooks(orgId, "started", executionId, flow.id, undefined, applicationId);
 
     // Execute via adapter
     const adapter = getAdapter();
@@ -111,7 +117,6 @@ export async function executeFlowInBackground(
           case "progress":
             await appendExecutionLog(
               executionId,
-              userId,
               orgId,
               "progress",
               "progress",
@@ -125,7 +130,6 @@ export async function executeFlowInBackground(
             lastAdapterError = msg.message ?? null;
             await appendExecutionLog(
               executionId,
-              userId,
               orgId,
               "system",
               "adapter_error",
@@ -140,7 +144,6 @@ export async function executeFlowInBackground(
             report += (msg.content ?? "") + "\n\n";
             await appendExecutionLog(
               executionId,
-              userId,
               orgId,
               "report",
               msg.type === "report_final" ? "report_final" : "report_chunk",
@@ -154,7 +157,6 @@ export async function executeFlowInBackground(
             if (msg.data) Object.assign(structuredData, msg.data);
             await appendExecutionLog(
               executionId,
-              userId,
               orgId,
               "result",
               "structured_output",
@@ -196,7 +198,6 @@ export async function executeFlowInBackground(
         });
         await appendExecutionLog(
           executionId,
-          userId,
           orgId,
           "system",
           "execution_completed",
@@ -207,7 +208,7 @@ export async function executeFlowInBackground(
           },
           "error",
         );
-        dispatchWebhooks(orgId, "timeout", executionId, flow.id, { duration });
+        dispatchWebhooks(orgId, "timeout", executionId, flow.id, { duration }, applicationId);
         return;
       }
       throw err;
@@ -225,7 +226,6 @@ export async function executeFlowInBackground(
         if (!outputValidation.valid) {
           await appendExecutionLog(
             executionId,
-            userId,
             orgId,
             "system",
             "output_validation",
@@ -279,19 +279,9 @@ export async function executeFlowInBackground(
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
+      await appendExecutionLog(executionId, orgId, "result", "result", null, result, "info");
       await appendExecutionLog(
         executionId,
-        userId,
-        orgId,
-        "result",
-        "result",
-        null,
-        result,
-        "info",
-      );
-      await appendExecutionLog(
-        executionId,
-        userId,
         orgId,
         "system",
         "execution_completed",
@@ -299,7 +289,14 @@ export async function executeFlowInBackground(
         { executionId, status: "success" },
         "info",
       );
-      dispatchWebhooks(orgId, "completed", executionId, flow.id, { result, duration });
+      dispatchWebhooks(
+        orgId,
+        "completed",
+        executionId,
+        flow.id,
+        { result, duration },
+        applicationId,
+      );
     } else {
       // Keep the existing no-result/failed path but update variable references
       if (signal.aborted) return;
@@ -324,7 +321,6 @@ export async function executeFlowInBackground(
       });
       await appendExecutionLog(
         executionId,
-        userId,
         orgId,
         "system",
         "execution_completed",
@@ -336,7 +332,7 @@ export async function executeFlowInBackground(
         },
         "error",
       );
-      dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration });
+      dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration }, applicationId);
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -353,7 +349,6 @@ export async function executeFlowInBackground(
     });
     await appendExecutionLog(
       executionId,
-      userId,
       orgId,
       "system",
       "execution_completed",
@@ -365,7 +360,14 @@ export async function executeFlowInBackground(
       },
       "error",
     );
-    dispatchWebhooks(orgId, "failed", executionId, flow.id, { error: errorMessage, duration });
+    dispatchWebhooks(
+      orgId,
+      "failed",
+      executionId,
+      flow.id,
+      { error: errorMessage, duration },
+      applicationId,
+    );
   } finally {
     untrackExecution(executionId);
   }
@@ -379,8 +381,8 @@ export function createExecutionsRouter() {
   // POST /api/flows/:scope/:name/run — execute a flow (fire-and-forget, returns JSON)
   router.post("/flows/:scope{@[^/]+}/:name/run", rateLimit(20), requireFlow(), async (c) => {
     const flow = c.get("flow");
-    const user = c.get("user");
     const orgId = c.get("orgId");
+    const actor = getActor(c);
     const packageId = flow.id;
     const profileIdOverride = c.req.query("profileId");
 
@@ -408,11 +410,11 @@ export function createExecutionsRouter() {
     // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
     const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
     const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, user.id, packageId, orgId, profileIdOverride),
+      resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
       getPackageConfig(orgId, packageId),
       profileIdOverride
         ? Promise.resolve(profileIdOverride)
-        : getEffectiveProfileId(user.id, packageId),
+        : getEffectiveProfileId(actor, packageId),
       parseRequestInput(c, effectiveFlow.manifest.input?.schema),
     ]);
 
@@ -454,7 +456,7 @@ export function createExecutionsRouter() {
           flow: effectiveFlow,
           providerProfiles,
           orgId,
-          userId: user.id,
+          actor,
           input: parsedInput,
           files: fileRefs,
           config,
@@ -497,7 +499,7 @@ export function createExecutionsRouter() {
     await createExecution(
       executionId,
       packageId,
-      user.id,
+      actor,
       orgId,
       parsedInput ?? null,
       undefined,
@@ -505,17 +507,19 @@ export function createExecutionsRouter() {
       userProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      c.get("applicationId") ?? null,
     );
 
     // Fire-and-forget background execution
     executeFlowInBackground(
       executionId,
-      user.id,
+      actor,
       orgId,
       effectiveFlow,
       promptContext,
       flowPackage,
       uploadedFiles,
+      c.get("applicationId") ?? null,
     ).catch((err) => {
       logger.error("Unhandled error in background execution", {
         executionId,
@@ -531,8 +535,13 @@ export function createExecutionsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 100);
+    const endUser = c.get("endUser");
     const rows = await listPackageExecutions(flow.id, orgId, limit);
-    return c.json(rows);
+    // End-user scoping: end-users can only see their own executions
+    const filtered = endUser
+      ? rows.filter((r: Record<string, unknown>) => r.endUserId === endUser.id)
+      : rows;
+    return c.json(filtered);
   });
 
   // GET /api/executions/:id — get a single execution
@@ -541,6 +550,11 @@ export function createExecutionsRouter() {
     const orgId = c.get("orgId");
     const row = await getExecutionFull(execId);
     if (!row || row.orgId !== orgId) {
+      throw notFound("Execution not found");
+    }
+    // End-user scoping: end-users can only see their own executions
+    const endUser = c.get("endUser");
+    if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Execution not found");
     }
     return c.json(row);
@@ -552,6 +566,11 @@ export function createExecutionsRouter() {
     const orgId = c.get("orgId");
     const exec = await getExecution(execId);
     if (!exec || exec.orgId !== orgId) {
+      throw notFound("Execution not found");
+    }
+    // End-user scoping: end-users can only see their own execution logs
+    const endUser = c.get("endUser");
+    if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Execution not found");
     }
     const logs = await listExecutionLogs(execId, orgId);
@@ -567,7 +586,6 @@ export function createExecutionsRouter() {
   // POST /api/executions/:id/cancel — cancel a running/pending execution
   router.post("/executions/:id/cancel", async (c) => {
     const execId = c.req.param("id");
-    const user = c.get("user");
     const orgId = c.get("orgId");
 
     const execution = await getExecution(execId);
@@ -597,7 +615,6 @@ export function createExecutionsRouter() {
     // Log the cancellation
     await appendExecutionLog(
       execId,
-      user.id,
       orgId,
       "system",
       "execution_completed",
@@ -615,7 +632,14 @@ export function createExecutionsRouter() {
       .stopByExecutionId(execId)
       .catch(() => {});
 
-    dispatchWebhooks(orgId, "cancelled", execId, execution.packageId);
+    dispatchWebhooks(
+      orgId,
+      "cancelled",
+      execId,
+      execution.packageId,
+      undefined,
+      c.get("applicationId") ?? null,
+    );
 
     return c.json({ ok: true });
   });

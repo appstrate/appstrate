@@ -9,9 +9,12 @@ import {
   uuid,
   index,
   doublePrecision,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { executionStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
+import { applications, endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
 import { packages, packageVersions } from "./packages.ts";
 
@@ -20,9 +23,15 @@ export const executions = pgTable(
   {
     id: text("id").primaryKey(),
     packageId: text("package_id").notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "set null",
+    }),
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -49,12 +58,18 @@ export const executions = pgTable(
     index("idx_executions_package_id").on(table.packageId),
     index("idx_executions_status").on(table.status),
     index("idx_executions_user_id").on(table.userId),
+    index("idx_executions_end_user_id").on(table.endUserId),
+    index("idx_executions_application_id").on(table.applicationId),
     index("idx_executions_org_id").on(table.orgId),
     index("idx_executions_notification").on(
       table.userId,
       table.orgId,
       table.notifiedAt,
       table.readAt,
+    ),
+    check(
+      "executions_at_most_one_actor",
+      sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
     ),
   ],
 );
@@ -66,9 +81,6 @@ export const executionLogs = pgTable(
     executionId: text("execution_id")
       .notNull()
       .references(() => executions.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -82,7 +94,6 @@ export const executionLogs = pgTable(
   (table) => [
     index("idx_execution_logs_execution_id").on(table.executionId),
     index("idx_execution_logs_lookup").on(table.executionId, table.id),
-    index("idx_execution_logs_user_id").on(table.userId),
     index("idx_execution_logs_org_id").on(table.orgId),
   ],
 );
@@ -116,9 +127,12 @@ export const packageSchedules = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id),
+    userId: text("user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "set null",
+    }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -135,7 +149,12 @@ export const packageSchedules = pgTable(
   (table) => [
     index("idx_schedules_package_id").on(table.packageId),
     index("idx_schedules_user_id").on(table.userId),
+    index("idx_schedules_end_user_id").on(table.endUserId),
     index("idx_package_schedules_org_id").on(table.orgId),
+    check(
+      "package_schedules_at_most_one_actor",
+      sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -152,11 +171,16 @@ export const shareTokens = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    createdBy: text("created_by")
-      .notNull()
-      .references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "set null",
+    }),
     manifest: jsonb("manifest"),
-    executionId: text("execution_id").references(() => executions.id, { onDelete: "set null" }),
+    executionId: text("execution_id").references(() => executions.id, {
+      onDelete: "set null",
+    }),
     consumedAt: timestamp("consumed_at"),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
@@ -165,5 +189,9 @@ export const shareTokens = pgTable(
     index("idx_share_tokens_token").on(table.token),
     index("idx_share_tokens_package_id").on(table.packageId),
     index("idx_share_tokens_org_id").on(table.orgId),
+    check(
+      "share_tokens_at_most_one_actor",
+      sql`NOT (created_by IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );

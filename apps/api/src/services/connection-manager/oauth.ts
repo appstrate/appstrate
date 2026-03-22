@@ -11,11 +11,12 @@ import {
   type OAuthCallbackResult,
   type OAuth1CallbackResult,
 } from "@appstrate/connect";
+import type { Actor } from "../../lib/actor.ts";
 
 export async function initiateConnection(
   provider: string,
   orgId: string,
-  userId: string,
+  actor: Actor,
   profileId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
@@ -25,10 +26,10 @@ export async function initiateConnection(
   // Route to OAuth1 if the provider uses it
   const providerDef = await getProvider(db, orgId, provider);
   if (providerDef?.authMode === "oauth1") {
-    return initiateOAuth1(db, orgId, userId, profileId, provider, redirectUri);
+    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri);
   }
 
-  return initiateOAuth(db, orgId, userId, profileId, provider, redirectUri, requestedScopes);
+  return initiateOAuth(db, orgId, actor, profileId, provider, redirectUri, requestedScopes);
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {

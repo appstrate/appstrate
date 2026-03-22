@@ -14,6 +14,7 @@ import {
 } from "../services/api-keys.ts";
 
 const createApiKeySchema = z.object({
+  applicationId: z.string().min(1, "applicationId is required"),
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
   expiresAt: z.iso
     .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
@@ -28,10 +29,11 @@ export function createApiKeysRouter() {
   // All endpoints are admin-only
   router.use("*", requireAdmin());
 
-  // GET /api/api-keys — list active keys for the org
+  // GET /api/api-keys — list active keys for the org (optionally filtered by applicationId)
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
-    const keys = await listApiKeys(orgId);
+    const applicationId = c.req.query("applicationId");
+    const keys = await listApiKeys(orgId, applicationId);
     return c.json({ apiKeys: keys });
   });
 
@@ -46,7 +48,7 @@ export function createApiKeysRouter() {
       throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
-    const { name, expiresAt } = parsed.data;
+    const { applicationId, name, expiresAt } = parsed.data;
     const rawKey = generateApiKey();
     const keyHash = await hashApiKey(rawKey);
     const keyPrefix = extractKeyPrefix(rawKey);
@@ -54,6 +56,7 @@ export function createApiKeysRouter() {
     try {
       const id = await createApiKeyRecord({
         orgId,
+        applicationId,
         name,
         keyHash,
         keyPrefix,

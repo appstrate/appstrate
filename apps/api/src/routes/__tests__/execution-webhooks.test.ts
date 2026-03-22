@@ -10,9 +10,12 @@ import type {
   PromptContext,
 } from "../../services/adapters/types.ts";
 import type { LoadedFlow } from "../../types/index.ts";
+import type { Actor } from "../../lib/actor.ts";
 import { packageVersionsStub, schemaStubs } from "../../services/__tests__/_db-mock.ts";
 
 // --- Mocks ---
+
+const testActor: Actor = { type: "member", id: "usr_1" };
 
 const noop = () => {};
 mock.module("../../lib/logger.ts", () => ({
@@ -124,15 +127,21 @@ mock.module("../../lib/cloud-loader.ts", () => ({
 
 // --- Webhook dispatch tracking ---
 
-const webhookCalls: { orgId: string; eventType: string; execution: Record<string, unknown> }[] = [];
+const webhookCalls: {
+  orgId: string;
+  eventType: string;
+  execution: Record<string, unknown>;
+  applicationId?: string | null;
+}[] = [];
 
 mock.module("../../services/webhooks.ts", () => ({
   dispatchWebhookEvents: async (
     orgId: string,
     eventType: string,
     execution: Record<string, unknown>,
+    applicationId?: string | null,
   ) => {
-    webhookCalls.push({ orgId, eventType, execution });
+    webhookCalls.push({ orgId, eventType, execution, applicationId });
   },
   // Other exports needed by the process-global mock
   createWebhook: async () => ({}),
@@ -205,7 +214,7 @@ describe("Webhook dispatch on execution transitions", () => {
   test("dispatches execution.started when execution begins", async () => {
     adapterMessages = [{ type: "report_final", content: "Done" }];
 
-    await executeFlowInBackground("exec_1", "usr_1", "org-1", makeFlow(), makePromptContext());
+    await executeFlowInBackground("exec_1", testActor, "org-1", makeFlow(), makePromptContext());
 
     const started = webhookCalls.find((c) => c.eventType === "execution.started");
     expect(started).toBeDefined();
@@ -220,7 +229,7 @@ describe("Webhook dispatch on execution transitions", () => {
       { type: "structured_output", data: { count: 42 } },
     ];
 
-    await executeFlowInBackground("exec_2", "usr_1", "org-1", makeFlow(), makePromptContext());
+    await executeFlowInBackground("exec_2", testActor, "org-1", makeFlow(), makePromptContext());
 
     const completed = webhookCalls.find((c) => c.eventType === "execution.completed");
     expect(completed).toBeDefined();
@@ -233,7 +242,7 @@ describe("Webhook dispatch on execution transitions", () => {
   test("dispatches execution.failed when adapter produces no result", async () => {
     adapterMessages = []; // No output → failed
 
-    await executeFlowInBackground("exec_3", "usr_1", "org-1", makeFlow(), makePromptContext());
+    await executeFlowInBackground("exec_3", testActor, "org-1", makeFlow(), makePromptContext());
 
     const failed = webhookCalls.find((c) => c.eventType === "execution.failed");
     expect(failed).toBeDefined();
@@ -245,7 +254,7 @@ describe("Webhook dispatch on execution transitions", () => {
   test("both started and completed dispatched for successful execution", async () => {
     adapterMessages = [{ type: "report_final", content: "Done" }];
 
-    await executeFlowInBackground("exec_5", "usr_1", "org-1", makeFlow(), makePromptContext());
+    await executeFlowInBackground("exec_5", testActor, "org-1", makeFlow(), makePromptContext());
 
     const types = webhookCalls.map((c) => c.eventType);
     expect(types).toContain("execution.started");
@@ -255,11 +264,49 @@ describe("Webhook dispatch on execution transitions", () => {
   test("all dispatches use the correct orgId and packageId", async () => {
     adapterMessages = [{ type: "report_final", content: "Done" }];
 
-    await executeFlowInBackground("exec_6", "usr_1", "org-42", makeFlow(), makePromptContext());
+    await executeFlowInBackground("exec_6", testActor, "org-42", makeFlow(), makePromptContext());
 
     for (const call of webhookCalls) {
       expect(call.orgId).toBe("org-42");
       expect(call.execution.packageId).toBe("@test/my-flow");
+    }
+  });
+
+  test("passes applicationId to all webhook dispatches", async () => {
+    adapterMessages = [{ type: "report_final", content: "Done" }];
+
+    await executeFlowInBackground(
+      "exec_app",
+      testActor,
+      "org-1",
+      makeFlow(),
+      makePromptContext(),
+      null,
+      undefined,
+      "app_test123",
+    );
+
+    for (const call of webhookCalls) {
+      expect(call.applicationId).toBe("app_test123");
+    }
+  });
+
+  test("passes null applicationId when no application context", async () => {
+    adapterMessages = [{ type: "report_final", content: "Done" }];
+
+    await executeFlowInBackground(
+      "exec_no_app",
+      testActor,
+      "org-1",
+      makeFlow(),
+      makePromptContext(),
+      null,
+      undefined,
+      null,
+    );
+
+    for (const call of webhookCalls) {
+      expect(call.applicationId).toBeNull();
     }
   });
 });

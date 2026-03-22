@@ -7,9 +7,11 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
+import { endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 
@@ -17,9 +19,10 @@ export const connectionProfiles = pgTable(
   "connection_profiles",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -28,17 +31,27 @@ export const connectionProfiles = pgTable(
   (table) => [
     uniqueIndex("idx_connection_profiles_default")
       .on(table.userId)
-      .where(sql`${table.isDefault} = true`),
+      .where(sql`${table.isDefault} = true AND ${table.userId} IS NOT NULL`),
+    uniqueIndex("idx_connection_profiles_default_end_user")
+      .on(table.endUserId)
+      .where(sql`${table.isDefault} = true AND ${table.endUserId} IS NOT NULL`),
     index("idx_connection_profiles_user_id").on(table.userId),
+    index("idx_connection_profiles_end_user_id").on(table.endUserId),
+    check(
+      "connection_profiles_exactly_one_actor",
+      sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );
 
 export const userPackageProfiles = pgTable(
   "user_package_profiles",
   {
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "cascade",
+    }),
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
@@ -48,8 +61,17 @@ export const userPackageProfiles = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.userId, table.packageId] }),
+    uniqueIndex("idx_user_package_profiles_member")
+      .on(table.userId, table.packageId)
+      .where(sql`${table.userId} IS NOT NULL`),
+    uniqueIndex("idx_user_package_profiles_end_user")
+      .on(table.endUserId, table.packageId)
+      .where(sql`${table.endUserId} IS NOT NULL`),
     index("idx_user_package_profiles_package_id").on(table.packageId),
+    check(
+      "user_package_profiles_exactly_one_actor",
+      sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -63,7 +85,9 @@ export const flowProviderBindings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    profileId: uuid("profile_id").references(() => connectionProfiles.id, { onDelete: "set null" }),
+    profileId: uuid("profile_id").references(() => connectionProfiles.id, {
+      onDelete: "set null",
+    }),
     connectedAt: timestamp("connected_at").defaultNow().notNull(),
   },
   (table) => [
@@ -128,9 +152,10 @@ export const oauthStates = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "cascade",
+    }),
     profileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
@@ -147,5 +172,11 @@ export const oauthStates = pgTable(
       .notNull()
       .default(sql`NOW() + INTERVAL '10 minutes'`),
   },
-  (table) => [index("idx_oauth_states_expires").on(table.expiresAt)],
+  (table) => [
+    index("idx_oauth_states_expires").on(table.expiresAt),
+    check(
+      "oauth_states_exactly_one_actor",
+      sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
+    ),
+  ],
 );

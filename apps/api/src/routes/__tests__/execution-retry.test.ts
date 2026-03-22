@@ -6,10 +6,12 @@ import type {
 } from "../../services/adapters/types.ts";
 import type { JSONSchemaObject } from "@appstrate/shared-types";
 import type { LoadedFlow } from "../../types/index.ts";
+import type { Actor } from "../../lib/actor.ts";
 import { packageVersionsStub, schemaStubs } from "../../services/__tests__/_db-mock.ts";
 
 // --- Mocks ---
 
+const testActor: Actor = { type: "member", id: "user-1" };
 const noop = () => {};
 mock.module("../../lib/logger.ts", () => ({
   logger: { debug: noop, info: noop, warn: noop, error: noop },
@@ -28,7 +30,6 @@ mock.module("../../services/state/index.ts", () => ({
   appendExecutionLog: mock(
     async (
       _executionId: string,
-      _userId: string,
       _orgId: string,
       _type: string,
       event: string,
@@ -224,7 +225,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground("exec-1", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-1", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("success");
     const result = lastUpdate()!.updates.result as { data: Record<string, unknown> };
@@ -239,7 +240,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-2", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-2", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("success");
     const result = lastUpdate()!.updates.result as { report: string };
@@ -254,7 +255,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-3", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-3", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("success");
     const result = lastUpdate()!.updates.result as {
@@ -272,7 +273,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-4", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-4", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("success");
     const result = lastUpdate()!.updates.result as { data: Record<string, unknown> };
@@ -286,7 +287,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-5", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-5", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("success");
     expect(lastUpdate()!.updates.state).toEqual({ cursor: "abc123" });
@@ -301,7 +302,7 @@ describe("executeFlowInBackground — output tools", () => {
     ];
 
     const flow = makeFlow({ outputSchema: OUTPUT_SCHEMA });
-    await executeFlowInBackground("exec-6", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-6", testActor, "org-1", flow, makePromptContext());
 
     // No retries — just a warning
     expect(findLogs("output_validation")).toHaveLength(1);
@@ -313,7 +314,7 @@ describe("executeFlowInBackground — output tools", () => {
     adapterMessages = [{ type: "progress", message: "Working..." }];
 
     const flow = makeFlow({});
-    await executeFlowInBackground("exec-7", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-7", testActor, "org-1", flow, makePromptContext());
 
     expect(lastUpdate()!.updates.status).toBe("failed");
   });

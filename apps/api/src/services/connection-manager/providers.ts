@@ -13,6 +13,7 @@ import {
   listProviders,
   getProviderAuthMode as getProviderAuthModeRaw,
 } from "@appstrate/connect";
+import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
 
 export interface IntegrationWithStatus {
@@ -67,10 +68,10 @@ export async function getIntegrationsWithStatus(
   });
 }
 
-export async function listAllUserConnections(
-  userId: string,
+export async function listAllActorConnections(
+  actor: Actor,
 ): Promise<{ providers: UserConnectionProviderGroup[] }> {
-  // 1. Fetch all user connections with org info
+  // 1. Fetch all actor connections with org info
   const rows = await db
     .select({
       connectionId: userProviderConnections.id,
@@ -84,19 +85,33 @@ export async function listAllUserConnections(
     })
     .from(userProviderConnections)
     .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(eq(connectionProfiles.userId, userId));
+    .where(
+      actorFilter(actor, {
+        userId: connectionProfiles.userId,
+        endUserId: connectionProfiles.endUserId,
+      }),
+    );
 
   if (rows.length === 0) return { providers: [] };
 
-  // 2. Fetch org names
-  const userOrgs = await db
-    .select({
-      orgId: organizationMembers.orgId,
-      orgName: organizations.name,
-    })
-    .from(organizationMembers)
-    .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
-    .where(eq(organizationMembers.userId, userId));
+  // 2. Fetch org names (for members, use organizationMembers; for end_users, derive from connections)
+  const userOrgs =
+    actor.type === "member"
+      ? await db
+          .select({
+            orgId: organizationMembers.orgId,
+            orgName: organizations.name,
+          })
+          .from(organizationMembers)
+          .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
+          .where(eq(organizationMembers.userId, actor.id))
+      : await db
+          .select({
+            orgId: organizations.id,
+            orgName: organizations.name,
+          })
+          .from(organizations)
+          .where(inArray(organizations.id, [...new Set(rows.map((r) => r.orgId))]));
 
   const orgNameMap = new Map(userOrgs.map((o) => [o.orgId, o.orgName]));
 

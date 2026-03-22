@@ -12,6 +12,7 @@ import { resolveCredentialsForProxy } from "@appstrate/connect";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
+import type { Actor } from "../lib/actor.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -21,7 +22,8 @@ async function verifyExecutionToken(c: Context): Promise<{
   executionId: string;
   execution: {
     packageId: string;
-    userId: string;
+    userId: string | null;
+    endUserId: string | null;
     orgId: string;
     status: string;
     connectionProfileId: string | null;
@@ -47,6 +49,7 @@ async function verifyExecutionToken(c: Context): Promise<{
     .select({
       packageId: executions.packageId,
       userId: executions.userId,
+      endUserId: executions.endUserId,
       orgId: executions.orgId,
       status: executions.status,
       connectionProfileId: executions.connectionProfileId,
@@ -69,6 +72,7 @@ async function verifyExecutionToken(c: Context): Promise<{
     execution: {
       packageId: execution.packageId!,
       userId: execution.userId,
+      endUserId: execution.endUserId,
       orgId: execution.orgId,
       status: execution.status,
       connectionProfileId: execution.connectionProfileId,
@@ -103,9 +107,12 @@ export function createInternalRouter() {
     const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
 
     try {
+      const actor: Actor = execution.endUserId
+        ? { type: "end_user", id: execution.endUserId }
+        : { type: "member", id: execution.userId! };
       const recentExecutions = await getRecentExecutions(
         execution.packageId,
-        execution.userId,
+        actor,
         execution.orgId,
         {
           limit,
@@ -161,9 +168,14 @@ export function createInternalRouter() {
         profileId = adminProfileId;
       } else {
         // Use the connection profile snapshot from the execution, or fall back to current
-        profileId =
-          execution.connectionProfileId ??
-          (await getEffectiveProfileId(execution.userId, execution.packageId));
+        if (execution.connectionProfileId) {
+          profileId = execution.connectionProfileId;
+        } else {
+          const executionActor: Actor = execution.endUserId
+            ? { type: "end_user", id: execution.endUserId }
+            : { type: "member", id: execution.userId! };
+          profileId = await getEffectiveProfileId(executionActor, execution.packageId);
+        }
       }
 
       // Unified credential resolution

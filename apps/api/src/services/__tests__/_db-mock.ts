@@ -39,6 +39,8 @@ function chainable(result: unknown[]) {
     limit: () => obj,
     orderBy: () => obj,
     innerJoin: () => obj,
+    leftJoin: () => obj,
+    groupBy: () => obj,
     returning: () => {
       const r = queues.insert.shift() ?? result;
       return { then: (resolve: (v: unknown) => void) => resolve(r) };
@@ -79,6 +81,7 @@ function makeDbProxy(): Record<string, unknown> {
         where: () => obj,
         returning: () => ({ then: (resolve: (v: unknown) => void) => resolve(result) }),
         then: (resolve: (v: unknown) => void) => resolve(result),
+        catch: () => obj,
       };
       return obj;
     },
@@ -122,9 +125,6 @@ export const schemaStubs = {
     email: "email",
     emailVerified: "email_verified",
     image: "image",
-    source: "source",
-    externalId: "external_id",
-    metadata: "metadata",
     createdAt: "created_at",
     updatedAt: "updated_at",
   },
@@ -194,6 +194,7 @@ export const schemaStubs = {
   apiKeys: {
     id: "id",
     orgId: "org_id",
+    applicationId: "application_id",
     name: "name",
     keyHash: "key_hash",
     keyPrefix: "key_prefix",
@@ -314,11 +315,35 @@ export const schemaStubs = {
     createdAt: "created_at",
   },
 
+  // --- applications.ts ---
+  applications: {
+    id: "id",
+    orgId: "org_id",
+    name: "name",
+    isDefault: "is_default",
+    settings: "settings",
+    createdBy: "created_by",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  },
+  endUsers: {
+    id: "id",
+    applicationId: "application_id",
+    orgId: "org_id",
+    externalId: "external_id",
+    name: "name",
+    email: "email",
+    metadata: "metadata",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  },
+
   // --- executions.ts ---
   executions: {
     id: "id",
     packageId: "package_id",
     userId: "user_id",
+    endUserId: "end_user_id",
     orgId: "org_id",
     status: "status",
     input: "input",
@@ -342,7 +367,6 @@ export const schemaStubs = {
   executionLogs: {
     id: "id",
     executionId: "execution_id",
-    userId: "user_id",
     orgId: "org_id",
     type: "type",
     level: "level",
@@ -363,6 +387,7 @@ export const schemaStubs = {
     id: "id",
     packageId: "package_id",
     userId: "user_id",
+    endUserId: "end_user_id",
     orgId: "org_id",
     name: "name",
     enabled: "enabled",
@@ -380,6 +405,7 @@ export const schemaStubs = {
     packageId: "package_id",
     orgId: "org_id",
     createdBy: "created_by",
+    endUserId: "end_user_id",
     manifest: "manifest",
     executionId: "execution_id",
     consumedAt: "consumed_at",
@@ -391,13 +417,16 @@ export const schemaStubs = {
   connectionProfiles: {
     id: "id",
     userId: "user_id",
+    endUserId: "end_user_id",
     name: "name",
     isDefault: "is_default",
     createdAt: "created_at",
     updatedAt: "updated_at",
   },
   userPackageProfiles: {
+    id: "id",
     userId: "user_id",
+    endUserId: "end_user_id",
     packageId: "package_id",
     profileId: "profile_id",
     updatedAt: "updated_at",
@@ -431,6 +460,7 @@ export const schemaStubs = {
     state: "state",
     orgId: "org_id",
     userId: "user_id",
+    endUserId: "end_user_id",
     profileId: "profile_id",
     providerId: "provider_id",
     codeVerifier: "code_verifier",
@@ -446,6 +476,7 @@ export const schemaStubs = {
   webhooks: {
     id: "id",
     orgId: "org_id",
+    applicationId: "application_id",
     url: "url",
     events: "events",
     flowId: "flow_id",

@@ -5,10 +5,12 @@ import type {
   PromptContext,
 } from "../../services/adapters/types.ts";
 import type { LoadedFlow } from "../../types/index.ts";
+import type { Actor } from "../../lib/actor.ts";
 import { packageVersionsStub, schemaStubs } from "../../services/__tests__/_db-mock.ts";
 
 // --- Mocks ---
 
+const testActor: Actor = { type: "member", id: "user-1" };
 const noop = () => {};
 const loggerErrorCalls: unknown[][] = [];
 
@@ -243,7 +245,7 @@ describe("executeFlowInBackground — billing integration", () => {
     ]);
 
     const flow = makeFlow();
-    await executeFlowInBackground("exec-oss-1", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-oss-1", testActor, "org-1", flow, makePromptContext());
 
     // Execution should succeed
     const successUpdates = findUpdatesWithStatus("success");
@@ -265,7 +267,7 @@ describe("executeFlowInBackground — billing integration", () => {
     ]);
 
     const flow = makeFlow();
-    await executeFlowInBackground("exec-cloud-1", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground("exec-cloud-1", testActor, "org-1", flow, makePromptContext());
 
     // Execution should succeed
     const successUpdates = findUpdatesWithStatus("success");
@@ -295,7 +297,13 @@ describe("executeFlowInBackground — billing integration", () => {
     adapterError = new Error("LLM API error");
 
     const flow = makeFlow();
-    await executeFlowInBackground("exec-fail-cost-1", "user-1", "org-1", flow, makePromptContext());
+    await executeFlowInBackground(
+      "exec-fail-cost-1",
+      testActor,
+      "org-1",
+      flow,
+      makePromptContext(),
+    );
 
     // Execution should fail
     const failedUpdates = findUpdatesWithStatus("failed");
@@ -321,7 +329,7 @@ describe("executeFlowInBackground — billing integration", () => {
     const flow = makeFlow();
     await executeFlowInBackground(
       "exec-fail-nocost-1",
-      "user-1",
+      testActor,
       "org-1",
       flow,
       makePromptContext(),
@@ -354,7 +362,7 @@ describe("executeFlowInBackground — billing integration", () => {
     const flow = makeFlow();
     await executeFlowInBackground(
       "exec-usage-fail-1",
-      "user-1",
+      testActor,
       "org-1",
       flow,
       makePromptContext(),

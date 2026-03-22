@@ -4,7 +4,7 @@ import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { ApiError, invalidRequest, forbidden, internalError } from "../lib/errors.ts";
 import {
-  listUserConnections,
+  listActorConnections,
   initiateConnection,
   handleCallback,
   handleOAuth1CallbackAndSave,
@@ -16,24 +16,25 @@ import {
   getProviderAuthMode,
 } from "../services/connection-manager/index.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getActor } from "../lib/actor.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 
 const router = new Hono<AppEnv>();
 
-// GET /auth/connections — list connections for current user's profile
+// GET /auth/connections — list connections for current actor's profile
 router.get("/connections", async (c) => {
-  const user = c.get("user");
+  const actor = getActor(c);
   const orgId = c.get("orgId");
-  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
-  const connections = await listUserConnections(profileId, orgId);
+  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(actor));
+  const connections = await listActorConnections(profileId, orgId);
   return c.json({ connections });
 });
 
 // POST /auth/connect/:provider — initiate OAuth or return authUrl
 router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-  const user = c.get("user");
+  const actor = getActor(c);
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
@@ -51,8 +52,8 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
       // No body or invalid JSON — OK, scopes and profileId are optional
     }
 
-    const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
-    const result = await initiateConnection(provider, orgId, user.id, effectiveProfileId, scopes);
+    const effectiveProfileId = profileId ?? (await getEffectiveProfileId(actor));
+    const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
@@ -64,7 +65,7 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
 // POST /auth/connect/:provider/api-key — create an API key connection
 router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-  const user = c.get("user");
+  const actor = getActor(c);
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
@@ -76,7 +77,7 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
     if (!body.apiKey || !body.apiKey.trim()) {
       throw invalidRequest("API key is required", "apiKey");
     }
-    const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
+    const profileId = body.profileId ?? (await getEffectiveProfileId(actor));
     await saveApiKeyConnection(provider, body.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
@@ -89,7 +90,7 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
 // POST /auth/connect/:provider/credentials — save generic credentials (basic/custom providers)
 router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-  const user = c.get("user");
+  const actor = getActor(c);
   const orgId = c.get("orgId");
 
   if (!(await isProviderEnabled(db, orgId, provider))) {
@@ -106,7 +107,7 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
     const authMode = await getProviderAuthMode(provider, orgId);
     const mode = authMode === "basic" ? "basic" : "custom";
 
-    const profileId = body.profileId ?? (await getEffectiveProfileId(user.id));
+    const profileId = body.profileId ?? (await getEffectiveProfileId(actor));
     await saveCredentialsConnection(provider, mode, body.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
@@ -170,27 +171,27 @@ router.get("/callback", async (c) => {
   }
 });
 
-// GET /auth/integrations — list all integrations with connection status for current user
+// GET /auth/integrations — list all integrations with connection status for current actor
 router.get("/integrations", async (c) => {
-  const user = c.get("user");
+  const actor = getActor(c);
   const orgId = c.get("orgId");
-  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+  const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(actor));
   const integrations = await getIntegrationsWithStatus(profileId, orgId);
   return c.json({ integrations });
 });
 
-// DELETE /auth/connections/:provider — disconnect a provider for current user
+// DELETE /auth/connections/:provider — disconnect a provider for current actor
 // If ?connectionId is provided, deletes only that specific connection.
 // Otherwise, deletes ALL connections for the provider on the profile.
 router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-  const user = c.get("user");
+  const actor = getActor(c);
   const connectionId = c.req.query("connectionId");
   try {
     if (connectionId) {
-      await disconnectConnectionById(connectionId, user.id);
+      await disconnectConnectionById(connectionId, actor);
     } else {
-      const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(user.id));
+      const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(actor));
       const orgId = c.get("orgId");
       await disconnectProvider(provider, profileId, orgId);
     }

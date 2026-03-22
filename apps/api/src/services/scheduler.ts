@@ -18,6 +18,8 @@ import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
+import { type Actor, actorInsert } from "../lib/actor.ts";
+import { getEndUserApplicationId } from "./end-users.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,7 +28,8 @@ import { getCloudModule } from "../lib/cloud-loader.ts";
 interface ScheduleJobData {
   scheduleId: string;
   packageId: string;
-  userId: string;
+  userId?: string;
+  endUserId?: string;
   orgId: string;
   input?: Record<string, unknown>;
 }
@@ -68,7 +71,8 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
-    userId: schedule.userId,
+    userId: schedule.userId ?? undefined,
+    endUserId: schedule.endUserId ?? undefined,
     orgId,
     input: (schedule.input as Record<string, unknown>) ?? undefined,
   };
@@ -94,9 +98,13 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job via BullMQ worker. */
 async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, userId, orgId, input } = job.data;
+  const { scheduleId, packageId, userId, endUserId, orgId, input } = job.data;
 
-  await triggerScheduledExecution(scheduleId, packageId, userId, orgId, input);
+  const actor: Actor = endUserId
+    ? { type: "end_user", id: endUserId }
+    : { type: "member", id: userId! };
+
+  await triggerScheduledExecution(scheduleId, packageId, actor, orgId, input);
 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId);
@@ -187,7 +195,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 async function triggerScheduledExecution(
   scheduleId: string,
   packageId: string,
-  userId: string,
+  actor: Actor,
   orgId: string,
   input: Record<string, unknown> | undefined,
 ) {
@@ -198,10 +206,10 @@ async function triggerScheduledExecution(
       return;
     }
 
-    // Resolve provider profiles for this user + package
+    // Resolve provider profiles for this actor + package
     const manifestProviders = resolveManifestProviders(flow.manifest);
     const [providerProfiles, config] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
+      resolveProviderProfiles(manifestProviders, actor, packageId, orgId),
       getPackageConfig(orgId, packageId),
     ]);
 
@@ -227,7 +235,7 @@ async function triggerScheduledExecution(
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
-    const userProfileId = await getEffectiveProfileId(userId, packageId);
+    const userProfileId = await getEffectiveProfileId(actor, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
@@ -242,7 +250,7 @@ async function triggerScheduledExecution(
           flow,
           providerProfiles,
           orgId,
-          userId,
+          actor,
           input,
           config,
         }));
@@ -278,11 +286,15 @@ async function triggerScheduledExecution(
       }
     }
 
+    // Resolve application context for execution record and webhook dispatch
+    const applicationId =
+      actor.type === "end_user" ? await getEndUserApplicationId(actor.id) : null;
+
     // Create execution record with schedule_id and version
     await createExecution(
       executionId,
       packageId,
-      userId,
+      actor,
       orgId,
       input ?? null,
       scheduleId,
@@ -290,25 +302,34 @@ async function triggerScheduledExecution(
       userProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      applicationId,
     );
 
     logger.info("Triggering scheduled execution", {
       executionId,
       packageId,
       scheduleId,
-      userId,
+      actorType: actor.type,
+      actorId: actor.id,
       orgId,
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, userId, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in scheduled execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(
+      executionId,
+      actor,
+      orgId,
+      flow,
+      promptContext,
+      flowPackage,
+      undefined,
+      applicationId,
+    ).catch((err) => {
+      logger.error("Unhandled error in scheduled execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
@@ -348,7 +369,7 @@ export async function getSchedule(id: string): Promise<Schedule | null> {
 
 export async function createSchedule(
   packageId: string,
-  userId: string,
+  actor: Actor,
   orgId: string,
   data: {
     name?: string;
@@ -368,7 +389,7 @@ export async function createSchedule(
     .values({
       id,
       packageId,
-      userId,
+      ...actorInsert(actor),
       orgId,
       name: data.name ?? null,
       enabled: true,

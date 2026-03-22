@@ -6,10 +6,10 @@ export { initiateConnection, handleCallback, handleOAuth1CallbackAndSave } from 
 export { saveApiKeyConnection, saveCredentialsConnection } from "./credentials.ts";
 
 export {
-  listUserConnections,
+  listActorConnections,
   disconnectProvider,
   disconnectConnectionById,
-  deleteAllUserConnections,
+  deleteAllActorConnections,
   validateScopes,
 } from "./operations.ts";
 
@@ -17,5 +17,5 @@ export type { IntegrationWithStatus } from "./providers.ts";
 export {
   getProviderAuthMode,
   getIntegrationsWithStatus,
-  listAllUserConnections,
+  listAllActorConnections,
 } from "./providers.ts";

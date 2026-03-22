@@ -1,5 +1,6 @@
 // Types
 export type {
+  Actor,
   AuthMode,
   ProviderDefinition,
   ConnectionRecord,

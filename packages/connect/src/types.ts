@@ -2,6 +2,9 @@ import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/valid
 
 export type { AuthMode };
 
+/** Actor identity — member (dashboard) or end-user (headless). */
+export type Actor = { type: "member"; id: string } | { type: "end_user"; id: string };
+
 /** Provider definition used by the connect package — extends core's resolved type with runtime fields. */
 export type ProviderDefinition = ResolvedProviderDefinition & {
   /** Whether this provider has a PROVIDER.md companion file. */
@@ -32,7 +35,7 @@ export interface DecryptedCredentials {
 export interface OAuthStateRecord {
   state: string;
   orgId: string;
-  userId: string;
+  userId: string | null;
   profileId: string;
   providerId: string;
   codeVerifier: string;
