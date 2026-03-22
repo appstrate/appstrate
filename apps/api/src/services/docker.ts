@@ -5,16 +5,20 @@ import { getEnv } from "@appstrate/env";
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
 
+// Support both unix socket (/var/run/docker.sock) and TCP (http://host:port).
 // Bun supports fetch() with unix: option for Unix sockets.
 // Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
+const DOCKER_TCP = DOCKER_SOCKET.startsWith("http://") || DOCKER_SOCKET.startsWith("https://");
+
 async function dockerFetch(
   path: string,
   options: RequestInit = {},
   timeoutMs: number | false = DOCKER_API_TIMEOUT_MS,
 ): Promise<Response> {
-  return fetch(`http://localhost${path}`, {
+  const url = DOCKER_TCP ? `${DOCKER_SOCKET}${path}` : `http://localhost${path}`;
+  return fetch(url, {
     ...options,
-    unix: DOCKER_SOCKET,
+    ...(DOCKER_TCP ? {} : { unix: DOCKER_SOCKET }),
     ...(timeoutMs !== false && { signal: AbortSignal.timeout(timeoutMs) }),
   });
 }

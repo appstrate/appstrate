@@ -35,7 +35,7 @@ export async function buildProviderTokens(
       .map(async (svc) => {
         const profileId = providerProfiles[svc.id]!;
 
-        const result = await getCredentials(db, profileId, svc.provider, orgId);
+        const result = await getCredentials(db, profileId, svc.id, orgId);
         const token = result
           ? (result.credentials.access_token ??
             result.credentials.api_key ??

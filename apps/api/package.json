@@ -6,7 +6,10 @@
   "module": "src/index.ts",
   "scripts": {
     "dev": "cd ../.. && bun --hot apps/api/src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/unit/ && bun test test/integration/",
+    "test:unit": "bun test test/unit/",
+    "test:integration": "bun test test/integration/"
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",

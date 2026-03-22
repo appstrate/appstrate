@@ -1,0 +1,322 @@
+import { describe, it, expect, beforeEach } from "bun:test";
+import { truncateAll, db } from "../../helpers/db.ts";
+import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
+import { seedWebhook } from "../../helpers/seed.ts";
+import {
+  createWebhook,
+  listWebhooks,
+  getWebhook,
+  updateWebhook,
+  deleteWebhook,
+  rotateSecret,
+  listDeliveries,
+  buildEventEnvelope,
+  validateEvents,
+} from "../../../src/services/webhooks.ts";
+import { webhookDeliveries } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+
+describe("webhooks service", () => {
+  let userId: string;
+  let orgId: string;
+  let defaultAppId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    const { cookie, ...user } = await createTestUser();
+    userId = user.id;
+    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
+    orgId = org.id;
+    defaultAppId = appId;
+  });
+
+  // ── createWebhook ────────────────────────────────────────
+
+  describe("createWebhook", () => {
+    it("creates a webhook with valid parameters", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+      });
+
+      expect(wh.id).toBeDefined();
+      expect(wh.id).toStartWith("wh_");
+      expect(wh.url).toBe("https://example.com/hook");
+      expect(wh.events).toContain("execution.completed");
+      expect(wh.active).toBe(true);
+      expect(wh.object).toBe("webhook");
+    });
+
+    it("returns a secret on creation", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+      });
+
+      expect(wh.secret).toBeDefined();
+      expect(wh.secret).toStartWith("whsec_");
+    });
+
+    it("respects active=false override", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+        active: false,
+      });
+
+      expect(wh.active).toBe(false);
+    });
+
+    it("supports flowId filter", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+        flowId: "@testorg/my-flow",
+      });
+
+      expect(wh.flowId).toBe("@testorg/my-flow");
+    });
+
+    it("supports summary payload mode", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+        payloadMode: "summary",
+      });
+
+      expect(wh.payloadMode).toBe("summary");
+    });
+
+    it("throws for invalid event types", async () => {
+      await expect(
+        createWebhook(orgId, defaultAppId, {
+          url: "https://example.com/hook",
+          events: ["invalid.event"],
+        }),
+      ).rejects.toThrow(/Invalid event type/);
+    });
+
+    it("throws for non-HTTPS URLs (when not localhost)", async () => {
+      await expect(
+        createWebhook(orgId, defaultAppId, {
+          url: "http://external-site.com/hook",
+          events: ["execution.completed"],
+        }),
+      ).rejects.toThrow(/https/i);
+    });
+
+    it("can create multiple webhooks for the same org", async () => {
+      for (let i = 0; i < 3; i++) {
+        await createWebhook(orgId, defaultAppId, {
+          url: `https://example.com/hook-${i}`,
+          events: ["execution.completed"],
+        });
+      }
+      const all = await listWebhooks(orgId);
+      expect(all).toHaveLength(3);
+    });
+  });
+
+  // ── listWebhooks ─────────────────────────────────────────
+
+  describe("listWebhooks", () => {
+    it("returns all webhooks for an org", async () => {
+      await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook1",
+        events: ["execution.completed"],
+      });
+      await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook2",
+        events: ["execution.failed"],
+      });
+
+      const list = await listWebhooks(orgId);
+      expect(list).toHaveLength(2);
+    });
+
+    it("does not include webhooks from other orgs", async () => {
+      const otherUser = await createTestUser({ email: "other@test.com" });
+      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, { slug: "otherorg" });
+
+      await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/mine",
+        events: ["execution.completed"],
+      });
+      await createWebhook(otherOrg.id, otherAppId, {
+        url: "https://example.com/theirs",
+        events: ["execution.completed"],
+      });
+
+      const list = await listWebhooks(orgId);
+      expect(list).toHaveLength(1);
+      expect(list[0]!.url).toBe("https://example.com/mine");
+    });
+
+    it("does not expose the secret in list results", async () => {
+      await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/hook",
+        events: ["execution.completed"],
+      });
+
+      const list = await listWebhooks(orgId);
+      expect((list[0] as unknown as Record<string, unknown>).secret).toBeUndefined();
+    });
+  });
+
+  // ── getWebhook ────────────────────────────────────────────
+
+  describe("getWebhook", () => {
+    it("returns a single webhook by ID", async () => {
+      const created = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/single",
+        events: ["execution.completed"],
+      });
+
+      const wh = await getWebhook(orgId, created.id);
+      expect(wh.id).toBe(created.id);
+      expect(wh.url).toBe("https://example.com/single");
+    });
+
+    it("throws not found for non-existent webhook", async () => {
+      await expect(getWebhook(orgId, "wh_nonexistent")).rejects.toThrow(/not found/i);
+    });
+  });
+
+  // ── deleteWebhook ─────────────────────────────────────────
+
+  describe("deleteWebhook", () => {
+    it("deletes a webhook", async () => {
+      const created = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/deleteme",
+        events: ["execution.completed"],
+      });
+
+      await deleteWebhook(orgId, created.id);
+
+      await expect(getWebhook(orgId, created.id)).rejects.toThrow(/not found/i);
+    });
+  });
+
+  // ── rotateSecret ──────────────────────────────────────────
+
+  describe("rotateSecret", () => {
+    it("returns a new secret different from the original", async () => {
+      const created = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/rotate",
+        events: ["execution.completed"],
+      });
+
+      const { secret: newSecret } = await rotateSecret(orgId, created.id);
+
+      expect(newSecret).toBeDefined();
+      expect(newSecret).toStartWith("whsec_");
+      expect(newSecret).not.toBe(created.secret);
+    });
+  });
+
+  // ── webhook delivery records ──────────────────────────────
+
+  describe("webhook delivery records", () => {
+    it("listDeliveries returns deliveries for a webhook", async () => {
+      const created = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/deliveries",
+        events: ["execution.completed"],
+      });
+
+      // Insert delivery records directly into DB
+      await db.insert(webhookDeliveries).values([
+        {
+          webhookId: created.id,
+          eventId: "evt_test-1",
+          eventType: "execution.completed",
+          status: "success",
+          statusCode: 200,
+          latency: 150,
+          attempt: 1,
+        },
+        {
+          webhookId: created.id,
+          eventId: "evt_test-2",
+          eventType: "execution.failed",
+          status: "failed",
+          statusCode: 500,
+          latency: 300,
+          attempt: 1,
+          error: "Internal Server Error",
+        },
+      ]);
+
+      const deliveries = await listDeliveries(orgId, created.id);
+
+      expect(deliveries).toHaveLength(2);
+      const statuses = deliveries.map((d) => d.status);
+      expect(statuses).toContain("success");
+      expect(statuses).toContain("failed");
+    });
+
+    it("listDeliveries returns empty array when no deliveries exist", async () => {
+      const created = await createWebhook(orgId, defaultAppId, {
+        url: "https://example.com/empty-deliveries",
+        events: ["execution.completed"],
+      });
+
+      const deliveries = await listDeliveries(orgId, created.id);
+      expect(deliveries).toHaveLength(0);
+    });
+  });
+
+  // ── buildEventEnvelope ────────────────────────────────────
+
+  describe("buildEventEnvelope", () => {
+    it("builds a valid event envelope in full mode", () => {
+      const { eventId, payload } = buildEventEnvelope({
+        eventType: "execution.completed",
+        execution: { id: "exec_123", status: "success", result: "output data", input: "input data" },
+        payloadMode: "full",
+      });
+
+      expect(eventId).toStartWith("evt_");
+      expect(payload.type).toBe("execution.completed");
+      expect(payload.object).toBe("event");
+      expect(payload.id).toBe(eventId);
+
+      const data = payload.data as { object: Record<string, unknown> };
+      expect(data.object.result).toBe("output data");
+      expect(data.object.input).toBe("input data");
+    });
+
+    it("strips result and input in summary mode", () => {
+      const { payload } = buildEventEnvelope({
+        eventType: "execution.completed",
+        execution: { id: "exec_123", status: "success", result: "output", input: "input" },
+        payloadMode: "summary",
+      });
+
+      const data = payload.data as { object: Record<string, unknown> };
+      expect(data.object.result).toBeUndefined();
+      expect(data.object.input).toBeUndefined();
+      expect(data.object.status).toBe("success");
+    });
+  });
+
+  // ── validateEvents ────────────────────────────────────────
+
+  describe("validateEvents", () => {
+    it("accepts valid event types", () => {
+      const result = validateEvents(["execution.completed", "execution.failed"]);
+      expect(result).toEqual(["execution.completed", "execution.failed"]);
+    });
+
+    it("throws for empty array", () => {
+      expect(() => validateEvents([])).toThrow(/non-empty/i);
+    });
+
+    it("throws for invalid event types", () => {
+      expect(() => validateEvents(["bogus.event"])).toThrow(/Invalid event type/i);
+    });
+
+    it("throws for non-array input", () => {
+      expect(() => validateEvents("not-an-array")).toThrow(/non-empty/i);
+    });
+  });
+});
