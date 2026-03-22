@@ -277,33 +277,20 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // --- User communication ---
-  sections.push("## User Communication\n");
-  sections.push(
-    "Use the `log` tool to send progress updates and important messages to the user. " +
-      "These messages appear in the user's log viewer in real time.\n",
-  );
-  sections.push("Levels:");
-  sections.push(
-    '- **info**: Progress milestones and key results (e.g. "42 emails processed", "3 contacts created")',
-  );
-  sections.push(
-    '- **warn**: Unexpected but non-blocking issues (e.g. "3 emails skipped — no subject")',
-  );
-  sections.push('- **error**: Failures that affect the result (e.g. "Gmail API timeout")\n');
-  sections.push(
-    "**Your very first action** must be a `log` call with level `info` to announce what you are about to do " +
-      '(e.g. "Retrieving recent emails from Gmail"). This is critical — users see a loading indicator until ' +
-      "the first log appears.\n",
-  );
-  sections.push(
-    "Then call `log` at meaningful milestones — not for every small step. " +
-      "Non-admin users only see these log messages, not your internal tool calls or reasoning.\n",
-  );
-  sections.push(
-    "**Do not use emojis** in log messages — the UI already displays colored level badges (INFO, WARN, ERROR). " +
-      "Keep messages plain and factual.\n",
-  );
+  // --- User communication (only when log tool is enabled) ---
+  if (ctx.logsEnabled !== false) {
+    sections.push("## User Communication\n");
+    sections.push(
+      "Use the `log` tool to keep the user informed of your progress. " +
+        "Messages appear in real time in the user's interface.\n",
+    );
+    sections.push("Levels: **info** (progress, milestones), **warn** (non-blocking issues), **error** (failures).\n");
+    sections.push(
+      "Start with a `log` call to announce what you are about to do — " +
+        "the user sees a loading indicator until the first message appears. " +
+        "Then log at meaningful milestones. Write naturally, as you would to a colleague.\n",
+    );
+  }
 
   // --- Output tools ---
   const outputSchema = ctx.schemas.output;

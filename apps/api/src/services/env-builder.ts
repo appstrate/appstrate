@@ -104,6 +104,7 @@ export function buildPromptContext(params: {
       name: s.name,
       description: s.description,
     })),
+    logsEnabled: (params.flow.manifest["x-logs"] as boolean | undefined) ?? true,
   };
 }
 

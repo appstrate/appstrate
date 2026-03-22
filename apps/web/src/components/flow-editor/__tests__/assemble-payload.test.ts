@@ -22,7 +22,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, outputRetries: 2 },
+    execution: { timeout: 300, outputRetries: 2, logs: true },
     _manifestBase: { schemaVersion: "1.0", type: "flow" },
     ...overrides,
   };
@@ -201,7 +201,7 @@ describe("assemblePayload", () => {
 
   test("omits timeout and outputRetries when defaults and not in base", () => {
     const state = makeState({
-      execution: { timeout: 300, outputRetries: 2 },
+      execution: { timeout: 300, outputRetries: 2, logs: true },
     });
 
     const result = assemblePayload(state);
@@ -212,7 +212,7 @@ describe("assemblePayload", () => {
 
   test("includes timeout and outputRetries when values differ from defaults", () => {
     const state = makeState({
-      execution: { timeout: 600, outputRetries: 3 },
+      execution: { timeout: 600, outputRetries: 3, logs: true },
     });
 
     const result = assemblePayload(state);
@@ -223,7 +223,7 @@ describe("assemblePayload", () => {
 
   test("preserves timeout and outputRetries when present in base manifest", () => {
     const state = makeState({
-      execution: { timeout: 300, outputRetries: 2 },
+      execution: { timeout: 300, outputRetries: 2, logs: true },
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",

@@ -14,14 +14,13 @@ export default function (pi: ExtensionAPI) {
     name: "log",
     label: "Log",
     description:
-      "Send a user-facing log message. Use this to report progress, milestones, warnings, or errors to the user. " +
-      "Levels: info (progress & milestones), warn (unexpected but non-blocking), error (failures).",
+      "Send a progress message to the user. Write naturally — the user reads these in real time.",
     parameters: Type.Object({
       level: Type.Union([Type.Literal("info"), Type.Literal("warn"), Type.Literal("error")], {
-        description: "Severity level: info for progress/milestones, warn for non-blocking issues, error for failures",
+        description: "info: progress and milestones, warn: non-blocking issues, error: failures",
       }),
       message: Type.String({
-        description: "Human-readable message for the user (e.g. '42 emails processed', '3 contacts skipped — no email address')",
+        description: "Message for the user",
       }),
     }),
 

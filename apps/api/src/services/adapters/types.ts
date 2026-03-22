@@ -97,6 +97,7 @@ export interface PromptContext {
   timeout?: number;
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
+  logsEnabled?: boolean;
 }
 
 export interface ExecutionAdapter {

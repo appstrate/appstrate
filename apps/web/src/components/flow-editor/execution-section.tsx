@@ -4,6 +4,7 @@ import { FormField } from "../form-field";
 export interface ExecutionSettings {
   timeout: number;
   outputRetries: number;
+  logs: boolean;
 }
 
 interface ExecutionSectionProps {
@@ -37,6 +38,18 @@ export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
           onChange={(v) => update({ outputRetries: Math.min(5, Math.max(0, parseInt(v) || 0)) })}
           description={t("editor.execRetriesDesc")}
         />
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">{t("editor.execLogs")}</p>
+            <p className="text-xs text-muted-foreground">{t("editor.execLogsDesc")}</p>
+          </div>
+          <input
+            id="exec-logs"
+            type="checkbox"
+            checked={value.logs}
+            onChange={(e) => update({ logs: e.target.checked })}
+          />
+        </div>
       </div>
     </div>
   );
