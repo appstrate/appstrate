@@ -41,23 +41,6 @@ export const schemas = {
       email: { type: "string" },
     },
   },
-  UserObject: {
-    type: "object",
-    description: "User object returned by the Users API",
-    properties: {
-      id: { type: "string", description: "User ID (usr_ prefix)" },
-      object: { type: "string", enum: ["user"] },
-      name: { type: ["string", "null"] },
-      email: { type: ["string", "null"] },
-      externalId: { type: ["string", "null"], description: "External ID for mapping" },
-      source: { type: "string", enum: ["dashboard", "api"] },
-      metadata: {
-        type: ["object", "null"],
-        additionalProperties: { type: "string" },
-      },
-      createdAt: { type: "string", format: "date-time" },
-    },
-  },
   WebhookObject: {
     type: "object",
     description: "Webhook configuration object",
@@ -642,6 +625,43 @@ export const schemas = {
       isDefault: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },
       createdBy: { type: ["string", "null"] },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  ApplicationObject: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Application ID (app_ prefix)" },
+      name: { type: "string", description: "Human-readable application name" },
+      isDefault: { type: "boolean", description: "Whether this is the default application" },
+      settings: {
+        type: "object",
+        properties: {
+          allowedRedirectDomains: {
+            type: "array",
+            items: { type: "string" },
+            description: "Domains allowed for OAuth redirect callbacks",
+          },
+        },
+      },
+      createdBy: {
+        type: ["string", "null"],
+        description: "ID of the user who created the application",
+      },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  EndUserObject: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "End-user ID (eu_ prefix)" },
+      applicationId: { type: "string", description: "ID of the parent application" },
+      name: { type: ["string", "null"], description: "Display name" },
+      email: { type: ["string", "null"], format: "email", description: "Email address" },
+      externalId: { type: ["string", "null"], description: "External system identifier" },
+      metadata: { type: ["object", "null"], description: "Arbitrary key-value metadata" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

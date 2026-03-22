@@ -18,6 +18,7 @@ import {
   buildEventEnvelope,
 } from "../services/webhooks.ts";
 import { invalidRequest } from "../lib/errors.ts";
+import { getApplication } from "../services/applications.ts";
 
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
@@ -26,6 +27,7 @@ export function createWebhooksRouter() {
   router.post("/", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json<{
+      applicationId: string;
       url: string;
       events: string[];
       flowId?: string | null;
@@ -33,17 +35,28 @@ export function createWebhooksRouter() {
       active?: boolean;
     }>();
 
+    if (!body.applicationId) throw invalidRequest("applicationId is required", "applicationId");
     if (!body.url) throw invalidRequest("url is required", "url");
     if (!body.events) throw invalidRequest("events is required", "events");
 
-    const result = await createWebhook(orgId, body);
+    // Verify applicationId belongs to this org (throws 404 if not found)
+    await getApplication(orgId, body.applicationId);
+
+    const result = await createWebhook(orgId, body.applicationId, {
+      url: body.url,
+      events: body.events,
+      flowId: body.flowId,
+      payloadMode: body.payloadMode,
+      active: body.active,
+    });
     return c.json(result, 201);
   });
 
-  // GET /api/webhooks — list webhooks
+  // GET /api/webhooks — list webhooks (optionally filtered by applicationId)
   router.get("/", rateLimit(300), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
-    const result = await listWebhooks(orgId);
+    const applicationId = c.req.query("applicationId");
+    const result = await listWebhooks(orgId, applicationId);
     return c.json({ object: "list", data: result });
   });
 

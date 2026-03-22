@@ -115,12 +115,12 @@ mock.module("../../services/connection-profiles.ts", () => ({
 const { saveApiKeyConnection, saveCredentialsConnection } =
   await import("../connection-manager/credentials.ts");
 
-const { listUserConnections, disconnectProvider } =
+const { listActorConnections, disconnectProvider } =
   await import("../connection-manager/operations.ts");
 
 const { getConnectionStatus } = await import("../connection-manager/status.ts");
 
-const { listAllUserConnections } = await import("../connection-manager/providers.ts");
+const { listAllActorConnections } = await import("../connection-manager/providers.ts");
 
 // --- Reset ---
 
@@ -151,12 +151,12 @@ describe("saveCredentialsConnection", () => {
   });
 });
 
-// ==================== Service: listUserConnections ====================
+// ==================== Service: listActorConnections ====================
 
-describe("listUserConnections", () => {
+describe("listActorConnections", () => {
   test("passes orgId to listConnections", async () => {
     const { listConnections } = await import("@appstrate/connect");
-    await listUserConnections("profile-1", "org-1");
+    await listActorConnections("profile-1", "org-1");
 
     expect(listConnections).toHaveBeenCalledWith(db, "profile-1", "org-1");
   });
@@ -190,13 +190,13 @@ describe("getConnectionStatus", () => {
   });
 });
 
-// ==================== Service: listAllUserConnections ====================
+// ==================== Service: listAllActorConnections ====================
 
-describe("listAllUserConnections", () => {
+describe("listAllActorConnections", () => {
   test("returns empty providers when no connections", async () => {
     queues.select.push([]); // userProviderConnections join
 
-    const result = await listAllUserConnections("user-1");
+    const result = await listAllActorConnections({ type: "member", id: "user-1" });
     expect(result.providers).toEqual([]);
   });
 
@@ -250,7 +250,7 @@ describe("listAllUserConnections", () => {
       { id: "@test/clickup", draftManifest: { displayName: "ClickUp" } },
     ]);
 
-    const result = await listAllUserConnections("user-1");
+    const result = await listAllActorConnections({ type: "member", id: "user-1" });
 
     // Two provider groups
     expect(result.providers).toHaveLength(2);
@@ -310,7 +310,7 @@ describe("listAllUserConnections", () => {
     queues.select.push([{ orgId: "org-1", orgName: "Mon Agence" }]);
     queues.select.push([{ id: "@test/gmail", draftManifest: { displayName: "Gmail" } }]);
 
-    const result = await listAllUserConnections("user-1");
+    const result = await listAllActorConnections({ type: "member", id: "user-1" });
 
     expect(result.providers).toHaveLength(1);
     const gmail = result.providers[0]!;

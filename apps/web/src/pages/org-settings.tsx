@@ -27,7 +27,6 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
-import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
 import {
   useProxies,
   useCreateProxy,
@@ -58,7 +57,6 @@ import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 import { CopyLinkButton } from "../components/copy-link-button";
-import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal } from "../hooks/use-billing";
@@ -67,7 +65,6 @@ import type {
   OrganizationMember,
   OrgRole,
   OrgInvitation,
-  ApiKeyInfo,
   OrgProxyInfo,
   OrgModelInfo,
   OrgProviderKeyInfo,
@@ -87,10 +84,9 @@ export function OrgSettingsPage() {
     "members",
     ...(features.models ? ["models" as const] : []),
     "proxies",
-    "api-keys",
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
-  type Tab = "general" | "members" | "models" | "proxies" | "api-keys" | "billing";
+  type Tab = "general" | "members" | "models" | "proxies" | "billing";
   const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -129,11 +125,6 @@ export function OrgSettingsPage() {
   const createPkMutation = useCreateProviderKey();
   const updatePkMutation = useUpdateProviderKey();
   const deletePkMutation = useDeleteProviderKey();
-
-  // API Keys
-  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
-  const { data: apiKeysData, isLoading: apiKeysLoading, error: apiKeysError } = useApiKeys();
-  const revokeApiKeyMutation = useRevokeApiKey();
 
   const orgId = currentOrg?.id;
 
@@ -328,7 +319,6 @@ export function OrgSettingsPage() {
           </TabsTrigger>
           {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
           <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
-          <TabsTrigger value="api-keys">{t("orgSettings.tabApiKeys")}</TabsTrigger>
           {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
         </TabsList>
       </Tabs>
@@ -655,22 +645,7 @@ export function OrgSettingsPage() {
         />
       )}
 
-      {tab === "api-keys" && (
-        <ApiKeysTab
-          apiKeys={apiKeysData}
-          isLoading={apiKeysLoading}
-          error={apiKeysError}
-          onCreate={() => setApiKeyModalOpen(true)}
-          onRevoke={(key) => {
-            if (!confirm(t("apiKeys.revokeConfirm", { name: key.name }))) return;
-            revokeApiKeyMutation.mutate(key.id);
-          }}
-        />
-      )}
-
       {tab === "billing" && features.billing && <BillingTab />}
-
-      <ApiKeyCreateModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
 
       <ProxyFormModal
         open={proxyModalOpen}
@@ -1044,111 +1019,6 @@ function ModelsTab({
       ) : (
         <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
           <Button onClick={onCreate}>{t("models.add")}</Button>
-        </EmptyState>
-      )}
-    </>
-  );
-}
-
-function ApiKeysTab({
-  apiKeys,
-  isLoading,
-  error,
-  onCreate,
-  onRevoke,
-}: {
-  apiKeys: ApiKeyInfo[] | undefined;
-  isLoading: boolean;
-  error: Error | null;
-  onCreate: () => void;
-  onRevoke: (key: ApiKeyInfo) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
-
-  const formatDate = (iso: string | null) => {
-    if (!iso) return "\u2014";
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
-
-  const isExpired = (expiresAt: string | null) =>
-    expiresAt ? new Date(expiresAt) < new Date() : false;
-
-  return (
-    <>
-      <div className="flex items-center justify-end gap-2 mb-4">
-        <a
-          href="/api/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mr-auto text-primary text-sm no-underline hover:underline"
-        >
-          {t("apiKeys.swaggerLink")}
-        </a>
-        <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
-      </div>
-
-      {apiKeys && apiKeys.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {apiKeys.map((key) => {
-            const expired = isExpired(key.expiresAt);
-            return (
-              <div key={key.id} className="rounded-lg border border-border bg-card p-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      <Badge variant="secondary" className="opacity-60">
-                        {key.keyPrefix}...
-                      </Badge>
-                      {expired ? (
-                        <Badge variant="failed">{t("apiKeys.expired")}</Badge>
-                      ) : (
-                        <Badge variant="success">{t("apiKeys.active")}</Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1 mt-3">
-                  <span className="text-sm text-muted-foreground">
-                    {key.expiresAt
-                      ? t("apiKeys.expiresOn", { date: formatDate(key.expiresAt) })
-                      : t("apiKeys.neverExpires")}
-                  </span>
-                  {key.lastUsedAt && (
-                    <span className="text-sm text-muted-foreground">
-                      {t("apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
-                    </span>
-                  )}
-                  {key.createdByName && (
-                    <span className="text-sm text-muted-foreground">
-                      {t("apiKeys.createdByLabel", { name: key.createdByName })}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
-                  <Button variant="destructive" size="sm" onClick={() => onRevoke(key)}>
-                    {t("apiKeys.revoke")}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState
-          message={t("apiKeys.empty")}
-          hint={t("apiKeys.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          <Button onClick={onCreate}>{t("apiKeys.createBtn")}</Button>
         </EmptyState>
       )}
     </>

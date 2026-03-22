@@ -18,6 +18,7 @@ import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { createShareToken } from "../services/share-tokens.ts";
+import { getActor } from "../lib/actor.ts";
 import { resolveVersionManifest } from "../services/package-versions.ts";
 import {
   getEffectiveProfileId,
@@ -99,7 +100,7 @@ export function createFlowsRouter() {
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
-      const user = c.get("user");
+      const actor = getActor(c);
       const providerId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
 
       // Verify the provider exists and is in admin mode
@@ -119,7 +120,7 @@ export function createFlowsRouter() {
       } catch {
         // No body — use default profile
       }
-      const effectiveProfileId = profileId ?? (await getEffectiveProfileId(user.id));
+      const effectiveProfileId = profileId ?? (await getEffectiveProfileId(actor));
 
       // Verify the profile has a connection for this provider
       const orgId = c.get("orgId");
@@ -155,20 +156,20 @@ export function createFlowsRouter() {
   // PUT /api/flows/:scope/:name/profile — set flow profile override
   router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
-    const user = c.get("user");
+    const actor = getActor(c);
     const body = await c.req.json<{ profileId: string }>();
     if (!body.profileId) {
       throw invalidRequest("profileId is required", "profileId");
     }
-    await setPackageProfileOverride(user.id, flow.id, body.profileId);
+    await setPackageProfileOverride(actor, flow.id, body.profileId);
     return c.json({ success: true });
   });
 
   // DELETE /api/flows/:scope/:name/profile — remove flow profile override
   router.delete("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
-    const user = c.get("user");
-    await removePackageProfileOverride(user.id, flow.id);
+    const actor = getActor(c);
+    await removePackageProfileOverride(actor, flow.id);
     return c.json({ success: true });
   });
 
@@ -258,7 +259,6 @@ export function createFlowsRouter() {
   // POST /api/flows/:scope/:name/share-token — generate a one-time public share link (admin-only)
   router.post("/:scope{@[^/]+}/:name/share-token", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
-    const user = c.get("user");
     const orgId = c.get("orgId");
 
     // Resolve manifest to snapshot: use requested version or fall back to draft
@@ -294,7 +294,8 @@ export function createFlowsRouter() {
       }
     }
 
-    const shareToken = await createShareToken(flow.id, user.id, orgId, undefined, manifest);
+    const actor = getActor(c);
+    const shareToken = await createShareToken(flow.id, actor, orgId, undefined, manifest);
     return c.json({
       token: shareToken!.token,
       expiresAt: shareToken!.expiresAt,

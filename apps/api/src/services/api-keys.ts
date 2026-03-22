@@ -37,6 +37,7 @@ export interface ValidatedApiKey {
   name: string;
   orgId: string;
   orgSlug: string;
+  applicationId: string;
 }
 
 /**
@@ -52,6 +53,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     .select({
       id: apiKeys.id,
       orgId: apiKeys.orgId,
+      applicationId: apiKeys.applicationId,
       createdBy: apiKeys.createdBy,
       expiresAt: apiKeys.expiresAt,
       revokedAt: apiKeys.revokedAt,
@@ -92,12 +94,14 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     name: row.userName,
     orgId: row.orgId,
     orgSlug: row.orgSlug,
+    applicationId: row.applicationId,
   };
 }
 
 /** Create a new API key record. Returns the record ID. */
 export async function createApiKeyRecord(params: {
   orgId: string;
+  applicationId: string;
   name: string;
   keyHash: string;
   keyPrefix: string;
@@ -108,6 +112,7 @@ export async function createApiKeyRecord(params: {
   await db.insert(apiKeys).values({
     id,
     orgId: params.orgId,
+    applicationId: params.applicationId,
     name: params.name,
     keyHash: params.keyHash,
     keyPrefix: params.keyPrefix,
@@ -117,8 +122,13 @@ export async function createApiKeyRecord(params: {
   return id;
 }
 
-/** List active (non-revoked) API keys for an org. */
-export async function listApiKeys(orgId: string): Promise<ApiKeyInfo[]> {
+/** List active (non-revoked) API keys for an org, optionally filtered by application. */
+export async function listApiKeys(orgId: string, applicationId?: string): Promise<ApiKeyInfo[]> {
+  const conditions = [eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)];
+  if (applicationId) {
+    conditions.push(eq(apiKeys.applicationId, applicationId));
+  }
+
   const rows = await db
     .select({
       id: apiKeys.id,
@@ -136,7 +146,7 @@ export async function listApiKeys(orgId: string): Promise<ApiKeyInfo[]> {
     .from(apiKeys)
     .leftJoin(userTable, eq(apiKeys.createdBy, userTable.id))
     .leftJoin(profiles, eq(apiKeys.createdBy, profiles.id))
-    .where(and(eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)))
+    .where(and(...conditions))
     .orderBy(apiKeys.createdAt);
 
   return rows.map((r) => ({

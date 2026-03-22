@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
+import { applications } from "./applications.ts";
 
 export const webhooks = pgTable(
   "webhooks",
@@ -8,6 +9,9 @@ export const webhooks = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["execution.completed", "execution.failed"]
     flowId: text("flow_id"), // null = all flows
@@ -21,7 +25,8 @@ export const webhooks = pgTable(
   },
   (table) => [
     index("idx_webhooks_org_id").on(table.orgId),
-    index("idx_webhooks_org_active").on(table.orgId, table.active),
+    index("idx_webhooks_application_id").on(table.applicationId),
+    index("idx_webhooks_app_active").on(table.applicationId, table.active),
   ],
 );
 

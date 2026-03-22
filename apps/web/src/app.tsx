@@ -18,6 +18,12 @@ import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OrgSettingsPage } from "./pages/org-settings";
+import { WebhooksPage } from "./pages/webhooks-page";
+import { WebhookDetailPage } from "./pages/webhook-detail-page";
+import { ApplicationsPage } from "./pages/applications-page";
+import { ApiKeysPage } from "./pages/api-keys-page";
+import { EndUsersPage } from "./pages/end-users-page";
+import { AppSettingsPage } from "./pages/app-settings-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
@@ -34,6 +40,7 @@ import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
+import { useApplicationResolver } from "./hooks/use-current-application";
 import { Spinner } from "./components/spinner";
 import {
   User,
@@ -151,6 +158,7 @@ function MainLayout() {
   const { resolvedTheme } = useTheme();
   const { user, profile, logout } = useAuth();
   const { isOrgAdmin } = useOrg();
+  useApplicationResolver();
 
   const handleLogout = async () => {
     await logout();
@@ -332,7 +340,14 @@ export function App() {
               path="/providers/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="provider" />}
             />
+            <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
+            {/* App-scoped routes (read applicationId from store, like orgId) */}
+            <Route path="/end-users" element={<EndUsersPage />} />
+            <Route path="/api-keys" element={<ApiKeysPage />} />
+            <Route path="/webhooks" element={<WebhooksPage />} />
+            <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+            <Route path="/app-settings" element={<AppSettingsPage />} />
             <Route path="/org-settings" element={<OrgSettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

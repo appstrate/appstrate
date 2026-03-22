@@ -22,11 +22,12 @@ import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
 import { createProviderKeysRouter } from "./routes/provider-keys.ts";
 import { createInternalRouter } from "./routes/internal.ts";
+import { createApplicationsRouter } from "./routes/applications.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
-import { createUsersRouter } from "./routes/users.ts";
+import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
 import authRouter from "./routes/auth.ts";
@@ -38,7 +39,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
-import { isOrgMember } from "./services/users.ts";
+import { isEndUserInApp } from "./services/end-users.ts";
 import type { AppEnv } from "./types/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
@@ -139,25 +140,36 @@ app.use("*", async (c, next) => {
     c.set("orgRole", "admin");
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);
+    c.set("applicationId", keyInfo.applicationId);
 
-    // Appstrate-User header: impersonate a user (API key only)
-    const targetUserId = c.req.header("Appstrate-User");
-    if (targetUserId) {
-      const targetUser = await isOrgMember(keyInfo.orgId, targetUserId);
-      if (!targetUser) {
+    // Appstrate-User header: resolve end-user context (API key only)
+    const targetEndUserId = c.req.header("Appstrate-User");
+    if (targetEndUserId) {
+      if (!targetEndUserId.startsWith("eu_")) {
         throw new ApiError({
-          status: 403,
-          code: "invalid_user",
-          title: "Invalid User",
-          detail: `User '${targetUserId}' does not exist or is not a member of this organization`,
+          status: 400,
+          code: "invalid_end_user_id",
+          title: "Invalid End-User ID",
+          detail: `Appstrate-User header must be an end-user ID with 'eu_' prefix, got '${targetEndUserId}'`,
           param: "Appstrate-User",
         });
       }
-      logger.info("Appstrate-User impersonation", {
+      const endUser = await isEndUserInApp(keyInfo.applicationId, targetEndUserId);
+      if (!endUser) {
+        throw new ApiError({
+          status: 403,
+          code: "invalid_end_user",
+          title: "Invalid End-User",
+          detail: `End-user '${targetEndUserId}' does not exist or does not belong to this application`,
+          param: "Appstrate-User",
+        });
+      }
+      logger.info("Appstrate-User end-user context", {
         requestId: c.get("requestId"),
         apiKeyId: keyInfo.keyId,
-        apiKeyOwner: keyInfo.userId,
-        targetUserId,
+        authenticatedMember: keyInfo.userId,
+        endUserId: endUser.id,
+        applicationId: endUser.applicationId,
         method: c.req.method,
         path: c.req.path,
         ip:
@@ -166,7 +178,7 @@ app.use("*", async (c, next) => {
           "unknown",
         userAgent: c.req.header("user-agent") || "unknown",
       });
-      c.set("user", { id: targetUser.id, email: targetUser.email, name: targetUser.name });
+      c.set("endUser", endUser);
     }
 
     return next();
@@ -197,7 +209,7 @@ app.use("*", async (c, next) => {
   c.set("authMethod", "session");
 
   // Ensure the user has a default connection profile
-  ensureDefaultProfile(session.user.id).catch((err) => {
+  ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
     logger.warn("Failed to ensure default profile", {
       userId: session.user.id,
       error: err instanceof Error ? err.message : String(err),
@@ -246,13 +258,14 @@ app.route("/api", createNotificationsRouter()); // Must be before executionsRout
 app.route("/api", executionsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
-app.route("/api/users", createUsersRouter());
+app.route("/api/end-users", createEndUsersRouter());
 app.route("/api/webhooks", createWebhooksRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/provider-keys", createProviderKeysRouter());
+app.route("/api/applications", createApplicationsRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

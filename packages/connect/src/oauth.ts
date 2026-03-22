@@ -3,6 +3,7 @@ import { eq, and, gt } from "drizzle-orm";
 import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord } from "./types.ts";
+import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
 import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
@@ -35,7 +36,7 @@ export interface InitiateOAuthResult {
 export async function initiateOAuth(
   db: Db,
   orgId: string,
-  userId: string,
+  actor: Actor,
   profileId: string,
   providerId: string,
   redirectUri: string,
@@ -60,10 +61,14 @@ export async function initiateOAuth(
 
   // Store OAuth state in DB
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const actorCols =
+    actor.type === "end_user"
+      ? { userId: null as string | null, endUserId: actor.id }
+      : { userId: actor.id, endUserId: null as string | null };
   await db.insert(oauthStates).values({
     state,
     orgId,
-    userId,
+    ...actorCols,
     profileId,
     providerId,
     codeVerifier,
@@ -96,7 +101,8 @@ export async function initiateOAuth(
 export interface OAuthCallbackResult {
   providerId: string;
   orgId: string;
-  userId: string;
+  userId: string | null;
+  actor: Actor;
   profileId: string;
   accessToken: string;
   refreshToken?: string;
@@ -127,11 +133,16 @@ export async function handleOAuthCallback(
 
   const rawRow = rows[0]!;
 
+  // Reconstruct actor from the stored columns
+  const actor: Actor = rawRow.endUserId
+    ? { type: "end_user", id: rawRow.endUserId }
+    : { type: "member", id: rawRow.userId! };
+
   // Map to OAuthStateRecord
   const stateRow: OAuthStateRecord = {
     state: rawRow.state,
     orgId: rawRow.orgId,
-    userId: rawRow.userId,
+    userId: rawRow.userId ?? null,
     profileId: rawRow.profileId,
     providerId: rawRow.providerId,
     codeVerifier: rawRow.codeVerifier,
@@ -217,7 +228,8 @@ export async function handleOAuthCallback(
   return {
     providerId: stateRow.providerId,
     orgId: stateRow.orgId,
-    userId: stateRow.userId,
+    userId: stateRow.userId ?? null,
+    actor,
     profileId: stateRow.profileId,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,

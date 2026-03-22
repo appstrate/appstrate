@@ -18,6 +18,7 @@ import { initWebhookWorker } from "../services/webhooks.ts";
 import { initCancelSubscriber } from "../services/execution-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
+import { ensureDefaultApplications } from "../services/applications.ts";
 
 export async function boot(): Promise<void> {
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
@@ -131,6 +132,11 @@ export async function boot(): Promise<void> {
           error: err instanceof Error ? err.message : String(err),
         });
       }),
+    ensureDefaultApplications().catch((err) => {
+      logger.warn("Could not ensure default applications", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
   ];
 
   await Promise.all(parallelInits);

@@ -12,6 +12,7 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
+import { getActor } from "../lib/actor.ts";
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
@@ -34,7 +35,6 @@ export function createSchedulesRouter() {
   // POST /api/flows/:scope/:name/schedules — create a schedule
   router.post("/flows/:scope{@[^/]+}/:name/schedules", requireFlow(), async (c) => {
     const flow = c.get("flow");
-    const user = c.get("user");
 
     const body = await c.req.json<{
       name?: string;
@@ -67,15 +67,17 @@ export function createSchedulesRouter() {
       }
     }
 
-    const schedule = await createSchedule(flow.id, user.id, c.get("orgId"), body);
+    const actor = getActor(c);
+    const schedule = await createSchedule(flow.id, actor, c.get("orgId"), body);
     return c.json(schedule, 201);
   });
 
   // PUT /api/schedules/:id — update a schedule
   router.put("/schedules/:id", async (c) => {
     const id = c.req.param("id");
+    const orgId = c.get("orgId");
     const existing = await getSchedule(id);
-    if (!existing) {
+    if (!existing || existing.orgId !== orgId) {
       throw notFound(`Schedule '${id}' not found`);
     }
 
@@ -99,6 +101,11 @@ export function createSchedulesRouter() {
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", async (c) => {
     const id = c.req.param("id");
+    const orgId = c.get("orgId");
+    const existing = await getSchedule(id);
+    if (!existing || existing.orgId !== orgId) {
+      throw notFound(`Schedule '${id}' not found`);
+    }
     const deleted = await deleteSchedule(id);
     if (!deleted) {
       throw notFound(`Schedule '${id}' not found`);

@@ -7,6 +7,7 @@ import { randomBytes, createHmac } from "node:crypto";
 import { eq, and, gt } from "drizzle-orm";
 import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
+import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuth1CredentialsOrThrow } from "./registry.ts";
 import { extractErrorMessage } from "./utils.ts";
 
@@ -74,7 +75,7 @@ export interface InitiateOAuth1Result {
 export async function initiateOAuth1(
   db: Db,
   orgId: string,
-  userId: string,
+  actor: Actor,
   profileId: string,
   providerId: string,
   callbackUrl: string,
@@ -140,10 +141,14 @@ export async function initiateOAuth1(
 
   // Store in oauth_states — use oauth_token as the state key (lookup key in callback)
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const actorCols =
+    actor.type === "end_user"
+      ? { userId: null as string | null, endUserId: actor.id }
+      : { userId: actor.id, endUserId: null as string | null };
   await db.insert(oauthStates).values({
     state: oauthToken,
     orgId,
-    userId,
+    ...actorCols,
     profileId,
     providerId,
     codeVerifier: "", // Not used for OAuth1, column is NOT NULL
@@ -169,7 +174,8 @@ export async function initiateOAuth1(
 export interface OAuth1CallbackResult {
   providerId: string;
   orgId: string;
-  userId: string;
+  userId: string | null;
+  actor: Actor;
   profileId: string;
   consumerKey: string;
   accessToken: string;
@@ -268,10 +274,16 @@ export async function handleOAuth1Callback(
   // Clean up the OAuth state
   await db.delete(oauthStates).where(eq(oauthStates.state, oauthToken));
 
+  // Reconstruct actor from the stored columns
+  const actor: Actor = stateRow.endUserId
+    ? { type: "end_user", id: stateRow.endUserId }
+    : { type: "member", id: stateRow.userId! }; // userId is guaranteed non-null when endUserId is null (DB check constraint)
+
   return {
     providerId: stateRow.providerId,
     orgId: stateRow.orgId,
-    userId: stateRow.userId,
+    userId: stateRow.userId ?? null,
+    actor,
     profileId: stateRow.profileId,
     consumerKey: creds.consumerKey,
     accessToken,

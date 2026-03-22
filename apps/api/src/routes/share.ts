@@ -25,6 +25,8 @@ import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { ApiError, notFound, gone } from "../lib/errors.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import type { Actor } from "../lib/actor.ts";
+import { getEndUserApplicationId } from "../services/end-users.ts";
 
 export function createShareRouter() {
   const router = new Hono();
@@ -107,8 +109,15 @@ export function createShareRouter() {
       throw gone("token_invalid", "This link has already been used or is no longer valid.");
     }
 
-    const { id: tokenId, packageId, createdBy: userId, orgId } = shareToken;
+    const { id: tokenId, packageId, orgId } = shareToken;
+    const actor: Actor = shareToken.endUserId
+      ? { type: "end_user", id: shareToken.endUserId }
+      : { type: "member", id: shareToken.createdBy! };
     const snapshotManifest = shareToken.manifest as Record<string, unknown> | null;
+
+    // Resolve application context for webhook dispatch
+    const applicationId =
+      actor.type === "end_user" ? await getEndUserApplicationId(actor.id) : null;
 
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
@@ -127,7 +136,7 @@ export function createShareRouter() {
 
     const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
     const [providerProfiles, config] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, userId, packageId, orgId),
+      resolveProviderProfiles(manifestProviders, actor, packageId, orgId),
       getPackageConfig(orgId, packageId),
     ]);
 
@@ -155,7 +164,7 @@ export function createShareRouter() {
       size: f.size,
     }));
 
-    const userProfileId = await getEffectiveProfileId(userId, packageId);
+    const userProfileId = await getEffectiveProfileId(actor, packageId);
 
     let promptContext: PromptContext;
     let flowPackage: Buffer | null;
@@ -169,7 +178,7 @@ export function createShareRouter() {
           flow: effectiveFlow,
           providerProfiles,
           orgId,
-          userId,
+          actor,
           input: parsedInput,
           files: fileRefs,
           config,
@@ -189,7 +198,7 @@ export function createShareRouter() {
     await createExecution(
       executionId,
       packageId,
-      userId,
+      actor,
       orgId,
       parsedInput ?? null,
       undefined,
@@ -197,18 +206,20 @@ export function createShareRouter() {
       userProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      applicationId,
     );
     await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
     executeFlowInBackground(
       executionId,
-      userId,
+      actor,
       orgId,
       effectiveFlow,
       promptContext,
       flowPackage,
       uploadedFiles,
+      applicationId,
     ).catch((err) => {
       logger.error("Unhandled error in shared execution", {
         executionId,

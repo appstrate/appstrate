@@ -2,12 +2,13 @@ import crypto from "node:crypto";
 import { eq, and, isNull, gt } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { shareTokens } from "@appstrate/db/schema";
+import type { Actor } from "../lib/actor.ts";
 
 const DEFAULT_EXPIRES_DAYS = 7;
 
 export async function createShareToken(
   packageId: string,
-  createdBy: string,
+  actor: Actor,
   orgId: string,
   expiresInDays = DEFAULT_EXPIRES_DAYS,
   manifest?: Record<string, unknown>,
@@ -15,12 +16,17 @@ export async function createShareToken(
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
 
+  const ownerFields =
+    actor.type === "end_user"
+      ? { createdBy: null, endUserId: actor.id }
+      : { createdBy: actor.id, endUserId: null };
+
   const [row] = await db
     .insert(shareTokens)
     .values({
       token,
       packageId,
-      createdBy,
+      ...ownerFields,
       orgId,
       expiresAt,
       manifest: manifest ?? null,

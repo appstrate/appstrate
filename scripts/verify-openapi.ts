@@ -233,12 +233,19 @@ const expectedEndpoints = [
   "GET /api/orgs/{orgId}/settings",
   "PUT /api/orgs/{orgId}/settings",
 
-  // Users (headless)
-  "POST /api/users",
-  "GET /api/users",
-  "GET /api/users/{id}",
-  "PATCH /api/users/{id}",
-  "DELETE /api/users/{id}",
+  // Applications
+  "POST /api/applications",
+  "GET /api/applications",
+  "GET /api/applications/{id}",
+  "PATCH /api/applications/{id}",
+  "DELETE /api/applications/{id}",
+
+  // End-Users
+  "POST /api/end-users",
+  "GET /api/end-users",
+  "GET /api/end-users/{id}",
+  "PATCH /api/end-users/{id}",
+  "DELETE /api/end-users/{id}",
 
   // Webhooks
   "POST /api/webhooks",

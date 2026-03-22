@@ -76,11 +76,13 @@ export async function markInvitationAccepted(invitationId: string, userId: strin
     .where(eq(orgInvitations.id, invitationId));
 }
 
-export async function cancelInvitation(invitationId: string) {
-  await db
+export async function cancelInvitation(invitationId: string, orgId: string) {
+  const [cancelled] = await db
     .update(orgInvitations)
     .set({ status: "cancelled" })
-    .where(eq(orgInvitations.id, invitationId));
+    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.orgId, orgId)))
+    .returning({ id: orgInvitations.id });
+  return cancelled ?? null;
 }
 
 export async function updateInvitationRole(

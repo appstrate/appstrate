@@ -7,88 +7,89 @@ import {
   createProfile,
   renameProfile,
   deleteProfile,
-  getProfileForUser,
+  getProfileForActor,
 } from "../services/connection-profiles.ts";
 import {
-  listAllUserConnections,
-  deleteAllUserConnections,
+  listAllActorConnections,
+  deleteAllActorConnections,
 } from "../services/connection-manager/index.ts";
+import { getActor } from "../lib/actor.ts";
 import { listConnections } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 
 export function createConnectionProfilesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/connection-profiles — list user's profiles with connection counts
+  // GET /api/connection-profiles — list actor's profiles with connection counts
   router.get("/", async (c) => {
-    const user = c.get("user");
-    const profiles = await listProfiles(user.id);
+    const actor = getActor(c);
+    const profiles = await listProfiles(actor);
     return c.json({ profiles });
   });
 
   // POST /api/connection-profiles — create a new profile
   router.post("/", async (c) => {
-    const user = c.get("user");
+    const actor = getActor(c);
     const body = await c.req.json<{ name?: string }>();
     if (!body.name?.trim()) {
       throw invalidRequest("Name is required", "name");
     }
-    const profile = await createProfile(user.id, body.name.trim());
+    const profile = await createProfile(actor, body.name.trim());
     return c.json({ profile }, 201);
   });
 
   // GET /api/connection-profiles/connections — all connections across all profiles
   router.get("/connections", async (c) => {
-    const user = c.get("user");
-    const result = await listAllUserConnections(user.id);
+    const actor = getActor(c);
+    const result = await listAllActorConnections(actor);
     return c.json(result);
   });
 
-  // DELETE /api/connection-profiles/connections — delete all user connections
+  // DELETE /api/connection-profiles/connections — delete all actor connections
   router.delete("/connections", async (c) => {
-    const user = c.get("user");
-    await deleteAllUserConnections(user.id);
+    const actor = getActor(c);
+    await deleteAllActorConnections(actor);
     return c.json({ ok: true });
   });
 
   // PUT /api/connection-profiles/:id — rename a profile
   router.put("/:id", async (c) => {
-    const user = c.get("user");
+    const actor = getActor(c);
     const profileId = c.req.param("id");
     const body = await c.req.json<{ name?: string }>();
     if (!body.name?.trim()) {
       throw invalidRequest("Name is required", "name");
     }
     try {
-      await renameProfile(profileId, user.id, body.name.trim());
+      await renameProfile(profileId, actor, body.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
-      logger.warn("Failed to rename profile", { profileId, userId: user.id, error: message });
+      logger.warn("Failed to rename profile", { profileId, actorId: actor.id, error: message });
       throw invalidRequest(message);
     }
   });
 
   // DELETE /api/connection-profiles/:id — delete a profile
   router.delete("/:id", async (c) => {
-    const user = c.get("user");
+    const actor = getActor(c);
     const profileId = c.req.param("id");
     try {
-      await deleteProfile(profileId, user.id);
+      await deleteProfile(profileId, actor);
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
-      logger.warn("Failed to delete profile", { profileId, userId: user.id, error: message });
+      logger.warn("Failed to delete profile", { profileId, actorId: actor.id, error: message });
       throw invalidRequest(message);
     }
   });
 
   // GET /api/connection-profiles/:id/connections — list connections for a profile
   router.get("/:id/connections", async (c) => {
-    const user = c.get("user");
+    const actor = getActor(c);
     const profileId = c.req.param("id");
-    // Verify the profile belongs to the authenticated user (single query, not fetch-all)
-    const profile = await getProfileForUser(profileId, user.id);
+    // Verify the profile belongs to the authenticated actor (single query, not fetch-all)
+    const profile = await getProfileForActor(profileId, actor);
     if (!profile) {
       throw notFound("Profile not found");
     }

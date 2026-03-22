@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { api } from "../api";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
+import { appStore } from "../stores/app-store";
 import type { OrganizationWithRole } from "@appstrate/shared-types";
 
 // Re-export non-hook accessor so existing imports keep working (e.g. api.ts)
@@ -43,6 +44,8 @@ export function useOrg() {
     (orgId: string) => {
       if (orgId === orgStore.getState().id) return;
       orgStore.getState().setId(orgId);
+      // Reset application selection when org changes
+      appStore.getState().setId(null);
       // Clear all cached data since it is org-scoped
       queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "orgs" });
     },

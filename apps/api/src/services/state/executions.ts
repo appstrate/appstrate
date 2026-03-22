@@ -2,13 +2,14 @@ import { eq, and, ne, desc, isNotNull, inArray, count } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { executions, executionLogs, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
+import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 
 // --- Executions ---
 
 export async function createExecution(
   id: string,
   packageId: string,
-  userId: string,
+  actor: Actor,
   orgId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
@@ -16,11 +17,12 @@ export async function createExecution(
   connectionProfileId?: string,
   proxyLabel?: string,
   modelLabel?: string,
+  applicationId?: string | null,
 ): Promise<void> {
   await db.insert(executions).values({
     id,
     packageId,
-    userId,
+    ...actorInsert(actor),
     orgId,
     status: "pending",
     input,
@@ -30,6 +32,7 @@ export async function createExecution(
     packageVersionId: packageVersionId ?? null,
     proxyLabel: proxyLabel ?? null,
     modelLabel: modelLabel ?? null,
+    applicationId: applicationId ?? null,
   });
 }
 
@@ -73,7 +76,7 @@ export async function updateExecution(
 
 export async function getLastExecutionState(
   packageId: string,
-  userId: string,
+  actor: Actor,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
   const [row] = await db
@@ -82,7 +85,7 @@ export async function getLastExecutionState(
     .where(
       and(
         eq(executions.packageId, packageId),
-        eq(executions.userId, userId),
+        actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
         eq(executions.orgId, orgId),
         isNotNull(executions.state),
       ),
@@ -94,7 +97,7 @@ export async function getLastExecutionState(
 
 export async function getRecentExecutions(
   packageId: string,
-  userId: string,
+  actor: Actor,
   orgId: string,
   options: {
     limit?: number;
@@ -107,7 +110,7 @@ export async function getRecentExecutions(
 
   const conditions = [
     eq(executions.packageId, packageId),
-    eq(executions.userId, userId),
+    actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
     eq(executions.orgId, orgId),
     eq(executions.status, "success"),
   ];
@@ -143,7 +146,7 @@ export async function getRecentExecutions(
   });
 }
 
-export async function getLastExecution(packageId: string, userId: string, orgId: string) {
+export async function getLastExecution(packageId: string, actor: Actor, orgId: string) {
   const [row] = await db
     .select({
       id: executions.id,
@@ -155,7 +158,7 @@ export async function getLastExecution(packageId: string, userId: string, orgId:
     .where(
       and(
         eq(executions.packageId, packageId),
-        eq(executions.userId, userId),
+        actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
         eq(executions.orgId, orgId),
       ),
     )
@@ -166,7 +169,6 @@ export async function getLastExecution(packageId: string, userId: string, orgId:
 
 export async function appendExecutionLog(
   executionId: string,
-  userId: string,
   orgId: string,
   type: string,
   event: string | null,
@@ -179,7 +181,6 @@ export async function appendExecutionLog(
       .insert(executionLogs)
       .values({
         executionId,
-        userId,
         orgId,
         type,
         event,
@@ -200,15 +201,17 @@ export async function appendExecutionLog(
 
 export async function getRunningExecutionsForPackage(
   packageId: string,
-  userId?: string,
+  actor?: Actor,
 ): Promise<number> {
   const conditions = [
     eq(executions.packageId, packageId),
     inArray(executions.status, ["running", "pending"]),
   ];
 
-  if (userId) {
-    conditions.push(eq(executions.userId, userId));
+  if (actor) {
+    conditions.push(
+      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
+    );
   }
 
   const [row] = await db
@@ -246,6 +249,7 @@ export async function getExecution(id: string) {
       id: executions.id,
       status: executions.status,
       userId: executions.userId,
+      endUserId: executions.endUserId,
       orgId: executions.orgId,
       packageId: executions.packageId,
     })
@@ -263,7 +267,17 @@ export async function deletePackageExecutions(packageId: string, orgId: string):
   return deleted.length;
 }
 
-export async function listPackageExecutions(packageId: string, orgId: string, limit = 50) {
+export async function listPackageExecutions(
+  packageId: string,
+  orgId: string,
+  limit = 50,
+  applicationId?: string | null,
+) {
+  const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];
+  if (applicationId) {
+    conditions.push(eq(executions.applicationId, applicationId));
+  }
+
   const rows = await db
     .select({
       execution: executions,
@@ -271,7 +285,7 @@ export async function listPackageExecutions(packageId: string, orgId: string, li
     })
     .from(executions)
     .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)))
+    .where(and(...conditions))
     .orderBy(desc(executions.startedAt))
     .limit(limit);
   return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));

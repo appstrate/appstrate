@@ -80,6 +80,16 @@ mock.module("../../services/webhooks.ts", () => ({
   shutdownWebhookWorker: async () => {},
 }));
 
+mock.module("../../services/applications.ts", () => ({
+  getApplication: async () => ({ id: "app_default", orgId: "org-1", name: "Default" }),
+}));
+
+mock.module("../../middleware/rate-limit.ts", () => ({
+  rateLimit: () => async (_c: unknown, next: () => Promise<void>) => {
+    await next();
+  },
+}));
+
 const { requestId } = await import("../../middleware/request-id.ts");
 const { errorHandler } = await import("../../middleware/error-handler.ts");
 const { createWebhooksRouter } = await import("../webhooks.ts");
@@ -129,6 +139,7 @@ describe("POST /api/webhooks", () => {
     };
 
     const res = await jsonRequest("/api/webhooks", "POST", {
+      applicationId: "app_default",
       url: "https://example.com/hook",
       events: ["execution.completed"],
     });
@@ -138,8 +149,17 @@ describe("POST /api/webhooks", () => {
     expect(json.secret).toBe("whsec_test123");
   });
 
+  test("rejects missing applicationId → 400", async () => {
+    const res = await jsonRequest("/api/webhooks", "POST", {
+      url: "https://example.com/hook",
+      events: ["execution.completed"],
+    });
+    expect(res.status).toBe(400);
+  });
+
   test("rejects missing url → 400", async () => {
     const res = await jsonRequest("/api/webhooks", "POST", {
+      applicationId: "app_default",
       events: ["execution.completed"],
     });
     expect(res.status).toBe(400);
@@ -147,6 +167,7 @@ describe("POST /api/webhooks", () => {
 
   test("rejects missing events → 400", async () => {
     const res = await jsonRequest("/api/webhooks", "POST", {
+      applicationId: "app_default",
       url: "https://example.com/hook",
     });
     expect(res.status).toBe(400);
@@ -161,6 +182,7 @@ describe("POST /api/webhooks", () => {
     });
 
     const res = await jsonRequest("/api/webhooks", "POST", {
+      applicationId: "app_default",
       url: "https://example.com/hook",
       events: ["execution.completed"],
     });
