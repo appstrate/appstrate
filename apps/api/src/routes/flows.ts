@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
-  getPackageConfig,
   setPackageConfig,
+  getFlowOverrides,
+  setFlowModelId,
+  setFlowProxyId,
   getRunningExecutionsCounts,
   getAdminConnections,
   bindAdminConnection,
@@ -198,8 +200,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const config = await getPackageConfig(orgId, flow.id);
-    const proxyId = (config.__proxyId as string | null) ?? null;
+    const { proxyId } = await getFlowOverrides(orgId, flow.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -210,15 +211,7 @@ export function createFlowsRouter() {
     const orgId = c.get("orgId");
     const body = await c.req.json<{ proxyId: string | null }>();
 
-    // Read existing config and merge __proxyId
-    const currentConfig = await getPackageConfig(orgId, flow.id);
-    if (body.proxyId === null) {
-      // Remove the override
-      const { __proxyId: _, ...rest } = currentConfig;
-      await setPackageConfig(orgId, flow.id, rest);
-    } else {
-      await setPackageConfig(orgId, flow.id, { ...currentConfig, __proxyId: body.proxyId });
-    }
+    await setFlowProxyId(orgId, flow.id, body.proxyId);
 
     return c.json({ success: true });
   });
@@ -227,8 +220,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const config = await getPackageConfig(orgId, flow.id);
-    const modelId = (config.__modelId as string | null) ?? null;
+    const { modelId } = await getFlowOverrides(orgId, flow.id);
 
     return c.json({ modelId });
   });
@@ -239,15 +231,7 @@ export function createFlowsRouter() {
     const orgId = c.get("orgId");
     const body = await c.req.json<{ modelId: string | null }>();
 
-    // Read existing config and merge __modelId
-    const currentConfig = await getPackageConfig(orgId, flow.id);
-    if (body.modelId === null) {
-      // Remove the override
-      const { __modelId: _, ...rest } = currentConfig;
-      await setPackageConfig(orgId, flow.id, rest);
-    } else {
-      await setPackageConfig(orgId, flow.id, { ...currentConfig, __modelId: body.modelId });
-    }
+    await setFlowModelId(orgId, flow.id, body.modelId);
 
     return c.json({ success: true });
   });

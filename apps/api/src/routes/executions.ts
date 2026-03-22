@@ -407,7 +407,12 @@ export function createExecutionsRouter() {
     if (!inputResult.ok) {
       return c.json(inputResult.error, inputResult.status);
     }
-    const { input: parsedInput, uploadedFiles } = inputResult.data;
+    const {
+      input: parsedInput,
+      uploadedFiles,
+      modelId: modelIdOverride,
+      proxyId: proxyIdOverride,
+    } = inputResult.data;
 
     const executionId = `exec_${crypto.randomUUID()}`;
 
@@ -436,6 +441,8 @@ export function createExecutionsRouter() {
           input: parsedInput,
           files: fileRefs,
           config,
+          modelId: modelIdOverride,
+          proxyId: proxyIdOverride,
           overrideVersionId,
         }));
     } catch (err) {

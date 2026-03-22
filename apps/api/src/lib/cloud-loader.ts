@@ -21,7 +21,9 @@ export async function loadCloud(): Promise<CloudModule | null> {
   // Step 1: try to import the module — if absent, OSS mode (silent)
   let mod: CloudModule;
   try {
-    mod = await import("@appstrate/cloud");
+    // Dynamic import of optional module — variable specifier prevents tsc from resolving it statically
+    const pkg = "@appstrate/cloud";
+    mod = await import(/* webpackIgnore: true */ pkg);
   } catch {
     _cloud = null;
     return null;

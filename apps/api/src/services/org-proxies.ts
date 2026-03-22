@@ -4,7 +4,6 @@ import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
-import { getPackageConfig } from "./state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
@@ -154,16 +153,11 @@ export async function setDefaultProxy(orgId: string, proxyId: string | null): Pr
 export async function resolveProxy(
   orgId: string,
   packageId: string,
-  config?: Record<string, unknown>,
+  proxyId: string | null,
 ): Promise<{ url: string; label: string } | null> {
-  // 1. Check flow config for __proxyId
-  const resolved = config ?? (await getPackageConfig(orgId, packageId));
-  const proxyId = resolved.__proxyId as string | undefined | null;
-
+  // 1. Explicit override (flow column or per-execution)
   if (proxyId === "none") return null;
-
   if (proxyId) {
-    // Load specific proxy
     const result = await loadProxy(orgId, proxyId);
     if (result) return result;
     logger.warn("Flow proxy override not found, falling through to org default", {
@@ -172,7 +166,7 @@ export async function resolveProxy(
     });
   }
 
-  // 2. Find org default — check DB first
+  // 2. Org default
   const [dbDefault] = await db
     .select()
     .from(orgProxies)
@@ -193,7 +187,7 @@ export async function resolveProxy(
     }
   }
 
-  // 3. Check system proxies for a default
+  // 3. System default
   const system = getSystemProxies();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
@@ -201,7 +195,7 @@ export async function resolveProxy(
     }
   }
 
-  // 4. Fallback to PROXY_URL env var
+  // 4. PROXY_URL env var fallback
   const envUrl = getEnv().PROXY_URL;
   return envUrl ? { url: envUrl, label: "Proxy" } : null;
 }

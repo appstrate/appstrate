@@ -27,6 +27,8 @@ export const packageConfigs = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     config: jsonb("config").notNull().default({}),
+    modelId: text("model_id"),
+    proxyId: text("proxy_id"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
