@@ -323,14 +323,9 @@ export function assemblePayload(state: FlowFormState) {
     delete manifest["x-logs"];
   }
   // Output mode: UI default is "report", API default is "data" — always write to manifest
-  // to avoid ambiguity between the two defaults
+  // to avoid ambiguity between the two defaults.
+  // No frontend fallback — the backend validates at execution time (data mode requires output schema).
   manifest["x-output-mode"] = state.execution.outputMode;
-
-  // Safety: data mode requires output schema — fall back to report if missing
-  const hasOutputFields = state.outputSchema.some((f) => f.key.trim() !== "");
-  if (state.execution.outputMode === "data" && !hasOutputFields) {
-    manifest["x-output-mode"] = "report";
-  }
 
   return {
     manifest,

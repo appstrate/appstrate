@@ -10,6 +10,7 @@ const HELLO_WORLD_MANIFEST = {
   author: "Appstrate",
   description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",
   keywords: ["demo", "example", "getting-started"],
+  "x-output-mode": "report",
 };
 
 const HELLO_WORLD_PROMPT = `# Hello World
@@ -25,13 +26,7 @@ Welcome to Appstrate! You are an AI agent running inside an ephemeral Docker con
    - Execute complex automated tasks autonomously
    - Produce structured, actionable results
 
-3. **Generate a structured result** as JSON with the following fields:
-   - \`message\`: a personalized welcome message
-   - \`timestamp\`: the current date and time
-   - \`capabilities\`: a list of task types you can accomplish
-   - \`status\`: "ready"
-
-4. **Encourage the user** to create their own flows to automate their daily tasks.
+3. **Encourage the user** to create their own flows to automate their daily tasks.
 
 Be concise, enthusiastic, and professional.
 `;

@@ -296,8 +296,6 @@
   "ownership.readOnly": "Ce package appartient à une autre organisation (lecture seule)",
   "result.copyAll": "Copier",
   "result.copied": "Copié !",
-  "result.tabReport": "Rapport",
-  "result.tabData": "Données",
   "ownership.forkedFrom": "Dupliqué depuis ",
   "detail.tabConfiguration": "Configuration",
   "detail.configSectionProxy": "Proxy",
