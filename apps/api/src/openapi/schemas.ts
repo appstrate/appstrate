@@ -195,7 +195,10 @@ export const schemas = {
       source: { type: "string", enum: ["system", "local"] },
       scope: { type: ["string", "null"], description: "Scope from manifest name" },
       version: { type: ["string", "null"], description: "Version from manifest" },
-      manifest: { type: "object", description: "Full manifest object (user flows only)" },
+      manifest: {
+        allOf: [{ $ref: "#/components/schemas/FlowManifest" }],
+        description: "Full manifest object (user flows only)",
+      },
       prompt: { type: "string", description: "Agent prompt markdown (user flows only)" },
       updatedAt: {
         type: "string",
@@ -674,5 +677,42 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
+  },
+  FlowManifest: {
+    description:
+      "AFPS Flow manifest extended with Appstrate platform fields. " +
+      "Standard fields are defined by the AFPS Flow schema; extension fields use the x- prefix per AFPS §10.",
+    allOf: [
+      { $ref: "https://afps.appstrate.dev/schema/v1/flow.schema.json" },
+      {
+        type: "object",
+        properties: {
+          "x-output-mode": {
+            type: "string",
+            enum: ["report", "data"],
+            description:
+              "Output mode. 'report': agent produces narrative Markdown via the report tool. " +
+              "'data': agent returns structured JSON via the structured_output tool (requires output.schema). " +
+              "Modes are mutually exclusive. API default: 'data'. UI default: 'report'.",
+          },
+          "x-logs": {
+            type: "boolean",
+            description: "Enable progress log messages from the agent to the user (default: true)",
+          },
+        },
+      },
+    ],
+  },
+  SkillManifest: {
+    description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
+    $ref: "https://afps.appstrate.dev/schema/v1/skill.schema.json",
+  },
+  ToolManifest: {
+    description: "AFPS Tool manifest. See https://afps.appstrate.dev for field reference.",
+    $ref: "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  },
+  ProviderManifest: {
+    description: "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
+    $ref: "https://afps.appstrate.dev/schema/v1/provider.schema.json",
   },
 } as const;
