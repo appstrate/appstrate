@@ -27,7 +27,9 @@ export const applicationsPaths = {
                     allowedRedirectDomains: {
                       type: "array",
                       items: { type: "string" },
-                      description: "Domains allowed for OAuth redirect callbacks",
+                      maxItems: 20,
+                      description:
+                        "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
                   description: "Application settings",
@@ -143,7 +145,9 @@ export const applicationsPaths = {
                     allowedRedirectDomains: {
                       type: "array",
                       items: { type: "string" },
-                      description: "Domains allowed for OAuth redirect callbacks",
+                      maxItems: 20,
+                      description:
+                        "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
                   description: "Application settings",

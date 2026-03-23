@@ -118,10 +118,13 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
-export interface OrgSettings {
-  allowedRedirectDomains?: string[];
-  apiVersion?: string;
-}
+import { z } from "zod";
+
+export const orgSettingsSchema = z.object({
+  apiVersion: z.string().optional(),
+});
+
+export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db

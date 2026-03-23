@@ -16,8 +16,8 @@ import {
   isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
+  orgSettingsSchema,
 } from "../services/organizations.ts";
-import { validateDomainList } from "../services/redirect-validation.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import {
   createInvitation,
@@ -383,16 +383,13 @@ router.put("/:orgId/settings", async (c) => {
     throw forbidden("Admin access required");
   }
 
-  const body = await c.req.json<{ allowedRedirectDomains?: string[] }>();
-
-  if (body.allowedRedirectDomains !== undefined) {
-    const validationError = validateDomainList(body.allowedRedirectDomains);
-    if (validationError) {
-      throw invalidRequest(validationError);
-    }
+  const raw = await c.req.json();
+  const parsed = orgSettingsSchema.partial().safeParse(raw);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
   }
 
-  const settings = await updateOrgSettings(orgId, body);
+  const settings = await updateOrgSettings(orgId, parsed.data);
   return c.json(settings);
 });
 

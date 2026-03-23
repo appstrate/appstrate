@@ -60,12 +60,6 @@ export const schemas = {
     type: "object",
     description: "Organization settings (extensible)",
     properties: {
-      allowedRedirectDomains: {
-        type: "array",
-        items: { type: "string" },
-        maxItems: 20,
-        description: "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com)",
-      },
       apiVersion: {
         type: "string",
         description:
