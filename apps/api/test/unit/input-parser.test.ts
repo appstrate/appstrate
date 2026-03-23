@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import { parseRequestInput } from "../../src/services/input-parser.ts";
-import type { ParsedInput } from "../../src/services/input-parser.ts";
+import { ApiError } from "../../src/lib/errors.ts";
 
 // --- Helpers ---
 
@@ -19,6 +19,50 @@ function jsonApp(body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+/** Create a Hono app that runs parseRequestInput with a schema, with error handling. */
+function requestWithSchema(
+  reqBody: string | FormData,
+  inputSchema: Parameters<typeof parseRequestInput>[1],
+  headers?: Record<string, string>,
+) {
+  const app = new Hono();
+  app.onError((err, c) => {
+    if (err instanceof ApiError) return c.json({ detail: err.message }, err.status as any);
+    return c.json({ detail: "Internal error" }, 500);
+  });
+  app.post("/", async (c) => {
+    const result = await parseRequestInput(c, inputSchema);
+    return c.json(result);
+  });
+  return app.request("/", { method: "POST", headers, body: reqBody });
+}
+
+function jsonAppWithSchema(body: unknown, inputSchema: Parameters<typeof parseRequestInput>[1]) {
+  return requestWithSchema(JSON.stringify(body), inputSchema, { "Content-Type": "application/json" });
+}
+
+function formDataApp(formData: FormData, inputSchema: Parameters<typeof parseRequestInput>[1]) {
+  return requestWithSchema(formData, inputSchema);
+}
+
+const FILE_SCHEMA_WITH_REQUIRED = {
+  type: "object" as const,
+  properties: {
+    files: { type: "file", description: "Upload file", multiple: false },
+    title: { type: "string", description: "Optional title" },
+  },
+  required: ["files"],
+};
+
+const INPUT_SCHEMA_WITH_REQUIRED = {
+  type: "object" as const,
+  properties: {
+    email: { type: "string", description: "User email" },
+    message: { type: "string", description: "Optional message" },
+  },
+  required: ["email"],
+};
 
 // --- Tests ---
 
@@ -58,5 +102,105 @@ describe("parseRequestInput", () => {
     const json = (await res.json()) as any;
 
     expect(json.proxyId).toBe("none");
+  });
+});
+
+describe("parseRequestInput — input schema validation", () => {
+  it("rejects missing required field", async () => {
+    const res = await jsonAppWithSchema(
+      { input: { message: "hi" } },
+      INPUT_SCHEMA_WITH_REQUIRED,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects undefined input when schema has required fields", async () => {
+    const res = await jsonAppWithSchema({}, INPUT_SCHEMA_WITH_REQUIRED);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects empty string on required field", async () => {
+    const res = await jsonAppWithSchema(
+      { input: { email: "" } },
+      INPUT_SCHEMA_WITH_REQUIRED,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects null on required field", async () => {
+    const res = await jsonAppWithSchema(
+      { input: { email: null } },
+      INPUT_SCHEMA_WITH_REQUIRED,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts valid input with required field present", async () => {
+    const res = await jsonAppWithSchema(
+      { input: { email: "test@example.com" } },
+      INPUT_SCHEMA_WITH_REQUIRED,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as any;
+    expect(json.input.email).toBe("test@example.com");
+  });
+
+  it("accepts input with only required fields (optional omitted)", async () => {
+    const res = await jsonAppWithSchema(
+      { input: { email: "test@example.com" } },
+      INPUT_SCHEMA_WITH_REQUIRED,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("skips validation when no schema provided", async () => {
+    const res = await jsonAppWithSchema({ input: { anything: true } }, undefined);
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts empty input when schema has no required fields", async () => {
+    const optionalSchema = {
+      type: "object" as const,
+      properties: {
+        note: { type: "string" },
+      },
+    };
+    const res = await jsonAppWithSchema({}, optionalSchema);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("parseRequestInput — required file validation", () => {
+  it("rejects FormData with no files when file field is required", async () => {
+    const formData = new FormData();
+    formData.set("input", JSON.stringify({}));
+
+    const res = await formDataApp(formData, FILE_SCHEMA_WITH_REQUIRED);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as any;
+    expect(json.detail).toContain("files");
+  });
+
+  it("accepts FormData with required file present", async () => {
+    const formData = new FormData();
+    formData.set("input", JSON.stringify({}));
+    formData.set("files", new File(["hello"], "test.txt", { type: "text/plain" }));
+
+    const res = await formDataApp(formData, FILE_SCHEMA_WITH_REQUIRED);
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts FormData when file field is optional and no file provided", async () => {
+    const optionalFileSchema = {
+      type: "object" as const,
+      properties: {
+        files: { type: "file", description: "Optional file" },
+      },
+    };
+    const formData = new FormData();
+    formData.set("input", JSON.stringify({}));
+
+    const res = await formDataApp(formData, optionalFileSchema);
+    expect(res.status).toBe(200);
   });
 });

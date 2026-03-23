@@ -69,12 +69,12 @@ export function createSchedulesRouter() {
       throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
-    // Validate input against flow's input schema if provided
-    if (parsed.data.input && inputSchema) {
+    // Validate input against flow's input schema (catches missing required fields even when input is undefined)
+    if (inputSchema) {
       const inputValidation = validateInput(parsed.data.input, inputSchema);
       if (!inputValidation.valid) {
         const first = inputValidation.errors[0]!;
-        throw invalidRequest(first.message);
+        throw invalidRequest(first.message, first.field);
       }
     }
 

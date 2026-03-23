@@ -14,6 +14,7 @@ import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-pro
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateFlowReadiness } from "./flow-readiness.ts";
 import { ApiError } from "../lib/errors.ts";
+import { validateInput } from "./schema.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
@@ -240,6 +241,20 @@ async function triggerScheduledExecution(
         return;
       }
       throw err;
+    }
+
+    // Validate input against flow's input schema (schema may have changed since schedule creation)
+    const inputSchema = flow.manifest.input?.schema;
+    if (inputSchema) {
+      const inputValidation = validateInput(input, inputSchema);
+      if (!inputValidation.valid) {
+        logger.warn("Scheduled input validation failed, skipping execution", {
+          scheduleId,
+          packageId,
+          errors: inputValidation.errors,
+        });
+        return;
+      }
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;

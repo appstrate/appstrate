@@ -46,12 +46,11 @@ export async function parseRequestInput(
       );
     }
 
-    if (uploadedFiles.length > 0) {
-      const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
-      if (!fileValidation.valid) {
-        const first = fileValidation.errors[0]!;
-        throw invalidRequest(first.message, first.field);
-      }
+    // Always validate file inputs — catches missing required files even when none uploaded
+    const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
+    if (!fileValidation.valid) {
+      const first = fileValidation.errors[0]!;
+      throw invalidRequest(first.message, first.field);
     }
   } else {
     try {
