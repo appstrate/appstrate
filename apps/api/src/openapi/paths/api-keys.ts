@@ -9,6 +9,10 @@ export const apiKeysPaths = {
       responses: {
         "200": {
           description: "API key list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -60,6 +64,10 @@ export const apiKeysPaths = {
       responses: {
         "201": {
           description: "API key created. The `key` field contains the raw key (shown only once).",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -96,7 +104,12 @@ export const apiKeysPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "API key revoked" },
+        "204": {
+          description: "API key revoked",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "404": { description: "API key not found or already revoked" },
       },
     },

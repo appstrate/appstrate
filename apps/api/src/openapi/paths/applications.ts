@@ -40,6 +40,10 @@ export const applicationsPaths = {
       responses: {
         "201": {
           description: "Application created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -60,6 +64,10 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -93,6 +101,10 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -144,6 +156,10 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -167,7 +183,12 @@ export const applicationsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Application deleted" },
+        "204": {
+          description: "Application deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

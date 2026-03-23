@@ -12,7 +12,11 @@ import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
   isProviderEnabled: (orgId: string, providerId: string) => Promise<boolean>;
-  getConnectionStatus: (provider: string, profileId: string, orgId: string) => Promise<ConnectionStatus>;
+  getConnectionStatus: (
+    provider: string,
+    profileId: string,
+    orgId: string,
+  ) => Promise<ConnectionStatus>;
   validateScopes: (granted: string[], required: string[]) => { sufficient: boolean };
 }
 
@@ -71,7 +75,9 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((svc) => deps.getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId)),
+    providers.map((svc) =>
+      deps.getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId),
+    ),
   );
 
   for (let i = 0; i < providers.length; i++) {

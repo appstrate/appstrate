@@ -11,6 +11,10 @@ export const sharePaths = {
       responses: {
         "200": {
           description: "Flow info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ShareFlowInfo" },
@@ -45,6 +49,10 @@ export const sharePaths = {
       responses: {
         "200": {
           description: "Execution started",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -78,6 +86,10 @@ export const sharePaths = {
       responses: {
         "200": {
           description: "Execution status",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

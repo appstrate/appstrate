@@ -47,6 +47,7 @@ export const schemas = {
     properties: {
       id: { type: "string", description: "Webhook ID (wh_ prefix)" },
       object: { type: "string", enum: ["webhook"] },
+      applicationId: { type: "string", description: "Application ID (app_ prefix)" },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },
       flowId: { type: ["string", "null"] },
@@ -64,6 +65,11 @@ export const schemas = {
         items: { type: "string" },
         maxItems: 20,
         description: "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com)",
+      },
+      apiVersion: {
+        type: "string",
+        description:
+          "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated.",
       },
     },
   },
@@ -302,6 +308,15 @@ export const schemas = {
       packageVersionId: { type: "integer" },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at execution time" },
       modelLabel: { type: ["string", "null"], description: "Model label used at execution time" },
+      cost: { type: ["number", "null"], description: "Execution cost in dollars" },
+      endUserId: {
+        type: ["string", "null"],
+        description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
+      },
+      applicationId: {
+        type: ["string", "null"],
+        description: "Application ID (app_ prefix) that owns this execution",
+      },
     },
   },
   ExecutionLog: {

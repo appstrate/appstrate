@@ -10,6 +10,10 @@ export const providersPaths = {
       responses: {
         "200": {
           description: "Provider list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -43,6 +47,10 @@ export const providersPaths = {
       responses: {
         "201": {
           description: "Provider created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -78,7 +86,13 @@ export const providersPaths = {
         },
       },
       responses: {
-        "200": { description: "Provider updated" },
+        "200": {
+          description: "Provider updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -95,7 +109,12 @@ export const providersPaths = {
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Provider deleted" },
+        "204": {
+          description: "Provider deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { description: "Provider in use by flows" },
       },
@@ -115,6 +134,10 @@ export const providersPaths = {
       responses: {
         "200": {
           description: "Credentials deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -161,6 +184,10 @@ export const providersPaths = {
       responses: {
         "200": {
           description: "Credentials configured",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

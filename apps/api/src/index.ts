@@ -40,6 +40,8 @@ import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
+import { apiVersion } from "./middleware/api-version.ts";
+import { getOrgSettings } from "./services/organizations.ts";
 import type { AppEnv } from "./types/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
@@ -228,6 +230,19 @@ app.use("*", async (c, next) => {
   if (skipOrgContext(path)) return next();
 
   return requireOrgContext()(c, next);
+});
+
+// API versioning: resolve Appstrate-Version header > org setting > default
+const apiVersionMiddleware = apiVersion({
+  getOrgApiVersion: async (orgId) => {
+    const settings = await getOrgSettings(orgId);
+    return settings.apiVersion ?? null;
+  },
+});
+app.use("*", async (c, next) => {
+  if (skipAuth(c.req.path)) return next();
+  if (!c.get("user")) return next();
+  return apiVersionMiddleware(c, next);
 });
 
 // Boot: load system resources, init services, clean up orphans

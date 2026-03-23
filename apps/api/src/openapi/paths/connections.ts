@@ -18,6 +18,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "Connection list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -55,6 +59,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "Integration list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -112,6 +120,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "OAuth authorization URL",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -172,6 +184,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "API key saved",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -235,6 +251,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "Credentials saved",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -294,7 +314,13 @@ export const connectionsPaths = {
         },
       ],
       responses: {
-        "200": { description: "Tokens exchanged successfully, popup closes" },
+        "200": {
+          description: "Tokens exchanged successfully, popup closes",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
       },
     },
   },
@@ -340,6 +366,10 @@ export const connectionsPaths = {
       responses: {
         "200": {
           description: "Disconnected",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

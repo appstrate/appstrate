@@ -5,6 +5,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestContext, addOrgMember } from "../../helpers/auth.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { organizations } from "@appstrate/db/schema";
+import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
+import { getOrgSettings } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
 
@@ -89,6 +91,25 @@ describe("Organizations API", () => {
       expect(res.status).toBe(400);
       const body = await res.json() as any;
       expect(body.code).toBe("slug_taken");
+    });
+
+    it("pins apiVersion in settings at creation", async () => {
+      const testUser = await createTestUser();
+
+      const res = await app.request("/api/orgs", {
+        method: "POST",
+        headers: {
+          Cookie: testUser.cookie,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Pinned Org", slug: "pinned-org" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json() as any;
+
+      const settings = await getOrgSettings(body.id);
+      expect(settings.apiVersion).toBe(CURRENT_API_VERSION);
     });
 
     it("rejects missing name", async () => {

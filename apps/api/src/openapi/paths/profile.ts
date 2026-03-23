@@ -8,6 +8,10 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "User profile",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -45,6 +49,10 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Profile updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -84,6 +92,10 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Profiles",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

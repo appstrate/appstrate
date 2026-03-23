@@ -25,6 +25,7 @@ import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { idempotency } from "../middleware/idempotency.ts";
 import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -379,156 +380,162 @@ export function createExecutionsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/flows/:scope/:name/run — execute a flow (fire-and-forget, returns JSON)
-  router.post("/flows/:scope{@[^/]+}/:name/run", rateLimit(20), requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const actor = getActor(c);
-    const packageId = flow.id;
-    const profileIdOverride = c.req.query("profileId");
+  router.post(
+    "/flows/:scope{@[^/]+}/:name/run",
+    rateLimit(20),
+    idempotency(),
+    requireFlow(),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const actor = getActor(c);
+      const packageId = flow.id;
+      const profileIdOverride = c.req.query("profileId");
 
-    // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
-    const versionOverride = c.req.query("version");
+      // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
+      const versionOverride = c.req.query("version");
 
-    // If a specific version is requested, resolve and override flow data
-    let effectiveFlow = flow;
-    let overrideVersionId: number | undefined;
-    if (versionOverride && flow.source !== "system") {
-      const versionDetail = await getVersionDetail(flow.id, versionOverride);
-      if (!versionDetail) {
-        throw notFound(`Version '${versionOverride}' not found`);
+      // If a specific version is requested, resolve and override flow data
+      let effectiveFlow = flow;
+      let overrideVersionId: number | undefined;
+      if (versionOverride && flow.source !== "system") {
+        const versionDetail = await getVersionDetail(flow.id, versionOverride);
+        if (!versionDetail) {
+          throw notFound(`Version '${versionOverride}' not found`);
+        }
+        overrideVersionId = versionDetail.id;
+        // Override manifest and content — version manifest replaces draft entirely
+        // (shallow merge would keep draft keys like config.schema when the version lacks them)
+        effectiveFlow = {
+          ...flow,
+          manifest: versionDetail.manifest as typeof flow.manifest,
+          prompt: versionDetail.textContent ?? flow.prompt,
+        };
       }
-      overrideVersionId = versionDetail.id;
-      // Override manifest and content — version manifest replaces draft entirely
-      // (shallow merge would keep draft keys like config.schema when the version lacks them)
-      effectiveFlow = {
-        ...flow,
-        manifest: versionDetail.manifest as typeof flow.manifest,
-        prompt: versionDetail.textContent ?? flow.prompt,
-      };
-    }
 
-    // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
-    const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
-    const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
-      getPackageConfig(orgId, packageId),
-      profileIdOverride
-        ? Promise.resolve(profileIdOverride)
-        : getEffectiveProfileId(actor, packageId),
-      parseRequestInput(c, effectiveFlow.manifest.input?.schema),
-    ]);
+      // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
+      const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
+      const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
+        resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
+        getPackageConfig(orgId, packageId),
+        profileIdOverride
+          ? Promise.resolve(profileIdOverride)
+          : getEffectiveProfileId(actor, packageId),
+        parseRequestInput(c, effectiveFlow.manifest.input?.schema),
+      ]);
 
-    // Validate flow readiness (prompt, skills, tools, providers, config) — throws on failure
-    await validateFlowReadiness({
-      flow: effectiveFlow,
-      providerProfiles,
-      orgId,
-      config,
-    });
+      // Validate flow readiness (prompt, skills, tools, providers, config) — throws on failure
+      await validateFlowReadiness({
+        flow: effectiveFlow,
+        providerProfiles,
+        orgId,
+        config,
+      });
 
-    const {
-      input: parsedInput,
-      uploadedFiles,
-      modelId: modelIdOverride,
-      proxyId: proxyIdOverride,
-    } = inputResult;
+      const {
+        input: parsedInput,
+        uploadedFiles,
+        modelId: modelIdOverride,
+        proxyId: proxyIdOverride,
+      } = inputResult;
 
-    const executionId = `exec_${crypto.randomUUID()}`;
+      const executionId = `exec_${crypto.randomUUID()}`;
 
-    // Build file metadata for prompt context (no URLs — files injected directly into container)
-    const fileRefs = uploadedFiles?.map((f) => ({
-      fieldName: f.fieldName,
-      name: f.name,
-      type: f.type,
-      size: f.size,
-    }));
+      // Build file metadata for prompt context (no URLs — files injected directly into container)
+      const fileRefs = uploadedFiles?.map((f) => ({
+        fieldName: f.fieldName,
+        name: f.name,
+        type: f.type,
+        size: f.size,
+      }));
 
-    // Build execution context (tokens, config, state, providers, package, version)
-    let promptContext: PromptContext;
-    let flowPackage: Buffer | null;
-    let packageVersionId: number | null;
-    let proxyLabel: string | null;
-    let modelLabel: string | null;
-    try {
-      ({ promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel } =
-        await buildExecutionContext({
-          executionId,
-          flow: effectiveFlow,
-          providerProfiles,
-          orgId,
-          actor,
-          input: parsedInput,
-          files: fileRefs,
-          config,
-          modelId: modelIdOverride,
-          proxyId: proxyIdOverride,
-          overrideVersionId,
-        }));
-    } catch (err) {
-      if (err instanceof ModelNotConfiguredError) {
-        throw new ApiError({
-          status: 400,
-          code: "model_not_configured",
-          title: "Bad Request",
-          detail: err.message,
-        });
-      }
-      throw err;
-    }
-
-    // Pre-execution quota check (Cloud only — reject before creating the execution record)
-    const cloud = getCloudModule();
-    if (cloud) {
+      // Build execution context (tokens, config, state, providers, package, version)
+      let promptContext: PromptContext;
+      let flowPackage: Buffer | null;
+      let packageVersionId: number | null;
+      let proxyLabel: string | null;
+      let modelLabel: string | null;
       try {
-        const runningCount = await getRunningExecutionCountForOrg(orgId);
-        await cloud.cloudHooks.checkQuota(orgId, runningCount);
+        ({ promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel } =
+          await buildExecutionContext({
+            executionId,
+            flow: effectiveFlow,
+            providerProfiles,
+            orgId,
+            actor,
+            input: parsedInput,
+            files: fileRefs,
+            config,
+            modelId: modelIdOverride,
+            proxyId: proxyIdOverride,
+            overrideVersionId,
+          }));
       } catch (err) {
-        if (err instanceof cloud.QuotaExceededError) {
+        if (err instanceof ModelNotConfiguredError) {
           throw new ApiError({
-            status: 402,
-            code: "quota_exceeded",
-            title: "Payment Required",
+            status: 400,
+            code: "model_not_configured",
+            title: "Bad Request",
             detail: err.message,
           });
         }
         throw err;
       }
-    }
 
-    // Create execution record
-    await createExecution(
-      executionId,
-      packageId,
-      actor,
-      orgId,
-      parsedInput ?? null,
-      undefined,
-      packageVersionId ?? undefined,
-      userProfileId,
-      proxyLabel ?? undefined,
-      modelLabel ?? undefined,
-      c.get("applicationId") ?? null,
-    );
+      // Pre-execution quota check (Cloud only — reject before creating the execution record)
+      const cloud = getCloudModule();
+      if (cloud) {
+        try {
+          const runningCount = await getRunningExecutionCountForOrg(orgId);
+          await cloud.cloudHooks.checkQuota(orgId, runningCount);
+        } catch (err) {
+          if (err instanceof cloud.QuotaExceededError) {
+            throw new ApiError({
+              status: 402,
+              code: "quota_exceeded",
+              title: "Payment Required",
+              detail: err.message,
+            });
+          }
+          throw err;
+        }
+      }
 
-    // Fire-and-forget background execution
-    executeFlowInBackground(
-      executionId,
-      actor,
-      orgId,
-      effectiveFlow,
-      promptContext,
-      flowPackage,
-      uploadedFiles,
-      c.get("applicationId") ?? null,
-    ).catch((err) => {
-      logger.error("Unhandled error in background execution", {
+      // Create execution record
+      await createExecution(
         executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+        packageId,
+        actor,
+        orgId,
+        parsedInput ?? null,
+        undefined,
+        packageVersionId ?? undefined,
+        userProfileId,
+        proxyLabel ?? undefined,
+        modelLabel ?? undefined,
+        c.get("applicationId") ?? null,
+      );
 
-    return c.json({ executionId });
-  });
+      // Fire-and-forget background execution
+      executeFlowInBackground(
+        executionId,
+        actor,
+        orgId,
+        effectiveFlow,
+        promptContext,
+        flowPackage,
+        uploadedFiles,
+        c.get("applicationId") ?? null,
+      ).catch((err) => {
+        logger.error("Unhandled error in background execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      return c.json({ executionId });
+    },
+  );
 
   // GET /api/flows/:scope/:name/executions — list executions for a flow
   router.get("/flows/:scope{@[^/]+}/:name/executions", requireFlow(), async (c) => {

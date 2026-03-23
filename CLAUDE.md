@@ -46,7 +46,7 @@ bun test                          # All 1000+ tests across all packages
 | Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                        |
 | DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                      |
 | Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
-| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback |
+| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
 | Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
 | Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state |
 | Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                   |
@@ -63,7 +63,8 @@ appstrate/
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
-│   │   └── paths/            # One file per route domain (160 endpoints)
+│   │   ├── headers.ts        # Reusable response header definitions
+│   │   └── paths/            # One file per route domain (173 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -76,7 +77,7 @@ appstrate/
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (30 tables, 6 enums, indexes)
+│   ├── schema.ts             # Full schema (33 tables, 5 enums, indexes) — barrel re-export from schema/
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (auto profile+org on signup)
 │
@@ -177,13 +178,13 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 - **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, admin connections). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
-- **Request pipeline**: CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie) → org context middleware (`X-Org-Id` → verify membership) → route handler → cloud routes (if loaded).
+- **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed.
 - **Cloud module** (`lib/cloud-loader.ts`): `loadCloud()` at boot tries `import("@appstrate/cloud")`. If the module is installed (via `bun link` in dev, or git dependency in prod), the platform runs in Cloud mode. If absent, OSS mode. `getCloudModule()` returns the loaded module or `null`.
 - **Cost tracking**: `executions.cost` (doublePrecision) stores the dollar cost per execution. Cost flows: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `ExecutionMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
-- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `flow` (set by `requireFlow()`).
+- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (from API key), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `flow` (set by `requireFlow()`).
 - **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not system package + no running executions.
-- **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
+- **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns IETF `RateLimit` structured header (`limit=N, remaining=M, reset=S`) + `RateLimit-Policy` + legacy `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/extension deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). All versioning columns included in the initial squashed migration.
@@ -191,6 +192,19 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **FlowService**: All flows (system + local) stored in DB. System flows loaded from ZIPs at boot and synced to DB with `orgId: null`.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
+
+### Headless Developer Platform
+
+Appstrate exposes a headless API for developers to integrate flows into their own apps. See `docs/specs/HEADLESS_DEVELOPER_PLATFORM.md` for the full spec.
+
+- **Applications**: Table `applications` (prefix `app_`). Each org has a default application (`isDefault: true`, unique index). API keys are scoped to an application. Routes: `/api/applications` (CRUD, admin-only).
+- **End-users**: Table `end_users` (prefix `eu_`). External users managed via API, belonging to an application. Not Better Auth users — separate table, no password, no dashboard login. Routes: `/api/end-users` (CRUD, admin-only). Fields: `externalId` (unique per app), `metadata` (JSONB, max 50 keys, 40 char key, 500 char value), `email`, `name`. Each end-user gets a default connection profile on creation.
+- **`Appstrate-User` header**: Impersonation header (pattern: Stripe `Stripe-Account`). Value: `eu_` prefixed ID. API key auth only — rejected with `400` on cookie auth. Validates that the end-user belongs to the API key's application. Sets `c.set("endUser")` in context. Full audit log on each impersonation (requestId, apiKeyId, endUserId, applicationId, IP, userAgent).
+- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `execution.started`, `execution.completed`, `execution.failed`, `execution.timeout`, `execution.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only).
+- **API versioning**: Date-based (pattern: Stripe). Current: `2026-03-21`. Header `Appstrate-Version` (request override + always in response). Org-level pinning via `settings.apiVersion`. `Sunset` header on deprecated versions. Middleware: `middleware/api-version.ts`.
+- **Idempotency**: Header `Idempotency-Key` on POST routes (end-users, webhooks, flow run). Redis-backed, 24h TTL, SHA-256 body hash for conflict detection. Returns `409` on concurrent, `422` on body mismatch, `Idempotent-Replayed: true` header on cached replay. Middleware: `middleware/idempotency.ts`.
+- **Error handling**: RFC 9457 `application/problem+json` on all endpoints (not just headless). `ApiError` class with factory helpers (`invalidRequest`, `unauthorized`, `forbidden`, `notFound`, `conflict`, `gone`, `internalError`). Custom `headers` field on `ApiError` for rate-limit headers. `Request-Id` (`req_` prefix) on all responses.
+- **SSE + API key**: SSE endpoints accept API key via `?token=ask_...` query param (EventSource can't send headers). Cookie auth fallback preserved.
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 
@@ -300,7 +314,7 @@ For testing middleware that calls services (e.g., `requireFlow` calls `getPackag
 |---|---|
 | `app.ts` | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler) |
 | `auth.ts` | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
-| `db.ts` | `truncateAll()` — DELETE FROM all 30 tables in FK-safe order |
+| `db.ts` | `truncateAll()` — DELETE FROM all 33 tables in FK-safe order |
 | `seed.ts` | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
 | `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification |
 | `redis.ts` | `getRedis()`, `flushRedis()` — test Redis client |
@@ -354,18 +368,18 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 160 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 173 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`.
+Full schema: `packages/db/src/schema.ts` (33 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app_ prefix), `endUsers` (eu_ prefix), `webhooks` (wh_ prefix), `webhookDeliveries`.
 
 ## Environment Variables
 
@@ -394,6 +408,7 @@ Full schema: `packages/db/src/schema.ts` (30 tables + 6 enums, Drizzle ORM). Mig
 | `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                                                                 |
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
+| `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret (if unset, tokens are unsigned)                                             |
 
 ## Flow & Extension Gotchas
 

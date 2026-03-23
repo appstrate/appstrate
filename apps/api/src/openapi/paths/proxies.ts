@@ -10,6 +10,10 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Proxy list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -52,6 +56,10 @@ export const proxiesPaths = {
       responses: {
         "201": {
           description: "Proxy created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -96,6 +104,10 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Default proxy updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -135,6 +147,10 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Proxy updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { id: { type: "string" } } },
@@ -154,7 +170,12 @@ export const proxiesPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Proxy deleted" },
+        "204": {
+          description: "Proxy deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -173,6 +194,10 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Test result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

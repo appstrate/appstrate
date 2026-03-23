@@ -22,9 +22,7 @@ const app = getTestApp();
 
 /** Fire a PG NOTIFY on a channel with a JSON payload. */
 async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  await db.execute(
-    sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`,
-  );
+  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`);
 }
 
 /** Small delay to let PG LISTEN dispatch events to subscribers. */
@@ -36,7 +34,11 @@ function wait(ms = 150): Promise<void> {
  * Make an SSE request to the test app with cookie auth and orgId query param.
  * EventSource cannot send custom headers, so auth uses Cookie + ?orgId= query.
  */
-async function sseRequest(path: string, ctx: TestContext, extra?: Record<string, string>): Promise<Response> {
+async function sseRequest(
+  path: string,
+  ctx: TestContext,
+  extra?: Record<string, string>,
+): Promise<Response> {
   const separator = path.includes("?") ? "&" : "?";
   const url = `${path}${separator}orgId=${ctx.orgId}`;
   return await app.request(url, {
@@ -92,7 +94,10 @@ describe("realtime SSE routes (integration)", () => {
 
       // Collect: first event should be ping (from keep-alive), then our execution_update
       // But ping has 30s delay, so the execution_update should arrive first
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
       expect(events[0]!.event).toBe("execution_update");
 
@@ -115,9 +120,7 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("returns 401 without cookie", async () => {
-      const res = await app.request(
-        `/api/realtime/executions/${execution.id}?orgId=${ctx.orgId}`,
-      );
+      const res = await app.request(`/api/realtime/executions/${execution.id}?orgId=${ctx.orgId}`);
       expect(res.status).toBe(401);
     });
 
@@ -153,7 +156,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flowPkg.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
       expect(events[0]!.event).toBe("execution_update");
 
@@ -175,7 +181,10 @@ describe("realtime SSE routes (integration)", () => {
         result: { some: "large-data" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       const data = JSON.parse(events[0]!.data);
       // stripPayload removes "result" for execution_update in non-verbose mode
       expect(data).not.toHaveProperty("result");
@@ -195,7 +204,10 @@ describe("realtime SSE routes (integration)", () => {
         data: { verbose: "details" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events[0]!.event).toBe("execution_log");
 
       const data = JSON.parse(events[0]!.data);
@@ -205,10 +217,7 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("verbose mode includes all fields", async () => {
-      const res = await sseRequest(
-        `/api/realtime/executions/${execution.id}?verbose=true`,
-        ctx,
-      );
+      const res = await sseRequest(`/api/realtime/executions/${execution.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
@@ -220,7 +229,10 @@ describe("realtime SSE routes (integration)", () => {
         result: { output: "data" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       const data = JSON.parse(events[0]!.data);
       // In verbose mode, result is NOT stripped
       expect(data.result).toEqual({ output: "data" });
@@ -228,10 +240,7 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("verbose mode includes data field for execution_log", async () => {
-      const res = await sseRequest(
-        `/api/realtime/executions/${execution.id}?verbose=true`,
-        ctx,
-      );
+      const res = await sseRequest(`/api/realtime/executions/${execution.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
@@ -243,7 +252,10 @@ describe("realtime SSE routes (integration)", () => {
         data: { detail: "full-info" },
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events[0]!.event).toBe("execution_log");
 
       const data = JSON.parse(events[0]!.data);
@@ -270,7 +282,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flowPkg.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
       expect(events[0]!.event).toBe("execution_update");
 
@@ -307,7 +322,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flowPkg.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
 
       const data = JSON.parse(events[0]!.data);
@@ -338,7 +356,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flowPkg.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
       expect(events[0]!.event).toBe("execution_update");
     });
@@ -367,7 +388,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flow2.id,
       });
 
-      const events = await collectSSEEvents(res.body!, 2, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(res.body!, 2, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(2);
 
       const ids = events.map((e) => JSON.parse(e.data).id);
@@ -377,6 +401,41 @@ describe("realtime SSE routes (integration)", () => {
 
     it("returns 401 without auth", async () => {
       const res = await app.request("/api/realtime/executions");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // ── API key auth via ?token= ────────────────────────────────
+
+  describe("API key auth via ?token=", () => {
+    let apiKeyRaw: string;
+
+    beforeEach(async () => {
+      const res = await app.request("/api/api-keys", {
+        method: "POST",
+        headers: {
+          Cookie: ctx.cookie,
+          "X-Org-Id": ctx.orgId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "SSE Test Key",
+          applicationId: ctx.defaultAppId,
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { key: string };
+      apiKeyRaw = body.key;
+    });
+
+    it("authenticates with valid API key in token query param", async () => {
+      const res = await app.request(`/api/realtime/executions?token=${apiKeyRaw}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toContain("text/event-stream");
+    });
+
+    it("returns 401 with invalid API key", async () => {
+      const res = await app.request(`/api/realtime/executions?token=ask_invalid_key`);
       expect(res.status).toBe(401);
     });
   });
@@ -413,7 +472,10 @@ describe("realtime SSE routes (integration)", () => {
         package_id: flowB.id,
       });
 
-      const events = await collectSSEEvents(resB.body!, 1, { timeoutMs: 3000, ignoreEvents: ["ping"] });
+      const events = await collectSSEEvents(resB.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
       expect(events.length).toBe(1);
 
       const data = JSON.parse(events[0]!.data);

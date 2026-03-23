@@ -6,7 +6,10 @@ export const endUsersPaths = {
       summary: "Create an end-user",
       description:
         "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -46,6 +49,15 @@ export const endUsersPaths = {
       responses: {
         "201": {
           description: "End-user created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+            "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
+            "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
@@ -55,6 +67,8 @@ export const endUsersPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
       },
     },
     get: {
@@ -105,6 +119,14 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "Paginated end-user list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+            "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
+            "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -143,6 +165,10 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "End-user detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
@@ -196,6 +222,10 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "End-user updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
@@ -218,7 +248,12 @@ export const endUsersPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "End-user deleted" },
+        "204": {
+          description: "End-user deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

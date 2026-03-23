@@ -1,4 +1,5 @@
 import { db } from "../lib/db.ts";
+import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import {
   organizations,
   organizationMembers,
@@ -59,7 +60,12 @@ export async function createOrganization(
 ): Promise<OrgResult> {
   const [org] = await db
     .insert(organizations)
-    .values({ name, slug, createdBy: userId })
+    .values({
+      name,
+      slug,
+      createdBy: userId,
+      settings: { apiVersion: CURRENT_API_VERSION },
+    })
     .returning();
 
   if (!org) throw new Error("Failed to create organization");
@@ -114,6 +120,7 @@ export async function updateOrganization(
 
 export interface OrgSettings {
   allowedRedirectDomains?: string[];
+  apiVersion?: string;
 }
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {

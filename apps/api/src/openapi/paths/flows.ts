@@ -14,6 +14,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Flow list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -55,6 +59,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Configuration saved",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -99,6 +107,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Admin connection bound",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { bound: { type: "boolean" } } },
@@ -124,6 +136,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Admin connection unbound",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { unbound: { type: "boolean" } } },
@@ -163,6 +179,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Profile override set",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -184,6 +204,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Profile override cleared",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -207,6 +231,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Share token created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -238,6 +266,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Flow proxy config",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -284,6 +316,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Flow proxy updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -309,6 +345,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Memory list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -339,6 +379,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Memories deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -370,6 +414,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Memory deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -400,6 +448,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Flow model config",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -445,6 +497,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Flow model updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -490,6 +546,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Skills updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -543,6 +603,10 @@ export const flowsPaths = {
       responses: {
         "200": {
           description: "Tools updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

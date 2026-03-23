@@ -5,10 +5,10 @@ export const realtimePaths = {
       tags: ["Realtime"],
       summary: "SSE: all execution status changes",
       description:
-        "Server-Sent Events stream for all execution status changes in the org. Cookie auth only (no API key support).",
-      security: [{ cookieAuth: [] }],
+        "Server-Sent Events stream for all execution status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],
       responses: {
@@ -24,11 +24,12 @@ export const realtimePaths = {
       operationId: "streamExecution",
       tags: ["Realtime"],
       summary: "SSE: single execution events",
-      description: "Server-Sent Events stream for execution status + log events. Cookie auth only.",
-      security: [{ cookieAuth: [] }],
+      description:
+        "Server-Sent Events stream for execution status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],
       responses: {
@@ -39,18 +40,23 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/flows/{scope}/{name}/executions": {
+  "/api/realtime/flows/{packageId}/executions": {
     get: {
       operationId: "streamFlowExecutions",
       tags: ["Realtime"],
       summary: "SSE: flow execution changes",
       description:
-        "Server-Sent Events stream for execution changes for a specific flow. Cookie auth only.",
-      security: [{ cookieAuth: [] }],
+        "Server-Sent Events stream for execution changes for a specific flow. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "packageId",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Flow package ID",
+        },
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],
       responses: {

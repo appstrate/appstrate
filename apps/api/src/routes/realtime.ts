@@ -7,6 +7,7 @@ import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
+import { validateApiKey } from "../services/api-keys.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -21,15 +22,37 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
   return evt.data;
 }
 
+interface SSEAuthResult {
+  userId: string;
+  orgId: string;
+  role: string;
+}
+
 /**
- * Validate session + org membership for SSE endpoints.
- * EventSource can't send custom headers, so:
- *  - Auth: via Better Auth session cookie (sent automatically with withCredentials)
- *  - Org: via ?orgId= query parameter
+ * Validate auth for SSE endpoints.
+ *
+ * Supports two auth methods:
+ *  1. API key via `?token=ask_...` query param (EventSource can't send headers)
+ *  2. Cookie session (existing behavior)
+ *
+ * Org context: `?orgId=` query param (cookie auth only — API key already resolves org).
  */
 async function validateSSEAuth(c: {
-  req: { raw: Request; query: (key: string) => string | undefined };
-}): Promise<{ userId: string; orgId: string; role: string } | null> {
+  req: {
+    raw: Request;
+    query: (key: string) => string | undefined;
+  };
+}): Promise<SSEAuthResult | null> {
+  // 1. Try API key auth via ?token= query param
+  const token = c.req.query("token");
+  if (token?.startsWith("ask_")) {
+    const keyInfo = await validateApiKey(token);
+    if (!keyInfo) return null;
+
+    return { userId: keyInfo.userId, orgId: keyInfo.orgId, role: "admin" };
+  }
+
+  // 2. Fallback: cookie session
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return null;
 

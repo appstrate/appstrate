@@ -51,5 +51,6 @@ export type AppEnv = {
     apiKeyId?: string;
     applicationId?: string;
     requestId: string;
+    apiVersion: string;
   };
 };

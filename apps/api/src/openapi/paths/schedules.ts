@@ -9,6 +9,10 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -35,6 +39,10 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -77,7 +85,13 @@ export const schedulesPaths = {
         },
       },
       responses: {
-        "201": { description: "Schedule created" },
+        "201": {
+          description: "Schedule created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
         "400": {
           description:
             "Validation error. Possible causes: missing/invalid cron expression, invalid input, or flow has file inputs (cannot be scheduled).",
@@ -118,7 +132,13 @@ export const schedulesPaths = {
         },
       },
       responses: {
-        "200": { description: "Schedule updated" },
+        "200": {
+          description: "Schedule updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -134,6 +154,10 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
