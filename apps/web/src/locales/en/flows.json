@@ -73,6 +73,7 @@
   "exec.breadcrumb": "Execution #{{number}}",
   "exec.draft": "draft",
   "exec.user": "by {{name}}",
+  "exec.sharedLink": "Shared link",
   "exec.proxy": "proxy {{label}}",
   "exec.tabUsage": "Usage",
   "exec.emptyUsage": "No usage data",

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedShareToken } from "../../helpers/seed.ts";
+import { seedFlow, seedShareToken, seedExecution } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -89,6 +89,69 @@ describe("Share API", () => {
       const res = await app.request("/share/nonexistent-token-12345/flow");
 
       expect(res.status).toBe(410);
+    });
+
+    it("returns execution data for a consumed token with linked execution", async () => {
+      const flow = await seedFlow({
+        id: "@myorg/linked-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/linked-flow",
+          version: "0.1.0",
+          type: "flow",
+          description: "A flow with execution",
+          displayName: "Linked Flow",
+        },
+      });
+
+      const shareToken = await seedShareToken({
+        packageId: flow.id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        consumedAt: new Date(),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      });
+
+      // Create an execution linked to the share token via shareTokenId
+      await seedExecution({
+        packageId: flow.id,
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        status: "success",
+        shareTokenId: shareToken.id,
+      });
+
+      const res = await app.request(`/share/${shareToken.token}/flow`);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.consumed).toBe(true);
+      expect(body.execution).toBeDefined();
+      expect(body.execution.status).toBe("success");
+    });
+
+    it("returns consumed: true without execution when no execution is linked", async () => {
+      const flow = await seedFlow({
+        id: "@myorg/no-exec-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const shareToken = await seedShareToken({
+        packageId: flow.id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        consumedAt: new Date(),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      });
+
+      const res = await app.request(`/share/${shareToken.token}/flow`);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.consumed).toBe(true);
+      expect(body.execution).toBeUndefined();
     });
   });
 });

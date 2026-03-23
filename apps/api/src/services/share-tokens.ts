@@ -74,7 +74,3 @@ export async function consumeShareToken(token: string) {
 
   return result;
 }
-
-export async function linkExecutionToToken(tokenId: string, executionId: string) {
-  await db.update(shareTokens).set({ executionId }).where(eq(shareTokens.id, tokenId));
-}

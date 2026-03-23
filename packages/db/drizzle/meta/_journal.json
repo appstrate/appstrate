@@ -43,6 +43,13 @@
       "when": 1774189909483,
       "tag": "0005_slow_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774298143163,
+      "tag": "0006_misty_justin_hammer",
+      "breakpoints": true
     }
   ]
 }

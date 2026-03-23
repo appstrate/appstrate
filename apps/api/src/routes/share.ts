@@ -3,11 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import {
-  getShareToken,
-  consumeShareToken,
-  linkExecutionToToken,
-} from "../services/share-tokens.ts";
+import { getShareToken, consumeShareToken } from "../services/share-tokens.ts";
 import { getPackage } from "../services/flow-service.ts";
 import {
   createExecution,
@@ -69,28 +65,26 @@ export function createShareRouter() {
       consumed: !!shareToken.consumedAt,
     };
 
-    // If already consumed and has execution, include execution status + logs
-    if (shareToken.consumedAt && shareToken.executionId) {
-      const [execRows, allLogs] = await Promise.all([
-        db
-          .select({
-            status: executions.status,
-            result: executions.result,
-            error: executions.error,
-          })
-          .from(executions)
-          .where(eq(executions.id, shareToken.executionId))
-          .limit(1),
-        listExecutionLogs(shareToken.executionId, shareToken.orgId),
-      ]);
+    // If already consumed, look up the linked execution
+    if (shareToken.consumedAt) {
+      const [execRow] = await db
+        .select({
+          id: executions.id,
+          status: executions.status,
+          result: executions.result,
+          error: executions.error,
+        })
+        .from(executions)
+        .where(eq(executions.shareTokenId, shareToken.id))
+        .limit(1);
 
-      const exec = execRows[0];
-      if (exec) {
+      if (execRow) {
+        const allLogs = await listExecutionLogs(execRow.id, shareToken.orgId);
         result.execution = {
-          id: shareToken.executionId,
-          status: exec.status,
-          ...(exec.result ? { result: exec.result } : {}),
-          ...(exec.error ? { error: exec.error } : {}),
+          id: execRow.id,
+          status: execRow.status,
+          ...(execRow.result ? { result: execRow.result } : {}),
+          ...(execRow.error ? { error: execRow.error } : {}),
           logs: allLogs,
         };
       }
@@ -207,8 +201,8 @@ export function createShareRouter() {
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
       applicationId,
+      tokenId,
     );
-    await linkExecutionToToken(tokenId, executionId);
 
     // Fire-and-forget
     executeFlowInBackground(
@@ -239,24 +233,23 @@ export function createShareRouter() {
       throw gone("token_invalid", "This link is no longer valid.");
     }
 
-    if (!shareToken.executionId) {
+    const [execRow] = await db
+      .select({
+        id: executions.id,
+        status: executions.status,
+        result: executions.result,
+        error: executions.error,
+      })
+      .from(executions)
+      .where(eq(executions.shareTokenId, shareToken.id))
+      .limit(1);
+
+    if (!execRow) {
       return c.json({ status: "pending", logs: [] });
     }
 
-    const [execRows, allLogs] = await Promise.all([
-      db
-        .select({
-          status: executions.status,
-          result: executions.result,
-          error: executions.error,
-        })
-        .from(executions)
-        .where(eq(executions.id, shareToken.executionId))
-        .limit(1),
-      listExecutionLogs(shareToken.executionId, shareToken.orgId),
-    ]);
-
-    const exec = execRows[0];
+    const allLogs = await listExecutionLogs(execRow.id, shareToken.orgId);
+    const exec = execRow;
 
     return c.json({
       status: exec?.status ?? "pending",

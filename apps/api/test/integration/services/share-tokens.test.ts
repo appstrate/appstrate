@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedFlow, seedExecution } from "../../helpers/seed.ts";
+import { seedFlow } from "../../helpers/seed.ts";
 import {
   createShareToken,
   getShareToken,
   consumeShareToken,
-  linkExecutionToToken,
 } from "../../../src/services/share-tokens.ts";
-import { shareTokens } from "@appstrate/db/schema";
+import { createExecution } from "../../../src/services/state/executions.ts";
+import { executions, shareTokens } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 describe("share-tokens service", () => {
@@ -202,42 +202,79 @@ describe("share-tokens service", () => {
     });
   });
 
-  // ── linkExecutionToToken ─────────────────────────────────
+  // ── execution ↔ shareTokenId ───────────────────────────────
 
-  describe("linkExecutionToToken", () => {
-    it("links an execution to a share token", async () => {
+  describe("execution shareTokenId", () => {
+    it("createExecution stores shareTokenId when provided", async () => {
       const actor = { type: "member" as const, id: userId };
-      const created = await createShareToken(packageId, actor, orgId);
+      const token = await createShareToken(packageId, actor, orgId);
+      const execId = `exec_${crypto.randomUUID()}`;
 
-      const execution = await seedExecution({ packageId, orgId });
+      await createExecution(
+        execId,
+        packageId,
+        actor,
+        orgId,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        token!.id,
+      );
 
-      await linkExecutionToToken(created!.id, execution.id);
-
-      // Verify the link in the database
-      const [dbRow] = await db
+      const [row] = await db
         .select()
-        .from(shareTokens)
-        .where(eq(shareTokens.id, created!.id))
+        .from(executions)
+        .where(eq(executions.id, execId))
         .limit(1);
-      expect(dbRow!.executionId).toBe(execution.id);
+      expect(row!.shareTokenId).toBe(token!.id);
     });
 
-    it("overwrites a previous execution link", async () => {
+    it("createExecution stores null shareTokenId by default", async () => {
       const actor = { type: "member" as const, id: userId };
-      const created = await createShareToken(packageId, actor, orgId);
+      const execId = `exec_${crypto.randomUUID()}`;
 
-      const exec1 = await seedExecution({ packageId, orgId });
-      const exec2 = await seedExecution({ packageId, orgId });
+      await createExecution(execId, packageId, actor, orgId, null);
 
-      await linkExecutionToToken(created!.id, exec1.id);
-      await linkExecutionToToken(created!.id, exec2.id);
-
-      const [dbRow] = await db
+      const [row] = await db
         .select()
-        .from(shareTokens)
-        .where(eq(shareTokens.id, created!.id))
+        .from(executions)
+        .where(eq(executions.id, execId))
         .limit(1);
-      expect(dbRow!.executionId).toBe(exec2.id);
+      expect(row!.shareTokenId).toBeNull();
+    });
+
+    it("execution can be looked up by shareTokenId", async () => {
+      const actor = { type: "member" as const, id: userId };
+      const token = await createShareToken(packageId, actor, orgId);
+      const execId = `exec_${crypto.randomUUID()}`;
+
+      await createExecution(
+        execId,
+        packageId,
+        actor,
+        orgId,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        token!.id,
+      );
+
+      const [row] = await db
+        .select()
+        .from(executions)
+        .where(eq(executions.shareTokenId, token!.id))
+        .limit(1);
+      expect(row).toBeDefined();
+      expect(row!.id).toBe(execId);
     });
   });
+
 });

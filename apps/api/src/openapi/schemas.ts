@@ -314,6 +314,10 @@ export const schemas = {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this execution",
       },
+      shareTokenId: {
+        type: ["string", "null"],
+        description: "Share token ID if execution was triggered via a shared link",
+      },
     },
   },
   ExecutionLog: {
