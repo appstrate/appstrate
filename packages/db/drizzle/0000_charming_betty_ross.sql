@@ -54,6 +54,7 @@ CREATE TABLE "verification" (
 CREATE TABLE "api_keys" (
 	"id" text PRIMARY KEY NOT NULL,
 	"org_id" uuid NOT NULL,
+	"application_id" text NOT NULL,
 	"name" text NOT NULL,
 	"key_hash" text NOT NULL,
 	"key_prefix" text NOT NULL,
@@ -138,10 +139,34 @@ CREATE TABLE "organizations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
+	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_by" text,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now(),
 	CONSTRAINT "organizations_slug_unique" UNIQUE("slug")
+);
+--> statement-breakpoint
+CREATE TABLE "applications" (
+	"id" text PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
+	"name" text NOT NULL,
+	"is_default" boolean DEFAULT false NOT NULL,
+	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_by" text,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "end_users" (
+	"id" text PRIMARY KEY NOT NULL,
+	"application_id" text NOT NULL,
+	"org_id" uuid NOT NULL,
+	"external_id" text,
+	"name" text,
+	"email" text,
+	"metadata" jsonb,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "profiles" (
@@ -157,6 +182,8 @@ CREATE TABLE "package_configs" (
 	"org_id" uuid NOT NULL,
 	"package_id" text NOT NULL,
 	"config" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"model_id" text,
+	"proxy_id" text,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now(),
 	CONSTRAINT "package_configs_org_id_package_id_pk" PRIMARY KEY("org_id","package_id")
@@ -220,7 +247,6 @@ CREATE TABLE "packages" (
 CREATE TABLE "execution_logs" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"execution_id" text NOT NULL,
-	"user_id" text NOT NULL,
 	"org_id" uuid NOT NULL,
 	"type" text DEFAULT 'progress' NOT NULL,
 	"level" text DEFAULT 'debug' NOT NULL,
@@ -233,7 +259,9 @@ CREATE TABLE "execution_logs" (
 CREATE TABLE "executions" (
 	"id" text PRIMARY KEY NOT NULL,
 	"package_id" text NOT NULL,
-	"user_id" text NOT NULL,
+	"user_id" text,
+	"end_user_id" text,
+	"application_id" text,
 	"org_id" uuid NOT NULL,
 	"status" "execution_status" DEFAULT 'pending' NOT NULL,
 	"input" jsonb,
@@ -249,10 +277,12 @@ CREATE TABLE "executions" (
 	"schedule_id" text,
 	"package_version_id" integer,
 	"notified_at" timestamp,
+	"read_at" timestamp,
 	"proxy_label" text,
 	"model_label" text,
-	"read_at" timestamp,
-	"cost" double precision
+	"cost" double precision,
+	"share_token_id" text,
+	CONSTRAINT "executions_at_most_one_actor" CHECK (NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "package_memories" (
@@ -267,7 +297,8 @@ CREATE TABLE "package_memories" (
 CREATE TABLE "package_schedules" (
 	"id" text PRIMARY KEY NOT NULL,
 	"package_id" text NOT NULL,
-	"user_id" text NOT NULL,
+	"user_id" text,
+	"end_user_id" text,
 	"org_id" uuid NOT NULL,
 	"name" text,
 	"enabled" boolean DEFAULT true,
@@ -277,7 +308,8 @@ CREATE TABLE "package_schedules" (
 	"last_run_at" timestamp,
 	"next_run_at" timestamp,
 	"created_at" timestamp DEFAULT now(),
-	"updated_at" timestamp DEFAULT now()
+	"updated_at" timestamp DEFAULT now(),
+	CONSTRAINT "package_schedules_at_most_one_actor" CHECK (NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "share_tokens" (
@@ -285,22 +317,25 @@ CREATE TABLE "share_tokens" (
 	"token" text NOT NULL,
 	"package_id" text NOT NULL,
 	"org_id" uuid NOT NULL,
-	"created_by" text NOT NULL,
+	"created_by" text,
+	"end_user_id" text,
 	"manifest" jsonb,
-	"execution_id" text,
 	"consumed_at" timestamp,
 	"expires_at" timestamp NOT NULL,
 	"created_at" timestamp DEFAULT now(),
-	CONSTRAINT "share_tokens_token_unique" UNIQUE("token")
+	CONSTRAINT "share_tokens_token_unique" UNIQUE("token"),
+	CONSTRAINT "share_tokens_at_most_one_actor" CHECK (NOT (created_by IS NOT NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "connection_profiles" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"user_id" text NOT NULL,
+	"user_id" text,
+	"end_user_id" text,
 	"name" text NOT NULL,
 	"is_default" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "connection_profiles_exactly_one_actor" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "flow_provider_bindings" (
@@ -315,7 +350,8 @@ CREATE TABLE "flow_provider_bindings" (
 CREATE TABLE "oauth_states" (
 	"state" text PRIMARY KEY NOT NULL,
 	"org_id" uuid NOT NULL,
-	"user_id" text NOT NULL,
+	"user_id" text,
+	"end_user_id" text,
 	"profile_id" uuid NOT NULL,
 	"provider_id" text NOT NULL,
 	"code_verifier" text NOT NULL,
@@ -324,7 +360,8 @@ CREATE TABLE "oauth_states" (
 	"scopes_requested" text[] DEFAULT '{}'::text[],
 	"redirect_uri" text NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"expires_at" timestamp DEFAULT NOW() + INTERVAL '10 minutes' NOT NULL
+	"expires_at" timestamp DEFAULT NOW() + INTERVAL '10 minutes' NOT NULL,
+	CONSTRAINT "oauth_states_exactly_one_actor" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "provider_credentials" (
@@ -337,11 +374,13 @@ CREATE TABLE "provider_credentials" (
 );
 --> statement-breakpoint
 CREATE TABLE "user_package_profiles" (
-	"user_id" text NOT NULL,
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" text,
+	"end_user_id" text,
 	"package_id" text NOT NULL,
 	"profile_id" uuid NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
-	CONSTRAINT "user_package_profiles_user_id_package_id_pk" PRIMARY KEY("user_id","package_id")
+	CONSTRAINT "user_package_profiles_exactly_one_actor" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "user_provider_connections" (
@@ -356,9 +395,39 @@ CREATE TABLE "user_provider_connections" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "webhook_deliveries" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"webhook_id" text NOT NULL,
+	"event_id" text NOT NULL,
+	"event_type" text NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"status_code" integer,
+	"latency" integer,
+	"attempt" integer DEFAULT 1 NOT NULL,
+	"error" text,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "webhooks" (
+	"id" text PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
+	"application_id" text NOT NULL,
+	"url" text NOT NULL,
+	"events" text[] NOT NULL,
+	"flow_id" text,
+	"payload_mode" text DEFAULT 'full' NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"secret" text NOT NULL,
+	"previous_secret" text,
+	"previous_secret_expires_at" timestamp,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_invited_by_user_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -373,6 +442,10 @@ ALTER TABLE "org_proxies" ADD CONSTRAINT "org_proxies_created_by_user_id_fk" FOR
 ALTER TABLE "organization_members" ADD CONSTRAINT "organization_members_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "organization_members" ADD CONSTRAINT "organization_members_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "organizations" ADD CONSTRAINT "organizations_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "applications" ADD CONSTRAINT "applications_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "applications" ADD CONSTRAINT "applications_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "end_users" ADD CONSTRAINT "end_users_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "end_users" ADD CONSTRAINT "end_users_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "profiles" ADD CONSTRAINT "profiles_id_user_id_fk" FOREIGN KEY ("id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_configs" ADD CONSTRAINT "package_configs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_configs" ADD CONSTRAINT "package_configs_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -388,37 +461,46 @@ ALTER TABLE "package_versions" ADD CONSTRAINT "package_versions_created_by_user_
 ALTER TABLE "packages" ADD CONSTRAINT "packages_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "packages" ADD CONSTRAINT "packages_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "execution_logs" ADD CONSTRAINT "execution_logs_execution_id_executions_id_fk" FOREIGN KEY ("execution_id") REFERENCES "public"."executions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "execution_logs" ADD CONSTRAINT "execution_logs_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "execution_logs" ADD CONSTRAINT "execution_logs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "executions" ADD CONSTRAINT "executions_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "executions" ADD CONSTRAINT "executions_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "executions" ADD CONSTRAINT "executions_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "executions" ADD CONSTRAINT "executions_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "executions" ADD CONSTRAINT "executions_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "executions" ADD CONSTRAINT "executions_package_version_id_package_versions_id_fk" FOREIGN KEY ("package_version_id") REFERENCES "public"."package_versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_memories" ADD CONSTRAINT "package_memories_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_memories" ADD CONSTRAINT "package_memories_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_memories" ADD CONSTRAINT "package_memories_execution_id_executions_id_fk" FOREIGN KEY ("execution_id") REFERENCES "public"."executions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_execution_id_executions_id_fk" FOREIGN KEY ("execution_id") REFERENCES "public"."executions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "share_tokens" ADD CONSTRAINT "share_tokens_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connection_profiles" ADD CONSTRAINT "connection_profiles_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "connection_profiles" ADD CONSTRAINT "connection_profiles_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flow_provider_bindings" ADD CONSTRAINT "flow_provider_bindings_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flow_provider_bindings" ADD CONSTRAINT "flow_provider_bindings_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "flow_provider_bindings" ADD CONSTRAINT "flow_provider_bindings_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "oauth_states" ADD CONSTRAINT "oauth_states_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "oauth_states" ADD CONSTRAINT "oauth_states_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "oauth_states" ADD CONSTRAINT "oauth_states_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "oauth_states" ADD CONSTRAINT "oauth_states_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "provider_credentials" ADD CONSTRAINT "provider_credentials_provider_id_packages_id_fk" FOREIGN KEY ("provider_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "provider_credentials" ADD CONSTRAINT "provider_credentials_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_package_profiles" ADD CONSTRAINT "user_package_profiles_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_package_profiles" ADD CONSTRAINT "user_package_profiles_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_package_profiles" ADD CONSTRAINT "user_package_profiles_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_package_profiles" ADD CONSTRAINT "user_package_profiles_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_provider_connections" ADD CONSTRAINT "user_provider_connections_profile_id_connection_profiles_id_fk" FOREIGN KEY ("profile_id") REFERENCES "public"."connection_profiles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_provider_connections" ADD CONSTRAINT "user_provider_connections_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_webhook_id_webhooks_id_fk" FOREIGN KEY ("webhook_id") REFERENCES "public"."webhooks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_api_keys_org_id" ON "api_keys" USING btree ("org_id");--> statement-breakpoint
-CREATE INDEX "idx_api_keys_key_hash" ON "api_keys" USING btree ("key_hash");--> statement-breakpoint
+CREATE INDEX "idx_api_keys_application_id" ON "api_keys" USING btree ("application_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_api_keys_key_hash" ON "api_keys" USING btree ("key_hash");--> statement-breakpoint
 CREATE INDEX "idx_api_keys_key_prefix" ON "api_keys" USING btree ("key_prefix");--> statement-breakpoint
 CREATE INDEX "idx_org_invitations_token" ON "org_invitations" USING btree ("token");--> statement-breakpoint
 CREATE INDEX "idx_org_invitations_org_id" ON "org_invitations" USING btree ("org_id");--> statement-breakpoint
@@ -429,6 +511,12 @@ CREATE INDEX "idx_org_provider_keys_org_id" ON "org_provider_keys" USING btree (
 CREATE INDEX "idx_org_proxies_org_id" ON "org_proxies" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_org_proxies_one_default" ON "org_proxies" USING btree ("org_id") WHERE "org_proxies"."is_default" = true;--> statement-breakpoint
 CREATE INDEX "idx_organization_members_user_id" ON "organization_members" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_applications_org_id" ON "applications" USING btree ("org_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_applications_one_default" ON "applications" USING btree ("org_id") WHERE "applications"."is_default" = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_end_users_external_id" ON "end_users" USING btree ("application_id","external_id") WHERE "end_users"."external_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_end_users_app_email" ON "end_users" USING btree ("application_id","email") WHERE email IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "idx_end_users_application_id" ON "end_users" USING btree ("application_id");--> statement-breakpoint
+CREATE INDEX "idx_end_users_org_id" ON "end_users" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_package_configs_org_id" ON "package_configs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_package_dependencies_dep_id" ON "package_dependencies" USING btree ("dependency_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "pkg_ver_deps_unique" ON "package_version_dependencies" USING btree ("version_id","dep_scope","dep_name","dep_type");--> statement-breakpoint
@@ -439,27 +527,40 @@ CREATE INDEX "idx_packages_org_id" ON "packages" USING btree ("org_id");--> stat
 CREATE INDEX "idx_packages_type" ON "packages" USING btree ("type");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_execution_id" ON "execution_logs" USING btree ("execution_id");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_lookup" ON "execution_logs" USING btree ("execution_id","id");--> statement-breakpoint
-CREATE INDEX "idx_execution_logs_user_id" ON "execution_logs" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_execution_logs_org_id" ON "execution_logs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_executions_package_id" ON "executions" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_executions_status" ON "executions" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_executions_user_id" ON "executions" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_executions_end_user_id" ON "executions" USING btree ("end_user_id");--> statement-breakpoint
+CREATE INDEX "idx_executions_application_id" ON "executions" USING btree ("application_id");--> statement-breakpoint
 CREATE INDEX "idx_executions_org_id" ON "executions" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_executions_notification" ON "executions" USING btree ("user_id","org_id","notified_at","read_at");--> statement-breakpoint
+CREATE INDEX "idx_executions_share_token_id" ON "executions" USING btree ("share_token_id");--> statement-breakpoint
 CREATE INDEX "idx_package_memories_package_org" ON "package_memories" USING btree ("package_id","org_id");--> statement-breakpoint
 CREATE INDEX "idx_package_memories_org_id" ON "package_memories" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_schedules_package_id" ON "package_schedules" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_schedules_user_id" ON "package_schedules" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_schedules_end_user_id" ON "package_schedules" USING btree ("end_user_id");--> statement-breakpoint
 CREATE INDEX "idx_package_schedules_org_id" ON "package_schedules" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_share_tokens_token" ON "share_tokens" USING btree ("token");--> statement-breakpoint
 CREATE INDEX "idx_share_tokens_package_id" ON "share_tokens" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_share_tokens_org_id" ON "share_tokens" USING btree ("org_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "idx_connection_profiles_default" ON "connection_profiles" USING btree ("user_id") WHERE "connection_profiles"."is_default" = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_connection_profiles_default" ON "connection_profiles" USING btree ("user_id") WHERE "connection_profiles"."is_default" = true AND "connection_profiles"."user_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_connection_profiles_default_end_user" ON "connection_profiles" USING btree ("end_user_id") WHERE "connection_profiles"."is_default" = true AND "connection_profiles"."end_user_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_connection_profiles_user_id" ON "connection_profiles" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_connection_profiles_end_user_id" ON "connection_profiles" USING btree ("end_user_id");--> statement-breakpoint
 CREATE INDEX "idx_flow_provider_bindings_package_id" ON "flow_provider_bindings" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_flow_provider_bindings_org_id" ON "flow_provider_bindings" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_oauth_states_expires" ON "oauth_states" USING btree ("expires_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_user_package_profiles_member" ON "user_package_profiles" USING btree ("user_id","package_id") WHERE "user_package_profiles"."user_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_user_package_profiles_end_user" ON "user_package_profiles" USING btree ("end_user_id","package_id") WHERE "user_package_profiles"."end_user_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_user_package_profiles_package_id" ON "user_package_profiles" USING btree ("package_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_user_provider_connections_unique" ON "user_provider_connections" USING btree ("profile_id","provider_id","org_id");--> statement-breakpoint
 CREATE INDEX "idx_user_provider_connections_profile" ON "user_provider_connections" USING btree ("profile_id");--> statement-breakpoint
-CREATE INDEX "idx_user_provider_connections_org_id" ON "user_provider_connections" USING btree ("org_id");
+CREATE INDEX "idx_user_provider_connections_org_id" ON "user_provider_connections" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_webhook_deliveries_webhook_id" ON "webhook_deliveries" USING btree ("webhook_id");--> statement-breakpoint
+CREATE INDEX "idx_webhook_deliveries_event_id" ON "webhook_deliveries" USING btree ("event_id");--> statement-breakpoint
+CREATE INDEX "idx_webhook_deliveries_status" ON "webhook_deliveries" USING btree ("webhook_id","status");--> statement-breakpoint
+CREATE INDEX "idx_webhooks_org_id" ON "webhooks" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_webhooks_application_id" ON "webhooks" USING btree ("application_id");--> statement-breakpoint
+CREATE INDEX "idx_webhooks_app_active" ON "webhooks" USING btree ("application_id","active");
