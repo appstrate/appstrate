@@ -86,6 +86,8 @@ export const webhooksPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
       },
