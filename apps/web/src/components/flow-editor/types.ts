@@ -1,7 +1,14 @@
 import type { SchemaField } from "./schema-section";
-import type { ExecutionSettings } from "./execution-section";
+
+export type OutputMode = "report" | "data";
 
 export type EditorTab = "general" | "prompt" | "providers" | "schema" | "skills" | "tools" | "json";
+
+export interface ExecutionSettings {
+  timeout: number;
+  logs: boolean;
+  outputMode: OutputMode;
+}
 
 export interface ProviderEntry {
   id: string;

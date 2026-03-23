@@ -84,18 +84,29 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
       }
 
-      // Conditionally disable tools based on flow manifest
+      // Conditionally disable tools based on output mode (mutually exclusive)
       const disabledTools: string[] = [];
+      const outputMode = ctx.outputMode ?? "data";
       const hasOutputSchema =
         ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
-      if (!hasOutputSchema) disabledTools.push("structured-output");
+
+      if (outputMode === "data") {
+        if (!hasOutputSchema) {
+          throw new Error("Output mode 'data' requires an output schema");
+        }
+        disabledTools.push("report");
+      } else {
+        // report mode — structured_output always disabled
+        disabledTools.push("structured-output");
+      }
+
       if (ctx.logsEnabled === false) disabledTools.push("log");
       if (disabledTools.length > 0) {
         containerEnv.DISABLED_TOOLS = disabledTools.join(",");
       }
 
       // Inject output schema for native LLM tool parameter enforcement
-      if (hasOutputSchema) {
+      if (outputMode === "data" && hasOutputSchema) {
         containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
       }
 

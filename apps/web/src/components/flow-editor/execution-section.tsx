@@ -1,10 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-
-export interface ExecutionSettings {
-  timeout: number;
-  logs: boolean;
-}
+import type { OutputMode, ExecutionSettings } from "./types";
 
 interface ExecutionSectionProps {
   value: ExecutionSettings;
@@ -28,6 +24,14 @@ export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
           value={String(value.timeout)}
           onChange={(v) => update({ timeout: parseInt(v) || 300 })}
           description={t("editor.execTimeoutDesc")}
+        />
+        <FormField
+          id="exec-output-mode"
+          label={t("editor.execOutputMode")}
+          value={value.outputMode}
+          onChange={(v) => update({ outputMode: v as OutputMode })}
+          description={t("editor.execOutputModeDesc")}
+          enumValues={["report", "data"]}
         />
         <div className="flex items-center justify-between gap-3">
           <div>
