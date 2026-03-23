@@ -31,7 +31,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, outputRetries: 2, logs: true },
+    execution: { timeout: 300, logs: true },
     _manifestBase: {
       $schema: AFPS_SCHEMA_URLS.flow,
       schemaVersion: "1.0",
@@ -184,7 +184,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     configSchema: schemaToFields(detail.config?.schema, "config"),
     execution: {
       timeout: (m.timeout as number) ?? 300,
-      outputRetries: (m["x-outputRetries"] as number) ?? 2,
       logs: (m["x-logs"] as boolean | undefined) ?? true,
     },
     _manifestBase: { ...m },
@@ -309,17 +308,14 @@ export function assemblePayload(state: FlowFormState) {
     delete manifest.config;
   }
 
-  // Write timeout/outputRetries at top level (only if non-default or present in base)
+  // Write timeout/logs at top level (only if non-default or present in base)
   if ("timeout" in state._manifestBase || state.execution.timeout !== 300) {
     manifest.timeout = state.execution.timeout;
   } else {
     delete manifest.timeout;
   }
-  if ("x-outputRetries" in state._manifestBase || state.execution.outputRetries !== 2) {
-    manifest["x-outputRetries"] = state.execution.outputRetries;
-  } else {
-    delete manifest["x-outputRetries"];
-  }
+  // Clean up legacy x-outputRetries if present in base manifest
+  delete manifest["x-outputRetries"];
   if ("x-logs" in state._manifestBase || state.execution.logs !== true) {
     manifest["x-logs"] = state.execution.logs;
   } else {
@@ -385,7 +381,6 @@ export function payloadToFormState(payload: {
     configSchema: schemaToFields(configObj?.schema, "config"),
     execution: {
       timeout: (manifest.timeout as number) ?? 300,
-      outputRetries: (manifest["x-outputRetries"] as number) ?? 2,
       logs: (manifest["x-logs"] as boolean | undefined) ?? true,
     },
     _manifestBase: { ...manifest },

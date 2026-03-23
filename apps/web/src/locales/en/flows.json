@@ -176,8 +176,6 @@
   "editor.execution": "Execution",
   "editor.execTimeout": "Timeout",
   "editor.execTimeoutDesc": "In seconds (default: 300)",
-  "editor.execRetries": "Output validation retries",
-  "editor.execRetriesDesc": "0-5 (default: 2)",
   "editor.execLogs": "Progress logs",
   "editor.execLogsDesc": "Allow the agent to send progress messages to the user",
   "editor.inputTitle": "Input",

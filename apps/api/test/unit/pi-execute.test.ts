@@ -229,6 +229,34 @@ describe("PiAdapter.execute()", () => {
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
     expect(spec.env.DISABLED_TOOLS).toContain("structured-output");
+    expect(spec.env.OUTPUT_SCHEMA).toBeUndefined();
+  });
+
+  it("injects OUTPUT_SCHEMA env var when output schema is defined", async () => {
+    const orchestrator = createMockOrchestrator();
+    const adapter = new PiAdapter(orchestrator);
+
+    const outputSchema = {
+      type: "object",
+      properties: {
+        total: { type: "number", description: "Total count" },
+        items: { type: "array", items: { type: "string" } },
+      },
+      required: ["total", "items"],
+    };
+
+    const ctx = basePromptContext({
+      schemas: { output: outputSchema as any },
+    });
+
+    await collectMessages(adapter.execute("exec-schema", ctx, 30));
+
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    expect(spec.env.DISABLED_TOOLS).toBeUndefined();
+    expect(spec.env.OUTPUT_SCHEMA).toBeDefined();
+    const parsed = JSON.parse(spec.env.OUTPUT_SCHEMA!);
+    expect(parsed.properties.total.type).toBe("number");
+    expect(parsed.required).toEqual(["total", "items"]);
   });
 
   it("disables log tool when logsEnabled is false", async () => {

@@ -94,6 +94,11 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.DISABLED_TOOLS = disabledTools.join(",");
       }
 
+      // Inject output schema for native LLM tool parameter enforcement
+      if (hasOutputSchema) {
+        containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
+      }
+
       // All outbound HTTP traffic routed through sidecar forward proxy.
       // The execution network is internal (no NAT) — clients that ignore
       // HTTP_PROXY simply get connection failures, which is the desired behavior.
