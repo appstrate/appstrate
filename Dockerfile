@@ -11,6 +11,8 @@ COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
 COPY packages/env/package.json packages/env/
+COPY runtime-pi/package.json runtime-pi/
+COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
 
 RUN bun install --frozen-lockfile
 
