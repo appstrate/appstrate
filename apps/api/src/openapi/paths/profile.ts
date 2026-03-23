@@ -25,6 +25,7 @@ export const profilePaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
     patch: {
@@ -66,6 +67,7 @@ export const profilePaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },
@@ -110,6 +112,7 @@ export const profilePaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },

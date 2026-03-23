@@ -64,6 +64,7 @@ export const authPaths = {
       description: "Clears session cookie.",
       responses: {
         "200": { description: "Logged out" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },
