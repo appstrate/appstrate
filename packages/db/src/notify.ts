@@ -36,7 +36,6 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
       PERFORM pg_notify('execution_log_insert', json_build_object(
         'id', NEW.id,
         'execution_id', NEW.execution_id,
-        'user_id', NEW.user_id,
         'org_id', NEW.org_id,
         'type', NEW.type,
         'level', NEW.level,
