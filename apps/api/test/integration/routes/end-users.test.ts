@@ -27,7 +27,7 @@ describe("End-Users API", () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     apiKeyRaw = body.key;
   });
 
@@ -47,11 +47,23 @@ describe("End-Users API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(body.id).toStartWith("eu_");
       expect(body.name).toBe("Alice");
       expect(body.email).toBe("alice@example.com");
+    });
+
+    it("includes Appstrate-Version response header", async () => {
+      const res = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Version Test" }),
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.headers.get("Appstrate-Version")).toBeDefined();
+      expect(res.headers.get("Appstrate-Version")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 
     it("returns 401 without authentication", async () => {
@@ -84,7 +96,7 @@ describe("End-Users API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(2);
     });
@@ -97,14 +109,14 @@ describe("End-Users API", () => {
         headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Bob", email: "bob@example.com" }),
       });
-      const created = await createRes.json() as any;
+      const created = (await createRes.json()) as any;
 
       const res = await app.request(`/api/end-users/${created.id}`, {
         headers: apiKeyHeaders(),
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(created.id);
       expect(body.name).toBe("Bob");
     });
@@ -117,7 +129,7 @@ describe("End-Users API", () => {
         headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Original", email: "orig@example.com" }),
       });
-      const created = await createRes.json() as any;
+      const created = (await createRes.json()) as any;
 
       const res = await app.request(`/api/end-users/${created.id}`, {
         method: "PATCH",
@@ -126,7 +138,7 @@ describe("End-Users API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.name).toBe("Updated");
     });
   });
@@ -138,7 +150,7 @@ describe("End-Users API", () => {
         headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "To Delete" }),
       });
-      const created = await createRes.json() as any;
+      const created = (await createRes.json()) as any;
 
       const res = await app.request(`/api/end-users/${created.id}`, {
         method: "DELETE",
@@ -151,10 +163,8 @@ describe("End-Users API", () => {
       const listRes = await app.request("/api/end-users", {
         headers: apiKeyHeaders(),
       });
-      const listBody = await listRes.json() as any;
-      const found = listBody.data.find(
-        (u: { id: string }) => u.id === created.id,
-      );
+      const listBody = (await listRes.json()) as any;
+      const found = listBody.data.find((u: { id: string }) => u.id === created.id);
       expect(found).toBeUndefined();
     });
   });

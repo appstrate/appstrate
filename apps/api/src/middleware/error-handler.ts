@@ -28,12 +28,22 @@ export function errorHandler(err: Error, c: Context<AppEnv>): Response {
 
   const body = apiError.toProblemDetail(requestId);
 
+  // Build response headers — always include problem+json content type and request ID.
+  const responseHeaders: Record<string, string> = {
+    "Content-Type": "application/problem+json",
+    "Request-Id": requestId,
+  };
+
+  // Merge custom headers from ApiError (e.g. rate-limit headers on 429).
+  if (apiError.headers) {
+    for (const [key, value] of Object.entries(apiError.headers)) {
+      responseHeaders[key] = value;
+    }
+  }
+
   // Use new Response() to set application/problem+json — c.json() forces application/json.
   return new Response(JSON.stringify(body), {
     status: body.status,
-    headers: {
-      "Content-Type": "application/problem+json",
-      "Request-Id": requestId,
-    },
+    headers: responseHeaders,
   });
 }

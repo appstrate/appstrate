@@ -6,15 +6,22 @@ export const webhooksPaths = {
       summary: "Create a webhook",
       description:
         "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org. Admin only.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
       requestBody: {
         required: true,
         content: {
           "application/json": {
             schema: {
               type: "object",
-              required: ["url", "events"],
+              required: ["url", "events", "applicationId"],
               properties: {
+                applicationId: {
+                  type: "string",
+                  description: "Application ID (app_ prefix) this webhook belongs to",
+                },
                 url: { type: "string", format: "uri", description: "HTTPS endpoint URL" },
                 events: {
                   type: "array",
@@ -49,6 +56,15 @@ export const webhooksPaths = {
       responses: {
         "201": {
           description: "Webhook created. The `secret` field is shown only once.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+            "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
+            "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -70,6 +86,8 @@ export const webhooksPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
       },
     },
     get: {
@@ -81,6 +99,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "Webhook list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -109,6 +131,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "Webhook detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": { schema: { $ref: "#/components/schemas/WebhookObject" } },
           },
@@ -145,6 +171,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "Webhook updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": { schema: { $ref: "#/components/schemas/WebhookObject" } },
           },
@@ -162,7 +192,12 @@ export const webhooksPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Webhook deleted" },
+        "204": {
+          description: "Webhook deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -180,6 +215,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "Test event generated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -210,6 +249,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "New secret generated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -243,6 +286,10 @@ export const webhooksPaths = {
       responses: {
         "200": {
           description: "Delivery history",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

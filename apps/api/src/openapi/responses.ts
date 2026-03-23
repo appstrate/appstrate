@@ -68,6 +68,14 @@ export const responses = {
   },
   RateLimited: {
     description: "Too many requests",
+    headers: {
+      "Request-Id": { $ref: "#/components/headers/RequestId" },
+      "Retry-After": { $ref: "#/components/headers/RetryAfter" },
+      RateLimit: { $ref: "#/components/headers/RateLimit" },
+      "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+      "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
+      "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
+    },
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -79,6 +87,46 @@ export const responses = {
           code: "rate_limited",
           requestId: "req_abc123",
           retryAfter: 30,
+        },
+      },
+    },
+  },
+  IdempotencyInProgress: {
+    description: "A request with the same Idempotency-Key is already being processed",
+    headers: {
+      "Request-Id": { $ref: "#/components/headers/RequestId" },
+    },
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/idempotency-in-progress",
+          title: "Idempotency In Progress",
+          status: 409,
+          detail:
+            "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+          code: "idempotency_in_progress",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  IdempotencyConflict: {
+    description: "Same Idempotency-Key used with a different request body",
+    headers: {
+      "Request-Id": { $ref: "#/components/headers/RequestId" },
+    },
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/idempotency-conflict",
+          title: "Idempotency Conflict",
+          status: 422,
+          detail:
+            "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+          code: "idempotency_conflict",
+          requestId: "req_abc123",
         },
       },
     },

@@ -11,7 +11,9 @@ import {
   removeMember,
   updateMemberRole,
   slugify,
+  getOrgSettings,
 } from "../../../src/services/organizations.ts";
+import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 
 describe("organizations service", () => {
   let userId: string;
@@ -59,6 +61,13 @@ describe("organizations service", () => {
       const fetched = await getOrgById(org.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.slug).toBe("fetch-org");
+    });
+
+    it("pins apiVersion to CURRENT_API_VERSION at creation", async () => {
+      const org = await createOrganization("Versioned Org", "versioned-org", userId);
+
+      const settings = await getOrgSettings(org.id);
+      expect(settings.apiVersion).toBe(CURRENT_API_VERSION);
     });
   });
 

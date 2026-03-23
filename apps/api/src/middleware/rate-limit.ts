@@ -37,9 +37,45 @@ export function _resetBucketsForTesting(): void {
   ipLimiters = new Map();
 }
 
+/** Extract retryAfter (seconds) from rate-limiter-flexible rejection. */
+function extractRetryAfter(rej: unknown): number | undefined {
+  return rej && typeof rej === "object" && "msBeforeNext" in rej
+    ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+    : undefined;
+}
+
+/** Throw a 429 ApiError with IETF + legacy rate-limit headers. */
+function throwRateLimited(maxPerMinute: number, retryAfter: number | undefined): never {
+  const reset = retryAfter ?? 60;
+  throw new ApiError({
+    status: 429,
+    code: "rate_limited",
+    title: "Rate Limited",
+    detail: "Too many requests. Please try again shortly.",
+    retryAfter,
+    headers: {
+      "Retry-After": String(reset),
+      RateLimit: `limit=${maxPerMinute}, remaining=0, reset=${reset}`,
+      "RateLimit-Policy": `${maxPerMinute};w=60`,
+    },
+  });
+}
+
+/** Set IETF + legacy rate-limit headers on a successful response. */
+function setRateLimitHeaders(
+  c: Context,
+  maxPerMinute: number,
+  remaining: number,
+  reset: number,
+): void {
+  c.header("X-RateLimit-Remaining", String(remaining));
+  c.header("X-RateLimit-Reset", String(reset));
+  c.header("RateLimit", `limit=${maxPerMinute}, remaining=${remaining}, reset=${reset}`);
+  c.header("RateLimit-Policy", `${maxPerMinute};w=60`);
+}
+
 /**
  * Authenticated rate limiter keyed by user ID or API key.
- * Adds `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers on success.
  */
 export function rateLimit(maxPerMinute: number) {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -57,24 +93,10 @@ export function rateLimit(maxPerMinute: number) {
 
     try {
       const res = await limiter.consume(key);
-
-      c.header("X-RateLimit-Remaining", String(res.remainingPoints));
-      c.header("X-RateLimit-Reset", String(Math.ceil(res.msBeforeNext / 1000)));
-
+      setRateLimitHeaders(c, maxPerMinute, res.remainingPoints, Math.ceil(res.msBeforeNext / 1000));
       return next();
     } catch (rej) {
-      const retryAfter =
-        rej && typeof rej === "object" && "msBeforeNext" in rej
-          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
-          : undefined;
-
-      throw new ApiError({
-        status: 429,
-        code: "rate_limited",
-        title: "Rate Limited",
-        detail: "Too many requests. Please try again shortly.",
-        retryAfter,
-      });
+      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
     }
   };
 }
@@ -98,20 +120,10 @@ export function rateLimitByBearer(maxPerMinute: number) {
 
     try {
       await limiter.consume(key);
+      // Bearer routes are internal — no rate-limit headers needed.
       return next();
     } catch (rej) {
-      const retryAfter =
-        rej && typeof rej === "object" && "msBeforeNext" in rej
-          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
-          : undefined;
-
-      throw new ApiError({
-        status: 429,
-        code: "rate_limited",
-        title: "Rate Limited",
-        detail: "Too many requests. Please try again shortly.",
-        retryAfter,
-      });
+      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
     }
   };
 }
@@ -133,21 +145,11 @@ export function rateLimitByIp(maxPerMinute: number) {
     const key = `ip:${c.req.method}:${c.req.path}:${ip}`;
 
     try {
-      await limiter.consume(key);
+      const res = await limiter.consume(key);
+      setRateLimitHeaders(c, maxPerMinute, res.remainingPoints, Math.ceil(res.msBeforeNext / 1000));
       return next();
     } catch (rej) {
-      const retryAfter =
-        rej && typeof rej === "object" && "msBeforeNext" in rej
-          ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
-          : undefined;
-
-      throw new ApiError({
-        status: 429,
-        code: "rate_limited",
-        title: "Rate Limited",
-        detail: "Too many requests. Please try again shortly.",
-        retryAfter,
-      });
+      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
     }
   };
 }

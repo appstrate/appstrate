@@ -38,7 +38,7 @@ describe("rateLimit (authenticated)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("sets rate limit headers", async () => {
+  it("sets legacy rate limit headers", async () => {
     const app = createApp();
     app.use("/test", async (c, next) => {
       c.set("user", { id: "user-rl-headers", email: "test@test.com", name: "Test" });
@@ -50,6 +50,27 @@ describe("rateLimit (authenticated)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("X-RateLimit-Remaining")).toBeDefined();
     expect(res.headers.get("X-RateLimit-Reset")).toBeDefined();
+  });
+
+  it("sets IETF RateLimit structured header on success", async () => {
+    const app = createApp();
+    app.use("/test", async (c, next) => {
+      c.set("user", { id: "user-ietf", email: "test@test.com", name: "Test" });
+      return rateLimit(10)(c, next);
+    });
+    app.get("/test", (c) => c.json({ ok: true }));
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(200);
+
+    const rl = res.headers.get("RateLimit");
+    expect(rl).toBeDefined();
+    expect(rl).toContain("limit=10");
+    expect(rl).toContain("remaining=");
+    expect(rl).toContain("reset=");
+
+    const policy = res.headers.get("RateLimit-Policy");
+    expect(policy).toBe("10;w=60");
   });
 
   it("returns 429 when limit exceeded", async () => {
@@ -68,6 +89,29 @@ describe("rateLimit (authenticated)", () => {
     const body = (await res.json()) as any;
     expect(body.code).toBe("rate_limited");
     expect(body.detail).toContain("Too many requests");
+  });
+
+  it("returns IETF headers and Retry-After on 429", async () => {
+    const app = createApp();
+    app.use("/test", async (c, next) => {
+      c.set("user", { id: "user-ietf-429", email: "test@test.com", name: "Test" });
+      return rateLimit(1)(c, next);
+    });
+    app.get("/test", (c) => c.json({ ok: true }));
+
+    await app.request("/test");
+    const res = await app.request("/test");
+    expect(res.status).toBe(429);
+
+    expect(res.headers.get("Retry-After")).toBeDefined();
+
+    const rl = res.headers.get("RateLimit");
+    expect(rl).toBeDefined();
+    expect(rl).toContain("limit=1");
+    expect(rl).toContain("remaining=0");
+
+    const policy = res.headers.get("RateLimit-Policy");
+    expect(policy).toBe("1;w=60");
   });
 
   it("uses apiKeyId as identity when present", async () => {
@@ -117,6 +161,24 @@ describe("rateLimitByIp", () => {
       headers: { "X-Forwarded-For": "1.2.3.4" },
     });
     expect(res.status).toBe(200);
+  });
+
+  it("sets IETF RateLimit headers on success", async () => {
+    const app = createApp();
+    app.use("/public", rateLimitByIp(10));
+    app.get("/public", (c) => c.json({ ok: true }));
+
+    const res = await app.request("/public", {
+      headers: { "X-Forwarded-For": "99.99.99.99" },
+    });
+    expect(res.status).toBe(200);
+
+    const rl = res.headers.get("RateLimit");
+    expect(rl).toBeDefined();
+    expect(rl).toContain("limit=10");
+
+    expect(res.headers.get("RateLimit-Policy")).toBe("10;w=60");
+    expect(res.headers.get("X-RateLimit-Remaining")).toBeDefined();
   });
 
   it("returns 429 when IP limit exceeded", async () => {

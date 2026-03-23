@@ -21,6 +21,10 @@ export const welcomePaths = {
       responses: {
         "200": {
           description: "Profile updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },

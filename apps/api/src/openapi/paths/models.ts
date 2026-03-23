@@ -10,6 +10,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Model list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -70,6 +74,10 @@ export const modelsPaths = {
       responses: {
         "201": {
           description: "Model created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -114,6 +122,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Default model updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { success: { type: "boolean" } } },
@@ -144,6 +156,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Model search results",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -219,6 +235,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Test result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
@@ -269,6 +289,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Model updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { id: { type: "string" } } },
@@ -288,7 +312,12 @@ export const modelsPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Model deleted" },
+        "204": {
+          description: "Model deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -307,6 +336,10 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Test result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

@@ -52,7 +52,7 @@ const expectedEndpoints = [
   // Realtime (SSE)
   "GET /api/realtime/executions",
   "GET /api/realtime/executions/{id}",
-  "GET /api/realtime/flows/{scope}/{name}/executions",
+  "GET /api/realtime/flows/{packageId}/executions",
 
   // Schedules
   "GET /api/schedules",

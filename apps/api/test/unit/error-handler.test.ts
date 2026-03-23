@@ -148,6 +148,31 @@ describe("errorHandler middleware", () => {
     expect(body.retryAfter).toBe(30);
   });
 
+  it("merges custom headers from ApiError into response", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw new ApiError({
+        status: 429,
+        code: "rate_limited",
+        title: "Rate Limited",
+        detail: "Too many requests.",
+        retryAfter: 15,
+        headers: {
+          "Retry-After": "15",
+          "RateLimit": "limit=60, remaining=0, reset=15",
+          "RateLimit-Policy": "60;w=60",
+        },
+      });
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("15");
+    expect(res.headers.get("RateLimit")).toBe("limit=60, remaining=0, reset=15");
+    expect(res.headers.get("RateLimit-Policy")).toBe("60;w=60");
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+  });
+
   it("unhandled errors become 500 internal_error", async () => {
     const app = createApp();
     app.get("/test", () => {

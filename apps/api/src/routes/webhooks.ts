@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { idempotency } from "../middleware/idempotency.ts";
 import {
   createWebhook,
   listWebhooks,
@@ -24,7 +25,7 @@ export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/webhooks — create a webhook (returns secret once)
-  router.post("/", rateLimit(10), requireAdmin(), async (c) => {
+  router.post("/", rateLimit(10), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json<{
       applicationId: string;

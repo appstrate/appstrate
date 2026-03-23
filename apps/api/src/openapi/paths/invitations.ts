@@ -10,6 +10,10 @@ export const invitationsPaths = {
       responses: {
         "200": {
           description: "Invitation metadata",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -56,6 +60,10 @@ export const invitationsPaths = {
       responses: {
         "200": {
           description: "Invitation accepted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

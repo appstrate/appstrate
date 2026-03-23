@@ -17,6 +17,8 @@ import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
 import { ApiError, unauthorized } from "../../src/lib/errors.ts";
+import { apiVersion } from "../../src/middleware/api-version.ts";
+import { getOrgSettings } from "../../src/services/organizations.ts";
 import { logger } from "../../src/lib/logger.ts";
 import { loadCloud } from "../../src/lib/cloud-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
@@ -193,6 +195,19 @@ export function getTestApp(): Hono<AppEnv> {
     if (c.get("authMethod") === "api_key") return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
+  });
+
+  // API versioning
+  const apiVersionMiddleware = apiVersion({
+    getOrgApiVersion: async (orgId) => {
+      const settings = await getOrgSettings(orgId);
+      return settings.apiVersion ?? null;
+    },
+  });
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path)) return next();
+    if (!c.get("user")) return next();
+    return apiVersionMiddleware(c, next);
   });
 
   // Mount routes (same order as production)

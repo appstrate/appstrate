@@ -6,6 +6,7 @@ import { openApiInfo } from "./info.ts";
 import { schemas } from "./schemas.ts";
 import { responses } from "./responses.ts";
 import { parameters } from "./parameters.ts";
+import { headers } from "./headers.ts";
 import { securitySchemes } from "./security-schemes.ts";
 
 // Path modules
@@ -67,6 +68,7 @@ export const openApiSpec = {
   components: {
     securitySchemes,
     parameters,
+    headers,
     schemas,
     responses,
   },

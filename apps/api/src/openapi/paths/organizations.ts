@@ -8,6 +8,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -28,7 +32,8 @@ export const organizationsPaths = {
       operationId: "createOrganization",
       tags: ["Organizations"],
       summary: "Create an organization",
-      description: "Create a new organization. The current user becomes the owner.",
+      description:
+        "Create a new organization. The current user becomes the owner. The organization is automatically pinned to the current API version.",
       requestBody: {
         required: true,
         content: {
@@ -45,7 +50,27 @@ export const organizationsPaths = {
         },
       },
       responses: {
-        "201": { description: "Organization created" },
+        "201": {
+          description: "Organization created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "string", format: "uuid" },
+                  name: { type: "string" },
+                  slug: { type: "string" },
+                  role: { type: "string", enum: ["owner"] },
+                  createdAt: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
         "400": { $ref: "#/components/responses/ValidationError" },
       },
     },
@@ -60,6 +85,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -88,7 +117,13 @@ export const organizationsPaths = {
         },
       },
       responses: {
-        "200": { description: "Organization updated" },
+        "200": {
+          description: "Organization updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
       },
     },
     delete: {
@@ -100,6 +135,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -136,6 +175,10 @@ export const organizationsPaths = {
       responses: {
         "201": {
           description: "User added or invitation created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -183,7 +226,13 @@ export const organizationsPaths = {
         },
       },
       responses: {
-        "200": { description: "Role updated" },
+        "200": {
+          description: "Role updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -200,6 +249,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Member removed",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -236,7 +289,13 @@ export const organizationsPaths = {
         },
       },
       responses: {
-        "200": { description: "Invitation role updated" },
+        "200": {
+          description: "Invitation role updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -253,6 +312,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Invitation cancelled",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -274,6 +337,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization settings",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -300,6 +367,10 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Settings updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },

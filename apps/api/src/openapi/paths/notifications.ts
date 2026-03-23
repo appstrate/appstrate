@@ -9,6 +9,10 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Unread count",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -35,6 +39,10 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Unread counts keyed by package ID",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -67,6 +75,10 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Mark result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -92,6 +104,10 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Update result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -135,6 +151,10 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Paginated execution list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {

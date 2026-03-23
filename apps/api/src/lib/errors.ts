@@ -52,6 +52,7 @@ export class ApiError extends Error {
   readonly param?: string;
   readonly retryAfter?: number;
   readonly fieldErrors?: ValidationFieldError[];
+  readonly headers?: Record<string, string>;
 
   constructor(opts: {
     status: number;
@@ -61,6 +62,7 @@ export class ApiError extends Error {
     param?: string;
     retryAfter?: number;
     errors?: ValidationFieldError[];
+    headers?: Record<string, string>;
   }) {
     super(opts.detail);
     this.name = "ApiError";
@@ -70,6 +72,7 @@ export class ApiError extends Error {
     this.param = opts.param;
     this.retryAfter = opts.retryAfter;
     this.fieldErrors = opts.errors;
+    this.headers = opts.headers;
   }
 
   /** Serialise to RFC 9457 Problem Details body. */

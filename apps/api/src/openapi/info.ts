@@ -7,7 +7,7 @@ export const openApiInfo = {
     title: "Appstrate API",
     version: "1.0.0",
     description:
-      "API for Appstrate — an open-source platform for executing one-shot AI flows in ephemeral Docker containers. Manage flows, executions, schedules, providers, API keys, and more.",
+      "API for Appstrate — an open-source platform for executing one-shot AI flows in ephemeral Docker containers. Manage flows, executions, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Deprecated API versions include a `Sunset` header (RFC 8594). Rate-limited endpoints return `RateLimit`, `RateLimit-Policy`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers on every response (not just 429).",
     contact: {
       name: "Appstrate",
     },

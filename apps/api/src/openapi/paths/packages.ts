@@ -38,6 +38,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -131,6 +135,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -290,6 +298,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -343,6 +355,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Skill created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -388,6 +404,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -431,6 +451,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -490,6 +514,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -542,6 +570,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -595,6 +627,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned skill detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -643,7 +679,12 @@ export const packagesPaths = {
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Version deleted" },
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -675,6 +716,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -730,6 +775,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -771,7 +820,12 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Skill deleted" },
+        "204": {
+          description: "Skill deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -822,6 +876,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Tool list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -868,6 +926,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Tool created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -913,6 +975,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -956,6 +1022,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1015,6 +1085,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1067,6 +1141,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1120,6 +1198,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned tool detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1168,7 +1250,12 @@ export const packagesPaths = {
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Version deleted" },
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -1200,6 +1287,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Tool detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -1255,6 +1346,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Tool updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1296,7 +1391,12 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Tool deleted" },
+        "204": {
+          description: "Tool deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -1363,6 +1463,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Flow created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1416,6 +1520,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Flow detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1472,6 +1580,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Flow updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1513,7 +1625,12 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Flow deleted" },
+        "204": {
+          description: "Flow deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { description: "Flow in use" },
       },
@@ -1545,6 +1662,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1587,6 +1708,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1646,6 +1771,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1693,6 +1822,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1739,6 +1872,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1787,7 +1924,12 @@ export const packagesPaths = {
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Version deleted" },
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -1852,6 +1994,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package forked successfully",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1935,6 +2081,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Provider package list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -1979,6 +2129,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Provider package created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2024,6 +2178,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2067,6 +2225,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2126,6 +2288,10 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2178,6 +2344,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2231,6 +2401,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned provider detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2279,7 +2453,12 @@ export const packagesPaths = {
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Version deleted" },
+        "204": {
+          description: "Version deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -2311,6 +2490,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Provider package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2362,6 +2545,10 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Provider package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -2403,7 +2590,12 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Provider package deleted" },
+        "204": {
+          description: "Provider package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { description: "Provider in use by flows" },

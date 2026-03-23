@@ -8,6 +8,9 @@ export const executionsPaths = {
         "Start a flow execution (fire-and-forget). Returns the execution ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+        { $ref: "#/components/parameters/AppstrateVersion" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
@@ -61,6 +64,16 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Execution started",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
+            Sunset: { $ref: "#/components/headers/Sunset" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+            "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
+            "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -81,6 +94,8 @@ export const executionsPaths = {
             },
           },
         },
+        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -104,6 +119,10 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Execution list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -128,6 +147,10 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Executions deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -154,6 +177,10 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Execution detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Execution" },
@@ -177,6 +204,10 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Log entries",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -202,6 +233,10 @@ export const executionsPaths = {
       responses: {
         "200": {
           description: "Execution cancelled",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },

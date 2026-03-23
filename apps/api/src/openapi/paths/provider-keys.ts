@@ -10,6 +10,10 @@ export const providerKeysPaths = {
       responses: {
         "200": {
           description: "Provider key list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -63,6 +67,10 @@ export const providerKeysPaths = {
       responses: {
         "201": {
           description: "Provider key created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -117,6 +125,10 @@ export const providerKeysPaths = {
       responses: {
         "200": {
           description: "Test result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
@@ -157,6 +169,10 @@ export const providerKeysPaths = {
       responses: {
         "200": {
           description: "Provider key updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { id: { type: "string" } } },
@@ -178,7 +194,12 @@ export const providerKeysPaths = {
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Provider key deleted" },
+        "204": {
+          description: "Provider key deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
@@ -197,6 +218,10 @@ export const providerKeysPaths = {
       responses: {
         "200": {
           description: "Test result",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

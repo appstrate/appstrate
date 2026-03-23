@@ -22,8 +22,7 @@
     "db:migrate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit migrate",
     "docker:dev": "docker compose up -d",
     "docker:prod": "docker compose --profile prod up -d",
-    "verify:openapi": "bun scripts/verify-openapi.ts",
-    "test": "bun test"
+    "verify:openapi": "bun scripts/verify-openapi.ts"
   },
   "dependencies": {
     "@appstrate/core": "^2.8.4"

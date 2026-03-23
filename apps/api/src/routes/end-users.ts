@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { idempotency } from "../middleware/idempotency.ts";
 import {
   createEndUser,
   listEndUsers,
@@ -21,7 +22,7 @@ export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/end-users — create an end-user
-  router.post("/", rateLimit(60), requireAdmin(), async (c) => {
+  router.post("/", rateLimit(60), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json<{
       applicationId?: string;

@@ -9,6 +9,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "Profile list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -57,6 +61,10 @@ export const connectionProfilesPaths = {
       responses: {
         "201": {
           description: "Profile created",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -90,6 +98,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "Connections deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -112,6 +124,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "User connections grouped by provider and organization",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
@@ -201,6 +217,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "Profile renamed",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -227,6 +247,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "Profile deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -258,6 +282,10 @@ export const connectionProfilesPaths = {
       responses: {
         "200": {
           description: "Connection list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
           content: {
             "application/json": {
               schema: {
