@@ -19,9 +19,11 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'user_id', NEW.user_id,
         'org_id', NEW.org_id,
         'error', NEW.error,
-        'completed_at', NEW.completed_at,
+        'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration,
-        'tokens_used', NEW.tokens_used
+        'tokens_used', NEW.tokens_used,
+        'share_token_id', NEW.share_token_id
       )::text);
       RETURN NEW;
     END;

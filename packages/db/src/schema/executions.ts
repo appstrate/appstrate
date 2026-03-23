@@ -53,6 +53,7 @@ export const executions = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     cost: doublePrecision("cost"),
+    shareTokenId: text("share_token_id"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),
@@ -67,6 +68,7 @@ export const executions = pgTable(
       table.notifiedAt,
       table.readAt,
     ),
+    index("idx_executions_share_token_id").on(table.shareTokenId),
     check(
       "executions_at_most_one_actor",
       sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
@@ -178,9 +180,6 @@ export const shareTokens = pgTable(
       onDelete: "set null",
     }),
     manifest: jsonb("manifest"),
-    executionId: text("execution_id").references(() => executions.id, {
-      onDelete: "set null",
-    }),
     consumedAt: timestamp("consumed_at"),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
