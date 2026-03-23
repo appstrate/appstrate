@@ -257,7 +257,7 @@ describe("assemblePayload", () => {
     expect(result.manifest["x-output-mode"]).toBe("report");
   });
 
-  it("falls back to report when data mode has no output schema", () => {
+  it("preserves data mode even without output schema (backend validates at execution)", () => {
     const state = makeState({
       execution: { timeout: 300, logs: true, outputMode: "data" },
       outputSchema: [],
@@ -265,21 +265,10 @@ describe("assemblePayload", () => {
 
     const result = assemblePayload(state);
 
-    expect(result.manifest["x-output-mode"]).toBe("report");
+    expect(result.manifest["x-output-mode"]).toBe("data");
   });
 
-  it("falls back to report when data mode has only empty output schema keys", () => {
-    const state = makeState({
-      execution: { timeout: 300, logs: true, outputMode: "data" },
-      outputSchema: [{ _id: "1", key: "", type: "string", description: "", required: false }],
-    });
-
-    const result = assemblePayload(state);
-
-    expect(result.manifest["x-output-mode"]).toBe("report");
-  });
-
-  it("keeps data mode when output schema has fields", () => {
+  it("preserves data mode with output schema fields", () => {
     const state = makeState({
       execution: { timeout: 300, logs: true, outputMode: "data" },
       outputSchema: [
