@@ -42,7 +42,6 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
   PLATFORM_API_URL: z.string().optional(),
-  OAUTH_CALLBACK_URL: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
   // Execution

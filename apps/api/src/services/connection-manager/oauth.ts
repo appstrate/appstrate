@@ -13,6 +13,10 @@ import {
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 
+export function getOAuthCallbackUrl(): string {
+  return `${getEnv().APP_URL}/auth/callback`;
+}
+
 export async function initiateConnection(
   provider: string,
   orgId: string,
@@ -20,8 +24,7 @@ export async function initiateConnection(
   profileId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
-  const apiEnv = getEnv();
-  const redirectUri = apiEnv.OAUTH_CALLBACK_URL ?? `http://localhost:${apiEnv.PORT}/auth/callback`;
+  const redirectUri = getOAuthCallbackUrl();
 
   // Route to OAuth1 if the provider uses it
   const providerDef = await getProvider(db, orgId, provider);

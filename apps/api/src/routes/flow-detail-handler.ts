@@ -16,7 +16,7 @@ import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
-import { getEnv } from "@appstrate/env";
+import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
@@ -162,7 +162,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
           }
         : null,
       populatedProviders,
-      callbackUrl: `${getEnv().APP_URL}/api/auth/callback`,
+      callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnpublishedChanges,
       forkedFrom: rawItem?.forkedFrom ?? null,
