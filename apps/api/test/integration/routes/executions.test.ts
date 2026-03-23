@@ -22,6 +22,85 @@ describe("Executions API", () => {
   });
 
 
+  // ─── POST /api/flows/:scope/:name/run — input validation ──
+
+  describe("POST /api/flows/:scope/:name/run — input validation", () => {
+    const inputSchema = {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "User email" },
+        count: { type: "number", description: "Optional count" },
+      },
+      required: ["email"],
+    };
+
+    async function seedFlowWithInput() {
+      return seedFlow({
+        id: "@execorg/input-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@execorg/input-flow",
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow with required input",
+          input: { schema: inputSchema },
+        },
+        draftContent: "Process the email: {{email}}",
+      });
+    }
+
+    it("returns 400 when required input field is missing", async () => {
+      await seedFlowWithInput();
+
+      const res = await app.request("/api/flows/@execorg/input-flow/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { count: 5 } }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json() as any;
+      expect(body.detail).toContain("email");
+    });
+
+    it("returns 400 when input is omitted entirely and schema has required fields", async () => {
+      await seedFlowWithInput();
+
+      const res = await app.request("/api/flows/@execorg/input-flow/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when required field is empty string", async () => {
+      await seedFlowWithInput();
+
+      const res = await app.request("/api/flows/@execorg/input-flow/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: "" } }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when required field is null", async () => {
+      await seedFlowWithInput();
+
+      const res = await app.request("/api/flows/@execorg/input-flow/run", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: null } }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+  });
+
   // ─── GET /api/flows/:scope/:name/executions ────────────────
 
   describe("GET /api/flows/:scope/:name/executions", () => {

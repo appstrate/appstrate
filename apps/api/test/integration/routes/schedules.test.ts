@@ -53,6 +53,99 @@ describe("Schedules API", () => {
     });
   });
 
+  describe("POST /api/flows/:scope/:name/schedules — input validation", () => {
+    const inputSchema = {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "User email" },
+        note: { type: "string", description: "Optional note" },
+      },
+      required: ["email"],
+    };
+
+    async function seedFlowWithInput() {
+      const fid = flowId("input-sched");
+      return seedFlow({
+        id: fid,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: fid,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow with required input",
+          input: { schema: inputSchema },
+        },
+        draftContent: "Process {{email}}",
+      });
+    }
+
+    it("returns 400 when required input field is missing", async () => {
+      await seedFlowWithInput();
+      const fid = flowId("input-sched");
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cronExpression: "0 9 * * 1-5",
+          input: { note: "hello" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json() as any;
+      expect(body.detail).toContain("email");
+    });
+
+    it("returns 400 when input is omitted and schema has required fields", async () => {
+      await seedFlowWithInput();
+      const fid = flowId("input-sched");
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cronExpression: "0 9 * * 1-5",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when required field is empty string", async () => {
+      await seedFlowWithInput();
+      const fid = flowId("input-sched");
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cronExpression: "0 9 * * 1-5",
+          input: { email: "" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("creates schedule when required input is provided", async () => {
+      await seedFlowWithInput();
+      const fid = flowId("input-sched");
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cronExpression: "0 9 * * 1-5",
+          input: { email: "test@example.com" },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+    });
+  });
+
   describe("POST /api/flows/:scope/:name/schedules", () => {
     it("creates a schedule for a flow", async () => {
       const fid = flowId("cron-flow");
