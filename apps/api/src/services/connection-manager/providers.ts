@@ -124,10 +124,16 @@ export async function listAllActorConnections(
 
   const providerInfo = new Map<string, { displayName: string; logo: string }>();
   for (const pkg of providerPkgs) {
-    const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
+    const manifest = (
+      pkg.draftManifest !== null &&
+      typeof pkg.draftManifest === "object" &&
+      !Array.isArray(pkg.draftManifest)
+        ? pkg.draftManifest
+        : {}
+    ) as Record<string, unknown>;
     providerInfo.set(pkg.id, {
-      displayName: (manifest.displayName as string) ?? pkg.id,
-      logo: (manifest.iconUrl as string) ?? "",
+      displayName: typeof manifest.displayName === "string" ? manifest.displayName : pkg.id,
+      logo: typeof manifest.iconUrl === "string" ? manifest.iconUrl : "",
     });
   }
 
@@ -162,7 +168,10 @@ export async function listAllActorConnections(
       orgName: orgNameMap.get(orgId) ?? orgId,
       connections: conns.map((r) => ({
         connectionId: r.connectionId,
-        scopesGranted: (r.scopesGranted as string[]) ?? [],
+        scopesGranted: (Array.isArray(r.scopesGranted) &&
+        r.scopesGranted.every((v: unknown) => typeof v === "string")
+          ? r.scopesGranted
+          : []) as string[],
         connectedAt: r.connectedAt?.toISOString() ?? "",
         profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
       })),

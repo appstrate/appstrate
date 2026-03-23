@@ -65,7 +65,10 @@ export async function consumeShareToken(token: string) {
       packageId: row.packageId,
       createdBy: row.createdBy,
       orgId: row.orgId,
-      manifest: row.manifest as Record<string, unknown> | null,
+      manifest:
+        row.manifest !== null && typeof row.manifest === "object" && !Array.isArray(row.manifest)
+          ? (row.manifest as Record<string, unknown>)
+          : null,
     };
   });
 

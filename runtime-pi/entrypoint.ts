@@ -65,7 +65,10 @@ async function initGitWorkspace(): Promise<void> {
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
 const disabledTools = new Set(
-  (process.env.DISABLED_TOOLS || "").split(",").map((s) => s.trim()).filter(Boolean),
+  (process.env.DISABLED_TOOLS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
 );
 
 /**
@@ -134,10 +137,7 @@ if (hasPackage) {
     await Promise.all([installDir("skills"), installDir("providers")]);
 
     // Load flow-package tools first (they take priority over runtime built-ins)
-    await loadExtensionsFromDir(
-      path.join(WORKSPACE, ".flow-package", "tools"),
-      "flow-package",
-    );
+    await loadExtensionsFromDir(path.join(WORKSPACE, ".flow-package", "tools"), "flow-package");
 
     // Cleanup extracted package (fire-and-forget)
     run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]).catch(() => {});
@@ -178,6 +178,15 @@ if (llmApiKey) {
   authStorage.setRuntimeApiKey(provider, llmApiKey);
 }
 
+function safeJsonParse<T>(raw: string | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 const modelRegistry = new ModelRegistry(authStorage);
 
 const model: Model<Api> = {
@@ -187,12 +196,10 @@ const model: Model<Api> = {
   provider,
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
-  input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) : ["text"],
-  cost: process.env.MODEL_COST
-    ? JSON.parse(process.env.MODEL_COST)
-    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: process.env.MODEL_CONTEXT_WINDOW ? parseInt(process.env.MODEL_CONTEXT_WINDOW) : 128000,
-  maxTokens: process.env.MODEL_MAX_TOKENS ? parseInt(process.env.MODEL_MAX_TOKENS) : 16384,
+  input: safeJsonParse<string[]>(process.env.MODEL_INPUT, ["text"]),
+  cost: safeJsonParse(process.env.MODEL_COST, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+  contextWindow: parseInt(process.env.MODEL_CONTEXT_WINDOW || "128000", 10) || 128000,
+  maxTokens: parseInt(process.env.MODEL_MAX_TOKENS || "16384", 10) || 16384,
 };
 
 // --- 4. Build resource loader ---

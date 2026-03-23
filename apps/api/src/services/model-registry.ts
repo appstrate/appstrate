@@ -1,5 +1,7 @@
+import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
+import { modelCostSchema } from "./adapters/types.ts";
 import type { ModelCost } from "./adapters/types.ts";
 
 // --- Types ---
@@ -36,31 +38,29 @@ let systemModels: Map<string, ModelDefinition> | null = null;
 
 // --- Parsing ---
 
-interface RawProviderKey {
-  id: string;
-  label: string;
-  api: string;
-  baseUrl: string;
-  apiKey: string;
-  models?: RawModel[];
-}
+const rawModelSchema = z.object({
+  id: z.string().optional(),
+  modelId: z.string().min(1),
+  label: z.string().min(1),
+  input: z.array(z.string()).nullable().optional(),
+  contextWindow: z.number().positive().nullable().optional(),
+  maxTokens: z.number().positive().nullable().optional(),
+  reasoning: z.boolean().nullable().optional(),
+  cost: modelCostSchema.optional(),
+  isDefault: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+});
 
-interface RawModel {
-  id?: string;
-  modelId: string;
-  label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost;
-  isDefault?: boolean;
-  enabled?: boolean;
-}
+const rawProviderKeySchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  api: z.string().min(1),
+  baseUrl: z.string().min(1),
+  apiKey: z.string().min(1),
+  models: z.array(rawModelSchema).optional(),
+});
 
-function isValidProviderKey(pk: RawProviderKey): boolean {
-  return !!(pk.id && pk.label && pk.api && pk.baseUrl && pk.apiKey);
-}
+type RawProviderKey = z.infer<typeof rawProviderKeySchema>;
 
 /**
  * Initialize system provider keys and models from the SYSTEM_PROVIDER_KEYS env var.
@@ -87,49 +87,54 @@ export function initSystemProviderKeys(): void {
   const raw = getEnv().SYSTEM_PROVIDER_KEYS as RawProviderKey[];
 
   for (const pk of raw) {
-    if (!isValidProviderKey(pk)) {
-      logger.error(
-        "[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry (missing id/label/api/baseUrl/apiKey)",
-        { providerKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined } },
-      );
+    const pkResult = rawProviderKeySchema.safeParse(pk);
+    if (!pkResult.success) {
+      logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid entry", {
+        error: pkResult.error.issues[0]?.message,
+        providerKey: { ...pk, apiKey: pk.apiKey ? "***" : undefined },
+      });
       continue;
     }
+    const validPk = pkResult.data;
 
-    pkMap.set(pk.id, {
-      id: pk.id,
-      label: pk.label,
-      api: pk.api,
-      baseUrl: pk.baseUrl,
-      apiKey: pk.apiKey,
+    pkMap.set(validPk.id, {
+      id: validPk.id,
+      label: validPk.label,
+      api: validPk.api,
+      baseUrl: validPk.baseUrl,
+      apiKey: validPk.apiKey,
     });
 
     // Parse models under this provider key
-    if (Array.isArray(pk.models)) {
-      for (const m of pk.models) {
-        if (!m.modelId || !m.label) {
-          logger.error(
-            "[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model (missing modelId/label)",
-            { providerKeyId: pk.id, model: m },
-          );
+    if (Array.isArray(validPk.models)) {
+      for (const m of validPk.models) {
+        const mResult = rawModelSchema.safeParse(m);
+        if (!mResult.success) {
+          logger.error("[model-registry] SYSTEM_PROVIDER_KEYS: skipping invalid model", {
+            providerKeyId: validPk.id,
+            error: mResult.error.issues[0]?.message,
+            model: m,
+          });
           continue;
         }
+        const validM = mResult.data;
 
-        const modelId = m.id ?? `${pk.id}:${m.modelId}`;
+        const modelId = validM.id ?? `${validPk.id}:${validM.modelId}`;
         mdlMap.set(modelId, {
           id: modelId,
-          label: m.label,
-          api: pk.api,
-          baseUrl: pk.baseUrl,
-          modelId: m.modelId,
-          apiKey: pk.apiKey,
-          providerKeyId: pk.id,
-          input: m.input ?? null,
-          contextWindow: m.contextWindow ?? null,
-          maxTokens: m.maxTokens ?? null,
-          reasoning: m.reasoning ?? null,
-          cost: m.cost ?? null,
-          isDefault: m.isDefault,
-          enabled: m.enabled,
+          label: validM.label,
+          api: validPk.api,
+          baseUrl: validPk.baseUrl,
+          modelId: validM.modelId,
+          apiKey: validPk.apiKey,
+          providerKeyId: validPk.id,
+          input: validM.input ?? null,
+          contextWindow: validM.contextWindow ?? null,
+          maxTokens: validM.maxTokens ?? null,
+          reasoning: validM.reasoning ?? null,
+          cost: validM.cost ?? null,
+          isDefault: validM.isDefault,
+          enabled: validM.enabled,
         });
       }
     }

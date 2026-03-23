@@ -5,6 +5,12 @@ import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedFlow } from "../types/index.ts";
 
+function asRecord(val: unknown): Record<string, unknown> {
+  return val !== null && typeof val === "object" && !Array.isArray(val)
+    ? (val as Record<string, unknown>)
+    : {};
+}
+
 interface DbPackageRow {
   id: string;
   draftManifest: unknown;
@@ -18,7 +24,7 @@ interface DbPackageRow {
 }
 
 function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
-  const manifest = row.draftManifest as FlowManifest;
+  const manifest = asRecord(row.draftManifest) as FlowManifest;
 
   // Read version maps from the flow's manifest
   const manifestSkillsMap = (manifest.dependencies?.skills ?? {}) as Record<string, string>;
@@ -28,7 +34,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const depSkills = (row.depRefs ?? [])
     .filter((d) => d.type === "skill")
     .map((d) => {
-      const m = (d.draftManifest ?? {}) as Partial<Manifest>;
+      const m = asRecord(d.draftManifest) as Partial<Manifest>;
       return {
         id: d.dependencyId,
         version: manifestSkillsMap[d.dependencyId] ?? "*",
@@ -40,7 +46,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
   const depTools = (row.depRefs ?? [])
     .filter((d) => d.type === "tool")
     .map((d) => {
-      const m = (d.draftManifest ?? {}) as Partial<Manifest>;
+      const m = asRecord(d.draftManifest) as Partial<Manifest>;
       return {
         id: d.dependencyId,
         version: manifestToolsMap[d.dependencyId] ?? "*",
@@ -55,7 +61,7 @@ function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
     prompt: row.draftContent,
     skills: depSkills,
     tools: depTools,
-    source: (row.source as "system" | "local") ?? "local",
+    source: row.source === "system" || row.source === "local" ? row.source : "local",
   };
 }
 

@@ -1,9 +1,18 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items/index.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { invalidRequest } from "../lib/errors.ts";
+
+const updateSkillsSchema = z.object({
+  skillIds: z.array(z.string()).max(50),
+});
+
+const updateToolsSchema = z.object({
+  toolIds: z.array(z.string()).max(50),
+});
 
 export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -19,12 +28,12 @@ export function createUserFlowsRouter() {
       const orgId = c.get("orgId");
       const packageId = flow.id;
 
-      const body = await c.req.json<{ skillIds: string[] }>();
-      const { skillIds } = body;
-
-      if (!Array.isArray(skillIds)) {
-        throw invalidRequest("skillIds must be an array", "skillIds");
+      const body = await c.req.json();
+      const parsed = updateSkillsSchema.safeParse(body);
+      if (!parsed.success) {
+        throw invalidRequest(parsed.error.issues[0]!.message, "skillIds");
       }
+      const { skillIds } = parsed.data;
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {
@@ -55,12 +64,12 @@ export function createUserFlowsRouter() {
       const orgId = c.get("orgId");
       const packageId = flow.id;
 
-      const body = await c.req.json<{ toolIds: string[] }>();
-      const { toolIds } = body;
-
-      if (!Array.isArray(toolIds)) {
-        throw invalidRequest("toolIds must be an array", "toolIds");
+      const body = await c.req.json();
+      const parsed = updateToolsSchema.safeParse(body);
+      if (!parsed.success) {
+        throw invalidRequest(parsed.error.issues[0]!.message, "toolIds");
       }
+      const { toolIds } = parsed.data;
 
       const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {

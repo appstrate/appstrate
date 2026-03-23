@@ -47,6 +47,7 @@ bun test                          # All 1000+ tests across all packages
 | DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                      |
 | Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
 | Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
+| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas    |
 | Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
 | Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state |
 | Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                   |
@@ -191,7 +192,8 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and extensions. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
 - **FlowService**: All flows (system + local) stored in DB. System flows loaded from ZIPs at boot and synced to DB with `orgId: null`.
 - **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
-- **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` all share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
+- **Validation (Zod)**: All route request bodies MUST be validated with Zod `.safeParse()`. Pattern: define schema in the route file (or service file if reused), call `.safeParse(body)`, throw `invalidRequest()` on failure. Reference implementations: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`. Naming: `{concept}Schema` for Zod objects (e.g. `createWebhookSchema`), `{Concept}` for inferred types via `z.infer<>`. For JSONB columns read from DB, use safe narrowing helpers (null/typeof/Array.isArray guards) instead of raw `as` casts. For query parameters, use `z.coerce.number().int().min().max().catch(default).parse()`. The codebase uses **Zod 4** — use `z.url()` (NOT `z.string().url()`), `z.uuid()`, etc. See `docs/architecture/ZOD_SCHEMA_AUDIT.md` for the full audit and patterns.
+- **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` use AJV for **dynamic** schemas (flow config/input/output defined in manifests). AJV coexists with Zod — use AJV only for schemas that come from user-defined manifest configuration, Zod for everything else. All three share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
 ### Headless Developer Platform
 

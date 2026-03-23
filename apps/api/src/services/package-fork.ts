@@ -128,7 +128,12 @@ async function forkWithConfig(
   if (existing) return { code: "NAME_COLLISION", existingId: targetId };
 
   // Build manifest from the published version snapshot, update name
-  const versionManifest = (versionRow.manifest ?? {}) as Record<string, unknown>;
+  const versionManifest =
+    versionRow.manifest !== null &&
+    typeof versionRow.manifest === "object" &&
+    !Array.isArray(versionRow.manifest)
+      ? (versionRow.manifest as Record<string, unknown>)
+      : {};
   const updatedManifest = { ...versionManifest, name: targetId };
 
   // Create the fork package (draft)
@@ -136,8 +141,10 @@ async function forkWithConfig(
     orgId,
     {
       id: targetId,
-      name: (versionManifest.displayName as string) ?? undefined,
-      description: (versionManifest.description as string) ?? undefined,
+      name:
+        typeof versionManifest.displayName === "string" ? versionManifest.displayName : undefined,
+      description:
+        typeof versionManifest.description === "string" ? versionManifest.description : undefined,
       content,
       createdBy: userId,
     },
@@ -169,7 +176,7 @@ async function forkWithConfig(
 
   // Sync flow dependencies if it's a flow
   if (cfg.type === "flow") {
-    const manifest = updatedManifest as Partial<Manifest>;
+    const manifest = (updatedManifest ?? {}) as Partial<Manifest>;
     const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
     await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, toolIds, providerIds);
   }

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
@@ -58,8 +59,19 @@ export function createNotificationsRouter() {
     const endUser = c.get("endUser");
     const orgId = c.get("orgId");
     const actorId = endUser ? endUser.id : user.id;
-    const limit = Math.min(parseInt(c.req.query("limit") || "20", 10) || 20, 100);
-    const offset = parseInt(c.req.query("offset") || "0", 10) || 0;
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(20)
+      .parse(c.req.query("limit") ?? 20);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
     const result = await listUserExecutions(actorId, orgId, { limit, offset });
     return c.json(result);
   });

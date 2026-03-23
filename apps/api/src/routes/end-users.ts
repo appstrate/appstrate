@@ -4,6 +4,7 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -14,9 +15,35 @@ import {
   getEndUser,
   updateEndUser,
   deleteEndUser,
-  validateMetadata,
 } from "../services/end-users.ts";
 import { invalidRequest } from "../lib/errors.ts";
+
+const createEndUserSchema = z.object({
+  applicationId: z.string().optional(),
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  externalId: z.string().optional(),
+  metadata: z
+    .record(
+      z.string().min(1).max(40),
+      z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+    )
+    .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
+    .optional(),
+});
+
+const updateEndUserSchema = z.object({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  externalId: z.string().optional(),
+  metadata: z
+    .record(
+      z.string().min(1).max(40),
+      z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+    )
+    .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys")
+    .optional(),
+});
 
 export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
@@ -24,26 +51,17 @@ export function createEndUsersRouter() {
   // POST /api/end-users — create an end-user
   router.post("/", rateLimit(60), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json<{
-      applicationId?: string;
-      name?: string;
-      email?: string;
-      externalId?: string;
-      metadata?: Record<string, unknown>;
-    }>();
-
-    if (body.metadata !== undefined) {
-      const result = validateMetadata(body.metadata);
-      if (!result.valid) {
-        throw invalidRequest(result.message, "metadata");
-      }
+    const body = await c.req.json();
+    const parsed = createEndUserSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
-    const created = await createEndUser(orgId, body.applicationId ?? null, {
-      name: body.name,
-      email: body.email,
-      externalId: body.externalId,
-      metadata: body.metadata,
+    const created = await createEndUser(orgId, parsed.data.applicationId ?? null, {
+      name: parsed.data.name,
+      email: parsed.data.email,
+      externalId: parsed.data.externalId,
+      metadata: parsed.data.metadata,
     });
     return c.json(created, 201);
   });
@@ -86,21 +104,13 @@ export function createEndUsersRouter() {
   router.patch("/:id", rateLimit(60), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
-    const body = await c.req.json<{
-      name?: string;
-      email?: string;
-      externalId?: string;
-      metadata?: Record<string, unknown>;
-    }>();
-
-    if (body.metadata !== undefined) {
-      const result = validateMetadata(body.metadata);
-      if (!result.valid) {
-        throw invalidRequest(result.message, "metadata");
-      }
+    const body = await c.req.json();
+    const parsed = updateEndUserSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
     }
 
-    const result = await updateEndUser(orgId, endUserId, body);
+    const result = await updateEndUser(orgId, endUserId, parsed.data);
     return c.json(result);
   });
 

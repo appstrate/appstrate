@@ -27,7 +27,11 @@ import {
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { z } from "zod";
 import { invalidRequest, notFound } from "../lib/errors.ts";
+
+const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
+const modelIdSchema = z.object({ modelId: z.string().nullable() });
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -157,11 +161,14 @@ export function createFlowsRouter() {
   router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const actor = getActor(c);
-    const body = await c.req.json<{ profileId: string }>();
-    if (!body.profileId) {
-      throw invalidRequest("profileId is required", "profileId");
+    const body = await c.req.json();
+    const parsed = z
+      .object({ profileId: z.string().min(1, "profileId is required") })
+      .safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message, "profileId");
     }
-    await setPackageProfileOverride(actor, flow.id, body.profileId);
+    await setPackageProfileOverride(actor, flow.id, parsed.data.profileId);
     return c.json({ success: true });
   });
 
@@ -186,9 +193,13 @@ export function createFlowsRouter() {
   router.put("/:scope{@[^/]+}/:name/proxy", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const body = await c.req.json<{ proxyId: string | null }>();
+    const body = await c.req.json();
+    const parsed = proxyIdSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
-    await setFlowProxyId(orgId, flow.id, body.proxyId);
+    await setFlowProxyId(orgId, flow.id, parsed.data.proxyId);
 
     return c.json({ success: true });
   });
@@ -206,9 +217,13 @@ export function createFlowsRouter() {
   router.put("/:scope{@[^/]+}/:name/model", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const body = await c.req.json<{ modelId: string | null }>();
+    const body = await c.req.json();
+    const parsed = modelIdSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
-    await setFlowModelId(orgId, flow.id, body.modelId);
+    await setFlowModelId(orgId, flow.id, parsed.data.modelId);
 
     return c.json({ success: true });
   });
@@ -244,10 +259,11 @@ export function createFlowsRouter() {
     async (c) => {
       const flow = c.get("flow");
       const orgId = c.get("orgId");
-      const memoryId = parseInt(c.req.param("memoryId")!, 10);
-      if (isNaN(memoryId)) {
+      const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
+      if (!result.success) {
         throw invalidRequest("Invalid memory ID", "memoryId");
       }
+      const memoryId = result.data;
       const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
       if (!deleted) {
         throw notFound("Memory not found");

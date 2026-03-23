@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
@@ -95,7 +96,13 @@ export function createInternalRouter() {
     const limitParam = c.req.query("limit");
     const fieldsParam = c.req.query("fields");
 
-    const limit = Math.max(1, Math.min(50, parseInt(limitParam || "10", 10) || 10));
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .catch(10)
+      .parse(limitParam ?? 10);
 
     const validFields = ["state", "result"] as const;
     const parsed = fieldsParam
