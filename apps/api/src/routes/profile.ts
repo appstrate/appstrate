@@ -12,6 +12,10 @@ const profileUpdateSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
 });
 
+const batchLookupSchema = z.object({
+  ids: z.array(z.string()).max(100),
+});
+
 const profileRouter = new Hono<AppEnv>();
 
 profileRouter.get("/profile", async (c) => {
@@ -65,8 +69,12 @@ profileRouter.patch("/profile", async (c) => {
 
 // POST /api/profiles/batch — batch lookup display names by user IDs
 profileRouter.post("/profiles/batch", async (c) => {
-  const body = await c.req.json<{ ids: string[] }>();
-  const ids = body.ids?.filter(Boolean)?.slice(0, 100) ?? [];
+  const body = await c.req.json();
+  const parsed = batchLookupSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
+  }
+  const ids = parsed.data.ids.filter(Boolean);
   if (ids.length === 0) return c.json({ profiles: [] });
 
   const rows = await db

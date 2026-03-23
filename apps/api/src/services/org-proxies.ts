@@ -67,7 +67,7 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
       urlPrefix,
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source as "built-in" | "custom",
+      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
       createdBy: row.createdBy,
       createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
       updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),

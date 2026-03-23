@@ -189,7 +189,14 @@ export async function getLatestVersionWithManifest(
     .limit(1);
 
   if (!row) return null;
-  return { id: row.id, manifest: row.manifest as Record<string, unknown> };
+  return {
+    id: row.id,
+    manifest: (row.manifest !== null &&
+    typeof row.manifest === "object" &&
+    !Array.isArray(row.manifest)
+      ? row.manifest
+      : {}) as Record<string, unknown>,
+  };
 }
 
 /** 3-step version resolution: exact → dist-tag → semver range. */
@@ -254,7 +261,12 @@ export async function resolveVersionManifest(
     .where(eq(packageVersions.id, versionId))
     .limit(1);
 
-  return (row?.manifest as Record<string, unknown>) ?? null;
+  if (!row?.manifest) return null;
+  return (
+    row.manifest !== null && typeof row.manifest === "object" && !Array.isArray(row.manifest)
+      ? row.manifest
+      : null
+  ) as Record<string, unknown> | null;
 }
 
 // ─────────────────────────────────────────────
@@ -328,7 +340,11 @@ export async function getVersionDetail(
   return {
     id: row.id,
     version: row.version,
-    manifest: row.manifest as Record<string, unknown>,
+    manifest: (row.manifest !== null &&
+    typeof row.manifest === "object" &&
+    !Array.isArray(row.manifest)
+      ? row.manifest
+      : {}) as Record<string, unknown>,
     textContent,
     content,
     yanked: row.yanked,
@@ -528,8 +544,13 @@ export async function getVersionInfo(
       .limit(1),
   ]);
 
-  const draftVersion =
-    ((pkg?.draftManifest as Record<string, unknown> | null)?.version as string | undefined) ?? null;
+  const draftManifest =
+    pkg?.draftManifest !== null &&
+    typeof pkg?.draftManifest === "object" &&
+    !Array.isArray(pkg?.draftManifest)
+      ? (pkg.draftManifest as Record<string, unknown>)
+      : null;
+  const draftVersion = typeof draftManifest?.version === "string" ? draftManifest.version : null;
 
   let latestVersion: string | null = null;
   if (latestTag) {
@@ -582,11 +603,18 @@ export async function createVersionFromDraft(params: {
 
   if (!pkg) return null;
 
-  const baseManifest = pkg.draftManifest as Record<string, unknown>;
-  const content = pkg.draftContent as string;
+  const baseManifest = (
+    pkg.draftManifest !== null &&
+    typeof pkg.draftManifest === "object" &&
+    !Array.isArray(pkg.draftManifest)
+      ? pkg.draftManifest
+      : {}
+  ) as Record<string, unknown>;
+  const content = (pkg.draftContent ?? "") as string;
 
   // Use override version if provided, otherwise use manifest version
-  const version = params.version ?? (baseManifest.version as string | undefined);
+  const version =
+    params.version ?? (typeof baseManifest.version === "string" ? baseManifest.version : undefined);
 
   if (!version || !isValidVersion(version)) return null;
 
@@ -604,7 +632,7 @@ export async function createVersionFromDraft(params: {
   // matches what would be published to the registry (same integrity).
   // Now that providers are in packageDependencies, the join query picks them up automatically.
   const deps = await buildDependencies(packageId, orgId);
-  const parsed = parseScopedName(baseManifest.name as string);
+  const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
   const finalManifest = parsed
     ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, deps)
     : manifest;

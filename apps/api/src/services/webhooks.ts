@@ -2,6 +2,7 @@
  * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
  */
 
+import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { Queue, Worker, UnrecoverableError } from "bullmq";
 import type { Job } from "bullmq";
@@ -17,15 +18,17 @@ import { getEnv } from "@appstrate/env";
 // Constants
 // ---------------------------------------------------------------------------
 
-const WEBHOOK_EVENTS = [
+export const webhookEventSchema = z.enum([
   "execution.started",
   "execution.completed",
   "execution.failed",
   "execution.timeout",
   "execution.cancelled",
-] as const;
+]);
 
-export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
+export type WebhookEventType = z.infer<typeof webhookEventSchema>;
+
+export const webhookEventsSchema = z.array(webhookEventSchema).min(1);
 
 /** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
@@ -138,12 +141,13 @@ export function validateEvents(events: unknown): string[] {
   if (!Array.isArray(events) || events.length === 0) {
     throw invalidRequest("events must be a non-empty array", "events");
   }
-  for (const e of events) {
-    if (!WEBHOOK_EVENTS.includes(e as WebhookEventType)) {
-      throw invalidRequest(`Invalid event type: '${e}'`, "events");
-    }
+  const result = webhookEventsSchema.safeParse(events);
+  if (!result.success) {
+    // Find the first invalid value for a clear error message
+    const invalid = events.find((e) => !webhookEventSchema.safeParse(e).success);
+    throw invalidRequest(`Invalid event type: '${invalid}'`, "events");
   }
-  return events as string[];
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +482,8 @@ export async function dispatchWebhookEvents(
     const { eventId, payload } = buildEventEnvelope({
       eventType,
       execution,
-      payloadMode: wh.payloadMode as "full" | "summary",
+      payloadMode:
+        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
     });
 
     await queue.add("deliver", {

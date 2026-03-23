@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 
@@ -11,9 +12,13 @@ export interface ProxyDefinition {
 
 let systemProxies: Map<string, ProxyDefinition> | null = null;
 
-function isValidProxy(p: ProxyDefinition): boolean {
-  return !!(p.id && p.label && p.url);
-}
+const proxyDefinitionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  url: z.string().min(1),
+  isDefault: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+});
 
 function parseEnvProxies(): ProxyDefinition[] {
   const raw = getEnv().SYSTEM_PROXIES;
@@ -29,16 +34,15 @@ export function initSystemProxies(): void {
   const proxies = parseEnvProxies();
 
   for (const p of proxies) {
-    if (!isValidProxy(p)) {
-      logger.error(
-        "[proxy-registry] SYSTEM_PROXIES: skipping invalid entry (missing id/label/url)",
-        {
-          proxy: p,
-        },
-      );
+    const result = proxyDefinitionSchema.safeParse(p);
+    if (!result.success) {
+      logger.error("[proxy-registry] SYSTEM_PROXIES: skipping invalid entry", {
+        error: result.error.issues[0]?.message,
+        proxy: p,
+      });
       continue;
     }
-    map.set(p.id, p);
+    map.set(result.data.id, result.data);
   }
 
   systemProxies = map;

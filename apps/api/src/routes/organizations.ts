@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import {
   createOrganization,
@@ -30,6 +31,31 @@ import { createDefaultApplication } from "../services/applications.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { logger } from "../lib/logger.ts";
 
+const createOrgSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  slug: z
+    .string()
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
+    .optional(),
+});
+
+const updateOrgSchema = z.object({
+  name: z.string().min(1).optional(),
+  slug: z
+    .string()
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
+    .optional(),
+});
+
+const addMemberSchema = z.object({
+  email: z.string().email("Email is required"),
+  role: z.enum(["member", "admin"]).default("member"),
+});
+
+const updateRoleSchema = z.object({
+  role: z.enum(["member", "admin"]),
+});
+
 const router = new Hono<AppEnv>();
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
@@ -51,14 +77,14 @@ router.get("/", async (c) => {
 // POST /api/orgs — create an organization (no org context needed)
 router.post("/", async (c) => {
   const user = c.get("user");
-  const body = await c.req.json<{ name: string; slug?: string }>();
-
-  if (!body.name?.trim()) {
-    throw invalidRequest("Name is required");
+  const body = await c.req.json();
+  const parsed = createOrgSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
   }
 
-  const slug = body.slug?.trim() || slugify(body.name);
-  if (!slug || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)) {
+  const slug = parsed.data.slug?.trim() || slugify(parsed.data.name);
+  if (!slug) {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
@@ -71,7 +97,7 @@ router.post("/", async (c) => {
     });
   }
 
-  const org = await createOrganization(body.name.trim(), slug, user.id);
+  const org = await createOrganization(parsed.data.name.trim(), slug, user.id);
 
   // Cloud billing: create billing account with free tier credits (non-fatal)
   await getCloudModule()
@@ -160,25 +186,26 @@ router.put("/:orgId", async (c) => {
     throw forbidden("Only the owner can modify the organization");
   }
 
-  const body = await c.req.json<{ name?: string; slug?: string }>();
+  const body = await c.req.json();
+  const parsed = updateOrgSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
+  }
 
-  if (body.slug) {
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
-      throw invalidRequest("Invalid slug (kebab-case required)");
-    }
-    if (!(await isSlugAvailable(body.slug))) {
+  if (parsed.data.slug) {
+    if (!(await isSlugAvailable(parsed.data.slug))) {
       throw new ApiError({
         status: 400,
         code: "slug_taken",
         title: "Bad Request",
-        detail: `Slug '${body.slug}' is already in use`,
+        detail: `Slug '${parsed.data.slug}' is already in use`,
       });
     }
   }
 
   const updated = await updateOrganization(orgId, {
-    ...(body.name?.trim() ? { name: body.name.trim() } : {}),
-    ...(body.slug ? { slug: body.slug } : {}),
+    ...(parsed.data.name?.trim() ? { name: parsed.data.name.trim() } : {}),
+    ...(parsed.data.slug ? { slug: parsed.data.slug } : {}),
   });
 
   return c.json(updated);
@@ -224,17 +251,15 @@ router.post("/:orgId/members", async (c) => {
     throw forbidden("Only admins can add members");
   }
 
-  const body = await c.req.json<{ email: string; role?: string }>();
-  if (!body.email?.trim()) {
-    throw invalidRequest("Email is required");
+  const body = await c.req.json();
+  const parsed = addMemberSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
   }
 
-  const role = (body.role as "member" | "admin") || "member";
-  if (!["member", "admin"].includes(role)) {
-    throw invalidRequest("Role must be 'member' or 'admin'");
-  }
+  const role = parsed.data.role;
 
-  const targetUser = await findUserByEmail(body.email.trim());
+  const targetUser = await findUserByEmail(parsed.data.email.trim());
 
   if (targetUser) {
     // User exists — add directly
@@ -254,7 +279,7 @@ router.post("/:orgId/members", async (c) => {
   // User doesn't exist — create invitation
   try {
     const invitation = await createInvitation({
-      email: body.email.trim(),
+      email: parsed.data.email.trim(),
       orgId,
       role,
       invitedBy: user.id,
@@ -297,12 +322,13 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
     throw forbidden("Only the owner can change roles");
   }
 
-  const body = await c.req.json<{ role: string }>();
-  if (!["member", "admin"].includes(body.role)) {
-    throw invalidRequest("Role must be 'member' or 'admin'");
+  const body = await c.req.json();
+  const parsed = updateRoleSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
   }
 
-  const updated = await updateInvitationRole(invitationId, orgId, body.role as "member" | "admin");
+  const updated = await updateInvitationRole(invitationId, orgId, parsed.data.role);
   if (!updated) {
     throw notFound("Invitation not found or already accepted");
   }
@@ -345,9 +371,10 @@ router.put("/:orgId/members/:userId", async (c) => {
     throw forbidden("Only the owner can change roles");
   }
 
-  const body = await c.req.json<{ role: string }>();
-  if (!["member", "admin"].includes(body.role)) {
-    throw invalidRequest("Role must be 'member' or 'admin'");
+  const body = await c.req.json();
+  const parsed = updateRoleSchema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message);
   }
 
   // Cannot change own role
@@ -355,8 +382,8 @@ router.put("/:orgId/members/:userId", async (c) => {
     throw forbidden("Cannot change your own role");
   }
 
-  await updateMemberRole(orgId, targetUserId, body.role as "member" | "admin");
-  return c.json({ userId: targetUserId, role: body.role });
+  await updateMemberRole(orgId, targetUserId, parsed.data.role);
+  return c.json({ userId: targetUserId, role: parsed.data.role });
 });
 
 // GET /api/orgs/:orgId/settings — get org settings

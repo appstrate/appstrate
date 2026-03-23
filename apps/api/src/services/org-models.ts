@@ -2,10 +2,22 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import type { ModelCost } from "./adapters/types.ts";
+import { modelCostSchema, type ModelCost } from "./adapters/types.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+
+function parseStringArray(val: unknown): string[] | null {
+  if (val === null || val === undefined) return null;
+  if (Array.isArray(val) && val.every((v) => typeof v === "string")) return val;
+  return null;
+}
+
+function parseModelCost(val: unknown): ModelCost | null {
+  if (val === null || val === undefined) return null;
+  const result = modelCostSchema.safeParse(val);
+  return result.success ? result.data : null;
+}
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
 
 // --- List (system + DB) ---
@@ -54,14 +66,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       api: row.api,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
-      input: row.input as string[] | null,
+      input: parseStringArray(row.input),
       contextWindow: row.contextWindow,
       maxTokens: row.maxTokens,
       reasoning: row.reasoning,
-      cost: (row.cost as OrgModelInfo["cost"]) ?? null,
+      cost: parseModelCost(row.cost) ?? null,
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source as "built-in" | "custom",
+      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
       createdBy: row.createdBy,
@@ -249,11 +261,11 @@ export async function resolveModel(
         modelId: dbDefault.modelId,
         apiKey: creds.apiKey,
         label: dbDefault.label,
-        input: dbDefault.input as string[] | null,
+        input: parseStringArray(dbDefault.input),
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
-        cost: (dbDefault.cost as ModelCost) ?? null,
+        cost: parseModelCost(dbDefault.cost) ?? null,
       };
     }
   }
@@ -308,11 +320,11 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     modelId: row.modelId,
     apiKey: creds.apiKey,
     label: row.label,
-    input: row.input as string[] | null,
+    input: parseStringArray(row.input),
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: (row.cost as ModelCost) ?? null,
+    cost: parseModelCost(row.cost) ?? null,
   };
 }
 

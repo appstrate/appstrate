@@ -4,6 +4,7 @@
  */
 
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -21,34 +22,52 @@ import {
 import { invalidRequest } from "../lib/errors.ts";
 import { getApplication } from "../services/applications.ts";
 
+const webhookEventsEnum = z.enum([
+  "execution.started",
+  "execution.completed",
+  "execution.failed",
+  "execution.timeout",
+  "execution.cancelled",
+]);
+
+const createWebhookSchema = z.object({
+  applicationId: z.string().min(1, "applicationId is required"),
+  url: z.url("url must be a valid URL"),
+  events: z.array(webhookEventsEnum).min(1, "events is required"),
+  flowId: z.string().nullable().optional(),
+  payloadMode: z.enum(["full", "summary"]).optional(),
+  active: z.boolean().optional(),
+});
+
+const updateWebhookSchema = z.object({
+  url: z.url().optional(),
+  events: z.array(webhookEventsEnum).min(1).optional(),
+  flowId: z.string().nullable().optional(),
+  payloadMode: z.enum(["full", "summary"]).optional(),
+  active: z.boolean().optional(),
+});
+
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/webhooks — create a webhook (returns secret once)
   router.post("/", rateLimit(10), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json<{
-      applicationId: string;
-      url: string;
-      events: string[];
-      flowId?: string | null;
-      payloadMode?: string;
-      active?: boolean;
-    }>();
-
-    if (!body.applicationId) throw invalidRequest("applicationId is required", "applicationId");
-    if (!body.url) throw invalidRequest("url is required", "url");
-    if (!body.events) throw invalidRequest("events is required", "events");
+    const body = await c.req.json();
+    const parsed = createWebhookSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
     // Verify applicationId belongs to this org (throws 404 if not found)
-    await getApplication(orgId, body.applicationId);
+    await getApplication(orgId, parsed.data.applicationId);
 
-    const result = await createWebhook(orgId, body.applicationId, {
-      url: body.url,
-      events: body.events,
-      flowId: body.flowId,
-      payloadMode: body.payloadMode,
-      active: body.active,
+    const result = await createWebhook(orgId, parsed.data.applicationId, {
+      url: parsed.data.url,
+      events: parsed.data.events,
+      flowId: parsed.data.flowId,
+      payloadMode: parsed.data.payloadMode,
+      active: parsed.data.active,
     });
     return c.json(result, 201);
   });
@@ -71,15 +90,13 @@ export function createWebhooksRouter() {
   // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret)
   router.put("/:id", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json<{
-      url?: string;
-      events?: string[];
-      flowId?: string | null;
-      payloadMode?: string;
-      active?: boolean;
-    }>();
+    const body = await c.req.json();
+    const parsed = updateWebhookSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
-    const result = await updateWebhook(orgId, c.req.param("id")!, body);
+    const result = await updateWebhook(orgId, c.req.param("id")!, parsed.data);
     return c.json(result);
   });
 
@@ -99,7 +116,8 @@ export function createWebhooksRouter() {
     const { eventId, payload } = buildEventEnvelope({
       eventType: "test.ping",
       execution: { id: "exec_test", flowId: "test", status: "success" },
-      payloadMode: wh.payloadMode as "full" | "summary",
+      payloadMode:
+        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
     });
 
     return c.json({ eventId, payload });

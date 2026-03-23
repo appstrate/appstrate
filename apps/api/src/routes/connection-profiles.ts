@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
@@ -17,6 +18,8 @@ import { getActor } from "../lib/actor.ts";
 import { listConnections } from "@appstrate/connect";
 import { db } from "../lib/db.ts";
 
+const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+
 export function createConnectionProfilesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -30,11 +33,12 @@ export function createConnectionProfilesRouter() {
   // POST /api/connection-profiles — create a new profile
   router.post("/", async (c) => {
     const actor = getActor(c);
-    const body = await c.req.json<{ name?: string }>();
-    if (!body.name?.trim()) {
-      throw invalidRequest("Name is required", "name");
+    const body = await c.req.json();
+    const parsed = profileNameSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message, "name");
     }
-    const profile = await createProfile(actor, body.name.trim());
+    const profile = await createProfile(actor, parsed.data.name.trim());
     return c.json({ profile }, 201);
   });
 
@@ -56,12 +60,13 @@ export function createConnectionProfilesRouter() {
   router.put("/:id", async (c) => {
     const actor = getActor(c);
     const profileId = c.req.param("id");
-    const body = await c.req.json<{ name?: string }>();
-    if (!body.name?.trim()) {
-      throw invalidRequest("Name is required", "name");
+    const body = await c.req.json();
+    const parsed = profileNameSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message, "name");
     }
     try {
-      await renameProfile(profileId, actor, body.name.trim());
+      await renameProfile(profileId, actor, parsed.data.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";

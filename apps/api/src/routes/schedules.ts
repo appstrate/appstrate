@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
@@ -13,6 +14,21 @@ import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
+
+const createScheduleSchema = z.object({
+  name: z.string().optional(),
+  cronExpression: z.string().min(1, "cronExpression is required"),
+  timezone: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+});
+
+const updateScheduleSchema = z.object({
+  name: z.string().optional(),
+  cronExpression: z.string().optional(),
+  timezone: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  enabled: z.boolean().optional(),
+});
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
@@ -36,12 +52,11 @@ export function createSchedulesRouter() {
   router.post("/flows/:scope{@[^/]+}/:name/schedules", requireFlow(), async (c) => {
     const flow = c.get("flow");
 
-    const body = await c.req.json<{
-      name?: string;
-      cronExpression: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-    }>();
+    const body = await c.req.json();
+    const parsed = createScheduleSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
     // Block scheduling for flows with file inputs
     const inputSchema = flow.manifest.input?.schema;
@@ -49,18 +64,14 @@ export function createSchedulesRouter() {
       throw invalidRequest("Cannot schedule flows with file inputs");
     }
 
-    if (!body.cronExpression) {
-      throw invalidRequest("cronExpression is required", "cronExpression");
-    }
-
     // Validate cron expression
-    if (!isValidCron(body.cronExpression)) {
+    if (!isValidCron(parsed.data.cronExpression)) {
       throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
     // Validate input against flow's input schema if provided
-    if (body.input && inputSchema) {
-      const inputValidation = validateInput(body.input, inputSchema);
+    if (parsed.data.input && inputSchema) {
+      const inputValidation = validateInput(parsed.data.input, inputSchema);
       if (!inputValidation.valid) {
         const first = inputValidation.errors[0]!;
         throw invalidRequest(first.message);
@@ -68,7 +79,7 @@ export function createSchedulesRouter() {
     }
 
     const actor = getActor(c);
-    const schedule = await createSchedule(flow.id, actor, c.get("orgId"), body);
+    const schedule = await createSchedule(flow.id, actor, c.get("orgId"), parsed.data);
     return c.json(schedule, 201);
   });
 
@@ -81,20 +92,18 @@ export function createSchedulesRouter() {
       throw notFound(`Schedule '${id}' not found`);
     }
 
-    const body = await c.req.json<{
-      name?: string;
-      cronExpression?: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-      enabled?: boolean;
-    }>();
+    const body = await c.req.json();
+    const parsed = updateScheduleSchema.safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest(parsed.error.issues[0]!.message);
+    }
 
     // Validate cron expression if provided
-    if (body.cronExpression && !isValidCron(body.cronExpression)) {
+    if (parsed.data.cronExpression && !isValidCron(parsed.data.cronExpression)) {
       throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
-    const schedule = await updateSchedule(id, body);
+    const schedule = await updateSchedule(id, parsed.data);
     return c.json(schedule);
   });
 

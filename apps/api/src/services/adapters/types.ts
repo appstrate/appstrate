@@ -1,17 +1,21 @@
-/** Per-model pricing in $/M tokens (margin included). */
-export interface ModelCost {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+import { z } from "zod";
 
-export interface TokenUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-}
+/** Per-model pricing in $/M tokens (margin included). */
+export const modelCostSchema = z.object({
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
+  cacheWrite: z.number().nonnegative(),
+});
+export type ModelCost = z.infer<typeof modelCostSchema>;
+
+export const tokenUsageSchema = z.object({
+  input_tokens: z.number().nonnegative(),
+  output_tokens: z.number().nonnegative(),
+  cache_creation_input_tokens: z.number().nonnegative().optional(),
+  cache_read_input_tokens: z.number().nonnegative().optional(),
+});
+export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
 export interface ExecutionMessage {
   type:

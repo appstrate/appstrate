@@ -5,12 +5,24 @@
  * Each end-user gets a default connection profile on creation.
  */
 
+import { z } from "zod";
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { getDefaultApplication } from "./applications.ts";
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+export const endUserMetadataSchema = z
+  .record(
+    z.string().min(1).max(40),
+    z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+  )
+  .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,10 +50,6 @@ export interface EndUserListResponse {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const MAX_METADATA_KEYS = 50;
-const MAX_METADATA_KEY_LENGTH = 40;
-const MAX_METADATA_VALUE_LENGTH = 500;
 
 function generateEndUserId(): string {
   return `eu_${crypto.randomUUID()}`;
@@ -76,39 +84,11 @@ export function validateMetadata(
   if (metadata === null || metadata === undefined) {
     return { valid: true, data: {} };
   }
-  if (typeof metadata !== "object" || Array.isArray(metadata)) {
-    return { valid: false, message: "metadata must be an object" };
+  const result = endUserMetadataSchema.safeParse(metadata);
+  if (!result.success) {
+    return { valid: false, message: result.error.issues[0]?.message ?? "Invalid metadata" };
   }
-  const entries = Object.entries(metadata as Record<string, unknown>);
-  if (entries.length > MAX_METADATA_KEYS) {
-    return { valid: false, message: `metadata cannot have more than ${MAX_METADATA_KEYS} keys` };
-  }
-  for (const [key, value] of entries) {
-    if (key.length > MAX_METADATA_KEY_LENGTH) {
-      return {
-        valid: false,
-        message: `metadata key '${key}' exceeds ${MAX_METADATA_KEY_LENGTH} characters`,
-      };
-    }
-    if (
-      typeof value !== "string" &&
-      typeof value !== "number" &&
-      typeof value !== "boolean" &&
-      value !== null
-    ) {
-      return {
-        valid: false,
-        message: `metadata value for '${key}' must be a string, number, boolean, or null`,
-      };
-    }
-    if (typeof value === "string" && value.length > MAX_METADATA_VALUE_LENGTH) {
-      return {
-        valid: false,
-        message: `metadata value for '${key}' exceeds ${MAX_METADATA_VALUE_LENGTH} characters`,
-      };
-    }
-  }
-  return { valid: true, data: metadata as Record<string, unknown> };
+  return { valid: true, data: result.data };
 }
 
 // ---------------------------------------------------------------------------

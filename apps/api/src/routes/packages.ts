@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -68,6 +69,16 @@ import {
 // ═══════════════════════════════════════════════
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+const githubImportSchema = z.object({
+  url: z.url("Missing 'url' field"),
+});
+
+const forkSchema = z
+  .object({
+    name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
+  })
+  .catch({});
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
@@ -988,14 +999,9 @@ export function createPackagesRouter() {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
-    const customName = typeof body.name === "string" ? body.name : undefined;
-
-    if (customName !== undefined) {
-      if (!SLUG_REGEX.test(customName)) {
-        throw invalidRequest("Name must match slug format", "name");
-      }
-    }
+    const rawBody = await c.req.json().catch(() => ({}));
+    const parsed = forkSchema.parse(rawBody);
+    const customName = parsed.name;
 
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
 
@@ -1244,14 +1250,15 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requireAdmin(), async (c) => {
-    const body = await c.req.json<{ url?: string }>();
-    if (!body.url || typeof body.url !== "string") {
-      throw invalidRequest("Missing 'url' field", "url");
+    const body = await c.req.json();
+    const urlParsed = githubImportSchema.safeParse(body);
+    if (!urlParsed.success) {
+      throw invalidRequest(urlParsed.error.issues[0]!.message, "url");
     }
 
     let zipBytes: Uint8Array;
     try {
-      zipBytes = await fetchGithubDirectory(body.url);
+      zipBytes = await fetchGithubDirectory(urlParsed.data.url);
     } catch (err) {
       if (err instanceof GithubImportError) {
         throw new ApiError({

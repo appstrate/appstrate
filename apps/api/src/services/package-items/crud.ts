@@ -43,7 +43,13 @@ async function getPackageDisplayNames(
     .where(inArray(packages.id, packageIds));
 
   return rows.map((r) => {
-    const m = (r.draftManifest ?? {}) as Partial<Manifest>;
+    const m = (
+      r.draftManifest !== null &&
+      typeof r.draftManifest === "object" &&
+      !Array.isArray(r.draftManifest)
+        ? r.draftManifest
+        : {}
+    ) as Partial<Manifest>;
     return {
       id: r.id,
       displayName: m.displayName ?? r.id,
@@ -64,7 +70,13 @@ async function findRegistryDependents(
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of registryPkgs) {
     if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
-    const m = pkg.draftManifest as Partial<Manifest>;
+    const m = (
+      pkg.draftManifest !== null &&
+      typeof pkg.draftManifest === "object" &&
+      !Array.isArray(pkg.draftManifest)
+        ? pkg.draftManifest
+        : {}
+    ) as Partial<Manifest>;
     const deps = extractDependencies(m);
     for (const dep of deps) {
       if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
@@ -202,7 +214,13 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   }
 
   return data.map((row) => {
-    const m = (row.draftManifest ?? {}) as Partial<Manifest>;
+    const m = (
+      row.draftManifest !== null &&
+      typeof row.draftManifest === "object" &&
+      !Array.isArray(row.draftManifest)
+        ? row.draftManifest
+        : {}
+    ) as Partial<Manifest>;
     return {
       id: row.id,
       orgId: row.orgId,
@@ -213,7 +231,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       createdAt: row.createdAt?.toISOString() ?? "",
       updatedAt: row.updatedAt?.toISOString() ?? "",
       usedByFlows: countMap.get(row.id) ?? 0,
-      version: (m.version as string) ?? null,
+      version: typeof m.version === "string" ? m.version : null,
       autoInstalled: row.autoInstalled,
       forkedFrom: row.forkedFrom ?? null,
     };
@@ -239,7 +257,13 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
 
   const packageIds = depRefs.map((d) => d.packageId);
 
-  const m = (data.draftManifest ?? {}) as Partial<Manifest>;
+  const m = (
+    data.draftManifest !== null &&
+    typeof data.draftManifest === "object" &&
+    !Array.isArray(data.draftManifest)
+      ? data.draftManifest
+      : {}
+  ) as Partial<Manifest>;
   return {
     id: data.id,
     orgId: data.orgId,
@@ -251,9 +275,13 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     createdAt: data.createdAt?.toISOString() ?? "",
     updatedAt: data.updatedAt?.toISOString() ?? "",
     autoInstalled: data.autoInstalled,
-    version: (m.version as string) ?? null,
-    manifestName: (m.name as string) ?? null,
-    manifest: (data.draftManifest ?? {}) as Record<string, unknown>,
+    version: typeof m.version === "string" ? m.version : null,
+    manifestName: typeof m.name === "string" ? m.name : null,
+    manifest: (data.draftManifest !== null &&
+    typeof data.draftManifest === "object" &&
+    !Array.isArray(data.draftManifest)
+      ? data.draftManifest
+      : {}) as Record<string, unknown>,
     lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
     flows: await getPackageDisplayNames(packageIds),

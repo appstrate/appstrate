@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
@@ -541,7 +542,13 @@ export function createExecutionsRouter() {
   router.get("/flows/:scope{@[^/]+}/:name/executions", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 100);
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(50)
+      .parse(c.req.query("limit") ?? 50);
     const endUser = c.get("endUser");
     const rows = await listPackageExecutions(flow.id, orgId, limit);
     // End-user scoping: end-users can only see their own executions
