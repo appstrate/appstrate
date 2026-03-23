@@ -57,7 +57,6 @@ const VALID_MANIFEST = {
     },
   },
   timeout: 300,
-  "x-outputRetries": 2,
 };
 
 const CONFIG_SCHEMA: JSONSchemaObject = {

@@ -22,7 +22,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, outputRetries: 2, logs: true },
+    execution: { timeout: 300, logs: true },
     _manifestBase: { schemaVersion: "1.0", type: "flow" },
     ...overrides,
   };
@@ -199,42 +199,52 @@ describe("assemblePayload", () => {
     expect(provCfg["@my-org/slack"]).toBeUndefined(); // default values, no config needed
   });
 
-  it("omits timeout and outputRetries when defaults and not in base", () => {
+  it("omits timeout when default and not in base", () => {
     const state = makeState({
-      execution: { timeout: 300, outputRetries: 2, logs: true },
+      execution: { timeout: 300, logs: true },
     });
 
     const result = assemblePayload(state);
 
     expect(result.manifest).not.toHaveProperty("timeout");
-    expect(result.manifest).not.toHaveProperty("x-outputRetries");
   });
 
-  it("includes timeout and outputRetries when values differ from defaults", () => {
+  it("includes timeout when value differs from default", () => {
     const state = makeState({
-      execution: { timeout: 600, outputRetries: 3, logs: true },
+      execution: { timeout: 600, logs: true },
     });
 
     const result = assemblePayload(state);
 
     expect(result.manifest.timeout).toBe(600);
-    expect(result.manifest["x-outputRetries"]).toBe(3);
   });
 
-  it("preserves timeout and outputRetries when present in base manifest", () => {
+  it("preserves timeout when present in base manifest", () => {
     const state = makeState({
-      execution: { timeout: 300, outputRetries: 2, logs: true },
+      execution: { timeout: 300, logs: true },
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",
         timeout: 300,
-        "x-outputRetries": 2,
       },
     });
 
     const result = assemblePayload(state);
 
     expect(result.manifest.timeout).toBe(300);
-    expect(result.manifest["x-outputRetries"]).toBe(2);
+  });
+
+  it("strips legacy x-outputRetries from base manifest", () => {
+    const state = makeState({
+      _manifestBase: {
+        schemaVersion: "1.0",
+        type: "flow",
+        "x-outputRetries": 2,
+      },
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest).not.toHaveProperty("x-outputRetries");
   });
 });

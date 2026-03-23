@@ -176,8 +176,6 @@
   "editor.execution": "Exécution",
   "editor.execTimeout": "Timeout",
   "editor.execTimeoutDesc": "En secondes (défaut: 300)",
-  "editor.execRetries": "Retries de validation output",
-  "editor.execRetriesDesc": "0-5 (défaut: 2)",
   "editor.execLogs": "Logs de progression",
   "editor.execLogsDesc": "Permet à l'agent d'envoyer des messages de progression à l'utilisateur",
   "editor.inputTitle": "Entrées (input)",

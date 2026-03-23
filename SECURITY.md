@@ -417,11 +417,11 @@ All external inputs are validated using Zod schemas before processing:
 | Flow configuration | AJV against manifest config schema                        | `schema.ts:validateConfig()`     |
 | Execution input    | AJV against manifest input schema                         | `schema.ts:validateInput()`      |
 | File uploads       | Extension allowlist, size limit, count limit              | `schema.ts:validateFileInputs()` |
-| Agent output       | Zod against manifest output schema (with retry)           | `schema.ts:validateOutput()`     |
+| Agent output       | Native LLM schema enforcement + AJV post-validation       | `schema.ts:validateOutput()`     |
 | ZIP imports        | 10 MB size limit, manifest validation, content validation | `flow-import.ts`                 |
 | Flow IDs           | Slug regex at DB level and Zod level                      | `schema.ts`, `001_initial.sql`   |
 
-**Output validation with retry:** When a flow defines `output.schema`, the platform validates the agent's result. On mismatch, a structured retry prompt is sent describing the errors and expected schema (up to `outputRetries` attempts). This prevents malformed output from being persisted.
+**Output validation:** When a flow defines `output.schema`, the schema is injected into the agent container (`OUTPUT_SCHEMA` env var) so the LLM tool definition includes the exact JSON Schema for constrained decoding. Post-execution, AJV validates the merged result against the schema. On mismatch, a warning is logged. This dual-layer approach (LLM-level + platform-level) prevents malformed output from being persisted.
 
 **Standard:** Input validation addresses **OWASP API Security Top 10** risks **API8:2023** (Security Misconfiguration) and aligns with **OWASP Top 10 for LLM Applications** **LLM05:2025** (Improper Output Handling).
 
@@ -557,7 +557,7 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **LLM01 — Prompt Injection**                 | Credentials never in agent context. Even under full prompt injection, the agent cannot exfiltrate secrets it does not possess. |
 | **LLM02 — Sensitive Information Disclosure** | No credentials in environment variables, no credentials in error messages, response truncation.                                |
-| **LLM05 — Improper Output Handling**         | Output schema validation with Zod + retry loop.                                                                                |
+| **LLM05 — Improper Output Handling**         | Native LLM schema enforcement via tool parameter injection + AJV post-validation against output schema.                        |
 | **LLM06 — Excessive Agency**                 | URL authorization limits API surface. Service allowlisting limits credential scope. Agent cannot request undeclared services.  |
 
 ### OWASP API Security Top 10 (2023)

@@ -3,7 +3,6 @@ import { FormField } from "../form-field";
 
 export interface ExecutionSettings {
   timeout: number;
-  outputRetries: number;
   logs: boolean;
 }
 
@@ -29,14 +28,6 @@ export function ExecutionSection({ value, onChange }: ExecutionSectionProps) {
           value={String(value.timeout)}
           onChange={(v) => update({ timeout: parseInt(v) || 300 })}
           description={t("editor.execTimeoutDesc")}
-        />
-        <FormField
-          id="exec-outputRetries"
-          label={t("editor.execRetries")}
-          type="number"
-          value={String(value.outputRetries)}
-          onChange={(v) => update({ outputRetries: Math.min(5, Math.max(0, parseInt(v) || 0)) })}
-          description={t("editor.execRetriesDesc")}
         />
         <div className="flex items-center justify-between gap-3">
           <div>

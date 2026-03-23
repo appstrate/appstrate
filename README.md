@@ -132,7 +132,7 @@ Browser (React SPA)              Platform (Bun + Hono :3000)
 - **Sidecar pool**: Pre-warmed containers for fast startup
 - **Parallel setup**: Sidecar + agent creation run concurrently
 - **Credential isolation**: Agent calls sidecar proxy; never sees raw credentials
-- **Output validation**: AJV validates output against schema with retry support
+- **Output validation**: Native LLM schema enforcement + AJV post-validation against output schema
 
 ## Environment Variables
 
