@@ -66,6 +66,7 @@ function basePromptContext(overrides?: Partial<PromptContext>): PromptContext {
       modelId: "claude-sonnet-4-20250514",
       apiKey: "sk-ant-api03-test",
     },
+    outputMode: "report",
     ...overrides,
   };
 }
@@ -219,12 +220,12 @@ describe("PiAdapter.execute()", () => {
     expect(spec.env.CONNECTED_PROVIDERS).toBe("@test/gmail,@test/stripe");
   });
 
-  it("disables structured-output tool when no output schema", async () => {
+  it("disables structured-output in report mode", async () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
     await collectMessages(
-      adapter.execute("exec-007", basePromptContext({ schemas: {} }), 30),
+      adapter.execute("exec-007", basePromptContext({ outputMode: "report", schemas: {} }), 30),
     );
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
@@ -232,7 +233,25 @@ describe("PiAdapter.execute()", () => {
     expect(spec.env.OUTPUT_SCHEMA).toBeUndefined();
   });
 
-  it("injects OUTPUT_SCHEMA env var when output schema is defined", async () => {
+  it("disables structured-output in report mode even with output schema", async () => {
+    const orchestrator = createMockOrchestrator();
+    const adapter = new PiAdapter(orchestrator);
+
+    const outputSchema = {
+      type: "object",
+      properties: { total: { type: "number", description: "Total count" } },
+    };
+
+    await collectMessages(
+      adapter.execute("exec-007b", basePromptContext({ outputMode: "report", schemas: { output: outputSchema as any } }), 30),
+    );
+
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    expect(spec.env.DISABLED_TOOLS).toContain("structured-output");
+    expect(spec.env.OUTPUT_SCHEMA).toBeUndefined();
+  });
+
+  it("disables report and injects OUTPUT_SCHEMA in data mode", async () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
@@ -246,17 +265,33 @@ describe("PiAdapter.execute()", () => {
     };
 
     const ctx = basePromptContext({
+      outputMode: "data",
       schemas: { output: outputSchema as any },
     });
 
     await collectMessages(adapter.execute("exec-schema", ctx, 30));
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
-    expect(spec.env.DISABLED_TOOLS).toBeUndefined();
+    expect(spec.env.DISABLED_TOOLS).toContain("report");
+    expect(spec.env.DISABLED_TOOLS).not.toContain("structured-output");
     expect(spec.env.OUTPUT_SCHEMA).toBeDefined();
     const parsed = JSON.parse(spec.env.OUTPUT_SCHEMA!);
     expect(parsed.properties.total.type).toBe("number");
     expect(parsed.required).toEqual(["total", "items"]);
+  });
+
+  it("throws when data mode has no output schema", async () => {
+    const orchestrator = createMockOrchestrator();
+    const adapter = new PiAdapter(orchestrator);
+
+    const ctx = basePromptContext({ outputMode: "data", schemas: {} });
+
+    try {
+      await collectMessages(adapter.execute("exec-no-schema", ctx, 30));
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect((err as Error).message).toContain("requires an output schema");
+    }
   });
 
   it("disables log tool when logsEnabled is false", async () => {

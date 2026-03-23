@@ -39,10 +39,11 @@ describe("buildEnrichedPrompt — core structure", () => {
     expect(prompt).toContain("add_memory");
   });
 
-  it("includes output section", () => {
-    const prompt = buildEnrichedPrompt(baseContext());
+  it("includes output section with report in report mode", () => {
+    const prompt = buildEnrichedPrompt(baseContext({ outputMode: "report" }));
     expect(prompt).toContain("## Output");
     expect(prompt).toContain("report(content)");
+    expect(prompt).not.toContain("structured_output(data)");
     expect(prompt).toContain("set_state(state)");
     expect(prompt).toContain("add_memory(content)");
   });
@@ -429,9 +430,10 @@ describe("buildEnrichedPrompt — documents", () => {
 
 // ─── Output schema ──────────────────────────────────────────
 
-describe("buildEnrichedPrompt — output schema", () => {
-  it("includes structured_output instructions when output schema has properties", () => {
+describe("buildEnrichedPrompt — output mode", () => {
+  it("includes structured_output in data mode with output schema", () => {
     const ctx = baseContext({
+      outputMode: "data",
       schemas: {
         output: {
           type: "object",
@@ -450,15 +452,60 @@ describe("buildEnrichedPrompt — output schema", () => {
     expect(prompt).toContain("Brief summary");
     expect(prompt).toContain("required");
     expect(prompt).toContain("count");
+    expect(prompt).not.toContain("### report(content)");
   });
 
-  it("omits structured_output when no output schema properties", () => {
+  it("omits structured_output in data mode when no output schema", () => {
     const ctx = baseContext({
+      outputMode: "data",
       schemas: { output: undefined },
     });
 
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### structured_output(data)");
+  });
+
+  it("includes report in report mode", () => {
+    const ctx = baseContext({ outputMode: "report" });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("### report(content)");
+    expect(prompt).not.toContain("### structured_output(data)");
+  });
+
+  it("excludes structured_output in report mode even with output schema", () => {
+    const ctx = baseContext({
+      outputMode: "report",
+      schemas: {
+        output: {
+          type: "object",
+          properties: {
+            result: { type: "string", description: "Result" },
+          },
+        },
+      },
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("### report(content)");
+    expect(prompt).not.toContain("### structured_output(data)");
+  });
+
+  it("defaults to data mode when outputMode is not set", () => {
+    const ctx = baseContext({
+      schemas: {
+        output: {
+          type: "object",
+          properties: {
+            value: { type: "string", description: "Value" },
+          },
+        },
+      },
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("### structured_output(data)");
+    expect(prompt).not.toContain("### report(content)");
   });
 });
 

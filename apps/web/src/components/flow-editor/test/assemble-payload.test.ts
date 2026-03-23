@@ -22,7 +22,7 @@ function makeState(overrides: Partial<FlowFormState> = {}): FlowFormState {
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, logs: true },
+    execution: { timeout: 300, logs: true, outputMode: "report" },
     _manifestBase: { schemaVersion: "1.0", type: "flow" },
     ...overrides,
   };
@@ -201,7 +201,7 @@ describe("assemblePayload", () => {
 
   it("omits timeout when default and not in base", () => {
     const state = makeState({
-      execution: { timeout: 300, logs: true },
+      execution: { timeout: 300, logs: true, outputMode: "report" },
     });
 
     const result = assemblePayload(state);
@@ -211,7 +211,7 @@ describe("assemblePayload", () => {
 
   it("includes timeout when value differs from default", () => {
     const state = makeState({
-      execution: { timeout: 600, logs: true },
+      execution: { timeout: 600, logs: true, outputMode: "report" },
     });
 
     const result = assemblePayload(state);
@@ -221,7 +221,7 @@ describe("assemblePayload", () => {
 
   it("preserves timeout when present in base manifest", () => {
     const state = makeState({
-      execution: { timeout: 300, logs: true },
+      execution: { timeout: 300, logs: true, outputMode: "report" },
       _manifestBase: {
         schemaVersion: "1.0",
         type: "flow",
@@ -232,6 +232,64 @@ describe("assemblePayload", () => {
     const result = assemblePayload(state);
 
     expect(result.manifest.timeout).toBe(300);
+  });
+
+  it("writes x-output-mode data to manifest when output schema present", () => {
+    const state = makeState({
+      execution: { timeout: 300, logs: true, outputMode: "data" },
+      outputSchema: [
+        { _id: "1", key: "result", type: "string", description: "The result", required: true },
+      ],
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest["x-output-mode"]).toBe("data");
+  });
+
+  it("writes x-output-mode report to manifest", () => {
+    const state = makeState({
+      execution: { timeout: 300, logs: true, outputMode: "report" },
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest["x-output-mode"]).toBe("report");
+  });
+
+  it("falls back to report when data mode has no output schema", () => {
+    const state = makeState({
+      execution: { timeout: 300, logs: true, outputMode: "data" },
+      outputSchema: [],
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest["x-output-mode"]).toBe("report");
+  });
+
+  it("falls back to report when data mode has only empty output schema keys", () => {
+    const state = makeState({
+      execution: { timeout: 300, logs: true, outputMode: "data" },
+      outputSchema: [{ _id: "1", key: "", type: "string", description: "", required: false }],
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest["x-output-mode"]).toBe("report");
+  });
+
+  it("keeps data mode when output schema has fields", () => {
+    const state = makeState({
+      execution: { timeout: 300, logs: true, outputMode: "data" },
+      outputSchema: [
+        { _id: "1", key: "result", type: "string", description: "The result", required: true },
+      ],
+    });
+
+    const result = assemblePayload(state);
+
+    expect(result.manifest["x-output-mode"]).toBe("data");
   });
 
   it("strips legacy x-outputRetries from base manifest", () => {

@@ -102,6 +102,7 @@ export interface PromptContext {
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
   logsEnabled?: boolean;
+  outputMode?: "report" | "data";
 }
 
 export interface ExecutionAdapter {
