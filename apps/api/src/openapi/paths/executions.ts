@@ -94,6 +94,14 @@ export const executionsPaths = {
             },
           },
         },
+        "402": {
+          description: "Quota exceeded (Cloud only)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
