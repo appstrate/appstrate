@@ -1,8 +1,15 @@
 import { eq, and, desc } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../lib/db.ts";
 import { applications, organizations } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
+
+export const appSettingsSchema = z.object({
+  allowedRedirectDomains: z.array(z.string()).optional(),
+});
+
+export type AppSettings = z.infer<typeof appSettingsSchema>;
 
 /** Generate a prefixed application ID. */
 function generateAppId(): string {
@@ -12,7 +19,7 @@ function generateAppId(): string {
 /** Create a new application for an organization. */
 export async function createApplication(
   orgId: string,
-  params: { name: string; settings?: Record<string, unknown>; isDefault?: boolean },
+  params: { name: string; settings?: AppSettings; isDefault?: boolean },
   createdBy?: string,
 ) {
   const id = generateAppId();
@@ -84,7 +91,7 @@ export async function getApplication(orgId: string, appId: string) {
 export async function updateApplication(
   orgId: string,
   appId: string,
-  params: { name?: string; settings?: Record<string, unknown> },
+  params: { name?: string; settings?: AppSettings },
 ) {
   const [app] = await db
     .update(applications)

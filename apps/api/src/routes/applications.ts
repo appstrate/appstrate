@@ -10,11 +10,13 @@ import {
   getApplication,
   updateApplication,
   deleteApplication,
+  appSettingsSchema,
 } from "../services/applications.ts";
+import { validateDomainList } from "../services/redirect-validation.ts";
 
 const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
-  settings: z.record(z.string(), z.unknown()).optional(),
+  settings: appSettingsSchema.optional(),
 });
 
 const updateApplicationSchema = z.object({
@@ -23,7 +25,7 @@ const updateApplicationSchema = z.object({
     .min(1, "name is required")
     .max(100, "name must be 100 characters or less")
     .optional(),
-  settings: z.record(z.string(), z.unknown()).optional(),
+  settings: appSettingsSchema.optional(),
 });
 
 export function createApplicationsRouter() {
@@ -51,6 +53,11 @@ export function createApplicationsRouter() {
 
     if (!parsed.success) {
       throw invalidRequest(parsed.error.issues[0]!.message);
+    }
+
+    if (parsed.data.settings?.allowedRedirectDomains) {
+      const validationError = validateDomainList(parsed.data.settings.allowedRedirectDomains);
+      if (validationError) throw invalidRequest(validationError);
     }
 
     try {
@@ -92,6 +99,11 @@ export function createApplicationsRouter() {
 
     if (!parsed.success) {
       throw invalidRequest(parsed.error.issues[0]!.message);
+    }
+
+    if (parsed.data.settings?.allowedRedirectDomains) {
+      const validationError = validateDomainList(parsed.data.settings.allowedRedirectDomains);
+      if (validationError) throw invalidRequest(validationError);
     }
 
     try {
