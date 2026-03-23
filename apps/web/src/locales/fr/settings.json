@@ -125,8 +125,6 @@
   "providers.deleteCredentialsConfirm": "Supprimer la configuration de ce fournisseur ?",
   "providers.configured": "Configuré",
   "providers.notConfigured": "Non configuré",
-  "providers.enabled": "Activé",
-  "providers.enabledHint": "Activez ce fournisseur pour permettre aux utilisateurs de se connecter et aux flows de l'utiliser.",
   "providers.configureProvider": "Configurer un provider",
   "providers.selectProvider": "Sélectionnez un fournisseur à configurer",
   "providers.allConfigured": "Tous les fournisseurs sont configurés.",
