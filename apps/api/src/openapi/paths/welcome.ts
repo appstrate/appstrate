@@ -31,6 +31,7 @@ export const welcomePaths = {
             },
           },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },
