@@ -647,7 +647,7 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { type: "object" },
+                  manifest: { $ref: "#/components/schemas/SkillManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
@@ -1229,7 +1229,7 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { type: "object" },
+                  manifest: { $ref: "#/components/schemas/ToolManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
@@ -1478,7 +1478,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content"],
               properties: {
-                manifest: { type: "object", description: "Flow manifest JSON" },
+                manifest: { $ref: "#/components/schemas/FlowManifest" },
                 content: { type: "string", description: "Agent prompt (markdown)" },
               },
             },
@@ -1596,7 +1596,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content", "lockVersion"],
               properties: {
-                manifest: { type: "object" },
+                manifest: { $ref: "#/components/schemas/FlowManifest" },
                 content: { type: "string" },
                 lockVersion: { type: "integer", description: "Optimistic lock version" },
               },
@@ -1916,7 +1916,7 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { type: "object" },
+                  manifest: { $ref: "#/components/schemas/FlowManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
@@ -2153,7 +2153,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content"],
               properties: {
-                manifest: { type: "object", description: "Provider manifest JSON" },
+                manifest: { $ref: "#/components/schemas/ProviderManifest" },
                 content: {
                   type: "string",
                   description: "Provider definition JSON (definition.json)",
@@ -2454,7 +2454,7 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { type: "object" },
+                  manifest: { $ref: "#/components/schemas/ProviderManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
@@ -2579,7 +2579,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content", "lockVersion"],
               properties: {
-                manifest: { type: "object" },
+                manifest: { $ref: "#/components/schemas/ProviderManifest" },
                 content: { type: "string" },
                 lockVersion: { type: "integer", description: "Optimistic lock version" },
               },
