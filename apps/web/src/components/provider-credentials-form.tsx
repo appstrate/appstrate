@@ -4,7 +4,6 @@ import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
 import { useConfigureProviderCredentials } from "../hooks/use-mutations";
 import { ExternalLink, Copy, Check } from "lucide-react";
@@ -19,7 +18,6 @@ interface ProviderCredentialsFormProps {
 }
 
 type CredentialsFormData = {
-  enabled: boolean;
   credentials: Record<string, string>;
 };
 
@@ -40,16 +38,15 @@ export function ProviderCredentialsForm({
   const fieldKeys = Object.keys(properties);
   const hasSchemaFields = fieldKeys.length > 0;
 
-  const { register, handleSubmit, control, setValue } = useForm<CredentialsFormData>({
+  const { register, handleSubmit, control } = useForm<CredentialsFormData>({
     defaultValues: {
-      enabled: !!provider.enabled,
       credentials: {},
     },
   });
 
-  const [credentials, enabled] = useWatch({
+  const credentials = useWatch({
     control,
-    name: ["credentials", "enabled"],
+    name: "credentials",
   });
 
   const allRequiredFilled =
@@ -81,7 +78,7 @@ export function ProviderCredentialsForm({
       providerId: string;
       credentials?: Record<string, string>;
       enabled: boolean;
-    } = { providerId: provider.id, enabled: data.enabled };
+    } = { providerId: provider.id, enabled: true };
 
     if (hasSchemaFields) {
       const creds: Record<string, string> = {};
@@ -101,23 +98,6 @@ export function ProviderCredentialsForm({
   return (
     <form onSubmit={handleSubmit(onFormSubmit)}>
       <div className="space-y-4">
-        {/* Enabled toggle */}
-        <label
-          htmlFor="provider-enabled"
-          className="flex items-start gap-3 rounded-lg bg-muted/50 p-4 cursor-pointer"
-        >
-          <Checkbox
-            id="provider-enabled"
-            checked={enabled}
-            onCheckedChange={(checked) => setValue("enabled", !!checked)}
-            className="mt-0.5"
-          />
-          <div className="space-y-0.5">
-            <span className="text-sm font-medium leading-none">{t("providers.enabled")}</span>
-            <p className="text-xs text-muted-foreground">{t("providers.enabledHint")}</p>
-          </div>
-        </label>
-
         {/* Setup Guide */}
         {guide?.steps && guide.steps.length > 0 && (
           <div className="rounded-lg bg-muted/50 p-4">

@@ -125,8 +125,6 @@
   "providers.deleteCredentialsConfirm": "Delete this provider's configuration?",
   "providers.configured": "Configured",
   "providers.notConfigured": "Not configured",
-  "providers.enabled": "Enabled",
-  "providers.enabledHint": "Enable this provider to allow users to connect and flows to use it.",
   "providers.configureProvider": "Configure a provider",
   "providers.selectProvider": "Select a provider to configure",
   "providers.allConfigured": "All providers are configured.",

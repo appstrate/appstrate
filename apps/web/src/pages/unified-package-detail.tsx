@@ -34,6 +34,7 @@ import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsForm } from "../components/provider-credentials-form";
+import { ProviderConnectButton } from "../components/provider-connect-button";
 // Flow-specific components
 import { FlowActions } from "../components/package-detail/flow-actions";
 import {
@@ -420,57 +421,63 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
             />
-          ) : isOrgAdmin ? (
-            <>
-              <PackageActionsDropdown
-                packageId={packageId}
-                type={type}
-                manifest={
-                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
-                    | Record<string, unknown>
-                    | undefined
-                }
-                isOrgAdmin={isOrgAdmin}
-                isOwned={isOwned}
-                isBuiltIn={isBuiltIn}
-                isHistoricalVersion={isHistoricalVersion}
-                hasDraftChanges={hasDraftChanges}
-                downloadVersion={downloadVersion ?? undefined}
-                onDownload={downloadPackage}
-                onCreateVersion={() => setCreateVersionOpen(true)}
-                onFork={() => setForkOpen(true)}
-                hasCredentials={providerConfig?.hasCredentials}
-                onDeleteCredentials={() => {
-                  if (!confirm(t("providers.deleteCredentialsConfirm", { ns: "settings" }))) return;
-                  deleteCredentialsMutation.mutate(packageId);
-                }}
-                canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
-                onDeletePackage={() => {
-                  if (!pkgDetail) return;
-                  const nameStr = pkgDetail.name || pkgDetail.id;
-                  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                  if (
-                    !confirm(
-                      t("packages.deleteConfirm", {
-                        type: typeLabel,
-                        name: nameStr,
-                        ns: "settings",
-                      }),
+          ) : (
+            <div className="flex items-center gap-2">
+              {type === "provider" && providerConfig && (
+                <ProviderConnectButton provider={providerConfig} />
+              )}
+              {isOrgAdmin && (
+                <PackageActionsDropdown
+                  packageId={packageId}
+                  type={type}
+                  manifest={
+                    (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
+                      | Record<string, unknown>
+                      | undefined
+                  }
+                  isOrgAdmin={isOrgAdmin}
+                  isOwned={isOwned}
+                  isBuiltIn={isBuiltIn}
+                  isHistoricalVersion={isHistoricalVersion}
+                  hasDraftChanges={hasDraftChanges}
+                  downloadVersion={downloadVersion ?? undefined}
+                  onDownload={downloadPackage}
+                  onCreateVersion={() => setCreateVersionOpen(true)}
+                  onFork={() => setForkOpen(true)}
+                  hasCredentials={providerConfig?.hasCredentials}
+                  onDeleteCredentials={() => {
+                    if (!confirm(t("providers.deleteCredentialsConfirm", { ns: "settings" })))
+                      return;
+                    deleteCredentialsMutation.mutate(packageId);
+                  }}
+                  canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
+                  onDeletePackage={() => {
+                    if (!pkgDetail) return;
+                    const nameStr = pkgDetail.name || pkgDetail.id;
+                    const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+                    if (
+                      !confirm(
+                        t("packages.deleteConfirm", {
+                          type: typeLabel,
+                          name: nameStr,
+                          ns: "settings",
+                        }),
+                      )
                     )
-                  )
-                    return;
-                  deletePkgMutation.mutate(packageId, {
-                    onError: (err) =>
-                      alert(
-                        err instanceof Error
-                          ? err.message
-                          : t("packages.deleteDependedOn", { ns: "settings" }),
-                      ),
-                  });
-                }}
-              />
-            </>
-          ) : undefined
+                      return;
+                    deletePkgMutation.mutate(packageId, {
+                      onError: (err) =>
+                        alert(
+                          err instanceof Error
+                            ? err.message
+                            : t("packages.deleteDependedOn", { ns: "settings" }),
+                        ),
+                    });
+                  }}
+                />
+              )}
+            </div>
+          )
         }
       />
 
