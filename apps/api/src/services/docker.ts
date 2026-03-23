@@ -41,10 +41,25 @@ export async function pullImage(image: string): Promise<void> {
     throw new Error(`Failed to pull image ${image}: ${res.status} ${error}`);
   }
 
-  // Consume the stream fully (Docker streams progress as JSON lines)
+  // Consume the stream fully — Docker streams JSON progress lines.
+  // The API always returns 200; errors (e.g. "manifest unknown") arrive as {"error":"..."} in the stream.
   if (res.body) {
-    for await (const _ of res.body) {
-      // drain
+    const decoder = new TextDecoder();
+    let lastError: string | undefined;
+    for await (const chunk of res.body) {
+      const text = decoder.decode(chunk, { stream: true });
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) lastError = msg.error;
+        } catch {
+          // not JSON, ignore
+        }
+      }
+    }
+    if (lastError) {
+      throw new Error(`Failed to pull image ${image}: ${lastError}`);
     }
   }
 
