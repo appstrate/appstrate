@@ -5,7 +5,7 @@ import { db } from "../lib/db.ts";
 import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
-import { getEnv } from "@appstrate/env";
+import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { requireAdmin, checkScopeMatch } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
@@ -119,7 +119,7 @@ export function createProvidersRouter() {
       return cfg;
     });
 
-    const callbackUrl = `${getEnv().APP_URL}/api/auth/callback`;
+    const callbackUrl = getOAuthCallbackUrl();
     return c.json({ providers, callbackUrl });
   });
 
