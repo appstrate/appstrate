@@ -41,6 +41,7 @@ import {
   FlowConnectorsTab,
   FlowExecutionsTab,
   FlowSchedulesTab,
+  FlowShareLinksTab,
   FlowMemoriesTab,
   FlowApiTab,
 } from "../components/package-detail/flow-tabs";
@@ -57,6 +58,7 @@ type DetailTab =
   | "executions"
   | "configuration"
   | "schedules"
+  | "shareLinks"
   | "memories"
   | "api"
   | "versions"
@@ -219,6 +221,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "executions",
     "configuration",
     "schedules",
+    "shareLinks",
     "memories",
     "api",
     "versions",
@@ -361,6 +364,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     {
       id: "schedules",
       label: t("detail.tabSchedules"),
+    },
+    {
+      id: "shareLinks",
+      label: t("detail.tabShareLinks"),
     },
     {
       id: "memories",
@@ -569,6 +576,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         />
       )}
       {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
+      {type === "flow" && tab === "shareLinks" && <FlowShareLinksTab packageId={packageId} />}
       {type === "flow" && tab === "memories" && (
         <FlowMemoriesTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
       )}

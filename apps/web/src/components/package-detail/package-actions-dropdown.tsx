@@ -25,7 +25,6 @@ import type { PackageType } from "@appstrate/shared-types";
 import { ShareLinkModal } from "../share-link-modal";
 import { Modal } from "../modal";
 import { JsonView } from "../json-view";
-import { api } from "../../api";
 import { packageEditPath } from "../../lib/package-paths";
 
 interface PackageActionsDropdownProps {
@@ -56,13 +55,6 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Share (flow-only)
-  shareServices?: Array<{
-    id: string;
-    connectionMode?: string;
-    status: string;
-    adminProvided?: boolean;
-  }>;
 }
 
 export function PackageActionsDropdown({
@@ -90,12 +82,10 @@ export function PackageActionsDropdown({
   onDeleteCredentials,
   canDeletePackage,
   onDeletePackage,
-  shareServices,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const navigate = useNavigate();
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [shareGenerating, setShareGenerating] = useState(false);
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
   const isFlow = type === "flow";
@@ -104,32 +94,6 @@ export function PackageActionsDropdown({
   // Share logic (flow-only)
   const copyShareLink = () => {
     setShareUrl(`${window.location.origin}/flows/${packageId}/run`);
-  };
-
-  const canSharePublic =
-    shareServices &&
-    (shareServices.length === 0 ||
-      shareServices.every(
-        (s) =>
-          (s.connectionMode ?? "user") === "admin" && s.adminProvided && s.status === "connected",
-      ));
-
-  const generatePublicLink = async () => {
-    setShareGenerating(true);
-    try {
-      const versionQs =
-        isHistoricalVersion && downloadVersion
-          ? `?version=${encodeURIComponent(downloadVersion)}`
-          : "";
-      const data = await api<{ token: string }>(`/flows/${packageId}/share-token${versionQs}`, {
-        method: "POST",
-      });
-      setShareUrl(`${window.location.origin}/share/${data.token}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : t("share.errorGenerate"));
-    } finally {
-      setShareGenerating(false);
-    }
   };
 
   // Nothing to show for non-admin on non-flow packages (unless there's a manifest to view)
@@ -153,11 +117,12 @@ export function PackageActionsDropdown({
               </DropdownMenuItem>
               {isOrgAdmin && (
                 <DropdownMenuItem
-                  onSelect={generatePublicLink}
-                  disabled={!canSharePublic || shareGenerating}
+                  onSelect={() => {
+                    window.location.hash = "shareLinks";
+                  }}
                 >
                   <Globe size={14} />
-                  {shareGenerating ? t("share.generating") : t("share.publicLink")}
+                  {t("detail.tabShareLinks")}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />

@@ -53,7 +53,7 @@ export function ExecutionRow({
         )}
         {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
         <Badge status={execution.status} />
-        {execution.shareTokenId ? (
+        {execution.shareLinkId ? (
           <span className="text-muted-foreground text-xs inline-flex items-center gap-1">
             <Globe size={12} />
             {t("exec.sharedLink")}

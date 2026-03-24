@@ -189,7 +189,7 @@ export function ExecutionDetailPage() {
         >
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </span>
-        {execution.shareTokenId ? (
+        {execution.shareLinkId ? (
           <span className="text-sm text-muted-foreground inline-flex items-center gap-1">
             <Globe size={14} />
             {t("exec.sharedLink")}

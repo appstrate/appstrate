@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "../lib/db.ts";
-import { executions } from "@appstrate/db/schema";
+import { executions, shareLinkUsages } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { getShareToken, consumeShareToken } from "../services/share-tokens.ts";
+import { getShareLink, useShareLink } from "../services/share-links.ts";
 import { getPackage } from "../services/flow-service.ts";
 import {
   createExecution,
@@ -30,21 +30,21 @@ export function createShareRouter() {
   // GET /share/:token/flow — public flow metadata (no JWT)
   router.get("/:token/flow", rateLimitByIp(60), async (c) => {
     const token = c.req.param("token")!;
-    const shareToken = await getShareToken(token);
+    const shareLink = await getShareLink(token);
 
-    if (!shareToken || shareToken.expiresAt < new Date()) {
+    if (!shareLink || !shareLink.isActive || shareLink.expiresAt < new Date()) {
       throw gone("token_invalid", "This link is no longer valid.");
     }
 
-    const orgId = shareToken.orgId;
-    const flow = await getPackage(shareToken.packageId, orgId);
+    const orgId = shareLink.orgId;
+    const flow = await getPackage(shareLink.packageId, orgId);
     if (!flow) {
       throw notFound("Flow not found.");
     }
 
     // Use the snapshotted manifest if available, otherwise fall back to current draft
-    const manifest = shareToken.manifest
-      ? (shareToken.manifest as typeof flow.manifest)
+    const manifest = shareLink.manifest
+      ? (shareLink.manifest as typeof flow.manifest)
       : flow.manifest;
 
     // Resolve provider statuses
@@ -56,58 +56,77 @@ export function createShareRouter() {
       undefined,
     );
 
+    // Check if link is exhausted (maxUses reached)
+    const exhausted = shareLink.maxUses !== null && shareLink.usageCount >= shareLink.maxUses;
+
     const result: Record<string, unknown> = {
       displayName: manifest.displayName,
       description: manifest.description,
       ...(manifest.input ? { input: { schema: manifest.input.schema } } : {}),
       ...(manifest.output ? { output: { schema: manifest.output.schema } } : {}),
       ...(providerStatuses.length > 0 ? { providers: providerStatuses } : {}),
-      consumed: !!shareToken.consumedAt,
+      usageCount: shareLink.usageCount,
+      maxUses: shareLink.maxUses,
+      exhausted,
     };
 
-    // If already consumed, look up the linked execution
-    if (shareToken.consumedAt) {
-      const [execRow] = await db
-        .select({
-          id: executions.id,
-          status: executions.status,
-          result: executions.result,
-          error: executions.error,
-        })
-        .from(executions)
-        .where(eq(executions.shareTokenId, shareToken.id))
+    // If there have been usages, return the most recent execution
+    if (shareLink.usageCount > 0) {
+      const [latestUsage] = await db
+        .select({ executionId: shareLinkUsages.executionId })
+        .from(shareLinkUsages)
+        .where(eq(shareLinkUsages.shareLinkId, shareLink.id))
+        .orderBy(desc(shareLinkUsages.usedAt))
         .limit(1);
 
-      if (execRow) {
-        const allLogs = await listExecutionLogs(execRow.id, shareToken.orgId);
-        result.execution = {
-          id: execRow.id,
-          status: execRow.status,
-          ...(execRow.result ? { result: execRow.result } : {}),
-          ...(execRow.error ? { error: execRow.error } : {}),
-          logs: allLogs,
-        };
+      if (latestUsage?.executionId) {
+        const [execRow] = await db
+          .select({
+            id: executions.id,
+            status: executions.status,
+            result: executions.result,
+            error: executions.error,
+          })
+          .from(executions)
+          .where(eq(executions.id, latestUsage.executionId))
+          .limit(1);
+
+        if (execRow) {
+          const allLogs = await listExecutionLogs(execRow.id, shareLink.orgId);
+          result.execution = {
+            id: execRow.id,
+            status: execRow.status,
+            ...(execRow.result ? { result: execRow.result } : {}),
+            ...(execRow.error ? { error: execRow.error } : {}),
+            logs: allLogs,
+          };
+        }
       }
     }
 
     return c.json(result);
   });
 
-  // POST /share/:token/run — validate, then consume token and execute (no JWT)
+  // POST /share/:token/run — validate, then use link and execute (no JWT)
   router.post("/:token/run", rateLimitByIp(5), async (c) => {
     const token = c.req.param("token")!;
 
-    // Verify token is valid (without consuming it yet)
-    const shareToken = await getShareToken(token);
-    if (!shareToken || shareToken.consumedAt || shareToken.expiresAt < new Date()) {
+    // Verify link is valid (without using it yet)
+    const shareLink = await getShareLink(token);
+    if (!shareLink || !shareLink.isActive || shareLink.expiresAt < new Date()) {
       throw gone("token_invalid", "This link has already been used or is no longer valid.");
     }
 
-    const { id: tokenId, packageId, orgId } = shareToken;
-    const actor: Actor = shareToken.endUserId
-      ? { type: "end_user", id: shareToken.endUserId }
-      : { type: "member", id: shareToken.createdBy! };
-    const snapshotManifest = shareToken.manifest as Record<string, unknown> | null;
+    // Check if link is exhausted
+    if (shareLink.maxUses !== null && shareLink.usageCount >= shareLink.maxUses) {
+      throw gone("token_invalid", "This link has reached its maximum number of uses.");
+    }
+
+    const { id: linkId, packageId, orgId } = shareLink;
+    const actor: Actor = shareLink.endUserId
+      ? { type: "end_user", id: shareLink.endUserId }
+      : { type: "member", id: shareLink.createdBy! };
+    const snapshotManifest = shareLink.manifest as Record<string, unknown> | null;
 
     // Resolve application context for webhook dispatch
     const applicationId =
@@ -123,7 +142,7 @@ export function createShareRouter() {
       ? { ...flow, manifest: snapshotManifest as typeof flow.manifest }
       : flow;
 
-    // --- Validate everything BEFORE consuming the token ---
+    // --- Validate everything BEFORE using the link ---
 
     const inputSchema = effectiveFlow.manifest.input?.schema;
     const { input: parsedInput, uploadedFiles } = await parseRequestInput(c, inputSchema);
@@ -142,14 +161,22 @@ export function createShareRouter() {
       config,
     });
 
-    // --- All validations passed — now atomically consume the token ---
-
-    const consumed = await consumeShareToken(token);
-    if (!consumed) {
-      throw gone("token_invalid", "This link has already been used or is no longer valid.");
-    }
+    // --- All validations passed — now atomically use the link ---
 
     const executionId = `exec_${crypto.randomUUID()}`;
+
+    const ip =
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? null;
+    const userAgent = c.req.header("user-agent") ?? null;
+
+    const used = await useShareLink(token, {
+      ip: ip ?? undefined,
+      userAgent: userAgent ?? undefined,
+      executionId,
+    });
+    if (!used) {
+      throw gone("token_invalid", "This link has already been used or is no longer valid.");
+    }
 
     const fileRefs = uploadedFiles?.map((f) => ({
       fieldName: f.fieldName,
@@ -201,7 +228,7 @@ export function createShareRouter() {
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
       applicationId,
-      tokenId,
+      linkId,
     );
 
     // Fire-and-forget
@@ -227,10 +254,22 @@ export function createShareRouter() {
   // GET /share/:token/status — polling endpoint for execution status + public logs (no JWT)
   router.get("/:token/status", rateLimitByIp(60), async (c) => {
     const token = c.req.param("token")!;
-    const shareToken = await getShareToken(token);
+    const shareLink = await getShareLink(token);
 
-    if (!shareToken) {
+    if (!shareLink) {
       throw gone("token_invalid", "This link is no longer valid.");
+    }
+
+    // Find the most recent execution via usages
+    const [latestUsage] = await db
+      .select({ executionId: shareLinkUsages.executionId })
+      .from(shareLinkUsages)
+      .where(eq(shareLinkUsages.shareLinkId, shareLink.id))
+      .orderBy(desc(shareLinkUsages.usedAt))
+      .limit(1);
+
+    if (!latestUsage?.executionId) {
+      return c.json({ status: "pending", logs: [] });
     }
 
     const [execRow] = await db
@@ -241,20 +280,19 @@ export function createShareRouter() {
         error: executions.error,
       })
       .from(executions)
-      .where(eq(executions.shareTokenId, shareToken.id))
+      .where(eq(executions.id, latestUsage.executionId))
       .limit(1);
 
     if (!execRow) {
       return c.json({ status: "pending", logs: [] });
     }
 
-    const allLogs = await listExecutionLogs(execRow.id, shareToken.orgId);
-    const exec = execRow;
+    const allLogs = await listExecutionLogs(execRow.id, shareLink.orgId);
 
     return c.json({
-      status: exec?.status ?? "pending",
-      ...(exec?.result ? { result: exec.result } : {}),
-      ...(exec?.error ? { error: exec.error } : {}),
+      status: execRow.status ?? "pending",
+      ...(execRow.result ? { result: execRow.result } : {}),
+      ...(execRow.error ? { error: execRow.error } : {}),
       logs: allLogs,
     });
   });

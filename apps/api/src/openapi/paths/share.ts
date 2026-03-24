@@ -5,7 +5,7 @@ export const sharePaths = {
       tags: ["Share"],
       summary: "Get shared flow info",
       description:
-        "Public endpoint. Returns flow metadata for a share token (displayName, description, input schema).",
+        "Public endpoint. Returns flow metadata for a share link (displayName, description, input schema, usage stats).",
       security: [],
       parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
       responses: {
@@ -21,7 +21,7 @@ export const sharePaths = {
             },
           },
         },
-        "410": { description: "Invalid or expired token" },
+        "410": { description: "Invalid, expired, or inactive link" },
       },
     },
   },
@@ -29,9 +29,9 @@ export const sharePaths = {
     post: {
       operationId: "runSharedFlow",
       tags: ["Share"],
-      summary: "Execute via share token",
+      summary: "Execute via share link",
       description:
-        "Execute a flow using a one-time public share token. No authentication required.",
+        "Execute a flow using a public share link. No authentication required. The link must be active and not exhausted (usageCount < maxUses or unlimited).",
       security: [],
       parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
@@ -71,7 +71,7 @@ export const sharePaths = {
             },
           },
         },
-        "410": { description: "Already used or expired token" },
+        "410": { description: "Exhausted, expired, or inactive link" },
       },
     },
   },
@@ -80,7 +80,8 @@ export const sharePaths = {
       operationId: "getSharedExecutionStatus",
       tags: ["Share"],
       summary: "Get shared execution status",
-      description: "Public endpoint. Poll execution status for a share token.",
+      description:
+        "Public endpoint. Poll execution status for the most recent execution on this share link.",
       security: [],
       parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
       responses: {
@@ -106,7 +107,7 @@ export const sharePaths = {
             },
           },
         },
-        "410": { description: "Invalid token" },
+        "410": { description: "Invalid link" },
       },
     },
   },

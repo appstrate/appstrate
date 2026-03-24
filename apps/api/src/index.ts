@@ -16,6 +16,7 @@ import { createExecutionsRouter } from "./routes/executions.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserFlowsRouter } from "./routes/user-flows.ts";
 import { createShareRouter } from "./routes/share.ts";
+import { createShareLinksRouter } from "./routes/share-links.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
@@ -268,6 +269,7 @@ const schedulesRouter = createSchedulesRouter();
 app.route("/api/orgs", orgsRouter);
 
 app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
+app.route("/api/flows", createShareLinksRouter());
 app.route("/api/flows", flowsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before executionsRouter (GET /api/executions vs /api/executions/:id)
 app.route("/api", executionsRouter);
