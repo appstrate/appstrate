@@ -18,7 +18,7 @@ export async function createExecution(
   proxyLabel?: string,
   modelLabel?: string,
   applicationId?: string | null,
-  shareTokenId?: string,
+  shareLinkId?: string,
 ): Promise<void> {
   await db.insert(executions).values({
     id,
@@ -34,7 +34,7 @@ export async function createExecution(
     proxyLabel: proxyLabel ?? null,
     modelLabel: modelLabel ?? null,
     applicationId: applicationId ?? null,
-    shareTokenId: shareTokenId ?? null,
+    shareLinkId: shareLinkId ?? null,
   });
 }
 

@@ -22,7 +22,6 @@
     "bullmq": "^5.71.0",
     "cron-parser": "4",
     "drizzle-orm": "^0.39.3",
-    "fflate": "^0.8.2",
     "hono": "^4.11.9",
     "ioredis": "^5.10.0",
     "rate-limiter-flexible": "^10.0.1",

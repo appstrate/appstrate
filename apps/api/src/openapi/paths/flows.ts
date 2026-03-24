@@ -223,41 +223,6 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{scope}/{name}/share-token": {
-    post: {
-      operationId: "createShareToken",
-      tags: ["Flows"],
-      summary: "Create a share token",
-      description: "Generate a one-time public share link for the flow. Admin only.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Share token created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  token: { type: "string" },
-                  expiresAt: { type: "string", format: "date-time" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
   "/api/flows/{scope}/{name}/proxy": {
     get: {
       operationId: "getFlowProxy",

@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedShareToken, seedExecution } from "../../helpers/seed.ts";
+import { seedFlow, seedShareLink } from "../../helpers/seed.ts";
+import { shareLinkUsages } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -15,7 +17,7 @@ describe("Share API", () => {
   });
 
   describe("GET /share/:token/flow", () => {
-    it("returns flow info for a valid share token", async () => {
+    it("returns flow info for a valid share link", async () => {
       const flow = await seedFlow({
         id: "@myorg/shared-flow",
         orgId: ctx.orgId,
@@ -29,58 +31,85 @@ describe("Share API", () => {
         },
       });
 
-      const shareToken = await seedShareToken({
+      const shareLink = await seedShareLink({
         packageId: flow.id,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(`/share/${shareToken.token}/flow`);
+      const res = await app.request(`/share/${shareLink.token}/flow`);
 
       expect(res.status).toBe(200);
       const body = await res.json() as any;
       expect(body.description).toBe("A shared flow");
-      expect(body.consumed).toBe(false);
+      expect(body.usageCount).toBe(0);
+      expect(body.exhausted).toBe(false);
     });
 
-    it("returns 200 with consumed: true for a consumed token", async () => {
+    it("returns exhausted: true for a fully-used link", async () => {
       const flow = await seedFlow({
-        id: "@myorg/consumed-flow",
+        id: "@myorg/used-flow",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const shareToken = await seedShareToken({
+      const shareLink = await seedShareLink({
         packageId: flow.id,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
-        consumedAt: new Date(),
+        maxUses: 1,
+        usageCount: 1,
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       });
 
-      const res = await app.request(`/share/${shareToken.token}/flow`);
+      // Create a usage record so there's an execution to find
+      await db.insert(shareLinkUsages).values({
+        shareLinkId: shareLink.id,
+        executionId: null,
+      });
 
-      // Consumed but not expired → 200 with consumed flag
+      const res = await app.request(`/share/${shareLink.token}/flow`);
+
       expect(res.status).toBe(200);
       const body = await res.json() as any;
-      expect(body.consumed).toBe(true);
+      expect(body.usageCount).toBe(1);
+      expect(body.exhausted).toBe(true);
     });
 
-    it("returns 410 for an expired token", async () => {
+    it("returns 410 for an expired link", async () => {
       const flow = await seedFlow({
         id: "@myorg/expired-flow",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const shareToken = await seedShareToken({
+      const shareLink = await seedShareLink({
         packageId: flow.id,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         expiresAt: new Date(Date.now() - 1000 * 60), // expired 1 minute ago
       });
 
-      const res = await app.request(`/share/${shareToken.token}/flow`);
+      const res = await app.request(`/share/${shareLink.token}/flow`);
+
+      expect(res.status).toBe(410);
+    });
+
+    it("returns 410 for an inactive link", async () => {
+      const flow = await seedFlow({
+        id: "@myorg/inactive-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const shareLink = await seedShareLink({
+        packageId: flow.id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        isActive: false,
+      });
+
+      const res = await app.request(`/share/${shareLink.token}/flow`);
 
       expect(res.status).toBe(410);
     });
@@ -89,69 +118,6 @@ describe("Share API", () => {
       const res = await app.request("/share/nonexistent-token-12345/flow");
 
       expect(res.status).toBe(410);
-    });
-
-    it("returns execution data for a consumed token with linked execution", async () => {
-      const flow = await seedFlow({
-        id: "@myorg/linked-flow",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        draftManifest: {
-          name: "@myorg/linked-flow",
-          version: "0.1.0",
-          type: "flow",
-          description: "A flow with execution",
-          displayName: "Linked Flow",
-        },
-      });
-
-      const shareToken = await seedShareToken({
-        packageId: flow.id,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        consumedAt: new Date(),
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
-      });
-
-      // Create an execution linked to the share token via shareTokenId
-      await seedExecution({
-        packageId: flow.id,
-        orgId: ctx.orgId,
-        userId: ctx.user.id,
-        status: "success",
-        shareTokenId: shareToken.id,
-      });
-
-      const res = await app.request(`/share/${shareToken.token}/flow`);
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.consumed).toBe(true);
-      expect(body.execution).toBeDefined();
-      expect(body.execution.status).toBe("success");
-    });
-
-    it("returns consumed: true without execution when no execution is linked", async () => {
-      const flow = await seedFlow({
-        id: "@myorg/no-exec-flow",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const shareToken = await seedShareToken({
-        packageId: flow.id,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        consumedAt: new Date(),
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
-      });
-
-      const res = await app.request(`/share/${shareToken.token}/flow`);
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.consumed).toBe(true);
-      expect(body.execution).toBeUndefined();
     });
   });
 });

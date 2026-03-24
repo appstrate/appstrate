@@ -12,7 +12,9 @@ interface FlowInfo {
   input?: { schema: JSONSchemaObject };
   output?: { schema: JSONSchemaObject };
   providers?: ProviderStatus[];
-  consumed: boolean;
+  usageCount: number;
+  maxUses: number | null;
+  exhausted: boolean;
   execution?: {
     id: string;
     status: string;
@@ -69,14 +71,17 @@ export function PublicShareRunPage() {
         }
         const data: FlowInfo = await res.json();
         setFlowInfo(data);
-        if (data.consumed && data.execution) {
+
+        if (data.execution) {
+          // There's at least one execution — show the latest
           const resolved = resolveExecutionStatus(data.execution.status, t);
           setStatus(resolved.pageStatus);
           if (resolved.error) setError(data.execution.error || resolved.error);
           if (data.execution.result)
             setResult(data.execution.result as { report?: string; data?: Record<string, unknown> });
           if (data.execution.logs) setRawLogs(data.execution.logs);
-        } else if (data.consumed) {
+        } else if (data.exhausted) {
+          // Link is exhausted — no more runs possible
           setStatus("invalid");
         } else {
           setStatus("idle");
@@ -123,6 +128,12 @@ export function PublicShareRunPage() {
     if (status === "running") startPolling();
     return stopPolling;
   }, [status, startPolling, stopPolling]);
+
+  // Can the user run again? (link not exhausted + last execution is terminal)
+  const canRunAgain =
+    flowInfo != null &&
+    !flowInfo.exhausted &&
+    (status === "success" || status === "failed" || status === "timeout");
 
   // Run handler
   const handleRun = async (input?: Record<string, unknown>, files?: Record<string, File[]>) => {
@@ -172,6 +183,14 @@ export function PublicShareRunPage() {
     }
   };
 
+  // Reset to idle state for running again
+  const handleRunAgain = () => {
+    setStatus("idle");
+    setResult(null);
+    setRawLogs([]);
+    setError(null);
+  };
+
   return (
     <FlowRunCard
       displayName={flowInfo?.displayName}
@@ -184,6 +203,7 @@ export function PublicShareRunPage() {
       logEntries={logEntries}
       submitting={submitting}
       onRun={handleRun}
+      onRerun={canRunAgain ? handleRunAgain : undefined}
     />
   );
 }

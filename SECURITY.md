@@ -379,7 +379,7 @@ All data access is scoped by organization at the application level. Every Drizzl
 | `flows`                | Org members     | Org admins            | Org admins            | Org admins            |
 | `flow_schedules`       | Org members     | Own user + org member | Own user + org member | Own user + org member |
 | `user_provider_connections` | Own user + org  | Own user + org member | Own user + org member | Own user + org member |
-| `share_tokens`         | Org members     | Org members           | Org members           | —                     |
+| `share_links`          | Org members     | Org members           | Org members           | —                     |
 
 Application-level isolation uses the org-context middleware and Drizzle `where` clauses:
 

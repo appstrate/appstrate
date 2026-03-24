@@ -23,7 +23,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration,
         'tokens_used', NEW.tokens_used,
-        'share_token_id', NEW.share_token_id
+        'share_link_id', NEW.share_link_id
       )::text);
       RETURN NEW;
     END;

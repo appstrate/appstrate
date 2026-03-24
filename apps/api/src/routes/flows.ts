@@ -6,7 +6,6 @@ import {
   setFlowModelId,
   setFlowProxyId,
   getRunningExecutionsCounts,
-  getAdminConnections,
   bindAdminConnection,
   unbindAdminConnection,
   getPackageMemories,
@@ -17,9 +16,7 @@ import { getConnectionStatus } from "../services/connection-manager/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
-import { createShareToken } from "../services/share-tokens.ts";
 import { getActor } from "../lib/actor.ts";
-import { resolveVersionManifest } from "../services/package-versions.ts";
 import {
   getEffectiveProfileId,
   setPackageProfileOverride,
@@ -271,52 +268,6 @@ export function createFlowsRouter() {
       return c.json({ deleted: true });
     },
   );
-
-  // POST /api/flows/:scope/:name/share-token — generate a one-time public share link (admin-only)
-  router.post("/:scope{@[^/]+}/:name/share-token", requireFlow(), requireAdmin(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-
-    // Resolve manifest to snapshot: use requested version or fall back to draft
-    const versionQuery = c.req.query("version");
-    let manifest = flow.manifest as Record<string, unknown>;
-    if (versionQuery && flow.source !== "system") {
-      const versionManifest = await resolveVersionManifest(flow.id, versionQuery);
-      if (!versionManifest) {
-        throw notFound(`Version '${versionQuery}' not found`);
-      }
-      manifest = versionManifest;
-    }
-
-    // Verify the flow is shareable publicly (using the resolved manifest)
-    const providers = resolveManifestProviders(manifest as typeof flow.manifest);
-    if (providers.length > 0) {
-      // Check for user-mode providers
-      const userModeService = providers.find((s) => (s.connectionMode ?? "user") === "user");
-      if (userModeService) {
-        throw invalidRequest(
-          "This flow cannot be shared publicly because it requires user-mode connections.",
-        );
-      }
-
-      // All providers are admin-mode — verify each is bound
-      const adminConns = await getAdminConnections(orgId, flow.id);
-      for (const svc of providers) {
-        if (!adminConns[svc.id]) {
-          throw invalidRequest(
-            "All admin providers must be bound before generating a public link.",
-          );
-        }
-      }
-    }
-
-    const actor = getActor(c);
-    const shareToken = await createShareToken(flow.id, actor, orgId, undefined, manifest);
-    return c.json({
-      token: shareToken!.token,
-      expiresAt: shareToken!.expiresAt,
-    });
-  });
 
   return router;
 }
