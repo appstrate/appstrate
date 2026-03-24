@@ -31,7 +31,7 @@ import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
 import { ErrorBoundary } from "./components/error-boundary";
-import { OrgSwitcher } from "./components/org-switcher";
+import { OrgSwitcher, NavMenu } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
 import { UsageBadge } from "./components/usage-badge";
 import { useQueryClient } from "@tanstack/react-query";
@@ -47,7 +47,6 @@ import {
   Settings,
   FileText,
   LogOut,
-  LayoutGrid,
   Sun,
   Moon,
   Monitor,
@@ -168,21 +167,17 @@ function MainLayout() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
       <header className="flex items-center gap-2 mb-8 pb-4 border-b border-border">
-        <Link to="/" className="flex items-center shrink-0 mr-auto">
+        <Link to="/" className="flex items-center shrink-0 mr-2">
           <img
             src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
             alt="Appstrate"
             className="h-[34px] w-auto"
           />
         </Link>
+        <div className="mx-2 h-5 w-px bg-border" />
         <OrgSwitcher />
-        <Link
-          to="/flows"
-          className="inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          title="Flows"
-        >
-          <LayoutGrid size={18} />
-        </Link>
+        <div className="mr-auto" />
+        <NavMenu />
         <NotificationBell />
         <UsageBadge />
         <div className="mx-2 h-5 w-px bg-border" />
