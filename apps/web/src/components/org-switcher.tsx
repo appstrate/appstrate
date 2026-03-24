@@ -54,7 +54,15 @@ interface SwitcherDropdownProps {
   footer?: ReactNode;
 }
 
-function SwitcherDropdown({ icon, label, ariaLabel, items, activeId, onSelect, footer }: SwitcherDropdownProps) {
+function SwitcherDropdown({
+  icon,
+  label,
+  ariaLabel,
+  items,
+  activeId,
+  onSelect,
+  footer,
+}: SwitcherDropdownProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
