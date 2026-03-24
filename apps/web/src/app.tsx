@@ -42,16 +42,7 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useApplicationResolver } from "./hooks/use-current-application";
 import { Spinner } from "./components/spinner";
-import {
-  User,
-  Settings,
-  FileText,
-  LogOut,
-  Sun,
-  Moon,
-  Monitor,
-  Palette,
-} from "lucide-react";
+import { User, Settings, FileText, LogOut, Sun, Moon, Monitor, Palette } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
