@@ -13,7 +13,8 @@
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
     "turbo": "^2",
-    "typescript-eslint": "^8.55.0"
+    "typescript-eslint": "^8.55.0",
+    "@mariozechner/pi-ai": "^0.52.12"
   },
   "peerDependencies": {
     "typescript": "^5"
