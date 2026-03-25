@@ -53,7 +53,6 @@ export const executions = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     cost: doublePrecision("cost"),
-    shareLinkId: text("share_link_id"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),
@@ -68,7 +67,6 @@ export const executions = pgTable(
       table.notifiedAt,
       table.readAt,
     ),
-    index("idx_executions_share_link_id").on(table.shareLinkId),
     check(
       "executions_at_most_one_actor",
       sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
@@ -157,65 +155,5 @@ export const packageSchedules = pgTable(
       "package_schedules_at_most_one_actor",
       sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
     ),
-  ],
-);
-
-export const shareLinks = pgTable(
-  "share_links",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    token: text("token").notNull().unique(),
-    packageId: text("package_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    createdBy: text("created_by").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    endUserId: text("end_user_id").references(() => endUsers.id, {
-      onDelete: "set null",
-    }),
-    label: text("label"),
-    manifest: jsonb("manifest"),
-    maxUses: integer("max_uses"),
-    isActive: boolean("is_active").notNull().default(true),
-    usageCount: integer("usage_count").notNull().default(0),
-    expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
-  },
-  (table) => [
-    index("idx_share_links_token").on(table.token),
-    index("idx_share_links_package_id").on(table.packageId),
-    index("idx_share_links_org_id").on(table.orgId),
-    check(
-      "share_links_at_most_one_actor",
-      sql`NOT (created_by IS NOT NULL AND end_user_id IS NOT NULL)`,
-    ),
-  ],
-);
-
-export const shareLinkUsages = pgTable(
-  "share_link_usages",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    shareLinkId: text("share_link_id")
-      .notNull()
-      .references(() => shareLinks.id, { onDelete: "cascade" }),
-    executionId: text("execution_id").references(() => executions.id, {
-      onDelete: "set null",
-    }),
-    ip: text("ip"),
-    userAgent: text("user_agent"),
-    usedAt: timestamp("used_at").defaultNow(),
-  },
-  (table) => [
-    index("idx_share_link_usages_link_id").on(table.shareLinkId),
-    index("idx_share_link_usages_lookup").on(table.shareLinkId, table.usedAt),
   ],
 );

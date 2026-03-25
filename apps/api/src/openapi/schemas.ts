@@ -314,10 +314,6 @@ export const schemas = {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this execution",
       },
-      shareLinkId: {
-        type: ["string", "null"],
-        description: "Share link ID if execution was triggered via a shared link",
-      },
     },
   },
   ExecutionLog: {
@@ -548,67 +544,6 @@ export const schemas = {
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-    },
-  },
-  ShareFlowInfo: {
-    type: "object",
-    properties: {
-      displayName: { type: "string" },
-      description: { type: "string" },
-      input: {
-        type: "object",
-        properties: {
-          schema: { type: "object" },
-        },
-      },
-      output: {
-        type: "object",
-        properties: {
-          schema: { type: "object" },
-        },
-      },
-      providers: { type: "array", items: { type: "object" } },
-      usageCount: { type: "integer" },
-      maxUses: { type: ["integer", "null"] },
-      exhausted: { type: "boolean" },
-      execution: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          status: { type: "string" },
-          result: { type: "object" },
-          error: { type: "string" },
-          logs: { type: "array", items: { type: "object" } },
-        },
-      },
-    },
-  },
-  ShareLink: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      token: { type: "string" },
-      packageId: { type: "string" },
-      orgId: { type: "string" },
-      createdBy: { type: ["string", "null"] },
-      endUserId: { type: ["string", "null"] },
-      label: { type: ["string", "null"] },
-      maxUses: { type: ["integer", "null"], description: "null = unlimited" },
-      isActive: { type: "boolean" },
-      usageCount: { type: "integer" },
-      expiresAt: { type: "string", format: "date-time" },
-      createdAt: { type: "string", format: "date-time" },
-    },
-  },
-  ShareLinkUsage: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      shareLinkId: { type: "string" },
-      executionId: { type: ["string", "null"] },
-      ip: { type: ["string", "null"] },
-      userAgent: { type: ["string", "null"] },
-      usedAt: { type: "string", format: "date-time" },
     },
   },
   FlowMemory: {

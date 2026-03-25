@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Globe, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import { Badge } from "./badge";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -53,12 +53,7 @@ export function ExecutionRow({
         )}
         {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
         <Badge status={execution.status} />
-        {execution.shareLinkId ? (
-          <span className="text-muted-foreground text-xs inline-flex items-center gap-1">
-            <Globe size={12} />
-            {t("exec.sharedLink")}
-          </span>
-        ) : userName ? (
+        {userName ? (
           <span className="text-muted-foreground text-xs">
             {t("exec.user", { name: userName })}
           </span>

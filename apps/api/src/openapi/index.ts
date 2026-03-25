@@ -26,8 +26,6 @@ import { apiKeysPaths } from "./paths/api-keys.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
 import { invitationsPaths } from "./paths/invitations.ts";
-import { sharePaths } from "./paths/share.ts";
-import { shareLinksPaths } from "./paths/share-links.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
@@ -56,8 +54,6 @@ export const openApiSpec = {
     ...organizationsPaths,
     ...profilePaths,
     ...invitationsPaths,
-    ...sharePaths,
-    ...shareLinksPaths,
     ...internalPaths,
     ...welcomePaths,
     ...metaPaths,

@@ -32,12 +32,6 @@ const expectedEndpoints = [
   "PUT /api/flows/{scope}/{name}/config",
   "POST /api/flows/{scope}/{name}/providers/{svcScope}/{svcName}/bind",
   "DELETE /api/flows/{scope}/{name}/providers/{svcScope}/{svcName}/bind",
-  "GET /api/flows/{scope}/{name}/share-links",
-  "POST /api/flows/{scope}/{name}/share-links",
-  "GET /api/flows/{scope}/{name}/share-links/{linkId}",
-  "PATCH /api/flows/{scope}/{name}/share-links/{linkId}",
-  "DELETE /api/flows/{scope}/{name}/share-links/{linkId}",
-  "GET /api/flows/{scope}/{name}/share-links/{linkId}/usages",
   "GET /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
@@ -204,11 +198,6 @@ const expectedEndpoints = [
   // Invitations
   "GET /invite/{token}/info",
   "POST /invite/{token}/accept",
-
-  // Share
-  "GET /share/{token}/flow",
-  "POST /share/{token}/run",
-  "GET /share/{token}/status",
 
   // Welcome
   "POST /api/welcome/setup",

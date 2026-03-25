@@ -30,8 +30,6 @@ const ALL_TABLES = [
   "user_provider_connections",
   "oauth_states",
   "provider_credentials",
-  "share_link_usages",
-  "share_links",
   "package_schedules",
   "org_models",
   "org_provider_keys",

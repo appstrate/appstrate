@@ -29,7 +29,6 @@ import { createFlowsRouter } from "../../src/routes/flows.ts";
 import { createExecutionsRouter } from "../../src/routes/executions.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserFlowsRouter } from "../../src/routes/user-flows.ts";
-import { createShareRouter } from "../../src/routes/share.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
@@ -236,7 +235,6 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/auth", authRouter);
   app.route("/invite", invitationsRouter);
-  app.route("/share", createShareRouter());
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
 

@@ -1,6 +1,6 @@
 /**
  * Centralized flow readiness validation — ensures a flow is properly configured
- * before execution. Called from all execution paths (manual, scheduled, share link).
+ * before execution. Called from all execution paths (manual, scheduled).
  */
 
 import type { LoadedPackage } from "../types/index.ts";

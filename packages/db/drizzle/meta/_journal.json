@@ -15,6 +15,13 @@
       "when": 1774308261070,
       "tag": "0001_jazzy_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774451667785,
+      "tag": "0002_abnormal_dreaming_celestial",
+      "breakpoints": true
     }
   ]
 }

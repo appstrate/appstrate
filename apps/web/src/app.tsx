@@ -4,8 +4,6 @@ import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
 import { PackageEditorPage } from "./pages/package-editor";
 import { ExecutionDetailPage } from "./pages/execution-detail";
-import { ShareableRunPage } from "./pages/shareable-run";
-import { PublicShareRunPage } from "./pages/public-share-run";
 import { SchedulesListPage } from "./pages/schedules-list";
 import { ExecutionsPage } from "./pages/executions-page";
 import { DashboardPage } from "./pages/dashboard";
@@ -248,7 +246,6 @@ export function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="/share/:token" element={<PublicShareRunPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </ErrorBoundary>
@@ -262,7 +259,6 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
-          <Route path="/share/:token" element={<PublicShareRunPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
@@ -271,7 +267,6 @@ export function App() {
           <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
           <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
           <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
-          <Route path="/flows/:scope/:name/run/:execId?" element={<ShareableRunPage />} />
           <Route
             element={
               <GlobalRealtimeSync>

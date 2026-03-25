@@ -9,8 +9,6 @@ import {
   Pencil,
   CalendarPlus,
   Trash2,
-  Link2,
-  Globe,
   FileJson,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +20,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import type { PackageType } from "@appstrate/shared-types";
-import { ShareLinkModal } from "../share-link-modal";
 import { Modal } from "../modal";
 import { JsonView } from "../json-view";
 import { packageEditPath } from "../../lib/package-paths";
@@ -85,16 +82,10 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const navigate = useNavigate();
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
   const isFlow = type === "flow";
   const isMutable = !isBuiltIn && !isHistoricalVersion && isOwned;
-
-  // Share logic (flow-only)
-  const copyShareLink = () => {
-    setShareUrl(`${window.location.origin}/flows/${packageId}/run`);
-  };
 
   // Nothing to show for non-admin on non-flow packages (unless there's a manifest to view)
   if (!isOrgAdmin && !isFlow && !manifest) return null;
@@ -108,27 +99,6 @@ export function PackageActionsDropdown({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {/* ── Share (flow-only) ── */}
-          {isFlow && (
-            <>
-              <DropdownMenuItem onSelect={copyShareLink}>
-                <Link2 size={14} />
-                {t("share.copyLink")}
-              </DropdownMenuItem>
-              {isOrgAdmin && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    window.location.hash = "shareLinks";
-                  }}
-                >
-                  <Globe size={14} />
-                  {t("detail.tabShareLinks")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-            </>
-          )}
-
           {/* ── View Definition ── */}
           {manifest && (
             <>
@@ -245,9 +215,6 @@ export function PackageActionsDropdown({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {isFlow && (
-        <ShareLinkModal open={!!shareUrl} onClose={() => setShareUrl(null)} url={shareUrl ?? ""} />
-      )}
       {manifest && (
         <Modal
           open={definitionOpen}

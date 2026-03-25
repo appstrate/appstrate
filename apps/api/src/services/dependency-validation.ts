@@ -1,6 +1,6 @@
 /**
  * Dependency validation — validates that all required providers are connected before execution.
- * Shared by executions.ts, share.ts, and scheduler.ts.
+ * Shared by executions.ts and scheduler.ts.
  */
 
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";

@@ -33,8 +33,6 @@ export const openApiInfo = {
     { name: "Realtime", description: "Server-Sent Events (SSE) for real-time updates" },
     { name: "Connections", description: "Provider connections (OAuth, API key)" },
     { name: "Invitations", description: "Organization invitation magic links" },
-    { name: "Share", description: "Managed share links for flow execution" },
-    { name: "Share Links", description: "Share link CRUD for authenticated users" },
     { name: "Welcome", description: "Post-invite profile setup" },
     { name: "Health", description: "Health check" },
     { name: "Internal", description: "Container-to-host internal routes" },
