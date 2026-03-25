@@ -42,12 +42,8 @@ export interface FileReference {
   size: number;
 }
 
-export interface ToolMeta {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}
+import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
+export type { ToolMeta };
 
 export interface PromptContext {
   rawPrompt: string;

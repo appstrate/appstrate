@@ -16,6 +16,7 @@ import {
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
 import { asRecord } from "../../lib/safe-json.ts";
+import { getPackageDisplayName } from "../../lib/package-helpers.ts";
 
 export async function getProviderAuthMode(
   provider: string,
@@ -116,7 +117,7 @@ export async function listAllActorConnections(
   for (const pkg of providerPkgs) {
     const manifest = asRecord(pkg.draftManifest);
     providerInfo.set(pkg.id, {
-      displayName: typeof manifest.displayName === "string" ? manifest.displayName : pkg.id,
+      displayName: getPackageDisplayName(pkg),
       logo: typeof manifest.iconUrl === "string" ? manifest.iconUrl : "",
     });
   }

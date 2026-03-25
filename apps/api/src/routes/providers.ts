@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, or, isNull, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { providerCredentials, packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
@@ -27,6 +27,7 @@ import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { asRecord } from "../lib/safe-json.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
@@ -92,9 +93,7 @@ export function createProvidersRouter() {
         pkg: { id: packages.id, draftManifest: packages.draftManifest, source: packages.source },
       })
       .from(packages)
-      .where(
-        and(or(eq(packages.orgId, orgId), isNull(packages.orgId)), eq(packages.type, "provider")),
-      )
+      .where(and(orgOrSystemFilter(orgId), eq(packages.type, "provider")))
       .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
     // Count provider usage across all flows
@@ -320,11 +319,7 @@ export function createProvidersRouter() {
       .select({ draftManifest: packages.draftManifest })
       .from(packages)
       .where(
-        and(
-          or(eq(packages.orgId, orgId), isNull(packages.orgId)),
-          eq(packages.id, providerId),
-          eq(packages.type, "provider"),
-        ),
+        and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
       )
       .limit(1);
 

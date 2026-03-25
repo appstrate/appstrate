@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { eq, and, or, isNull, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/flow-service.ts";
@@ -21,6 +21,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 export async function flowDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
@@ -69,7 +70,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
         .from(packages)
         .where(
           and(
-            or(eq(packages.orgId, orgId), isNull(packages.orgId)),
+            orgOrSystemFilter(orgId),
             eq(packages.type, "provider"),
             inArray(packages.id, providerIds),
           ),

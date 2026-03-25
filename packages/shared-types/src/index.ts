@@ -32,15 +32,18 @@ export interface AppConfig {
 
 // --- Package Types ---
 
+/** A reference to a skill or tool dependency with optional metadata. */
+export interface ResourceEntry {
+  id: string;
+  version?: string;
+  name?: string;
+  description?: string;
+}
+
 // --- Execution Types ---
 
-export type ExecutionStatus =
-  | "pending"
-  | "running"
-  | "success"
-  | "failed"
-  | "timeout"
-  | "cancelled";
+import { executionStatusEnum } from "@appstrate/db/schema";
+export type ExecutionStatus = (typeof executionStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
@@ -48,7 +51,8 @@ export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
 
 // --- Organization Types ---
 
-export type OrgRole = "owner" | "admin" | "member";
+import { orgRoleEnum } from "@appstrate/db/schema";
+export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
 
 export interface OrganizationMember {
   orgId: string;
@@ -126,6 +130,10 @@ export function findMissingDependencies(
   return Object.keys(required).filter((id) => !installed.has(id));
 }
 
+// --- Connection Status ---
+
+export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
+
 // --- User Connection Types ---
 
 export interface UserConnectionEntry {
@@ -154,7 +162,7 @@ export interface ProviderStatus {
   name?: string;
   provider: string;
   description: string;
-  status: "connected" | "not_connected" | "needs_reconnection";
+  status: ConnectionStatusValue;
   authMode?: string;
   connectUrl?: string;
   connectionMode?: "user" | "admin";
@@ -243,8 +251,6 @@ export interface OrgPackageItem {
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   flows: { id: string; displayName: string }[];
-  autoInstalled?: boolean;
-  version?: string | null;
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
   lockVersion?: number;
@@ -359,7 +365,7 @@ export interface AvailableProvider {
   provider: string;
   displayName: string;
   logo?: string;
-  status: "connected" | "not_connected" | "needs_reconnection";
+  status: ConnectionStatusValue;
   authMode?: string;
   connectionId?: string;
   connectedAt?: string;

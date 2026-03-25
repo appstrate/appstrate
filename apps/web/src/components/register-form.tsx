@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useTheme } from "../hooks/use-theme";
+import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { GoogleSignInButton } from "./google-sign-in-button";

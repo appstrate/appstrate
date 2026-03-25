@@ -1,10 +1,11 @@
-import { eq, and, or, isNull, count, sql } from "drizzle-orm";
+import { eq, and, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 interface DbPackageRow {
   id: string;
@@ -62,7 +63,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 export async function getPackage(id: string, orgId?: string): Promise<LoadedPackage | null> {
   const conditions = [eq(packages.id, id)];
   if (orgId) {
-    conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
+    conditions.push(orgOrSystemFilter(orgId));
   }
 
   const pkgRows = await db
@@ -103,7 +104,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
 export async function listPackages(orgId?: string): Promise<LoadedPackage[]> {
   const conditions = [eq(packages.type, "flow")];
   if (orgId) {
-    conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
+    conditions.push(orgOrSystemFilter(orgId));
   }
   const rows = await db
     .select({
@@ -130,7 +131,7 @@ export async function listPackages(orgId?: string): Promise<LoadedPackage[]> {
 export async function getAllPackageIds(orgId?: string, type?: string): Promise<string[]> {
   const conditions = [];
   if (orgId) {
-    conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
+    conditions.push(orgOrSystemFilter(orgId));
   }
   if (type) {
     conditions.push(eq(packages.type, type as PackageType));

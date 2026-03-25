@@ -34,7 +34,7 @@ import { OrgSwitcher, NavMenu } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "./hooks/use-theme";
+import { useTheme } from "./stores/theme-store";
 import { useAuth } from "./hooks/use-auth";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";

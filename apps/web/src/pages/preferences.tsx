@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useTheme } from "../hooks/use-theme";
+import { useTheme } from "../stores/theme-store";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth, refreshAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";

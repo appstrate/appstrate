@@ -1,13 +1,13 @@
 import { db } from "@appstrate/db/client";
 import type { FlowProviderRequirement } from "../../types/index.ts";
-import type { ProviderStatus } from "@appstrate/shared-types";
+import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
 import { getConnection, validateScopes } from "@appstrate/connect";
 import { getProviderAuthMode } from "./providers.ts";
 import { authModeLabel } from "./helpers.ts";
 
 export interface ConnectionStatus {
   provider: string;
-  status: "connected" | "not_connected" | "needs_reconnection";
+  status: ConnectionStatusValue;
   connectionId?: string;
   connectedAt?: string;
   scopesGranted?: string[];
