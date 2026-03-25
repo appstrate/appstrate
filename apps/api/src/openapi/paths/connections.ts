@@ -1,5 +1,5 @@
 export const connectionsPaths = {
-  "/auth/connections": {
+  "/api/connections": {
     get: {
       operationId: "listConnections",
       tags: ["Connections"],
@@ -40,7 +40,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/integrations": {
+  "/api/connections/integrations": {
     get: {
       operationId: "listAvailableProviders",
       tags: ["Connections"],
@@ -82,7 +82,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{scope}/{name}": {
+  "/api/connections/connect/{scope}/{name}": {
     post: {
       operationId: "connectOAuth",
       tags: ["Connections"],
@@ -142,7 +142,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{scope}/{name}/api-key": {
+  "/api/connections/connect/{scope}/{name}/api-key": {
     post: {
       operationId: "connectApiKey",
       tags: ["Connections"],
@@ -205,7 +205,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connect/{scope}/{name}/credentials": {
+  "/api/connections/connect/{scope}/{name}/credentials": {
     post: {
       operationId: "connectCredentials",
       tags: ["Connections"],
@@ -273,7 +273,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/callback": {
+  "/api/connections/callback": {
     get: {
       operationId: "oauthCallback",
       tags: ["Connections"],
@@ -329,7 +329,7 @@ export const connectionsPaths = {
       },
     },
   },
-  "/auth/connections/{scope}/{name}": {
+  "/api/connections/{scope}/{name}": {
     delete: {
       operationId: "disconnectProvider",
       tags: ["Connections"],

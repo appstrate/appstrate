@@ -29,7 +29,7 @@ import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
-import authRouter from "./routes/auth.ts";
+import connectionsRouter from "./routes/connections.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -106,10 +106,10 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
 
 // Paths that skip both auth and org-context middleware (handled by other means or public)
 function skipAuth(path: string): boolean {
-  if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return true;
+  if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
-  if (path === "/auth/callback") return true; // OAuth redirect — no session
+  if (path === "/api/connections/callback") return true; // OAuth redirect — no session
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
   return false;
@@ -285,7 +285,7 @@ app.route("/api/applications", createApplicationsRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
-app.route("/auth", authRouter);
+app.route("/api/connections", connectionsRouter);
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

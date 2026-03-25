@@ -14,7 +14,7 @@ import {
 import type { Actor } from "../../lib/actor.ts";
 
 export function getOAuthCallbackUrl(): string {
-  return `${getEnv().APP_URL}/auth/callback`;
+  return `${getEnv().APP_URL}/api/connections/callback`;
 }
 
 export async function initiateConnection(

@@ -107,7 +107,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
      |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
      |-- PUT /api/flows/:id/config -->|-- schema.ts (AJV validation) → state.ts (Drizzle)
-     |-- POST /auth/connect/:prov --->|-- connection-manager.ts → OAuth2 flow / API key storage
+     |-- POST /api/connections/connect/:prov -->|-- connection-manager.ts → OAuth2 flow / API key storage
      |                                |
      |-- POST /api/flows/:id/run ---->|
      |                                |-- 1. Validate deps, config, input (AJV)

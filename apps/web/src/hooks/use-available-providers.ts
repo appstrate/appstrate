@@ -11,7 +11,9 @@ export function useAvailableProviders() {
     queryKey: ["available-providers", orgId, profileId],
     queryFn: async () => {
       const qs = profileId ? `?profileId=${profileId}` : "";
-      const data = await apiFetch<{ integrations: AvailableProvider[] }>(`/auth/integrations${qs}`);
+      const data = await apiFetch<{ integrations: AvailableProvider[] }>(
+        `/api/connections/integrations${qs}`,
+      );
       return data.integrations;
     },
   });

@@ -23,8 +23,8 @@ import { db } from "@appstrate/db/client";
 
 const router = new Hono<AppEnv>();
 
-// GET /auth/connections — list connections for current actor's profile
-router.get("/connections", async (c) => {
+// GET /api/connections — list connections for current actor's profile
+router.get("/", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
   const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(actor));
@@ -32,7 +32,7 @@ router.get("/connections", async (c) => {
   return c.json({ connections });
 });
 
-// POST /auth/connect/:provider — initiate OAuth or return authUrl
+// POST /api/connections/connect/:provider — initiate OAuth or return authUrl
 router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const actor = getActor(c);
@@ -63,7 +63,7 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   }
 });
 
-// POST /auth/connect/:provider/api-key — create an API key connection
+// POST /api/connections/connect/:provider/api-key — create an API key connection
 router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const actor = getActor(c);
@@ -93,7 +93,7 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
   }
 });
 
-// POST /auth/connect/:provider/credentials — save generic credentials (basic/custom providers)
+// POST /api/connections/connect/:provider/credentials — save generic credentials (basic/custom providers)
 router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const actor = getActor(c);
@@ -128,7 +128,7 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
   }
 });
 
-// GET /auth/callback — OAuth2/OAuth1 callback (detects flow type, exchanges for token, closes popup)
+// GET /api/connections/callback — OAuth2/OAuth1 callback (detects flow type, exchanges for token, closes popup)
 router.get("/callback", async (c) => {
   const error = c.req.query("error");
   if (error) {
@@ -182,7 +182,7 @@ router.get("/callback", async (c) => {
   }
 });
 
-// GET /auth/integrations — list all available providers with connection status for current actor
+// GET /api/connections/integrations — list all available providers with connection status for current actor
 router.get("/integrations", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
@@ -191,10 +191,10 @@ router.get("/integrations", async (c) => {
   return c.json({ integrations });
 });
 
-// DELETE /auth/connections/:provider — disconnect a provider for current actor
+// DELETE /api/connections/:provider — disconnect a provider for current actor
 // If ?connectionId is provided, deletes only that specific connection.
 // Otherwise, deletes ALL connections for the provider on the profile.
-router.delete("/connections/:scope{@[^/]+}/:name", async (c) => {
+router.delete("/:scope{@[^/]+}/:name", async (c) => {
   const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
   const actor = getActor(c);
   const connectionId = c.req.query("connectionId");

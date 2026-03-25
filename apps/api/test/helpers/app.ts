@@ -43,7 +43,7 @@ import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createWebhooksRouter } from "../../src/routes/webhooks.ts";
 import healthRouter from "../../src/routes/health.ts";
-import authRouter from "../../src/routes/auth.ts";
+import connectionsRouter from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
@@ -86,10 +86,10 @@ export function getTestApp(): Hono<AppEnv> {
 
   // Auth paths that skip auth middleware
   function skipAuth(path: string): boolean {
-    if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return true;
+    if (!path.startsWith("/api/")) return true;
     if (path.startsWith("/api/auth/")) return true;
     if (path.startsWith("/api/realtime/")) return true;
-    if (path === "/auth/callback") return true;
+    if (path === "/api/connections/callback") return true;
     if (path === "/api/docs" || path === "/api/openapi.json") return true;
     return false;
   }
@@ -233,7 +233,7 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
-  app.route("/auth", authRouter);
+  app.route("/api/connections", connectionsRouter);
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());

@@ -61,13 +61,13 @@ const expectedEndpoints = [
   "DELETE /api/schedules/{id}",
 
   // Connections
-  "GET /auth/connections",
-  "GET /auth/integrations",
-  "POST /auth/connect/{scope}/{name}",
-  "POST /auth/connect/{scope}/{name}/api-key",
-  "POST /auth/connect/{scope}/{name}/credentials",
-  "GET /auth/callback",
-  "DELETE /auth/connections/{scope}/{name}",
+  "GET /api/connections",
+  "GET /api/connections/integrations",
+  "POST /api/connections/connect/{scope}/{name}",
+  "POST /api/connections/connect/{scope}/{name}/api-key",
+  "POST /api/connections/connect/{scope}/{name}/credentials",
+  "GET /api/connections/callback",
+  "DELETE /api/connections/{scope}/{name}",
 
   // Providers
   "GET /api/providers",

@@ -98,7 +98,7 @@ export function useConnect() {
       if (scopes) body.scopes = scopes;
       if (profileId) body.profileId = profileId;
 
-      const session = await apiFetch<{ authUrl: string }>(`/auth/connect/${provider}`, {
+      const session = await apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
         method: "POST",
         ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
       });
@@ -137,7 +137,7 @@ export function useConnectApiKey() {
       apiKey: string;
       profileId?: string;
     }) => {
-      return apiFetch(`/auth/connect/${provider}/api-key`, {
+      return apiFetch(`/api/connections/connect/${provider}/api-key`, {
         method: "POST",
         body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
@@ -160,7 +160,7 @@ export function useDisconnect() {
         connectionId,
         ...(!connectionId ? { profileId } : {}),
       });
-      return apiFetch(`/auth/connections/${provider}${qs}`, { method: "DELETE" });
+      return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
@@ -264,7 +264,7 @@ export function useConnectCredentials() {
       credentials: Record<string, string>;
       profileId?: string;
     }) => {
-      return apiFetch(`/auth/connect/${provider}/credentials`, {
+      return apiFetch(`/api/connections/connect/${provider}/credentials`, {
         method: "POST",
         body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
