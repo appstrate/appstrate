@@ -1,0 +1,49 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/notion",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Notion",
+  "description": "All-in-one workspace for notes and docs",
+  "iconUrl": "https://cdn.simpleicons.org/notion/white",
+  "categories": [
+    "productivity",
+    "documentation"
+  ],
+  "docsUrl": "https://developers.notion.com/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://api.notion.com/v1/oauth/authorize",
+      "tokenUrl": "https://api.notion.com/v1/oauth/token",
+      "defaultScopes": [],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "authorizationParams": {
+        "owner": "user"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.notion.com/*"
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Notion integration",
+        "url": "https://www.notion.so/my-integrations"
+      },
+      {
+        "label": "Configure OAuth settings"
+      },
+      {
+        "label": "Copy your credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

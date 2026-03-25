@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, TriangleAlert } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { usePackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
@@ -23,8 +24,6 @@ import { ProviderPicker } from "../components/flow-editor/provider-picker";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
-import { FormField } from "../components/form-field";
-import { SectionCard } from "../components/section-card";
 import { Spinner } from "../components/spinner";
 import { EmptyState } from "../components/page-states";
 import { EditorShell } from "../components/editor-shell";
@@ -36,6 +35,8 @@ import type { JSONSchemaObject } from "@appstrate/shared-types";
 import {
   defaultEditorState,
   getManifestName,
+  manifestToMetadata,
+  metadataToManifestPatch,
   getProviderEntries,
   setProviderEntries,
   getResourceEntries,
@@ -94,36 +95,30 @@ function FlowEditorInner({
   const updateManifest = (patch: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
 
-  // Adapters: read/write between manifest and section component interfaces
-  const metadata = useMemo((): MetadataState => {
-    const { scope, id } = getManifestName(state.manifest);
-    return {
-      id,
-      scope,
-      version: (state.manifest.version as string) ?? "1.0.0",
-      displayName: (state.manifest.displayName as string) ?? "",
-      description: (state.manifest.description as string) ?? "",
-      author: (state.manifest.author as string) ?? "",
-      keywords: Array.isArray(state.manifest.keywords) ? (state.manifest.keywords as string[]) : [],
-    };
-  }, [state.manifest]);
+  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
+  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
 
-  const onMetadataChange = (m: MetadataState) =>
-    updateManifest({
-      name: `@${m.scope}/${m.id}`,
-      version: m.version,
-      displayName: m.displayName,
-      description: m.description,
-      author: m.author,
-      keywords: m.keywords,
-    });
+  // Schema fields are stored in local state to preserve fields being edited (empty key).
+  // Only complete fields are persisted to the manifest via fieldsToSchema.
+  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() => ({
+    input: schemaToFields(
+      (state.manifest.input as { schema?: JSONSchemaObject } | undefined)?.schema,
+      "input",
+    ),
+    output: schemaToFields(
+      (state.manifest.output as { schema?: JSONSchemaObject } | undefined)?.schema,
+      "output",
+    ),
+    config: schemaToFields(
+      (state.manifest.config as { schema?: JSONSchemaObject } | undefined)?.schema,
+      "config",
+    ),
+  }));
 
-  const getSchemaFields = (key: "input" | "output" | "config") => {
-    const container = state.manifest[key] as { schema?: JSONSchemaObject } | undefined;
-    return schemaToFields(container?.schema, key);
-  };
+  const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];
 
   const onSchemaChange = (key: "input" | "output" | "config") => (fields: SchemaField[]) => {
+    setSchemaFields((prev) => ({ ...prev, [key]: fields }));
     const schema = fieldsToSchema(fields, key);
     if (schema) {
       updateManifest({ [key]: { schema } });
@@ -236,31 +231,7 @@ function FlowEditorInner({
       hideSubmitBar={activeTab === "json"}
     >
       {activeTab === "general" && (
-        <>
-          <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
-          <SectionCard title={t("editor.execution")}>
-            <FormField
-              id="exec-timeout"
-              label={t("editor.execTimeout")}
-              type="number"
-              value={String((state.manifest.timeout as number) ?? 300)}
-              onChange={(v) => updateManifest({ timeout: parseInt(v) || 300 })}
-              description={t("editor.execTimeoutDesc")}
-            />
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">{t("editor.execLogs")}</p>
-                <p className="text-xs text-muted-foreground">{t("editor.execLogsDesc")}</p>
-              </div>
-              <input
-                id="exec-logs"
-                type="checkbox"
-                checked={(state.manifest["x-logs"] as boolean | undefined) ?? true}
-                onChange={(e) => updateManifest({ "x-logs": e.target.checked })}
-              />
-            </div>
-          </SectionCard>
-        </>
+        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
       )}
       {activeTab === "prompt" && (
         <PromptEditor
@@ -314,17 +285,29 @@ function FlowEditorInner({
         />
       )}
       {activeTab === "tools" && (
-        <ResourceSection
-          type="tool"
-          title={t("editor.tabTools")}
-          emptyLabel={t("editor.toolsEmpty")}
-          selectedEntries={getResourceEntries(state.manifest, "tools")}
-          onChange={(entries) => {
-            const m = { ...state.manifest };
-            setResourceEntries(m, "tools", entries);
-            setState((s) => ({ ...s, manifest: m }));
-          }}
-        />
+        <>
+          {(state.manifest.output as { schema?: { properties?: Record<string, unknown> } } | undefined)
+            ?.schema?.properties &&
+            !getResourceEntries(state.manifest, "tools").some(
+              (e) => e.id === "@appstrate/output",
+            ) && (
+              <Alert variant="warning" className="mb-4">
+                <TriangleAlert className="h-4 w-4" />
+                <AlertDescription>{t("editor.outputToolWarning")}</AlertDescription>
+              </Alert>
+            )}
+          <ResourceSection
+            type="tool"
+            title={t("editor.tabTools")}
+            emptyLabel={t("editor.toolsEmpty")}
+            selectedEntries={getResourceEntries(state.manifest, "tools")}
+            onChange={(entries) => {
+              const m = { ...state.manifest };
+              setResourceEntries(m, "tools", entries);
+              setState((s) => ({ ...s, manifest: m }));
+            }}
+          />
+        </>
       )}
       {activeTab === "json" && (
         <JsonEditor

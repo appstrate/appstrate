@@ -1,0 +1,82 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/google-drive",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Google Drive",
+  "description": "Cloud file storage and synchronization",
+  "iconUrl": "https://cdn.simpleicons.org/googledrive",
+  "categories": [
+    "storage",
+    "productivity"
+  ],
+  "docsUrl": "https://developers.google.com/workspace/drive/api",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "defaultScopes": [
+        "https://www.googleapis.com/auth/drive.file"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "access_type": "offline",
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://www.googleapis.com/drive/*",
+      "https://www.googleapis.com/upload/drive/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "https://www.googleapis.com/auth/drive.file",
+        "label": "Per-file access (recommended)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.readonly",
+        "label": "Read-only access"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive",
+        "label": "Full access"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.metadata.readonly",
+        "label": "Read metadata only"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.appdata",
+        "label": "App data folder"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.photos.readonly",
+        "label": "Read photos/videos"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Google Cloud project",
+        "url": "https://console.cloud.google.com/apis/library/drive.googleapis.com"
+      },
+      {
+        "label": "Configure the OAuth consent screen",
+        "url": "https://console.cloud.google.com/apis/credentials/consent"
+      },
+      {
+        "label": "Create OAuth credentials",
+        "url": "https://console.cloud.google.com/apis/credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

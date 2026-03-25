@@ -181,7 +181,7 @@ export function ResourceSection({
                   <div className="ml-auto shrink-0">
                     {isBuiltIn ? (
                       <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
-                        {t("editor.builtIn", "Integree")}
+                        {t("editor.builtIn")}
                       </span>
                     ) : (
                       <VersionSelect

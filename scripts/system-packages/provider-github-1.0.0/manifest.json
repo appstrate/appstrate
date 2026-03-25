@@ -1,0 +1,79 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/github",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "GitHub",
+  "description": "Code hosting and collaboration platform",
+  "iconUrl": "https://cdn.simpleicons.org/github/white",
+  "categories": [
+    "development",
+    "code"
+  ],
+  "docsUrl": "https://docs.github.com/en/apps/oauth-apps",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://github.com/login/oauth/authorize",
+      "tokenUrl": "https://github.com/login/oauth/access_token",
+      "defaultScopes": [
+        "repo",
+        "read:user"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.github.com/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "repo",
+        "label": "Full repository access"
+      },
+      {
+        "value": "read:user",
+        "label": "Read user profile"
+      },
+      {
+        "value": "user:email",
+        "label": "Read user emails"
+      },
+      {
+        "value": "read:org",
+        "label": "Read org membership"
+      },
+      {
+        "value": "gist",
+        "label": "Create gists"
+      },
+      {
+        "value": "notifications",
+        "label": "Access notifications"
+      },
+      {
+        "value": "workflow",
+        "label": "Update GitHub Actions workflows"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the Authorization callback URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Register a new OAuth application",
+        "url": "https://github.com/settings/developers"
+      },
+      {
+        "label": "Set the callback URL"
+      },
+      {
+        "label": "Copy your credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

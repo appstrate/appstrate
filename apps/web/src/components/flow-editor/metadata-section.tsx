@@ -16,6 +16,7 @@ export interface MetadataState {
   description: string;
   author: string;
   keywords: string[];
+  timeout?: number;
 }
 
 interface MetadataSectionProps {
@@ -94,6 +95,16 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
         placeholder="1.0.0"
         description={t("editor.metaVersionDesc")}
       />
+      {value.timeout !== undefined && (
+        <FormField
+          id="meta-timeout"
+          label={t("editor.execTimeout")}
+          type="number"
+          value={String(value.timeout)}
+          onChange={(v) => update({ timeout: parseInt(v) || 300 })}
+          description={t("editor.execTimeoutDesc")}
+        />
+      )}
       <div className="space-y-2">
         <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
         <Textarea

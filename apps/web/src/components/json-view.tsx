@@ -1,29 +1,63 @@
-import { useMemo } from "react";
-import { JsonView as JsonViewLite, defaultStyles, allExpanded } from "react-json-view-lite";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
-import { CopyButton } from "./result-renderer/components/copy-button";
+import { Copy, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface JsonViewProps {
   data: unknown;
 }
 
+// Use structural classes from the lib (layout, spacing, icons) but override all
+// color classes with Tailwind tokens so the viewer adapts to light/dark theme.
 const jsonStyles = {
   ...defaultStyles,
-  label: "text-foreground font-medium",
-  clickableLabel: "text-foreground font-medium cursor-pointer",
-  stringValue: "text-success",
-  numberValue: "text-primary",
-  booleanValue: "text-primary",
-  nullValue: "text-muted-foreground",
-  undefinedValue: "text-muted-foreground",
-  otherValue: "text-muted-foreground",
-  punctuation: "text-muted-foreground",
-  collapseIcon: "text-muted-foreground",
-  expandIcon: "text-muted-foreground",
-  collapsedContent: "text-muted-foreground",
+  container: `${defaultStyles.container} !bg-transparent`,
+  label: `${defaultStyles.label} !text-foreground font-medium`,
+  clickableLabel: `${defaultStyles.clickableLabel} !text-foreground font-medium`,
+  stringValue: `${defaultStyles.stringValue} !text-success`,
+  numberValue: `${defaultStyles.numberValue} !text-primary`,
+  booleanValue: `${defaultStyles.booleanValue} !text-primary`,
+  nullValue: `${defaultStyles.nullValue} !text-muted-foreground`,
+  undefinedValue: `${defaultStyles.undefinedValue} !text-muted-foreground`,
+  otherValue: `${defaultStyles.otherValue} !text-muted-foreground`,
+  punctuation: `${defaultStyles.punctuation} !text-muted-foreground`,
+  collapseIcon: `${defaultStyles.collapseIcon} !text-muted-foreground`,
+  expandIcon: `${defaultStyles.expandIcon} !text-muted-foreground`,
+  collapsedContent: `${defaultStyles.collapsedContent} !text-muted-foreground`,
   noQuotesForStringValues: false,
   quotesForFieldNames: true,
 };
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn("h-7 w-7 text-muted-foreground", copied && "text-success")}
+      onClick={handleCopy}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </Button>
+  );
+}
 
 export function JsonView({ data }: JsonViewProps) {
   const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/stripe",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Stripe",
+  "description": "Payment processing platform",
+  "iconUrl": "https://cdn.simpleicons.org/stripe",
+  "categories": [
+    "payments",
+    "finance"
+  ],
+  "docsUrl": "https://stripe.com/docs/api",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Stripe API key (sk_...)"
+          }
+        },
+        "required": [
+          "api_key"
+        ]
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.stripe.com/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Get your API key",
+        "url": "https://dashboard.stripe.com/apikeys"
+      },
+      {
+        "label": "Connect on the Connectors page"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

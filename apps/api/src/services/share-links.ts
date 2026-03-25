@@ -3,6 +3,7 @@ import { eq, and, gt, sql } from "drizzle-orm";
 import { db } from "../lib/db.ts";
 import { shareLinks, shareLinkUsages } from "@appstrate/db/schema";
 import type { Actor } from "../lib/actor.ts";
+import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { InferSelectModel } from "drizzle-orm";
 
 const DEFAULT_EXPIRES_DAYS = 7;
@@ -109,10 +110,7 @@ export async function useShareLink(
       packageId: row.packageId,
       createdBy: row.createdBy,
       orgId: row.orgId,
-      manifest:
-        row.manifest !== null && typeof row.manifest === "object" && !Array.isArray(row.manifest)
-          ? (row.manifest as Record<string, unknown>)
-          : null,
+      manifest: asRecordOrNull(row.manifest),
     };
   });
 

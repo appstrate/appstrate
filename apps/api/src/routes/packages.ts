@@ -53,6 +53,7 @@ import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middlewar
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import { asRecord } from "../lib/safe-json.ts";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
@@ -498,12 +499,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // After-create hook
     if (rcfg.afterCreate) {
-      const finalManifest = (item.draftManifest ?? {}) as Record<string, unknown>;
+      const finalManifest = asRecord(item.draftManifest);
       await rcfg.afterCreate({ packageId: item.id, orgId, manifest: finalManifest });
     }
 
     // Create initial version (non-fatal)
-    const finalManifest = (item.draftManifest ?? {}) as Record<string, unknown>;
+    const finalManifest = asRecord(item.draftManifest);
     await createVersionSafe({
       packageId: item.id,
       orgId,

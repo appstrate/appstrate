@@ -1,0 +1,49 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/brevo",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Brevo",
+  "description": "Email marketing and CRM platform",
+  "iconUrl": "https://cdn.simpleicons.org/brevo",
+  "categories": [
+    "email",
+    "marketing",
+    "crm"
+  ],
+  "docsUrl": "https://developers.brevo.com/docs/getting-started",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Brevo API v3 key"
+          }
+        },
+        "required": [
+          "api_key"
+        ]
+      }
+    },
+    "credentialHeaderName": "api-key",
+    "credentialHeaderPrefix": "",
+    "authorizedUris": [
+      "https://api.brevo.com/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Get your API key",
+        "url": "https://app.brevo.com/settings/keys/api"
+      },
+      {
+        "label": "Connect on the Connectors page"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

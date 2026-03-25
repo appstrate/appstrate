@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import type { JSONSchemaObject, ProviderStatus } from "@appstrate/shared-types";
 import { InputFields } from "./input-fields";
 import { initInputValues, buildInputPayload } from "./input-utils";
-import { ResultRenderer } from "./result-renderer";
+import { JsonView } from "./json-view";
 import { Spinner } from "./spinner";
 import { InlineMarkdown } from "./markdown";
 import { ExecutionTimeline } from "./log-viewer";
@@ -292,7 +292,7 @@ export function FlowRunCard({
               {error}
             </div>
           )}
-          {result && <ResultRenderer data={result} />}
+          {result && Object.keys(result).length > 0 && <JsonView data={result} />}
           {onRerun && (
             <Button variant="outline" className="w-full" onClick={onRerun}>
               {t("shareable.rerun")}

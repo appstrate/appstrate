@@ -88,12 +88,6 @@ export class PiAdapter implements ExecutionAdapter {
       const hasOutputSchema =
         ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
 
-      const disabledTools: string[] = [];
-      if (ctx.logsEnabled === false) disabledTools.push("log");
-      if (disabledTools.length > 0) {
-        containerEnv.DISABLED_TOOLS = disabledTools.join(",");
-      }
-
       if (hasOutputSchema) {
         containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
       }

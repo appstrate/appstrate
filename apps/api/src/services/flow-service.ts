@@ -4,12 +4,7 @@ import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedPackage } from "../types/index.ts";
-
-function asRecord(val: unknown): Record<string, unknown> {
-  return val !== null && typeof val === "object" && !Array.isArray(val)
-    ? (val as Record<string, unknown>)
-    : {};
-}
+import { asRecord } from "../lib/safe-json.ts";
 
 interface DbPackageRow {
   id: string;

@@ -7,6 +7,7 @@ import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
+import { asRecord } from "../../lib/safe-json.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -277,11 +278,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     autoInstalled: data.autoInstalled,
     version: typeof m.version === "string" ? m.version : null,
     manifestName: typeof m.name === "string" ? m.name : null,
-    manifest: (data.draftManifest !== null &&
-    typeof data.draftManifest === "object" &&
-    !Array.isArray(data.draftManifest)
-      ? data.draftManifest
-      : {}) as Record<string, unknown>,
+    manifest: asRecord(data.draftManifest),
     lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
     flows: await getPackageDisplayNames(packageIds),

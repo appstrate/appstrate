@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 /**
- * Tests for buildDataSchema() in output extension.
+ * Tests for buildDataSchema() in the output system tool.
  *
  * Since the extension reads process.env.OUTPUT_SCHEMA at import time,
  * we must set the env var BEFORE dynamically importing the module.
  * Each test uses a fresh import via cache-busting query string.
+ *
+ * The source lives in system-packages/tool-output-1.0.0/output.ts but
+ * depends on @mariozechner/pi-ai (installed in runtime-pi/node_modules).
+ * We import from system-packages — Bun resolves the Pi SDK via the
+ * runtime-pi workspace's node_modules.
  */
 
 /** Helper: create a mock pi that captures registered tools. */
@@ -19,6 +24,12 @@ function createMockPi() {
   };
 }
 
+/** Absolute path to the output extension source. */
+const OUTPUT_PATH = new URL(
+  "../../scripts/system-packages/tool-output-1.0.0/output.ts",
+  import.meta.url,
+).pathname;
+
 /** Helper: import the extension with a fresh module evaluation. */
 async function importExtension(envValue?: string) {
   // Set or clear the env var before import
@@ -30,7 +41,7 @@ async function importExtension(envValue?: string) {
 
   // Cache-bust to force re-evaluation of module-level code
   const cacheBuster = `${Date.now()}-${Math.random()}`;
-  const mod = await import(`../extensions/output.ts?v=${cacheBuster}`);
+  const mod = await import(`${OUTPUT_PATH}?v=${cacheBuster}`);
   const factory = mod.default;
 
   const pi = createMockPi();

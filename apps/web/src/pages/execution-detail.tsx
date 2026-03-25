@@ -16,7 +16,6 @@ import { Coins, Database, FileText, Globe, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
-import { ResultRenderer } from "../components/result-renderer";
 import { InputModal } from "../components/input-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useProfiles } from "../hooks/use-profiles";
@@ -278,7 +277,7 @@ export function ExecutionDetailPage() {
 
       {activeTab === "result" &&
         (hasResult ? (
-          <ResultRenderer data={finalData ?? undefined} />
+          <JsonView data={finalData!} />
         ) : (
           <EmptyState message={t("exec.emptyResult")} icon={FileText} compact />
         ))}

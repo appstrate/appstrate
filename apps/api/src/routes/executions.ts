@@ -202,42 +202,72 @@ export async function executeFlowInBackground(
       throw err;
     }
 
-    const hasResult = Object.keys(structuredData).length > 0;
+    // Determine outcome: fail only on adapter error or zero tokens (LLM unreachable).
+    // A flow without the output tool succeeds even without structured data.
+    const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+    const error =
+      lastAdapterError ??
+      (totalTokens === 0
+        ? promptContext.proxyUrl
+          ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
+          : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
+        : null);
 
-    if (hasResult) {
-      // Validate output against schema (if defined)
-      const outputSchema = flow.manifest.output?.schema;
-      if (outputSchema) {
-        const outputValidation = validateOutput(structuredData, outputSchema);
-        if (!outputValidation.valid) {
-          await appendExecutionLog(
-            executionId,
-            orgId,
-            "system",
-            "output_validation",
-            null,
-            { valid: false, errors: outputValidation.errors },
-            "warn",
-          );
-          logger.warn("Output validation failed", { executionId, errors: outputValidation.errors });
+    if (signal.aborted) return;
+
+    const duration = Date.now() - startTime;
+
+    if (error) {
+      await updateExecution(executionId, {
+        status: "failed",
+        error,
+        completedAt: new Date().toISOString(),
+        duration,
+        notifiedAt: new Date().toISOString(),
+      });
+      await appendExecutionLog(
+        executionId,
+        orgId,
+        "system",
+        "execution_completed",
+        null,
+        { executionId, status: "failed", error },
+        "error",
+      );
+      dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration }, applicationId);
+    } else {
+      // --- Success path (with or without output data) ---
+
+      // Validate output against schema (if any output was produced)
+      const hasResult = Object.keys(structuredData).length > 0;
+      if (hasResult) {
+        const outputSchema = flow.manifest.output?.schema;
+        if (outputSchema) {
+          const outputValidation = validateOutput(structuredData, outputSchema);
+          if (!outputValidation.valid) {
+            await appendExecutionLog(
+              executionId,
+              orgId,
+              "system",
+              "output_validation",
+              null,
+              { valid: false, errors: outputValidation.errors },
+              "warn",
+            );
+            logger.warn("Output validation failed", {
+              executionId,
+              errors: outputValidation.errors,
+            });
+          }
         }
       }
 
-      // Guard: don't overwrite "cancelled" status
-      if (signal.aborted) return;
+      const result: Record<string, unknown> = hasResult ? { data: structuredData } : {};
 
-      const duration = Date.now() - startTime;
-      const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-
-      // Build result object
-      const result: Record<string, unknown> = { data: structuredData };
-
-      // Persist memories
       if (memories.length > 0) {
         await addPackageMemories(flow.id, orgId, memories, executionId);
       }
 
-      // Record billing (keep existing cloud billing logic exactly as-is)
       if (cloud && accumulatedCost > 0) {
         try {
           await cloud.cloudHooks.recordUsage(orgId, executionId, accumulatedCost);
@@ -259,11 +289,15 @@ export async function executeFlowInBackground(
         duration,
         notifiedAt: new Date().toISOString(),
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
-        ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
+        ...(totalTokens > 0
+          ? { tokenUsage: { ...accumulated } as Record<string, unknown> }
+          : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
-      await appendExecutionLog(executionId, orgId, "result", "result", null, result, "info");
+      if (hasResult) {
+        await appendExecutionLog(executionId, orgId, "result", "result", null, result, "info");
+      }
       await appendExecutionLog(
         executionId,
         orgId,
@@ -273,50 +307,7 @@ export async function executeFlowInBackground(
         { executionId, status: "success" },
         "info",
       );
-      dispatchWebhooks(
-        orgId,
-        "completed",
-        executionId,
-        flow.id,
-        { result, duration },
-        applicationId,
-      );
-    } else {
-      // Keep the existing no-result/failed path but update variable references
-      if (signal.aborted) return;
-
-      const duration = Date.now() - startTime;
-      const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-
-      const error =
-        lastAdapterError ??
-        (totalTokens === 0
-          ? promptContext.proxyUrl
-            ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
-            : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
-          : "No result returned from adapter");
-
-      await updateExecution(executionId, {
-        status: "failed",
-        error,
-        completedAt: new Date().toISOString(),
-        duration,
-        notifiedAt: new Date().toISOString(),
-      });
-      await appendExecutionLog(
-        executionId,
-        orgId,
-        "system",
-        "execution_completed",
-        null,
-        {
-          executionId,
-          status: "failed",
-          error,
-        },
-        "error",
-      );
-      dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration }, applicationId);
+      dispatchWebhooks(orgId, "completed", executionId, flow.id, { result, duration }, applicationId);
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status

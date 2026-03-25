@@ -7,7 +7,10 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { log } from "../lib/emit.ts";
+
+function emit(obj: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -26,7 +29,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params) {
       const { level, message } = params as { level: "info" | "warn" | "error"; message: string };
-      log(level, message);
+      emit({ type: "log", level, message });
       return {
         content: [{ type: "text", text: `Logged [${level}]: ${message}` }],
         details: { level, message },

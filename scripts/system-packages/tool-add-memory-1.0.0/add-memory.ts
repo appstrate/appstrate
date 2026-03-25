@@ -7,7 +7,10 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { emitAddMemory } from "../lib/emit.ts";
+
+function emit(obj: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -23,9 +26,10 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params) {
       const { content } = params as { content: string };
-      emitAddMemory(content);
+      emit({ type: "add_memory", content });
       return {
         content: [{ type: "text", text: "Memory saved" }],
+        details: { content },
       };
     },
   });

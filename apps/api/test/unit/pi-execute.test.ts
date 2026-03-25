@@ -257,18 +257,6 @@ describe("PiAdapter.execute()", () => {
     expect(spec.env.OUTPUT_SCHEMA).toBeUndefined();
   });
 
-  it("disables log tool when logsEnabled is false", async () => {
-    const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
-
-    await collectMessages(
-      adapter.execute("exec-008", basePromptContext({ logsEnabled: false }), 30),
-    );
-
-    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
-    expect(spec.env.DISABLED_TOOLS).toContain("log");
-  });
-
   it("cleans up sidecar and boundary even on error", async () => {
     const orchestrator = createMockOrchestrator({
       startWorkload: mock(() => Promise.reject(new Error("start failed"))),

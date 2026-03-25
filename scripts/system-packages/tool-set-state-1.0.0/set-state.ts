@@ -7,7 +7,10 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { emitSetState } from "../lib/emit.ts";
+
+function emit(obj: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -25,9 +28,10 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params) {
       const { state } = params as { state: Record<string, unknown> };
-      emitSetState(state);
+      emit({ type: "set_state", state });
       return {
         content: [{ type: "text", text: "State saved" }],
+        details: { state },
       };
     },
   });

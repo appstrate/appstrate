@@ -22,6 +22,19 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   };
 }
 
+/** Context with all system tools available (mimics backward compat behavior). */
+function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptContext {
+  return baseContext({
+    availableTools: [
+      { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
+      { id: "@appstrate/output", name: "Output", description: "Return execution result" },
+      { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
+      { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+    ],
+    ...overrides,
+  });
+}
+
 // ─── Core structure ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — core structure", () => {
@@ -30,22 +43,6 @@ describe("buildEnrichedPrompt — core structure", () => {
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
     expect(prompt).toContain("ephemeral container");
-  });
-
-  it("includes persistence section", () => {
-    const prompt = buildEnrichedPrompt(baseContext());
-    expect(prompt).toContain("### Persistence");
-    expect(prompt).toContain("set_state");
-    expect(prompt).toContain("add_memory");
-  });
-
-  it("includes output section with output tool", () => {
-    const prompt = buildEnrichedPrompt(baseContext());
-    expect(prompt).toContain("## Output");
-    expect(prompt).toContain("output(data)");
-    expect(prompt).not.toContain("report(content)");
-    expect(prompt).toContain("set_state(state)");
-    expect(prompt).toContain("add_memory(content)");
   });
 
   it("appends raw prompt at the end after separator", () => {
@@ -66,6 +63,46 @@ describe("buildEnrichedPrompt — core structure", () => {
     const ctx = baseContext({ timeout: undefined });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
+  });
+});
+
+// ─── Tool documentation (TOOL.md) ──────────────────────────
+
+describe("buildEnrichedPrompt — tool documentation", () => {
+  it("includes TOOL.md content for available tools", () => {
+    const ctx = baseContext({
+      availableTools: [
+        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
+      ],
+      toolDocs: [{ id: "@appstrate/log", content: "## User Communication\n\nUse the `log` tool." }],
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("## User Communication");
+    expect(prompt).toContain("Use the `log` tool.");
+  });
+
+  it("includes multiple tool docs", () => {
+    const ctx = baseContext({
+      availableTools: [
+        { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
+        { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
+      ],
+      toolDocs: [
+        { id: "@appstrate/set-state", content: "## State Persistence\n\nUse `set_state`." },
+        { id: "@appstrate/add-memory", content: "## Memory\n\nUse `add_memory`." },
+      ],
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("## State Persistence");
+    expect(prompt).toContain("## Memory");
+  });
+
+  it("omits tool doc section when no toolDocs", () => {
+    const ctx = baseContext({ toolDocs: undefined });
+    const prompt = buildEnrichedPrompt(ctx);
+    // Should not contain any tool-specific documentation sections
+    expect(prompt).not.toContain("## User Communication");
+    expect(prompt).not.toContain("## State Persistence");
   });
 });
 
@@ -169,8 +206,8 @@ describe("buildEnrichedPrompt — configuration", () => {
 // ─── Previous state ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — previous state", () => {
-  it("includes previous state as JSON block", () => {
-    const ctx = baseContext({
+  it("includes previous state when set-state tool is available", () => {
+    const ctx = contextWithSystemTools({
       previousState: { cursor: "abc123", processedCount: 42 },
     });
     const prompt = buildEnrichedPrompt(ctx);
@@ -181,7 +218,18 @@ describe("buildEnrichedPrompt — previous state", () => {
   });
 
   it("omits previous state when null", () => {
-    const ctx = baseContext({ previousState: null });
+    const ctx = contextWithSystemTools({ previousState: null });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Previous State");
+  });
+
+  it("omits previous state when set-state tool is not available", () => {
+    const ctx = baseContext({
+      previousState: { cursor: "abc123" },
+      availableTools: [
+        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
+      ],
+    });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Previous State");
   });
@@ -190,8 +238,8 @@ describe("buildEnrichedPrompt — previous state", () => {
 // ─── Memories ───────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — memories", () => {
-  it("includes memories section", () => {
-    const ctx = baseContext({
+  it("includes memories section when add-memory tool is available", () => {
+    const ctx = contextWithSystemTools({
       memories: [
         { id: 1, content: "Gmail API paginates at 100 results", createdAt: "2025-01-15" },
         { id: 2, content: "Use batch endpoint for efficiency", createdAt: "2025-01-16" },
@@ -205,7 +253,20 @@ describe("buildEnrichedPrompt — memories", () => {
   });
 
   it("omits memory section when no memories", () => {
-    const ctx = baseContext({ memories: [] });
+    const ctx = contextWithSystemTools({ memories: [] });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Memory");
+  });
+
+  it("omits memory section when add-memory tool is not available", () => {
+    const ctx = baseContext({
+      memories: [
+        { id: 1, content: "Some memory", createdAt: "2025-01-15" },
+      ],
+      availableTools: [
+        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
+      ],
+    });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Memory");
   });
@@ -428,57 +489,6 @@ describe("buildEnrichedPrompt — documents", () => {
   });
 });
 
-// ─── Output schema ──────────────────────────────────────────
-
-describe("buildEnrichedPrompt — output", () => {
-  it("includes output tool with field list when output schema defined", () => {
-    const ctx = baseContext({
-      schemas: {
-        output: {
-          type: "object",
-          properties: {
-            summary: { type: "string", description: "Brief summary" },
-            count: { type: "number", description: "Total items processed" },
-          },
-          required: ["summary"],
-        },
-      },
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### output(data)");
-    expect(prompt).toContain("summary");
-    expect(prompt).toContain("Brief summary");
-    expect(prompt).toContain("required");
-    expect(prompt).toContain("count");
-    expect(prompt).not.toContain("report(content)");
-  });
-
-  it("includes generic output instruction when no schema", () => {
-    const ctx = baseContext({ schemas: {} });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### output(data)");
-    expect(prompt).toContain("any JSON object");
-    expect(prompt).not.toContain("report(content)");
-  });
-
-  it("never includes report tool", () => {
-    const ctx = baseContext({
-      schemas: {
-        output: {
-          type: "object",
-          properties: {
-            value: { type: "string", description: "Value" },
-          },
-        },
-      },
-    });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### output(data)");
-    expect(prompt).not.toContain("report(content)");
-  });
-});
-
 // ─── Tools and skills ───────────────────────────────────────
 
 describe("buildEnrichedPrompt — tools and skills", () => {
@@ -520,22 +530,5 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     const ctx = baseContext({ availableSkills: [] });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
-  });
-});
-
-// ─── User communication ────────────────────────────────────
-
-describe("buildEnrichedPrompt — user communication", () => {
-  it("includes log section when logs enabled (default)", () => {
-    const ctx = baseContext();
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## User Communication");
-    expect(prompt).toContain("`log` tool");
-  });
-
-  it("omits log section when logs disabled", () => {
-    const ctx = baseContext({ logsEnabled: false });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## User Communication");
   });
 });

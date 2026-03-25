@@ -11,7 +11,10 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { emitOutput } from "../lib/emit.ts";
+
+function emit(obj: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
 
 function buildDataSchema() {
   const raw = process.env.OUTPUT_SCHEMA;
@@ -43,17 +46,18 @@ export default function (pi: ExtensionAPI) {
     name: "output",
     label: "Output",
     description:
-      "Return data as the execution result. Each call is deep-merged into the final output. " +
-      "If an output schema is defined, the merged result is validated against it.",
+      "MANDATORY — call at least once before finishing. Returns data as the execution result. " +
+      "Each call is deep-merged into the final output. Call with {} if you have no structured data to return.",
     parameters: Type.Object({
       data: buildDataSchema(),
     }),
 
     async execute(_toolCallId, params) {
       const { data } = params as { data: Record<string, unknown> };
-      emitOutput(data);
+      emit({ type: "output", data });
       return {
         content: [{ type: "text", text: "Output recorded" }],
+        details: { data },
       };
     },
   });

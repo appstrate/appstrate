@@ -19,6 +19,7 @@ import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { db } from "../lib/db.ts";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { asRecord } from "../lib/safe-json.ts";
 
 const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
   flow: FLOW_CONFIG,
@@ -128,12 +129,7 @@ async function forkWithConfig(
   if (existing) return { code: "NAME_COLLISION", existingId: targetId };
 
   // Build manifest from the published version snapshot, update name
-  const versionManifest =
-    versionRow.manifest !== null &&
-    typeof versionRow.manifest === "object" &&
-    !Array.isArray(versionRow.manifest)
-      ? (versionRow.manifest as Record<string, unknown>)
-      : {};
+  const versionManifest = asRecord(versionRow.manifest);
   const updatedManifest = { ...versionManifest, name: targetId };
 
   // Create the fork package (draft)

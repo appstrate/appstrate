@@ -1,4 +1,5 @@
 import type { FlowEditorState, ProviderEntry, ResourceEntry } from "./types";
+import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
 import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
 import { getOrderedKeys } from "@appstrate/shared-types";
@@ -17,7 +18,16 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): FlowEd
       displayName: "",
       description: "",
       author: userEmail ?? "",
-      dependencies: { providers: {} },
+      timeout: 300,
+      dependencies: {
+        providers: {},
+        tools: {
+          "@appstrate/log": "*",
+          "@appstrate/output": "*",
+          "@appstrate/set-state": "*",
+          "@appstrate/add-memory": "*",
+        },
+      },
     },
     prompt: "",
   };
@@ -27,8 +37,36 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): FlowEd
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {
   const raw = (m.name as string) || "";
-  const match = raw.match(/^@([^/]+)\/(.+)$/);
+  const match = raw.match(/^@([^/]+)\/(.*)$/);
   return match ? { scope: match[1], id: match[2] } : { scope: "", id: raw };
+}
+
+/** Extract MetadataState from a manifest object. Includes timeout if present (flows only). */
+export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
+  const { scope, id } = getManifestName(m);
+  return {
+    id,
+    scope,
+    version: (m.version as string) ?? "1.0.0",
+    displayName: (m.displayName as string) ?? "",
+    description: (m.description as string) ?? "",
+    author: (m.author as string) ?? "",
+    keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
+    ...(typeof m.timeout === "number" ? { timeout: m.timeout } : {}),
+  };
+}
+
+/** Apply MetadataState changes back into a manifest patch. */
+export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
+  return {
+    name: m.scope ? `@${m.scope}/${m.id}` : m.id,
+    version: m.version,
+    displayName: m.displayName,
+    description: m.description,
+    author: m.author,
+    keywords: m.keywords,
+    ...(m.timeout !== undefined ? { timeout: m.timeout } : {}),
+  };
 }
 
 export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
