@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, ExternalLink } from "lucide-react";
+import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { InputModal } from "./input-modal";
@@ -88,12 +88,6 @@ export function RunFlowButton({
     }
   };
 
-  const handleOpenExternal = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    window.open(`/flows/${packageId}/run`, "_blank");
-  };
-
   const isPending = fetching || runFlow.isPending;
   const isDisabled = disabled || isPending;
 
@@ -102,19 +96,11 @@ export function RunFlowButton({
       {showLabel ? (
         <Button
           variant={variant}
-          className="gap-0 pr-0"
           onClick={handleClick}
           disabled={isDisabled}
           title={disabled ? disabledTitle : t("detail.run")}
         >
           {isPending ? <Spinner /> : t("detail.run")}
-          <span
-            className="ml-3 border-l border-primary-foreground/25 pl-2 pr-2.5 -my-1 py-1 opacity-70 hover:opacity-100 transition-opacity"
-            onClick={handleOpenExternal}
-            role="link"
-          >
-            <ExternalLink size={14} />
-          </span>
         </Button>
       ) : (
         <Button

@@ -12,7 +12,7 @@ import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Coins, Globe, Shield } from "lucide-react";
+import { Coins, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
@@ -175,12 +175,7 @@ export function ExecutionDetailPage() {
         >
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </span>
-        {execution.shareLinkId ? (
-          <span className="text-sm text-muted-foreground inline-flex items-center gap-1">
-            <Globe size={14} />
-            {t("exec.sharedLink")}
-          </span>
-        ) : userName ? (
+        {userName ? (
           <span className="text-sm text-muted-foreground">
             {t("exec.user", { name: userName })}
           </span>

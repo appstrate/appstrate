@@ -31,7 +31,7 @@ export class ModelNotConfiguredError extends Error {
 
 /**
  * Resolve provider profiles, config, and validate flow readiness.
- * Shared preflight logic for all execution paths (manual run, scheduled, share link).
+ * Shared preflight logic for all execution paths (manual run, scheduled).
  */
 export async function resolvePreflightContext(params: {
   flow: LoadedPackage;
@@ -143,7 +143,7 @@ export function buildPromptContext(params: {
 
 /**
  * Build the full execution context (tokens, config, state, providers, package, version).
- * Shared by executions.ts, share.ts, and scheduler.ts.
+ * Shared by executions.ts and scheduler.ts.
  */
 export async function buildExecutionContext(params: {
   executionId: string;

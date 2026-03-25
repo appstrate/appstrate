@@ -19,7 +19,6 @@ import {
   orgProviderKeys,
   orgModels,
   connectionProfiles,
-  shareLinks,
   orgInvitations,
   packageVersions,
 } from "@appstrate/db/schema";
@@ -314,27 +313,6 @@ export async function seedConnectionProfile(
     })
     .returning();
   return profile!;
-}
-
-// ─── Share Links ──────────────────────────────────────────
-
-type ShareLinkInsert = Partial<InferInsertModel<typeof shareLinks>> & {
-  packageId: string;
-  orgId: string;
-};
-
-export async function seedShareLink(
-  overrides: ShareLinkInsert,
-): Promise<InferSelectModel<typeof shareLinks>> {
-  const [link] = await db
-    .insert(shareLinks)
-    .values({
-      token: crypto.randomUUID(),
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24), // 24h
-      ...overrides,
-    })
-    .returning();
-  return link!;
 }
 
 // ─── Invitations ──────────────────────────────────────────

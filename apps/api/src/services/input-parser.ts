@@ -1,6 +1,6 @@
 /**
  * Request input parsing — parses input from FormData or JSON body.
- * Shared by executions.ts and share.ts.
+ * Shared by executions.ts.
  */
 
 import type { Context } from "hono";

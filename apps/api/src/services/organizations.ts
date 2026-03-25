@@ -7,7 +7,6 @@ import {
   user,
   executions,
   executionLogs,
-  shareLinks,
   flowProviderBindings,
   packageSchedules,
   packageConfigs,
@@ -254,7 +253,6 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // execution_logs → executions (cascade exists, but org_id FK needs manual delete)
     await tx.delete(executionLogs).where(eq(executionLogs.orgId, orgId));
     await tx.delete(executions).where(eq(executions.orgId, orgId));
-    await tx.delete(shareLinks).where(eq(shareLinks.orgId, orgId));
     await tx.delete(flowProviderBindings).where(eq(flowProviderBindings.orgId, orgId));
     await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
     await tx.delete(packageConfigs).where(eq(packageConfigs.orgId, orgId));
