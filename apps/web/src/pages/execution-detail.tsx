@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Coins, Database, FileText, Globe, Shield } from "lucide-react";
+import { Coins, Globe, Shield } from "lucide-react";
 import { Badge } from "../components/badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
@@ -86,7 +86,6 @@ export function ExecutionDetailPage() {
     ["logs", "result", "state", "usage"] as const,
     "logs",
   );
-  const hasUserSelected = useRef(false);
 
   const { historicalLogs, structuredData } = useMemo(() => {
     if (!logs) return { historicalLogs: [], structuredData: null };
@@ -99,18 +98,6 @@ export function ExecutionDetailPage() {
   const hasResult = finalData && Object.keys(finalData).length > 0;
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
-
-  // Reset hasUserSelected when switching executions
-  useEffect(() => {
-    hasUserSelected.current = false;
-  }, [execId]);
-
-  // Auto-switch to result tab when result data arrives (including during streaming)
-  useEffect(() => {
-    if (hasResult && !hasUserSelected.current) {
-      setActiveTab("result");
-    }
-  }, [hasResult, setActiveTab]);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -225,10 +212,7 @@ export function ExecutionDetailPage() {
       <div className="flex items-center justify-between gap-4 mb-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => {
-            hasUserSelected.current = true;
-            setActiveTab(v as "logs" | "result" | "state" | "usage");
-          }}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
         >
           <TabsList>
             <TabsTrigger value="logs">
@@ -239,9 +223,8 @@ export function ExecutionDetailPage() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>
-            <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>
-            {/* TODO: hide in Cloud mode (visible OSS only) — use useAppConfig().features */}
+            {hasResult && <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>}
+            {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
             <TabsTrigger value="usage">{t("exec.tabUsage")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -275,19 +258,9 @@ export function ExecutionDetailPage() {
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "result" &&
-        (hasResult ? (
-          <JsonView data={finalData!} />
-        ) : (
-          <EmptyState message={t("exec.emptyResult")} icon={FileText} compact />
-        ))}
+      {activeTab === "result" && hasResult && <JsonView data={finalData!} />}
 
-      {activeTab === "state" &&
-        (stateData ? (
-          <JsonView data={stateData} />
-        ) : (
-          <EmptyState message={t("exec.emptyState")} icon={Database} compact />
-        ))}
+      {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
       {activeTab === "usage" &&
         (() => {
