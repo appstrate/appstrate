@@ -1,4 +1,4 @@
-import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
@@ -8,6 +8,7 @@ import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
+import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -43,19 +44,10 @@ async function getPackageDisplayNames(
     .from(packages)
     .where(inArray(packages.id, packageIds));
 
-  return rows.map((r) => {
-    const m = (
-      r.draftManifest !== null &&
-      typeof r.draftManifest === "object" &&
-      !Array.isArray(r.draftManifest)
-        ? r.draftManifest
-        : {}
-    ) as Partial<Manifest>;
-    return {
-      id: r.id,
-      displayName: m.displayName ?? r.id,
-    };
-  });
+  return rows.map((r) => ({
+    id: r.id,
+    displayName: getPackageDisplayName(r),
+  }));
 }
 
 /** Find packages that depend on the target package (via manifest dependencies). */
@@ -71,17 +63,11 @@ async function findDependentPackages(
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of orgPkgs) {
     if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
-    const m = (
-      pkg.draftManifest !== null &&
-      typeof pkg.draftManifest === "object" &&
-      !Array.isArray(pkg.draftManifest)
-        ? pkg.draftManifest
-        : {}
-    ) as Partial<Manifest>;
+    const m = asRecord(pkg.draftManifest) as Partial<Manifest>;
     const deps = extractDependencies(m);
     for (const dep of deps) {
       if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
-        dependents.push({ id: pkg.id, displayName: m.displayName ?? pkg.id });
+        dependents.push({ id: pkg.id, displayName: getPackageDisplayName(pkg) });
         break;
       }
     }
@@ -193,7 +179,7 @@ export async function updateOrgItem(
 
 /** List all items of a type in the org with usedByFlows count. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
-  const orgFilter = or(eq(packages.orgId, orgId), isNull(packages.orgId));
+  const orgFilter = orgOrSystemFilter(orgId);
 
   const data = await db
     .select()
@@ -215,17 +201,11 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   }
 
   return data.map((row) => {
-    const m = (
-      row.draftManifest !== null &&
-      typeof row.draftManifest === "object" &&
-      !Array.isArray(row.draftManifest)
-        ? row.draftManifest
-        : {}
-    ) as Partial<Manifest>;
+    const m = asRecord(row.draftManifest) as Partial<Manifest>;
     return {
       id: row.id,
       orgId: row.orgId,
-      name: m.displayName ?? row.id,
+      name: getPackageDisplayName(row),
       description: m.description ?? null,
       source: row.source ?? "local",
       createdBy: row.createdBy,
@@ -241,7 +221,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
 
 /** Get a single item with content and list of flows referencing it. */
 export async function getOrgItem(orgId: string, itemId: string, cfg: PackageTypeConfig) {
-  const orgFilter = or(eq(packages.orgId, orgId), isNull(packages.orgId));
+  const orgFilter = orgOrSystemFilter(orgId);
 
   const [data] = await db
     .select()
@@ -258,17 +238,11 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
 
   const packageIds = depRefs.map((d) => d.packageId);
 
-  const m = (
-    data.draftManifest !== null &&
-    typeof data.draftManifest === "object" &&
-    !Array.isArray(data.draftManifest)
-      ? data.draftManifest
-      : {}
-  ) as Partial<Manifest>;
+  const m = asRecord(data.draftManifest) as Partial<Manifest>;
   return {
     id: data.id,
     orgId: data.orgId,
-    name: m.displayName ?? data.id,
+    name: getPackageDisplayName(data),
     description: m.description ?? null,
     content: data.draftContent,
     source: data.source ?? "local",

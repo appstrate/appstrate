@@ -1,4 +1,4 @@
-import { eq, and, or, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -6,6 +6,7 @@ import { buildDependenciesFromRows, type Dependencies } from "@appstrate/core/de
 import { type PackageTypeConfig, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
+import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 
 // ─────────────────────────────────────────────
 // Flow ↔ package item dependency management
@@ -27,7 +28,7 @@ export async function setFlowItems(
       .from(packages)
       .where(
         and(
-          or(eq(packages.orgId, orgId), isNull(packages.orgId)),
+          orgOrSystemFilter(orgId),
           eq(packages.type, cfg.type),
           inArray(packages.id, orgItemIds),
         ),

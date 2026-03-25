@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
-import { useTheme } from "../hooks/use-theme";
+import { useTheme } from "../stores/theme-store";
 import { useAppConfig } from "../hooks/use-app-config";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 

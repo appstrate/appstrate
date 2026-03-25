@@ -26,7 +26,7 @@ function resolve(theme: Theme): "dark" | "light" {
 
 const stored = (localStorage.getItem(STORAGE_KEY) as Theme) || "system";
 
-export const useThemeStore = create<ThemeState>()((set) => ({
+export const useTheme = create<ThemeState>()((set) => ({
   theme: stored,
   resolvedTheme: resolve(stored),
   setTheme: (theme) => {
@@ -38,14 +38,14 @@ export const useThemeStore = create<ThemeState>()((set) => ({
 }));
 
 // Apply theme on load
-applyTheme(useThemeStore.getState().resolvedTheme);
+applyTheme(useTheme.getState().resolvedTheme);
 
 // React to system theme changes when in "system" mode
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  const { theme } = useThemeStore.getState();
+  const { theme } = useTheme.getState();
   if (theme === "system") {
     const resolvedTheme = getSystemTheme();
     applyTheme(resolvedTheme);
-    useThemeStore.setState({ resolvedTheme });
+    useTheme.setState({ resolvedTheme });
   }
 });

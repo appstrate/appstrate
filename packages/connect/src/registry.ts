@@ -7,6 +7,11 @@ import { buildProviderDefinitionFromManifest } from "@appstrate/core/validation"
 
 export type { Db };
 
+/** Drizzle filter: packages owned by org OR system packages (orgId: null). */
+function orgOrSystemFilter(orgId: string) {
+  return or(eq(packages.orgId, orgId), isNull(packages.orgId))!;
+}
+
 /**
  * Get a provider definition by ID.
  * Queries packages where type="provider".
@@ -23,7 +28,7 @@ export async function getProvider(
       draftContent: packages.draftContent,
     })
     .from(packages)
-    .where(and(eq(packages.id, providerId), or(eq(packages.orgId, orgId), isNull(packages.orgId))))
+    .where(and(eq(packages.id, providerId), orgOrSystemFilter(orgId)))
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -144,9 +149,7 @@ export async function listProviders(db: Db, orgId: string): Promise<ProviderDefi
   const rows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(
-      and(eq(packages.type, "provider"), or(eq(packages.orgId, orgId), isNull(packages.orgId))),
-    );
+    .where(and(eq(packages.type, "provider"), orgOrSystemFilter(orgId)));
 
   return rows.map((pkg) =>
     buildProviderDefinitionFromManifest(

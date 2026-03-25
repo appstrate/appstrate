@@ -128,7 +128,7 @@ export function setResourceEntries(
   const deps = m.dependencies as Record<string, unknown>;
   const record: Record<string, string> = {};
   for (const e of entries) {
-    if (e.id) record[e.id] = e.version;
+    if (e.id) record[e.id] = e.version ?? "*";
   }
   if (Object.keys(record).length > 0) {
     deps[type] = record;
