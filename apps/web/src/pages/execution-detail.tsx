@@ -23,6 +23,7 @@ import { useMarkRead } from "../hooks/use-notifications";
 import type { ExecutionStatus, ExecutionLog } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
+import { Markdown } from "../components/markdown";
 
 export function ExecutionDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
@@ -83,19 +84,23 @@ export function ExecutionDetailPage() {
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["logs", "result", "state", "usage"] as const,
+    ["logs", "result", "report", "state", "usage"] as const,
     "logs",
   );
 
-  const { historicalLogs, structuredData } = useMemo(() => {
-    if (!logs) return { historicalLogs: [], structuredData: null };
-    const { entries, data } = buildLogEntries(logs as RawLog[]);
-    return { historicalLogs: entries, structuredData: data };
+  const { historicalLogs, structuredOutput, reportContent } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredOutput: null, reportContent: null };
+    const { entries, output, report } = buildLogEntries(logs as RawLog[]);
+    return { historicalLogs: entries, structuredOutput: output, reportContent: report };
   }, [logs]);
 
-  const execResult = execution?.result as { data?: Record<string, unknown> } | null;
-  const finalData = structuredData || execResult?.data || null;
-  const hasResult = finalData && Object.keys(finalData).length > 0;
+  const execResult = execution?.result as {
+    output?: Record<string, unknown>;
+    report?: string;
+  } | null;
+  const finalOutput = structuredOutput || execResult?.output || null;
+  const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
+  const finalReport = reportContent || execResult?.report || null;
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
@@ -212,7 +217,7 @@ export function ExecutionDetailPage() {
       <div className="flex items-center justify-between gap-4 mb-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "report" | "state" | "usage")}
         >
           <TabsList>
             <TabsTrigger value="logs">
@@ -223,7 +228,8 @@ export function ExecutionDetailPage() {
                 </span>
               )}
             </TabsTrigger>
-            {hasResult && <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>}
+            {hasOutput && <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>}
+            {finalReport && <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>}
             {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
             <TabsTrigger value="usage">{t("exec.tabUsage")}</TabsTrigger>
           </TabsList>
@@ -258,7 +264,13 @@ export function ExecutionDetailPage() {
 
       {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
-      {activeTab === "result" && hasResult && <JsonView data={finalData!} />}
+      {activeTab === "result" && hasOutput && <JsonView data={finalOutput!} />}
+
+      {activeTab === "report" && finalReport && (
+        <div className="rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
+          <Markdown>{finalReport}</Markdown>
+        </div>
+      )}
 
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 

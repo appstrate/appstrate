@@ -1,0 +1,24 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/report",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Report",
+  "description": "Generate a markdown report as part of the execution result.",
+  "schemaVersion": "1.0",
+  "entrypoint": "report.ts",
+  "tool": {
+    "name": "report",
+    "description": "MANDATORY — call at least once. Appends markdown content to the execution report.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "Markdown content to append to the report"
+        }
+      },
+      "required": ["content"]
+    }
+  }
+}

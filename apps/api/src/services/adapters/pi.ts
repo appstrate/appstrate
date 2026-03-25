@@ -260,6 +260,9 @@ export function parsePiStreamLine(line: string): ExecutionMessage | null {
       case "output":
         return { type: "output", data: obj.data };
 
+      case "report":
+        return { type: "report", content: obj.content || "" };
+
       case "set_state":
         return { type: "set_state", data: obj.state };
 

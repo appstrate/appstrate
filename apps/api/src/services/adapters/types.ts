@@ -18,7 +18,7 @@ export const tokenUsageSchema = z.object({
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
 export interface ExecutionMessage {
-  type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory";
+  type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory" | "report";
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;

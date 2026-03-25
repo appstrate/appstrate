@@ -37,6 +37,22 @@ export const PROVIDER_CONFIG: PackageTypeConfig = {
 };
 
 // ─────────────────────────────────────────────
+// Type → config lookup
+// ─────────────────────────────────────────────
+
+const ALL_CONFIGS: PackageTypeConfig[] = [FLOW_CONFIG, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG];
+
+const CONFIG_BY_TYPE = Object.fromEntries(ALL_CONFIGS.map((c) => [c.type, c])) as Record<
+  PackageType,
+  PackageTypeConfig
+>;
+
+/** Resolve the S3 storage folder for a package type (e.g. "tool" → "tools"). */
+export function storageFolderForType(type: PackageType): PackageTypeConfig["storageFolder"] {
+  return CONFIG_BY_TYPE[type].storageFolder;
+}
+
+// ─────────────────────────────────────────────
 // Package items storage bucket
 // ─────────────────────────────────────────────
 

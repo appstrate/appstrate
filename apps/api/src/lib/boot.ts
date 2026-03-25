@@ -11,7 +11,11 @@ import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
 import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
-import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/index.ts";
+import {
+  uploadPackageFiles,
+  SYSTEM_STORAGE_NAMESPACE,
+  storageFolderForType,
+} from "../services/package-items/index.ts";
 import { markOrphanExecutionsFailed } from "../services/state/index.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initWebhookWorker } from "../services/webhooks.ts";
@@ -186,7 +190,7 @@ async function loadAndSyncSystemPackages(): Promise<void> {
       // 2. Upload system package files to global _system/ namespace (once, not per-org)
       if (Object.keys(entry.files).length > 1) {
         await uploadPackageFiles(
-          type as "flows" | "skills" | "tools" | "providers",
+          storageFolderForType(type),
           SYSTEM_STORAGE_NAMESPACE,
           id,
           entry.files,
