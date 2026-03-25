@@ -13,7 +13,6 @@ export {
   validateScopes,
 } from "./operations.ts";
 
-export type { AvailableProviderWithStatus } from "./providers.ts";
 export {
   getProviderAuthMode,
   getAvailableProvidersWithStatus,

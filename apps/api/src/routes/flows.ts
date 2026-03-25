@@ -25,7 +25,7 @@ import {
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
@@ -159,13 +159,12 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const actor = getActor(c);
     const body = await c.req.json();
-    const parsed = z
-      .object({ profileId: z.string().min(1, "profileId is required") })
-      .safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message, "profileId");
-    }
-    await setPackageProfileOverride(actor, flow.id, parsed.data.profileId);
+    const data = parseBody(
+      z.object({ profileId: z.string().min(1, "profileId is required") }),
+      body,
+      "profileId",
+    );
+    await setPackageProfileOverride(actor, flow.id, data.profileId);
     return c.json({ success: true });
   });
 
@@ -191,12 +190,9 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = proxyIdSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(proxyIdSchema, body);
 
-    await setFlowProxyId(orgId, flow.id, parsed.data.proxyId);
+    await setFlowProxyId(orgId, flow.id, data.proxyId);
 
     return c.json({ success: true });
   });
@@ -215,12 +211,9 @@ export function createFlowsRouter() {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = modelIdSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(modelIdSchema, body);
 
-    await setFlowModelId(orgId, flow.id, parsed.data.modelId);
+    await setFlowModelId(orgId, flow.id, data.modelId);
 
     return c.json({ success: true });
   });

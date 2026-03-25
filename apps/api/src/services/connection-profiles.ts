@@ -72,16 +72,7 @@ export async function listProfiles(
     )
     .groupBy(connectionProfiles.id);
 
-  return rows.map((r) => ({
-    id: r.id,
-    userId: r.userId,
-    endUserId: r.endUserId,
-    name: r.name,
-    isDefault: r.isDefault,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-    connectionCount: r.connectionCount,
-  }));
+  return rows;
 }
 
 /**
@@ -165,11 +156,6 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
 
 // ─── Profile Resolution ─────────────────────────────────────
 
-export async function getDefaultProfileId(actor: Actor): Promise<string> {
-  const profile = await ensureDefaultProfile(actor);
-  return profile.id;
-}
-
 /**
  * Get the effective profile ID for an actor+package combination.
  * Returns the override if one exists, otherwise the default.
@@ -193,7 +179,7 @@ export async function getEffectiveProfileId(actor: Actor, packageId?: string): P
     if (override) return override.profileId;
   }
 
-  return getDefaultProfileId(actor);
+  return (await ensureDefaultProfile(actor)).id;
 }
 
 export async function setPackageProfileOverride(

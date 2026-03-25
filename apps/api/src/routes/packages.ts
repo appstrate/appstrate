@@ -63,6 +63,7 @@ import {
   notFound,
   conflict,
   internalError,
+  parseBody,
 } from "../lib/errors.ts";
 
 // ═══════════════════════════════════════════════
@@ -1247,14 +1248,11 @@ export function createPackagesRouter() {
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requireAdmin(), async (c) => {
     const body = await c.req.json();
-    const urlParsed = githubImportSchema.safeParse(body);
-    if (!urlParsed.success) {
-      throw invalidRequest(urlParsed.error.issues[0]!.message, "url");
-    }
+    const data = parseBody(githubImportSchema, body, "url");
 
     let zipBytes: Uint8Array;
     try {
-      zipBytes = await fetchGithubDirectory(urlParsed.data.url);
+      zipBytes = await fetchGithubDirectory(data.url);
     } catch (err) {
       if (err instanceof GithubImportError) {
         throw new ApiError({

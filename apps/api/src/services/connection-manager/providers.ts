@@ -1,5 +1,5 @@
 import { db } from "../../lib/db.ts";
-import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
+import type { UserConnectionProviderGroup, AvailableProvider } from "@appstrate/shared-types";
 import { eq, inArray } from "drizzle-orm";
 import {
   userProviderConnections,
@@ -16,17 +16,6 @@ import {
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
 
-export interface AvailableProviderWithStatus {
-  uniqueKey: string;
-  provider: string;
-  displayName: string;
-  logo: string;
-  status: "connected" | "not_connected" | "needs_reconnection";
-  authMode?: string;
-  connectionId?: string;
-  connectedAt?: string;
-}
-
 export async function getProviderAuthMode(
   provider: string,
   orgId: string,
@@ -37,7 +26,7 @@ export async function getProviderAuthMode(
 export async function getAvailableProvidersWithStatus(
   profileId: string,
   orgId: string,
-): Promise<AvailableProviderWithStatus[]> {
+): Promise<AvailableProvider[]> {
   const [providers, connections] = await Promise.all([
     listProviders(db, orgId),
     listConnectionsRaw(db, profileId, orgId),

@@ -16,7 +16,7 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, parseBody } from "../lib/errors.ts";
 
 const createEndUserSchema = z.object({
   applicationId: z.string().optional(),
@@ -52,16 +52,13 @@ export function createEndUsersRouter() {
   router.post("/", rateLimit(60), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = createEndUserSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(createEndUserSchema, body);
 
-    const created = await createEndUser(orgId, parsed.data.applicationId ?? null, {
-      name: parsed.data.name,
-      email: parsed.data.email,
-      externalId: parsed.data.externalId,
-      metadata: parsed.data.metadata,
+    const created = await createEndUser(orgId, data.applicationId ?? null, {
+      name: data.name,
+      email: data.email,
+      externalId: data.externalId,
+      metadata: data.metadata,
     });
     return c.json(created, 201);
   });
@@ -105,12 +102,9 @@ export function createEndUsersRouter() {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     const body = await c.req.json();
-    const parsed = updateEndUserSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateEndUserSchema, body);
 
-    const result = await updateEndUser(orgId, endUserId, parsed.data);
+    const result = await updateEndUser(orgId, endUserId, data);
     return c.json(result);
   });
 

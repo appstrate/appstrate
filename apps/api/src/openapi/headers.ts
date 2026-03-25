@@ -34,12 +34,4 @@ export const headers = {
     description: "Seconds to wait before retrying. Present on 429 responses.",
     schema: { type: "integer" },
   },
-  XRateLimitRemaining: {
-    description: "Legacy header: remaining requests in the current window.",
-    schema: { type: "integer" },
-  },
-  XRateLimitReset: {
-    description: "Legacy header: seconds until the rate limit window resets.",
-    schema: { type: "integer" },
-  },
 } as const;

@@ -4,7 +4,7 @@ import { db } from "../lib/db.ts";
 import { profiles, user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
-import { unauthorized, invalidRequest } from "../lib/errors.ts";
+import { unauthorized, parseBody } from "../lib/errors.ts";
 
 const welcomeSetupSchema = z.object({
   displayName: z.string().max(100).optional(),
@@ -20,14 +20,11 @@ router.post("/welcome/setup", async (c) => {
   }
 
   const body = await c.req.json();
-  const parsed = welcomeSetupSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(welcomeSetupSchema, body);
 
   // Update display name if provided
-  if (parsed.data.displayName?.trim()) {
-    const trimmed = parsed.data.displayName.trim();
+  if (data.displayName?.trim()) {
+    const trimmed = data.displayName.trim();
     await Promise.all([
       db
         .update(profiles)

@@ -160,3 +160,31 @@ export function internalError(detail = "An internal error occurred"): ApiError {
     detail,
   });
 }
+
+export function systemEntityForbidden(type: string, id: string, verb = "modify"): ApiError {
+  return new ApiError({
+    status: 403,
+    code: "operation_not_allowed",
+    title: "Forbidden",
+    detail: `Cannot ${verb} built-in ${type} '${id}'`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Validation helper
+// ---------------------------------------------------------------------------
+
+import type { z } from "zod";
+
+/** Parse a request body with a Zod schema, throwing invalidRequest on failure. */
+export function parseBody<T extends z.ZodType>(
+  schema: T,
+  body: unknown,
+  param?: string,
+): z.output<T> {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw invalidRequest(parsed.error.issues[0]!.message, param);
+  }
+  return parsed.data;
+}

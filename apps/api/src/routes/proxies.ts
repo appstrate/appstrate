@@ -13,7 +13,13 @@ import {
   testProxyConnection,
 } from "../services/org-proxies.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, internalError } from "../lib/errors.ts";
+import {
+  ApiError,
+  notFound,
+  internalError,
+  parseBody,
+  systemEntityForbidden,
+} from "../lib/errors.ts";
 
 const createProxySchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -48,14 +54,10 @@ export function createProxiesRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
-    const parsed = createProxySchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(createProxySchema, body);
 
     try {
-      const id = await createOrgProxy(orgId, parsed.data.label, parsed.data.url, user.id);
+      const id = await createOrgProxy(orgId, data.label, data.url, user.id);
       return c.json({ id }, 201);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -72,14 +74,10 @@ export function createProxiesRouter() {
   router.put("/default", async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = setDefaultSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(setDefaultSchema, body);
 
     try {
-      await setDefaultProxy(orgId, parsed.data.proxyId);
+      await setDefaultProxy(orgId, data.proxyId);
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default proxy failed", {
@@ -113,23 +111,14 @@ export function createProxiesRouter() {
     const orgId = c.get("orgId");
     const proxyId = c.req.param("id");
     const body = await c.req.json();
-    const parsed = updateProxySchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateProxySchema, body);
 
     if (isSystemProxy(proxyId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot modify built-in proxy '${proxyId}'`,
-      });
+      throw systemEntityForbidden("proxy", proxyId);
     }
 
     try {
-      await updateOrgProxy(orgId, proxyId, parsed.data);
+      await updateOrgProxy(orgId, proxyId, data);
       return c.json({ id: proxyId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -147,12 +136,7 @@ export function createProxiesRouter() {
     const proxyId = c.req.param("id");
 
     if (isSystemProxy(proxyId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot delete built-in proxy '${proxyId}'`,
-      });
+      throw systemEntityForbidden("proxy", proxyId, "delete");
     }
 
     try {

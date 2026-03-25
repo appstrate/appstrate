@@ -5,7 +5,7 @@ import { db } from "../lib/db.ts";
 import { profiles, user as userTable } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { invalidRequest, internalError, notFound } from "../lib/errors.ts";
+import { internalError, notFound, parseBody } from "../lib/errors.ts";
 
 const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
@@ -37,12 +37,9 @@ profileRouter.patch("/profile", async (c) => {
   const user = c.get("user");
   const body = await c.req.json();
 
-  const parsed = profileUpdateSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid input");
-  }
+  const data = parseBody(profileUpdateSchema, body);
 
-  const { language, displayName } = parsed.data;
+  const { language, displayName } = data;
 
   try {
     const profileUpdates: Record<string, unknown> = {};
@@ -70,11 +67,8 @@ profileRouter.patch("/profile", async (c) => {
 // POST /api/profiles/batch — batch lookup display names by user IDs
 profileRouter.post("/profiles/batch", async (c) => {
   const body = await c.req.json();
-  const parsed = batchLookupSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
-  const ids = parsed.data.ids.filter(Boolean);
+  const data = parseBody(batchLookupSchema, body);
+  const ids = data.ids.filter(Boolean);
   if (ids.length === 0) return c.json({ profiles: [] });
 
   const rows = await db
