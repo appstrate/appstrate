@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useForm, useWatch } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
@@ -32,7 +32,7 @@ import {
 import { ProfileSelector } from "../components/profile-selector";
 import { GoogleIcon } from "../components/icons";
 import { formatDateField } from "../lib/markdown";
-import { Unplug, Mail } from "lucide-react";
+import { Unplug, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
@@ -201,7 +201,10 @@ function LinkedAccountsSection() {
           <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
             <div className="flex items-center gap-3">
               <GoogleIcon className="h-5 w-5" />
-              <span className="text-sm font-medium">Google</span>
+              <div>
+                <span className="text-sm font-medium">Google</span>
+                <div className="text-xs text-muted-foreground">{googleAccount.accountId}</div>
+              </div>
             </div>
             <Button
               variant="ghost"
@@ -263,10 +266,62 @@ function SecurityTab() {
   );
 }
 
+function EmailVerificationBadge() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { user, resendVerificationEmail } = useAuth();
+  const { features } = useAppConfig();
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
+
+  if (!features.emailVerification || !user) return null;
+
+  if (user.emailVerified) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+        <CheckCircle2 size={14} />
+        <span>{t("preferences.emailVerified")}</span>
+      </div>
+    );
+  }
+
+  const handleResend = async () => {
+    setResendState("sending");
+    try {
+      await resendVerificationEmail(user.email);
+      setResendState("sent");
+      setTimeout(() => setResendState("idle"), 3000);
+    } catch {
+      setResendState("idle");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <AlertCircle size={14} />
+        <span>{t("preferences.emailNotVerified")}</span>
+      </div>
+      <button
+        type="button"
+        onClick={handleResend}
+        disabled={resendState !== "idle"}
+        className="text-xs text-primary underline underline-offset-2 hover:no-underline disabled:opacity-50 disabled:no-underline"
+      >
+        {resendState === "sending"
+          ? t("preferences.resendingVerification")
+          : resendState === "sent"
+            ? t("preferences.verificationResent")
+            : t("preferences.resendVerification")}
+      </button>
+    </div>
+  );
+}
+
 function EmailChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { user } = useAuth();
+  const { features } = useAppConfig();
   const [success, setSuccess] = useState("");
+  const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
 
   const {
     register,
@@ -286,6 +341,7 @@ function EmailChangeForm() {
 
   const onSubmit = async (data: { newEmail: string }) => {
     setSuccess("");
+    setVerificationPendingEmail("");
     try {
       const result = await authClient.changeEmail({ newEmail: data.newEmail.trim() });
       if (result.error) {
@@ -295,9 +351,13 @@ function EmailChangeForm() {
           setError("root", { message: result.error.message || t("login.error") });
         }
       } else {
-        setSuccess(t("preferences.emailChanged"));
         reset();
-        await refreshAuth();
+        if (features.emailVerification) {
+          setVerificationPendingEmail(data.newEmail.trim());
+        } else {
+          setSuccess(t("preferences.emailChanged"));
+          await refreshAuth();
+        }
       }
     } catch {
       setError("root", { message: t("login.error") });
@@ -310,6 +370,7 @@ function EmailChangeForm() {
         <div className="space-y-2">
           <Label>{t("preferences.email")}</Label>
           <Input type="email" value={user?.email ?? ""} disabled />
+          <EmailVerificationBadge />
         </div>
         <div className="space-y-2">
           <Label>{t("preferences.newEmail")}</Label>
@@ -317,6 +378,16 @@ function EmailChangeForm() {
         </div>
         {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}
         {success && <div className="text-sm text-success">{success}</div>}
+        {verificationPendingEmail && (
+          <div className="text-sm text-muted-foreground rounded-md bg-muted px-3 py-2">
+            <Trans
+              ns="settings"
+              i18nKey="preferences.emailChangeVerificationSent"
+              values={{ email: verificationPendingEmail }}
+              components={{ strong: <strong /> }}
+            />
+          </div>
+        )}
         <Button type="submit" disabled={!canSubmit}>
           {isSubmitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
         </Button>

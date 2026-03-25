@@ -31,11 +31,11 @@ function clearAuth() {
 }
 
 function setAuthenticatedUser(
-  user: { id: string; email: string; name: string },
+  user: { id: string; email: string; emailVerified: boolean; name: string },
   profile: Profile | null,
 ) {
   authStore.setState({
-    user: { id: user.id, email: user.email, name: user.name },
+    user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },
     profile,
     loading: false,
   });
@@ -129,7 +129,7 @@ export function useAuth() {
   const linkGoogle = useCallback(async () => {
     await authClient.linkSocial({
       provider: "google",
-      callbackURL: "/preferences#security",
+      callbackURL: "/preferences",
     });
   }, []);
 

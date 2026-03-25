@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";
-import { Mail } from "lucide-react";
+import { Mail, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthLayout } from "../components/auth-layout";
 import { useAuth } from "../hooks/use-auth";
@@ -10,7 +10,9 @@ export function VerifyEmailPage() {
   const { t } = useTranslation("settings");
   const { resendVerificationEmail } = useAuth();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const email = (location.state as { email?: string })?.email ?? "";
+  const error = searchParams.get("error");
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 
   const handleResend = async () => {
@@ -33,14 +35,22 @@ export function VerifyEmailPage() {
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold">{t("verifyEmail.title")}</h1>
-          <p className="text-sm text-muted-foreground">
-            <Trans
-              ns="settings"
-              i18nKey="verifyEmail.description"
-              values={{ email }}
-              components={{ strong: <strong /> }}
-            />
-          </p>
+          {error && (
+            <div className="flex items-center justify-center gap-2 text-sm text-destructive">
+              <AlertCircle size={16} />
+              <span>{t("preferences.verificationLinkExpired")}</span>
+            </div>
+          )}
+          {!error && (
+            <p className="text-sm text-muted-foreground">
+              <Trans
+                ns="settings"
+                i18nKey="verifyEmail.description"
+                values={{ email }}
+                components={{ strong: <strong /> }}
+              />
+            </p>
+          )}
         </div>
         {email && (
           <Button variant="outline" onClick={handleResend} disabled={resendState !== "idle"}>

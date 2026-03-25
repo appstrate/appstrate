@@ -2,7 +2,7 @@ import { createStore } from "zustand/vanilla";
 import type { Profile } from "@appstrate/shared-types";
 
 interface AuthState {
-  user: { id: string; email: string; name?: string } | null;
+  user: { id: string; email: string; emailVerified: boolean; name?: string } | null;
   profile: Profile | null;
   loading: boolean;
 }
