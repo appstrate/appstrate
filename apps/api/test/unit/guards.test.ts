@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
-import type { AppEnv, LoadedFlow } from "../../src/types/index.ts";
+import type { AppEnv, LoadedPackage } from "../../src/types/index.ts";
 import { requireAdmin, requireOwnedPackage, checkScopeMatch, requireMutableFlow } from "../../src/middleware/guards.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
@@ -128,7 +128,7 @@ describe("requireMutableFlow", () => {
   it("rejects system flow with 403", async () => {
     const app = createApp();
     app.use("/test", async (c, next) => {
-      c.set("flow", { id: "@system/flow", source: "system" } as unknown as LoadedFlow);
+      c.set("flow", { id: "@system/flow", source: "system" } as unknown as LoadedPackage);
       return requireMutableFlow()(c, next);
     });
     app.get("/test", (c) => c.json({ ok: true }));

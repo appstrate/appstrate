@@ -1,10 +1,11 @@
-import { useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { api } from "../api";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
+import { useAutoSelect } from "./use-auto-select";
 import type { OrganizationWithRole } from "@appstrate/shared-types";
 
 // Re-export non-hook accessor so existing imports keep working (e.g. api.ts)
@@ -27,18 +28,9 @@ export function useOrg() {
     },
   });
 
-  // Auto-select first org when only one and none selected, or when the
-  // currently-stored org ID is no longer in the user's org list.
-  useEffect(() => {
-    if (orgs.length === 0) return;
-
-    const storedId = currentOrgId;
-    const storedExists = storedId && orgs.some((o) => o.id === storedId);
-
-    if (!storedExists) {
-      orgStore.getState().setId(orgs[0].id);
-    }
-  }, [orgs, currentOrgId]);
+  useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, (id) =>
+    orgStore.getState().setId(id),
+  );
 
   const switchOrg = useCallback(
     (orgId: string) => {

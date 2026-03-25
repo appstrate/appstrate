@@ -1,16 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-
-export interface ApplicationInfo {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  settings: { allowedRedirectDomains?: string[] };
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import type { ApplicationInfo } from "@appstrate/shared-types";
+export type { ApplicationInfo } from "@appstrate/shared-types";
 
 export function useApplications() {
   const orgId = useCurrentOrgId();

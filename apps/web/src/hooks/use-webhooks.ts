@@ -2,33 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-
-export interface WebhookInfo {
-  id: string;
-  url: string;
-  events: string[];
-  flowId: string | null;
-  payloadMode: "full" | "summary";
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WebhookCreateResponse extends WebhookInfo {
-  secret: string;
-}
-
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  eventType: string;
-  status: "pending" | "success" | "failed";
-  statusCode: number | null;
-  latency: number | null;
-  attempt: number;
-  error: string | null;
-  createdAt: string;
-}
+import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
+export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
 
 export const WEBHOOK_EVENTS = [
   "execution.started",

@@ -393,3 +393,64 @@ export interface ProviderConfig extends Omit<
   credentialSchema?: Record<string, unknown>;
   usedByFlows?: number;
 }
+
+// --- Application Types ---
+
+export interface ApplicationInfo {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  settings: { allowedRedirectDomains?: string[] };
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- End-User Types ---
+
+export interface EndUserInfo {
+  id: string;
+  applicationId: string;
+  name: string | null;
+  email: string | null;
+  externalId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EndUserListResponse {
+  object: "list";
+  data: EndUserInfo[];
+  hasMore: boolean;
+  limit: number;
+}
+
+// --- Webhook Types ---
+
+export interface WebhookInfo {
+  id: string;
+  url: string;
+  events: string[];
+  flowId: string | null;
+  payloadMode: "full" | "summary";
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookCreateResponse extends WebhookInfo {
+  secret: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  eventId: string;
+  eventType: string;
+  status: "pending" | "success" | "failed";
+  statusCode: number | null;
+  latency: number | null;
+  attempt: number;
+  error: string | null;
+  createdAt: string;
+}

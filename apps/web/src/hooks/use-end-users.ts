@@ -1,24 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-
-export interface EndUserInfo {
-  id: string;
-  applicationId: string;
-  name: string | null;
-  email: string | null;
-  externalId: string | null;
-  metadata: Record<string, unknown> | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EndUserListResponse {
-  object: "list";
-  data: EndUserInfo[];
-  hasMore: boolean;
-  limit: number;
-}
+import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
+export type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 
 export interface EndUserListParams {
   applicationId?: string;

@@ -3,7 +3,7 @@ import { db } from "../lib/db.ts";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
-import type { FlowManifest, LoadedFlow } from "../types/index.ts";
+import type { FlowManifest, LoadedPackage } from "../types/index.ts";
 
 function asRecord(val: unknown): Record<string, unknown> {
   return val !== null && typeof val === "object" && !Array.isArray(val)
@@ -23,50 +23,48 @@ interface DbPackageRow {
   }[];
 }
 
-function dbRowToLoadedFlow(row: DbPackageRow): LoadedFlow {
+function mapDependencies(
+  depRefs: NonNullable<DbPackageRow["depRefs"]>,
+  type: string,
+  versionMap: Record<string, string>,
+): LoadedPackage["skills"] {
+  return depRefs
+    .filter((d) => d.type === type)
+    .map((d) => {
+      const m = asRecord(d.draftManifest) as Partial<Manifest>;
+      return {
+        id: d.dependencyId,
+        version: versionMap[d.dependencyId] ?? "*",
+        name: m.displayName ?? undefined,
+        description: m.description ?? undefined,
+      };
+    });
+}
+
+function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
   const manifest = asRecord(row.draftManifest) as FlowManifest;
-
-  // Read version maps from the flow's manifest
-  const manifestSkillsMap = (manifest.dependencies?.skills ?? {}) as Record<string, string>;
-  const manifestToolsMap = (manifest.dependencies?.tools ?? {}) as Record<string, string>;
-
-  // Dependencies from packageDependencies joined with packages
-  const depSkills = (row.depRefs ?? [])
-    .filter((d) => d.type === "skill")
-    .map((d) => {
-      const m = asRecord(d.draftManifest) as Partial<Manifest>;
-      return {
-        id: d.dependencyId,
-        version: manifestSkillsMap[d.dependencyId] ?? "*",
-        name: m.displayName ?? undefined,
-        description: m.description ?? undefined,
-      };
-    });
-
-  const depTools = (row.depRefs ?? [])
-    .filter((d) => d.type === "tool")
-    .map((d) => {
-      const m = asRecord(d.draftManifest) as Partial<Manifest>;
-      return {
-        id: d.dependencyId,
-        version: manifestToolsMap[d.dependencyId] ?? "*",
-        name: m.displayName ?? undefined,
-        description: m.description ?? undefined,
-      };
-    });
+  const deps = row.depRefs ?? [];
 
   return {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    skills: depSkills,
-    tools: depTools,
+    skills: mapDependencies(
+      deps,
+      "skill",
+      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+    ),
+    tools: mapDependencies(
+      deps,
+      "tool",
+      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
+    ),
     source: row.source === "system" || row.source === "local" ? row.source : "local",
   };
 }
 
 /** Get a single package by ID. Queries DB filtered by orgId (includes system packages via orgId: null). */
-export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow | null> {
+export async function getPackage(id: string, orgId?: string): Promise<LoadedPackage | null> {
   const conditions = [eq(packages.id, id)];
   if (orgId) {
     conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
@@ -97,7 +95,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
     .innerJoin(packages, eq(packageDependencies.dependencyId, packages.id))
     .where(eq(packageDependencies.packageId, id));
 
-  return dbRowToLoadedFlow({
+  return dbRowToLoadedPackage({
     id: pkgRow.id,
     draftManifest: pkgRow.draftManifest,
     draftContent: pkgRow.draftContent ?? "",
@@ -107,7 +105,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedFlow
 }
 
 /** List all flows: system (orgId: null) + user packages of type "flow" (from DB, scoped by org). */
-export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
+export async function listPackages(orgId?: string): Promise<LoadedPackage[]> {
   const conditions = [eq(packages.type, "flow")];
   if (orgId) {
     conditions.push(or(eq(packages.orgId, orgId), isNull(packages.orgId))!);
@@ -124,7 +122,7 @@ export async function listPackages(orgId?: string): Promise<LoadedFlow[]> {
     .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
   return rows.map((row) =>
-    dbRowToLoadedFlow({
+    dbRowToLoadedPackage({
       id: row.id,
       draftManifest: row.draftManifest,
       draftContent: row.draftContent ?? "",

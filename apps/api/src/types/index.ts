@@ -20,9 +20,9 @@ export interface FlowProviderRequirement {
   connectionMode?: "user" | "admin";
 }
 
-// --- Loaded Flow (manifest + prompt from DB) ---
+// --- Loaded Package (manifest + prompt from DB) ---
 
-export interface LoadedFlow {
+export interface LoadedPackage {
   id: string;
   manifest: FlowManifest;
   prompt: string;
@@ -36,7 +36,7 @@ export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     endUser?: { id: string; applicationId: string; name?: string | null; email?: string | null };
-    flow: LoadedFlow;
+    flow: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;

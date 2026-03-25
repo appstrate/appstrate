@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const createMutation = useCreateApiKey();
 
   const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
 
   const {
     register,
@@ -49,7 +50,6 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const handleClose = () => {
     reset({ name: "", expiresIn: "90" });
     setCreatedKey(null);
-    setCopied(false);
     createMutation.reset();
     onClose();
   };
@@ -74,11 +74,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const onSubmit = handleSubmit(onFormSubmit);
 
   const handleCopy = () => {
-    if (createdKey) {
-      navigator.clipboard.writeText(createdKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    if (createdKey) copy(createdKey);
   };
 
   // After creation: show the key
