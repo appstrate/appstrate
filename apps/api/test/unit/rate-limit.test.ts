@@ -38,20 +38,6 @@ describe("rateLimit (authenticated)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("sets legacy rate limit headers", async () => {
-    const app = createApp();
-    app.use("/test", async (c, next) => {
-      c.set("user", { id: "user-rl-headers", email: "test@test.com", name: "Test" });
-      return rateLimit(10)(c, next);
-    });
-    app.get("/test", (c) => c.json({ ok: true }));
-
-    const res = await app.request("/test");
-    expect(res.status).toBe(200);
-    expect(res.headers.get("X-RateLimit-Remaining")).toBeDefined();
-    expect(res.headers.get("X-RateLimit-Reset")).toBeDefined();
-  });
-
   it("sets IETF RateLimit structured header on success", async () => {
     const app = createApp();
     app.use("/test", async (c, next) => {

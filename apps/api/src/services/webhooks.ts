@@ -10,6 +10,7 @@ import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";
+import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
 import { isBlockedUrl } from "../lib/ssrf.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { getEnv } from "@appstrate/env";
@@ -41,18 +42,6 @@ const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000; // 24h
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface WebhookResponse {
-  id: string;
-  object: "webhook";
-  url: string;
-  events: string[];
-  flowId: string | null;
-  payloadMode: string;
-  active: boolean;
-  createdAt: string;
-  secret?: string; // Only on create
-}
 
 interface DeliveryJobData {
   webhookId: string;
@@ -88,16 +77,18 @@ function toWebhookResponse(row: {
   payloadMode: string;
   active: boolean;
   createdAt: Date;
-}): WebhookResponse {
+  updatedAt: Date;
+}): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
     url: row.url,
     events: row.events ?? [],
     flowId: row.flowId,
-    payloadMode: row.payloadMode,
+    payloadMode: row.payloadMode === "summary" ? "summary" : "full",
     active: row.active,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -199,7 +190,7 @@ export async function createWebhook(
     payloadMode?: string;
     active?: boolean;
   },
-): Promise<WebhookResponse & { secret: string }> {
+): Promise<WebhookCreateResponse> {
   // Check limit
   const existing = await db
     .select({ id: webhooks.id })
@@ -238,10 +229,7 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(
-  orgId: string,
-  applicationId?: string,
-): Promise<WebhookResponse[]> {
+export async function listWebhooks(orgId: string, applicationId?: string): Promise<WebhookInfo[]> {
   const conditions = [eq(webhooks.orgId, orgId)];
   if (applicationId) {
     conditions.push(eq(webhooks.applicationId, applicationId));
@@ -256,6 +244,7 @@ export async function listWebhooks(
       payloadMode: webhooks.payloadMode,
       active: webhooks.active,
       createdAt: webhooks.createdAt,
+      updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
     .where(and(...conditions))
@@ -264,7 +253,7 @@ export async function listWebhooks(
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookResponse> {
+export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
   const [row] = await db
     .select({
       id: webhooks.id,
@@ -274,6 +263,7 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
       payloadMode: webhooks.payloadMode,
       active: webhooks.active,
       createdAt: webhooks.createdAt,
+      updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
     .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
@@ -293,7 +283,7 @@ export async function updateWebhook(
     payloadMode?: string;
     active?: boolean;
   },
-): Promise<WebhookResponse> {
+): Promise<WebhookInfo> {
   await getWebhook(orgId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);

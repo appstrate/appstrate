@@ -403,6 +403,7 @@ export interface ApplicationInfo {
 
 export interface EndUserInfo {
   id: string;
+  object: "end_user";
   applicationId: string;
   name: string | null;
   email: string | null;
@@ -423,6 +424,7 @@ export interface EndUserListResponse {
 
 export interface WebhookInfo {
   id: string;
+  object: "webhook";
   url: string;
   events: string[];
   flowId: string | null;
