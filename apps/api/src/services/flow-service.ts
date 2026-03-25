@@ -1,11 +1,12 @@
-import { eq, and, count, sql } from "drizzle-orm";
+import { eq, and, count, sql, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageDependencies } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
 import type { FlowManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 
 interface DbPackageRow {
   id: string;
@@ -59,6 +60,31 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
   };
 }
 
+/** Resolve dependency refs from a package's manifest. */
+async function resolveDepRefs(
+  manifest: unknown,
+): Promise<NonNullable<DbPackageRow["depRefs"]>> {
+  const m = asRecord(manifest) as Partial<Manifest>;
+  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
+  const allDepIds = [...skillIds, ...toolIds, ...providerIds];
+  if (allDepIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      draftManifest: packages.draftManifest,
+    })
+    .from(packages)
+    .where(inArray(packages.id, allDepIds));
+
+  return rows.map((r) => ({
+    dependencyId: r.id,
+    type: r.type,
+    draftManifest: r.draftManifest,
+  }));
+}
+
 /** Get a single package by ID. Queries DB filtered by orgId (includes system packages via orgId: null). */
 export async function getPackage(id: string, orgId?: string): Promise<LoadedPackage | null> {
   const conditions = [eq(packages.id, id)];
@@ -80,16 +106,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
   const pkgRow = pkgRows[0];
   if (!pkgRow) return null;
 
-  // Fetch dependencies joined with their package metadata
-  const depRefs = await db
-    .select({
-      dependencyId: packageDependencies.dependencyId,
-      type: packages.type,
-      draftManifest: packages.draftManifest,
-    })
-    .from(packageDependencies)
-    .innerJoin(packages, eq(packageDependencies.dependencyId, packages.id))
-    .where(eq(packageDependencies.packageId, id));
+  const depRefs = await resolveDepRefs(pkgRow.draftManifest);
 
   return dbRowToLoadedPackage({
     id: pkgRow.id,

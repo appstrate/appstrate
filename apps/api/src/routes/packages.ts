@@ -23,7 +23,6 @@ import {
   deleteOrgItem,
   uploadPackageFiles,
   downloadPackageFiles,
-  syncFlowDepsJunctionTable,
   SKILL_CONFIG,
   TOOL_CONFIG,
   FLOW_CONFIG,
@@ -52,7 +51,6 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
-import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
@@ -319,12 +317,6 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     jsonBodyCreate: true,
     requireMutableForVersionOps: true,
     getHandler: flowDetailHandler,
-    afterUpdate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
-        manifest as Partial<Manifest>,
-      );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
-    },
   },
   providers: {
     cfg: PROVIDER_CONFIG,
@@ -676,13 +668,10 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     const result = await deleteOrgItem(orgId, itemId, rcfg.cfg);
     if (!result.ok) {
-      if (result.error === "DEPENDED_ON") {
-        throw conflict(
-          "depended_on",
-          `${label} '${itemId}' is required by ${result.dependents!.length} package(s)`,
-        );
-      }
-      throw conflict("in_use", `${label} '${itemId}' is used by ${result.flows!.length} flow(s)`);
+      throw conflict(
+        "in_use",
+        `${label} '${itemId}' is used by ${result.dependents!.length} package(s)`,
+      );
     }
 
     return c.body(null, 204);
@@ -1186,14 +1175,6 @@ export function createPackagesRouter() {
         title: "Post-Install Failed",
         detail: message,
       });
-    }
-
-    // Sync flow dependency junction table after import (providers included)
-    if (packageType === "flow") {
-      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
-        manifest as Partial<Manifest>,
-      );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
     }
 
     // Force import: replace existing version content if integrity differs

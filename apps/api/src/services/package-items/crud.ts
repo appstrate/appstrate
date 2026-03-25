@@ -1,14 +1,12 @@
-import { eq, and, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageDependencies } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
-import { syncFlowDepsJunctionTable } from "./dependencies.ts";
 import { deletePackageFiles } from "./storage.ts";
-import { extractDepsFromManifest } from "../../lib/manifest-utils.ts";
 import { asRecord } from "../../lib/safe-json.ts";
 import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
 
@@ -37,21 +35,6 @@ export async function getPackageById(id: string): Promise<Package | null> {
 // ─────────────────────────────────────────────
 
 /** Fetch package display names from a list of package IDs. */
-async function getPackageDisplayNames(
-  packageIds: string[],
-): Promise<{ id: string; displayName: string }[]> {
-  if (packageIds.length === 0) return [];
-  const rows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(inArray(packages.id, packageIds));
-
-  return rows.map((r) => ({
-    id: r.id,
-    displayName: getPackageDisplayName(r),
-  }));
-}
-
 /** Find packages that depend on the target package (via manifest dependencies). */
 async function findDependentPackages(
   orgId: string,
@@ -141,13 +124,6 @@ export async function createOrgItem(
       .returning();
 
     if (!row) throw new Error("Failed to insert package: no row returned");
-
-    // Auto-sync dependency junction table for flows
-    if (cfg.type === "flow") {
-      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(finalManifest);
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
-    }
-
     return row;
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {
@@ -199,14 +175,19 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       desc(packages.createdAt),
     );
 
-  // Count usage via packageDependencies junction table (unified for all types)
+  // Count usage by scanning all org packages' manifests
   const countMap = new Map<string, number>();
-  const depRows = await db
-    .select({ dependencyId: packageDependencies.dependencyId })
-    .from(packageDependencies)
-    .where(eq(packageDependencies.orgId, orgId));
-  for (const row of depRows) {
-    countMap.set(row.dependencyId, (countMap.get(row.dependencyId) ?? 0) + 1);
+  const allOrgPkgs = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(eq(packages.orgId, orgId));
+  for (const pkg of allOrgPkgs) {
+    if (!pkg.draftManifest) continue;
+    const deps = extractDependencies(asRecord(pkg.draftManifest) as Partial<Manifest>);
+    for (const dep of deps) {
+      const depId = buildPackageId(dep.depScope, dep.depName);
+      countMap.set(depId, (countMap.get(depId) ?? 0) + 1);
+    }
   }
 
   return data.map((row) => {
@@ -240,12 +221,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
 
   if (!data) return null;
 
-  const depRefs = await db
-    .select({ packageId: packageDependencies.packageId })
-    .from(packageDependencies)
-    .where(and(eq(packageDependencies.orgId, orgId), eq(packageDependencies.dependencyId, itemId)));
-
-  const packageIds = depRefs.map((d) => d.packageId);
+  const dependents = await findDependentPackages(orgId, itemId);
 
   const m = asRecord(data.draftManifest) as Partial<Manifest>;
   return {
@@ -264,11 +240,11 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     manifest: asRecord(data.draftManifest),
     lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
-    flows: await getPackageDisplayNames(packageIds),
+    flows: dependents,
   };
 }
 
-/** Delete an item. Returns error info if still referenced by flows. */
+/** Delete an item. Returns error info if still referenced by other packages. */
 export async function deleteOrgItem(
   orgId: string,
   itemId: string,
@@ -276,22 +252,11 @@ export async function deleteOrgItem(
 ): Promise<{
   ok: boolean;
   error?: string;
-  flows?: { id: string; displayName: string }[];
   dependents?: { id: string; displayName: string }[];
 }> {
-  const refs = await db
-    .select({ packageId: packageDependencies.packageId })
-    .from(packageDependencies)
-    .where(and(eq(packageDependencies.orgId, orgId), eq(packageDependencies.dependencyId, itemId)));
-
-  if (refs.length > 0) {
-    const flowList = await getPackageDisplayNames(refs.map((r) => r.packageId));
-    return { ok: false, error: "IN_USE", flows: flowList };
-  }
-
   const dependents = await findDependentPackages(orgId, itemId);
   if (dependents.length > 0) {
-    return { ok: false, error: "DEPENDED_ON", dependents };
+    return { ok: false, error: "IN_USE", dependents };
   }
 
   await db
