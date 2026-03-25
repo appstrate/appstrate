@@ -14,6 +14,8 @@ import {
   SIDECAR_MEMORY_BYTES,
   SIDECAR_NANO_CPUS,
   SIDECAR_EXPOSED_PORTS,
+  SIDECAR_PORT_BINDINGS,
+  SIDECAR_INTERNAL_PORT,
 } from "./orchestrator/constants.ts";
 export const getSidecarImage = () => getEnv().SIDECAR_IMAGE;
 const HEALTH_CHECK_RETRIES = 15;
@@ -154,6 +156,18 @@ function scheduleReplenish(): void {
   }, 100);
 }
 
+/** Start a sidecar container and wait for health check. Returns the host port. */
+export async function startSidecarAndHealthCheck(containerId: string): Promise<number> {
+  await startContainer(containerId);
+  const hostPort = await getContainerHostPort(containerId, SIDECAR_INTERNAL_PORT);
+  if (!hostPort) {
+    await removeContainer(containerId).catch(() => {});
+    throw new Error("No host port mapped for sidecar");
+  }
+  await waitForSidecarHealth(hostPort);
+  return hostPort;
+}
+
 /** Create a single pooled sidecar container. */
 async function createPooledSidecar(): Promise<PooledSidecar> {
   const configSecret = crypto.randomUUID();
@@ -167,7 +181,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: standbyNetworkId!,
       extraHosts: ["host.docker.internal:host-gateway"],
-      portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+      portBindings: SIDECAR_PORT_BINDINGS,
       exposedPorts: SIDECAR_EXPOSED_PORTS,
       labels: {
         "appstrate.pool": "sidecar",
@@ -176,15 +190,7 @@ async function createPooledSidecar(): Promise<PooledSidecar> {
     },
   );
 
-  await startContainer(containerId);
-
-  const hostPort = await getContainerHostPort(containerId, "8080/tcp");
-  if (!hostPort) {
-    await removeContainer(containerId).catch(() => {});
-    throw new Error("No host port mapped for pooled sidecar");
-  }
-
-  await waitForSidecarHealth(hostPort);
+  const hostPort = await startSidecarAndHealthCheck(containerId);
   return { containerId, hostPort, configSecret };
 }
 

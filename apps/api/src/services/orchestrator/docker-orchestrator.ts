@@ -10,8 +10,13 @@ import type {
 } from "./types.ts";
 import * as docker from "../docker.ts";
 import * as sidecarPool from "../sidecar-pool.ts";
-import { getSidecarImage } from "../sidecar-pool.ts";
-import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS, SIDECAR_EXPOSED_PORTS } from "./constants.ts";
+import { getSidecarImage, startSidecarAndHealthCheck } from "../sidecar-pool.ts";
+import {
+  SIDECAR_MEMORY_BYTES,
+  SIDECAR_NANO_CPUS,
+  SIDECAR_EXPOSED_PORTS,
+  SIDECAR_PORT_BINDINGS,
+} from "./constants.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -119,7 +124,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: this.egressNetworkId!,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
-      portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+      portBindings: SIDECAR_PORT_BINDINGS,
       exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
 
@@ -130,10 +135,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
     }
 
-    await docker.startContainer(containerId);
-    const hostPort = await docker.getContainerHostPort(containerId, "8080/tcp");
-    if (!hostPort) throw new Error("No host port mapped for fresh sidecar");
-    await sidecarPool.waitForSidecarHealth(hostPort);
+    await startSidecarAndHealthCheck(containerId);
 
     return new DockerWorkloadHandle(containerId, executionId, "sidecar");
   }

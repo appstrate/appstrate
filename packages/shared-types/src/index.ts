@@ -261,6 +261,16 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
   hasUnpublishedChanges?: boolean;
 }
 
+// --- Model Cost Types ---
+
+/** Per-model pricing in $/M tokens. */
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 // --- Package Version Types ---
 
 export interface PackageVersionInfo {
@@ -270,6 +280,21 @@ export interface PackageVersionInfo {
   artifactSize: number;
   yanked: boolean;
   createdAt: string;
+}
+
+/** Extended version info for list views (includes createdBy). */
+export interface VersionListItem extends Omit<PackageVersionInfo, "createdAt"> {
+  createdBy: string | null;
+  createdAt: string | null;
+}
+
+/** Full version detail returned by the API. */
+export interface VersionDetailResponse extends Omit<PackageVersionInfo, "createdAt"> {
+  manifest: Record<string, unknown>;
+  content?: string | null;
+  yankedReason: string | null;
+  createdAt: string | null;
+  distTags: string[];
 }
 
 export interface DistTagInfo {

@@ -8,6 +8,7 @@ import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
+import { isAdminRole } from "../middleware/guards.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -71,10 +72,6 @@ async function validateSSEAuth(c: {
   if (!rows[0]) return null;
 
   return { userId: session.user.id, orgId, role: rows[0].role };
-}
-
-function isAdminRole(role: string): boolean {
-  return role === "admin" || role === "owner";
 }
 
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */

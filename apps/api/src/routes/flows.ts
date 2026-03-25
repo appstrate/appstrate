@@ -93,22 +93,22 @@ export function createFlowsRouter() {
     });
   });
 
-  // POST /api/flows/:scope/:name/providers/:svcScope/:svcName/bind — bind a profile's connection to a provider
+  // POST /api/flows/:scope/:name/providers/:providerScope/:providerName/bind — bind a profile's connection to a provider
   router.post(
-    "/:scope{@[^/]+}/:name/providers/:svcScope{@[^/]+}/:svcName/bind",
+    "/:scope{@[^/]+}/:name/providers/:providerScope{@[^/]+}/:providerName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
       const actor = getActor(c);
-      const providerId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
+      const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
 
       // Verify the provider exists and is in admin mode
-      const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
-      if (!svc) {
+      const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
+      if (!provider) {
         throw notFound(`Provider '${providerId}' not found`);
       }
-      if ((svc.connectionMode ?? "user") !== "admin") {
+      if ((provider.connectionMode ?? "user") !== "admin") {
         throw invalidRequest(`Provider '${providerId}' is not in admin mode`);
       }
 
@@ -124,9 +124,9 @@ export function createFlowsRouter() {
 
       // Verify the profile has a connection for this provider
       const orgId = c.get("orgId");
-      const conn = await getConnectionStatus(svc.id, effectiveProfileId, orgId);
+      const conn = await getConnectionStatus(provider.id, effectiveProfileId, orgId);
       if (conn.status !== "connected") {
-        throw invalidRequest(`No active connection for '${svc.id}'`);
+        throw invalidRequest(`No active connection for '${provider.id}'`);
       }
 
       await bindFlowProvider(orgId, flow.id, providerId, effectiveProfileId);
@@ -134,17 +134,17 @@ export function createFlowsRouter() {
     },
   );
 
-  // DELETE /api/flows/:scope/:name/providers/:svcScope/:svcName/bind — unbind admin's connection from a provider
+  // DELETE /api/flows/:scope/:name/providers/:providerScope/:providerName/bind — unbind admin's connection from a provider
   router.delete(
-    "/:scope{@[^/]+}/:name/providers/:svcScope{@[^/]+}/:svcName/bind",
+    "/:scope{@[^/]+}/:name/providers/:providerScope{@[^/]+}/:providerName/bind",
     requireFlow(),
     requireAdmin(),
     async (c) => {
       const flow = c.get("flow");
-      const providerId = `${c.req.param("svcScope")}/${c.req.param("svcName")}`;
+      const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
 
-      const svc = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
-      if (!svc) {
+      const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
+      if (!provider) {
         throw notFound(`Provider '${providerId}' not found`);
       }
 

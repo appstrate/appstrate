@@ -52,34 +52,34 @@ export async function validateFlowDependencies(
   }
 
   // Check for missing profiles first (no async needed)
-  for (const svc of providers) {
-    const connectionProfileId = providerProfiles[svc.id];
+  for (const provider of providers) {
+    const connectionProfileId = providerProfiles[provider.id];
     if (!connectionProfileId) {
-      const mode = svc.connectionMode ?? "user";
+      const mode = provider.connectionMode ?? "user";
       if (mode === "admin") {
         throw new ApiError({
           status: 400,
           code: "dependency_not_satisfied",
           title: "Dependency Not Satisfied",
-          detail: `Provider '${svc.id}' is not bound by an administrator`,
+          detail: `Provider '${provider.id}' is not bound by an administrator`,
         });
       }
       throw new ApiError({
         status: 400,
         code: "dependency_not_satisfied",
         title: "Dependency Not Satisfied",
-        detail: `Provider '${svc.id}' is not connected`,
+        detail: `Provider '${provider.id}' is not connected`,
       });
     }
   }
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((svc) => deps.getConnectionStatus(svc.id, providerProfiles[svc.id]!, orgId)),
+    providers.map((p) => deps.getConnectionStatus(p.id, providerProfiles[p.id]!, orgId)),
   );
 
   for (let i = 0; i < providers.length; i++) {
-    const svc = providers[i]!;
+    const provider = providers[i]!;
     const conn = statuses[i]!;
 
     if (conn.status === "not_connected") {
@@ -87,7 +87,7 @@ export async function validateFlowDependencies(
         status: 400,
         code: "dependency_not_satisfied",
         title: "Dependency Not Satisfied",
-        detail: `Provider '${svc.id}' is not connected`,
+        detail: `Provider '${provider.id}' is not connected`,
       });
     }
 
@@ -96,18 +96,18 @@ export async function validateFlowDependencies(
         status: 400,
         code: "needs_reconnection",
         title: "Needs Reconnection",
-        detail: `Provider '${svc.id}' needs to be reconnected (provider configuration changed)`,
+        detail: `Provider '${provider.id}' needs to be reconnected (provider configuration changed)`,
       });
     }
 
-    if (svc.scopes && svc.scopes.length > 0 && conn.scopesGranted) {
-      const scopeResult = deps.validateScopes(conn.scopesGranted, svc.scopes);
+    if (provider.scopes && provider.scopes.length > 0 && conn.scopesGranted) {
+      const scopeResult = deps.validateScopes(conn.scopesGranted, provider.scopes);
       if (!scopeResult.sufficient) {
         throw new ApiError({
           status: 400,
           code: "scope_insufficient",
           title: "Scope Insufficient",
-          detail: `Provider '${svc.id}' requires additional permissions`,
+          detail: `Provider '${provider.id}' requires additional permissions`,
         });
       }
     }

@@ -56,32 +56,6 @@ export function useCreateEndUser() {
   });
 }
 
-export function useUpdateEndUser() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: {
-        name?: string;
-        email?: string;
-        externalId?: string;
-        metadata?: Record<string, unknown>;
-      };
-    }) => {
-      return api<EndUserInfo>(`/end-users/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["end-users"] });
-    },
-  });
-}
-
 export function useDeleteEndUser() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { ModelCost } from "@appstrate/shared-types";
+export type { ModelCost };
 
 /** Per-model pricing in $/M tokens (margin included). */
 export const modelCostSchema = z.object({
@@ -6,8 +8,7 @@ export const modelCostSchema = z.object({
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative(),
   cacheWrite: z.number().nonnegative(),
-});
-export type ModelCost = z.infer<typeof modelCostSchema>;
+}) satisfies z.ZodType<ModelCost>;
 
 export const tokenUsageSchema = z.object({
   input_tokens: z.number().nonnegative(),
@@ -35,12 +36,7 @@ export interface UploadedFile {
   buffer: Buffer;
 }
 
-export interface FileReference {
-  fieldName: string;
-  name: string;
-  type: string;
-  size: number;
-}
+export type FileReference = Omit<UploadedFile, "buffer">;
 
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 export type { ToolMeta };

@@ -60,18 +60,3 @@ export function useDeleteConnectionProfile() {
     },
   });
 }
-
-export function useSetFlowProfile(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (profileId: string) =>
-      api(`/flows/${packageId}/profile`, {
-        method: "PUT",
-        body: JSON.stringify({ profileId }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["available-providers"] });
-    },
-  });
-}

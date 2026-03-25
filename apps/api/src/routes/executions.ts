@@ -16,7 +16,7 @@ import {
   addPackageMemories,
 } from "../services/state/index.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
-import { getAdapter, TimeoutError } from "../services/adapters/index.ts";
+import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import {
@@ -31,7 +31,7 @@ import { trackExecution, untrackExecution, abortExecution } from "../services/ex
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
-import { requireFlow, requireAdmin } from "../middleware/guards.ts";
+import { requireFlow, requireAdmin, isAdminRole } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchWebhookEvents } from "../services/webhooks.ts";
@@ -94,7 +94,7 @@ export async function executeFlowInBackground(
     dispatchWebhooks(orgId, "started", executionId, flow.id, undefined, applicationId);
 
     // Execute via adapter
-    const adapter = getAdapter();
+    const adapter = new PiAdapter();
 
     const timeout = (flow.manifest.timeout as number | undefined) ?? 300;
     const structuredOutput: Record<string, unknown> = {};
@@ -586,7 +586,7 @@ export function createExecutionsRouter() {
 
     // Filter by role: non-admins don't see debug logs
     const role = c.get("orgRole");
-    const isAdmin = role === "admin" || role === "owner";
+    const isAdmin = isAdminRole(role);
     const filtered = isAdmin ? logs : logs.filter((l) => l.level !== "debug");
 
     return c.json(filtered);

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
+import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
 import type { ModelFormData } from "../components/model-form-modal";
 import { useCreateProviderKey } from "./use-provider-keys";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
@@ -107,13 +107,7 @@ export function useTestModel() {
   });
 }
 
-/** Per-model pricing in $/M tokens. */
-export interface ModelCost {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+export type { ModelCost };
 
 export interface OpenRouterModel {
   id: string;
