@@ -58,18 +58,18 @@ async function getPackageDisplayNames(
   });
 }
 
-/** Find registry packages that depend on the target package (via manifest dependencies). */
-async function findRegistryDependents(
+/** Find packages that depend on the target package (via manifest dependencies). */
+async function findDependentPackages(
   orgId: string,
   targetPackageId: string,
 ): Promise<{ id: string; displayName: string }[]> {
-  const registryPkgs = await db
+  const orgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(eq(packages.orgId, orgId));
 
   const dependents: { id: string; displayName: string }[] = [];
-  for (const pkg of registryPkgs) {
+  for (const pkg of orgPkgs) {
     if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
     const m = (
       pkg.draftManifest !== null &&
@@ -306,7 +306,7 @@ export async function deleteOrgItem(
     return { ok: false, error: "IN_USE", flows: flowList };
   }
 
-  const dependents = await findRegistryDependents(orgId, itemId);
+  const dependents = await findDependentPackages(orgId, itemId);
   if (dependents.length > 0) {
     return { ok: false, error: "DEPENDED_ON", dependents };
   }
