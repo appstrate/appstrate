@@ -608,7 +608,6 @@ export async function createVersionFromDraft(params: {
 
   // Enrich manifest with dependencies so the version ZIP
   // matches what would be published to the registry (same integrity).
-  // Now that providers are in packageDependencies, the join query picks them up automatically.
   const deps = await buildDependencies(packageId, orgId);
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
   const finalManifest = parsed

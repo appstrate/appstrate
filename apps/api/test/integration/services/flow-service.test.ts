@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { listPackages, getPackage } from "../../../src/services/flow-service.ts";
-import { packageDependencies } from "@appstrate/db/schema";
 
 describe("flow-service", () => {
   let userId: string;
@@ -43,7 +42,6 @@ describe("flow-service", () => {
     });
 
     it("includes system packages (orgId: null) alongside org packages", async () => {
-      // System package has no orgId
       await seedPackage({
         orgId: null as unknown as string,
         id: "@system/sys-flow",
@@ -147,8 +145,8 @@ describe("flow-service", () => {
       expect(flow).toBeNull();
     });
 
-    it("resolves skill and tool dependencies", async () => {
-      const skillPkg = await seedPackage({
+    it("resolves skill and tool dependencies from manifest", async () => {
+      await seedPackage({
         orgId,
         id: `@${orgSlug}/my-skill`,
         type: "skill",
@@ -161,7 +159,7 @@ describe("flow-service", () => {
         },
       });
 
-      const toolPkg = await seedPackage({
+      await seedPackage({
         orgId,
         id: `@${orgSlug}/my-tool`,
         type: "tool",
@@ -174,7 +172,7 @@ describe("flow-service", () => {
         },
       });
 
-      const flowPkg = await seedPackage({
+      await seedPackage({
         orgId,
         id: `@${orgSlug}/dep-flow`,
         draftManifest: {
@@ -190,19 +188,76 @@ describe("flow-service", () => {
         draftContent: "Flow with dependencies",
       });
 
-      // Insert package dependencies
-      await db.insert(packageDependencies).values([
-        { packageId: flowPkg.id, dependencyId: skillPkg.id, orgId },
-        { packageId: flowPkg.id, dependencyId: toolPkg.id, orgId },
-      ]);
-
+      // No junction table insert needed — manifest is the source of truth
       const flow = await getPackage(`@${orgSlug}/dep-flow`, orgId);
 
       expect(flow).not.toBeNull();
       expect(flow!.skills).toHaveLength(1);
       expect(flow!.skills[0]!.id).toBe(`@${orgSlug}/my-skill`);
+      expect(flow!.skills[0]!.name).toBe("My Skill");
       expect(flow!.tools).toHaveLength(1);
       expect(flow!.tools[0]!.id).toBe(`@${orgSlug}/my-tool`);
+      expect(flow!.tools[0]!.name).toBe("My Tool");
+    });
+
+    it("resolves system tool dependencies", async () => {
+      // System tools have orgId: null
+      await seedPackage({
+        orgId: null as unknown as string,
+        id: "@appstrate/log",
+        type: "tool",
+        source: "system",
+        draftManifest: {
+          name: "@appstrate/log",
+          displayName: "Log",
+          version: "1.0.0",
+          type: "tool",
+          description: "Send log messages",
+        },
+      });
+
+      await seedPackage({
+        orgId,
+        id: `@${orgSlug}/sys-dep-flow`,
+        draftManifest: {
+          name: `@${orgSlug}/sys-dep-flow`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow with system tool",
+          dependencies: {
+            tools: { "@appstrate/log": "*" },
+          },
+        },
+      });
+
+      const flow = await getPackage(`@${orgSlug}/sys-dep-flow`, orgId);
+
+      expect(flow).not.toBeNull();
+      expect(flow!.tools).toHaveLength(1);
+      expect(flow!.tools[0]!.id).toBe("@appstrate/log");
+      expect(flow!.tools[0]!.name).toBe("Log");
+    });
+
+    it("gracefully handles missing dependency packages", async () => {
+      await seedPackage({
+        orgId,
+        id: `@${orgSlug}/missing-dep-flow`,
+        draftManifest: {
+          name: `@${orgSlug}/missing-dep-flow`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow referencing non-existent tool",
+          dependencies: {
+            tools: { "@nonexistent/tool": "*" },
+          },
+        },
+      });
+
+      const flow = await getPackage(`@${orgSlug}/missing-dep-flow`, orgId);
+
+      expect(flow).not.toBeNull();
+      // Missing deps are silently ignored (not in DB → not resolved)
+      expect(flow!.tools).toHaveLength(0);
     });
 
     it("returns empty skills and tools when no dependencies exist", async () => {

@@ -122,22 +122,3 @@ export const packageVersionDependencies = pgTable(
   ],
 );
 
-export const packageDependencies = pgTable(
-  "package_dependencies",
-  {
-    packageId: text("package_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
-    dependencyId: text("dependency_id")
-      .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at").defaultNow(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.packageId, table.dependencyId] }),
-    index("idx_package_dependencies_dep_id").on(table.dependencyId),
-  ],
-);

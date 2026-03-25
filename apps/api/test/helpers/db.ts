@@ -23,7 +23,6 @@ const ALL_TABLES = [
   "package_memories",
   "package_version_dependencies",
   "package_dist_tags",
-  "package_dependencies",
   "package_configs",
   "user_package_profiles",
   "flow_provider_bindings",
