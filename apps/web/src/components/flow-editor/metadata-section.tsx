@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "../form-field";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
-interface MetadataState {
+export interface MetadataState {
   id: string;
   scope: string;
   version: string;

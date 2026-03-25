@@ -1,11 +1,4 @@
-import type { SchemaField } from "./schema-section";
-
 export type EditorTab = "general" | "prompt" | "providers" | "schema" | "skills" | "tools" | "json";
-
-export interface ExecutionSettings {
-  timeout: number;
-  logs: boolean;
-}
 
 export interface ProviderEntry {
   id: string;
@@ -21,23 +14,7 @@ export interface ResourceEntry {
   description?: string;
 }
 
-export interface FlowFormState {
-  metadata: {
-    id: string;
-    scope: string;
-    version: string;
-    displayName: string;
-    description: string;
-    author: string;
-    keywords: string[];
-  };
+export interface FlowEditorState {
+  manifest: Record<string, unknown>;
   prompt: string;
-  providers: ProviderEntry[];
-  skills: ResourceEntry[];
-  tools: ResourceEntry[];
-  inputSchema: SchemaField[];
-  outputSchema: SchemaField[];
-  configSchema: SchemaField[];
-  execution: ExecutionSettings;
-  _manifestBase: Record<string, unknown>;
 }

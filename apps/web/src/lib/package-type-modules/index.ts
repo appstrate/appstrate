@@ -22,19 +22,13 @@ export interface ContentPackageInput {
 
 // --- Generic form state ---
 
-export interface PackageMetadata {
-  id: string;
-  scope: string;
-  version: string;
-  displayName: string;
-  description: string;
-  author: string;
-  keywords: string[];
-}
+import type { MetadataState } from "../../components/flow-editor/metadata-section";
+
+export type PackageMetadata = MetadataState;
 
 export interface PackageFormState {
   _type: "skill" | "tool";
-  metadata: PackageMetadata;
+  metadata: MetadataState;
   content: string;
   _manifestBase: Record<string, unknown>;
   _lockVersion?: number;

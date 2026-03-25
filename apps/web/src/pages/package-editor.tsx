@@ -17,26 +17,33 @@ import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 // Flow editor components
 import { MetadataSection } from "../components/flow-editor/metadata-section";
 import { SchemaSection } from "../components/flow-editor/schema-section";
-import { ExecutionSection } from "../components/flow-editor/execution-section";
 import { ResourceSection } from "../components/flow-editor/resource-section";
 import { PromptEditor } from "../components/flow-editor/prompt-editor";
 import { ProviderPicker } from "../components/flow-editor/provider-picker";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
+import { FormField } from "../components/form-field";
 import { Spinner } from "../components/spinner";
 import { EmptyState } from "../components/page-states";
 import { EditorShell } from "../components/editor-shell";
 import { useProviders } from "../hooks/use-providers";
 
-import type { FlowFormState } from "../components/flow-editor/types";
+import type { FlowEditorState } from "../components/flow-editor/types";
+import type { MetadataState } from "../components/flow-editor/metadata-section";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 import {
-  defaultFormState as flowDefaultFormState,
-  detailToFormState as flowDetailToFormState,
-  assemblePayload as flowAssemblePayload,
-  payloadToFormState as flowPayloadToFormState,
+  defaultEditorState,
+  getManifestName,
+  getProviderEntries,
+  setProviderEntries,
+  getResourceEntries,
+  setResourceEntries,
   toResourceEntry,
+  schemaToFields,
+  fieldsToSchema,
 } from "../components/flow-editor/utils";
+import type { SchemaField } from "../components/flow-editor/schema-section";
 import flowSchema from "../lib/schemas/flow.schema.json";
 import skillSchema from "../lib/schemas/skill.schema.json";
 import toolSchema from "../lib/schemas/tool.schema.json";
@@ -68,7 +75,7 @@ function FlowEditorInner({
   packageId,
   isEdit,
 }: {
-  initialState: FlowFormState;
+  initialState: FlowEditorState;
   detail: { dependencies: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
   packageId: string | undefined;
   isEdit: boolean;
@@ -79,67 +86,117 @@ function FlowEditorInner({
   const createFlow = useCreatePackage("flow");
   const updateFlow = useUpdatePackage("flow", packageId || "");
 
-  const [form, setForm] = useState<FlowFormState>(initialState);
+  const [state, setState] = useState<FlowEditorState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
 
+  const updateManifest = (patch: Record<string, unknown>) =>
+    setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
+
+  // Adapters: read/write between manifest and section component interfaces
+  const metadata = useMemo((): MetadataState => {
+    const { scope, id } = getManifestName(state.manifest);
+    return {
+      id,
+      scope,
+      version: (state.manifest.version as string) ?? "1.0.0",
+      displayName: (state.manifest.displayName as string) ?? "",
+      description: (state.manifest.description as string) ?? "",
+      author: (state.manifest.author as string) ?? "",
+      keywords: Array.isArray(state.manifest.keywords) ? (state.manifest.keywords as string[]) : [],
+    };
+  }, [state.manifest]);
+
+  const onMetadataChange = (m: MetadataState) =>
+    updateManifest({
+      name: `@${m.scope}/${m.id}`,
+      version: m.version,
+      displayName: m.displayName,
+      description: m.description,
+      author: m.author,
+      keywords: m.keywords,
+    });
+
+  const getSchemaFields = (key: "input" | "output" | "config") => {
+    const container = state.manifest[key] as { schema?: JSONSchemaObject } | undefined;
+    return schemaToFields(container?.schema, key);
+  };
+
+  const onSchemaChange = (key: "input" | "output" | "config") => (fields: SchemaField[]) => {
+    const schema = fieldsToSchema(fields, key);
+    if (schema) {
+      updateManifest({ [key]: { schema } });
+    } else {
+      setState((s) => {
+        const { [key]: _, ...rest } = s.manifest;
+        return { ...s, manifest: rest };
+      });
+    }
+  };
+
   // --- Unsaved changes detection ---
   const isDirty = useMemo(
-    () => JSON.stringify(initialState) !== JSON.stringify(form),
-    [initialState, form],
+    () => JSON.stringify(initialState) !== JSON.stringify(state),
+    [initialState, state],
   );
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !detail || !packageId) return;
-    const { prompt, ...payload } = flowAssemblePayload(form);
     await api(`/packages/flows/${packageId}`, {
       method: "PUT",
-      body: JSON.stringify({ ...payload, content: prompt, lockVersion: detail.lockVersion! }),
+      body: JSON.stringify({
+        manifest: state.manifest,
+        content: state.prompt,
+        lockVersion: detail.lockVersion!,
+      }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["flows"] });
-  }, [form, isEdit, detail, packageId, qc]);
+  }, [state, isEdit, detail, packageId, qc]);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from server data to local form state */
+  // Sync resolved skill/tool metadata from server (names, descriptions)
   useEffect(() => {
     if (!detail) return;
-    setForm((prev) => ({
-      ...prev,
-      skills: (
+    setState((prev) => {
+      const m = { ...prev.manifest };
+      const skills = (
         detail.dependencies.skills as {
           id: string;
           version?: string;
           name?: string;
           description?: string;
         }[]
-      ).map(toResourceEntry),
-      tools: (
+      ).map(toResourceEntry);
+      const tools = (
         detail.dependencies.tools as {
           id: string;
           version?: string;
           name?: string;
           description?: string;
         }[]
-      ).map(toResourceEntry),
-    }));
+      ).map(toResourceEntry);
+      setResourceEntries(m, "skills", skills);
+      setResourceEntries(m, "tools", tools);
+      return { ...prev, manifest: m };
+    });
   }, [detail]);
 
   const handleSubmit = () => {
     setError(null);
-    if (!form.metadata.id || !form.metadata.displayName) {
+    const { id } = getManifestName(state.manifest);
+    if (!id || !state.manifest.displayName) {
       setError(t("editor.errorRequired"));
       setActiveTab("general");
       return;
     }
-    if (!form.prompt.trim()) {
+    if (!state.prompt.trim()) {
       setError(t("editor.errorPrompt"));
       setActiveTab("prompt");
       return;
     }
     allowNavigation();
-    const { prompt, ...payload } = flowAssemblePayload(form);
-    const body = { ...payload, content: prompt };
+    const body = { manifest: state.manifest, content: state.prompt };
     if (isEdit && detail) {
       updateFlow.mutate(
         { ...body, lockVersion: detail.lockVersion! },
@@ -151,10 +208,6 @@ function FlowEditorInner({
   };
 
   const isPending = createFlow.isPending || updateFlow.isPending;
-  const handleJsonApply = (parsed: Record<string, unknown>) => {
-    setForm(flowPayloadToFormState({ manifest: parsed, prompt: form.prompt }));
-    setActiveTab("general");
-  };
 
   const flowTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
@@ -171,7 +224,7 @@ function FlowEditorInner({
       type="flow"
       packageId={packageId}
       isEdit={isEdit}
-      displayName={form.metadata.displayName || packageId}
+      displayName={(state.manifest.displayName as string) || packageId}
       tabs={flowTabs}
       activeTab={activeTab}
       onTabChange={(v) => setActiveTab(v as GenericEditorTab)}
@@ -183,27 +236,50 @@ function FlowEditorInner({
     >
       {activeTab === "general" && (
         <>
-          <MetadataSection
-            value={form.metadata}
-            onChange={(metadata) => setForm((s) => ({ ...s, metadata }))}
-            isEdit={isEdit}
-          />
-          <ExecutionSection
-            value={form.execution}
-            onChange={(execution) => setForm((s) => ({ ...s, execution }))}
-          />
+          <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
+          <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
+            <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
+              {t("editor.execution")}
+            </div>
+            <div className="space-y-3 p-4">
+              <FormField
+                id="exec-timeout"
+                label={t("editor.execTimeout")}
+                type="number"
+                value={String((state.manifest.timeout as number) ?? 300)}
+                onChange={(v) => updateManifest({ timeout: parseInt(v) || 300 })}
+                description={t("editor.execTimeoutDesc")}
+              />
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{t("editor.execLogs")}</p>
+                  <p className="text-xs text-muted-foreground">{t("editor.execLogsDesc")}</p>
+                </div>
+                <input
+                  id="exec-logs"
+                  type="checkbox"
+                  checked={(state.manifest["x-logs"] as boolean | undefined) ?? true}
+                  onChange={(e) => updateManifest({ "x-logs": e.target.checked })}
+                />
+              </div>
+            </div>
+          </div>
         </>
       )}
       {activeTab === "prompt" && (
         <PromptEditor
-          value={form.prompt}
-          onChange={(prompt) => setForm((s) => ({ ...s, prompt }))}
+          value={state.prompt}
+          onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
         />
       )}
       {activeTab === "providers" && (
         <ProviderPicker
-          value={form.providers}
-          onChange={(providers) => setForm((s) => ({ ...s, providers }))}
+          value={getProviderEntries(state.manifest)}
+          onChange={(entries) => {
+            const m = { ...state.manifest };
+            setProviderEntries(m, entries);
+            setState((s) => ({ ...s, manifest: m }));
+          }}
         />
       )}
       {activeTab === "schema" && (
@@ -211,20 +287,20 @@ function FlowEditorInner({
           <SchemaSection
             title={t("editor.inputTitle")}
             mode="input"
-            fields={form.inputSchema}
-            onChange={(inputSchema) => setForm((s) => ({ ...s, inputSchema }))}
+            fields={getSchemaFields("input")}
+            onChange={onSchemaChange("input")}
           />
           <SchemaSection
             title={t("editor.outputTitle")}
             mode="output"
-            fields={form.outputSchema}
-            onChange={(outputSchema) => setForm((s) => ({ ...s, outputSchema }))}
+            fields={getSchemaFields("output")}
+            onChange={onSchemaChange("output")}
           />
           <SchemaSection
             title={t("editor.configTitle")}
             mode="config"
-            fields={form.configSchema}
-            onChange={(configSchema) => setForm((s) => ({ ...s, configSchema }))}
+            fields={getSchemaFields("config")}
+            onChange={onSchemaChange("config")}
           />
         </>
       )}
@@ -233,8 +309,12 @@ function FlowEditorInner({
           type="skill"
           title={t("editor.tabSkills")}
           emptyLabel={t("editor.skillsEmpty")}
-          selectedEntries={form.skills}
-          onChange={(entries) => setForm((s) => ({ ...s, skills: entries }))}
+          selectedEntries={getResourceEntries(state.manifest, "skills")}
+          onChange={(entries) => {
+            const m = { ...state.manifest };
+            setResourceEntries(m, "skills", entries);
+            setState((s) => ({ ...s, manifest: m }));
+          }}
         />
       )}
       {activeTab === "tools" && (
@@ -242,14 +322,21 @@ function FlowEditorInner({
           type="tool"
           title={t("editor.tabTools")}
           emptyLabel={t("editor.toolsEmpty")}
-          selectedEntries={form.tools}
-          onChange={(entries) => setForm((s) => ({ ...s, tools: entries }))}
+          selectedEntries={getResourceEntries(state.manifest, "tools")}
+          onChange={(entries) => {
+            const m = { ...state.manifest };
+            setResourceEntries(m, "tools", entries);
+            setState((s) => ({ ...s, manifest: m }));
+          }}
         />
       )}
       {activeTab === "json" && (
         <JsonEditor
-          value={flowAssemblePayload(form).manifest}
-          onApply={handleJsonApply}
+          value={state.manifest}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
+            setActiveTab("general");
+          }}
           schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow }}
         />
       )}
@@ -384,7 +471,7 @@ function PackageEditorInner({
             ).manifest
           }
           onApply={(parsed) => {
-            const scopeMatch = (parsed.name as string)?.match(/^@([^/]+)\/(.+)$/);
+            const parsedName = getManifestName(parsed);
             setForm((s) => ({
               ...s,
               metadata: {
@@ -392,7 +479,7 @@ function PackageEditorInner({
                 displayName: (parsed.displayName as string) ?? s.metadata.displayName,
                 description: (parsed.description as string) ?? s.metadata.description,
                 version: (parsed.version as string) ?? s.metadata.version,
-                ...(scopeMatch ? { scope: scopeMatch[1], id: scopeMatch[2] } : {}),
+                ...(parsedName.scope ? { scope: parsedName.scope, id: parsedName.id } : {}),
               },
               _manifestBase: parsed,
             }));
@@ -475,10 +562,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // Flow editor
   if (type === "flow") {
     const flowDetail = flowQuery.data;
-    const initialState =
+    const initialState: FlowEditorState =
       isEdit && flowDetail
-        ? flowDetailToFormState(flowDetail)
-        : flowDefaultFormState(currentOrg?.slug, user?.email);
+        ? {
+            manifest: (flowDetail.manifest ?? {}) as Record<string, unknown>,
+            prompt: flowDetail.prompt || "",
+          }
+        : defaultEditorState(currentOrg?.slug, user?.email);
 
     return (
       <FlowEditorInner
