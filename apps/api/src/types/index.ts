@@ -22,18 +22,11 @@ export interface FlowProviderRequirement {
 
 // --- Loaded Flow (manifest + prompt from DB) ---
 
-export interface SkillMeta {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}
-
 export interface LoadedFlow {
   id: string;
   manifest: FlowManifest;
   prompt: string;
-  skills: SkillMeta[];
+  skills: ToolMeta[];
   tools: ToolMeta[];
   source: "system" | "local";
 }

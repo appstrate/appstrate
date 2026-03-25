@@ -17,7 +17,7 @@ const CONNECTED_SENTINEL = "__connected__";
 
 /**
  * Build a map of provider tokens for all required providers.
- * providerProfiles maps providerId → profileId.
+ * providerProfiles maps providerId → connectionProfileId.
  *
  * For providers with `access_token` or `api_key` credentials, the actual token
  * value is stored. For other auth modes (basic, custom) that have credentials,
@@ -33,9 +33,9 @@ export async function buildProviderTokens(
     providers
       .filter((svc) => providerProfiles[svc.id])
       .map(async (svc) => {
-        const profileId = providerProfiles[svc.id]!;
+        const connectionProfileId = providerProfiles[svc.id]!;
 
-        const result = await getCredentials(db, profileId, svc.id, orgId);
+        const result = await getCredentials(db, connectionProfileId, svc.id, orgId);
         const token = result
           ? (result.credentials.access_token ??
             result.credentials.api_key ??
@@ -45,7 +45,7 @@ export async function buildProviderTokens(
           logger.warn("No token resolved for provider", {
             providerId: svc.id,
             provider: svc.provider,
-            profileId,
+            connectionProfileId,
           });
         }
         return [svc.id, token] as const;

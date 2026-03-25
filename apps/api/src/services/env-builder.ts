@@ -19,12 +19,38 @@ import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { resolveProviderProfiles } from "./connection-profiles.ts";
+import { validateFlowReadiness } from "./flow-readiness.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
     super("No LLM model configured for this organization");
     this.name = "ModelNotConfiguredError";
   }
+}
+
+/**
+ * Resolve provider profiles, config, and validate flow readiness.
+ * Shared preflight logic for all execution paths (manual run, scheduled, share link).
+ */
+export async function resolvePreflightContext(params: {
+  flow: LoadedFlow;
+  actor: Actor;
+  packageId: string;
+  orgId: string;
+  profileIdOverride?: string;
+}): Promise<{ providerProfiles: Record<string, string>; config: Record<string, unknown> }> {
+  const { flow, actor, packageId, orgId, profileIdOverride } = params;
+  const manifestProviders = resolveManifestProviders(flow.manifest);
+
+  const [providerProfiles, config] = await Promise.all([
+    resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
+    getPackageConfig(orgId, packageId),
+  ]);
+
+  await validateFlowReadiness({ flow, providerProfiles, orgId, config });
+
+  return { providerProfiles, config };
 }
 
 /**

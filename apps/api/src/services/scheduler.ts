@@ -5,14 +5,16 @@ import { db } from "../lib/db.ts";
 import { packageSchedules } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";
-import { createExecution, getPackageConfig } from "./state/index.ts";
+import { createExecution } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
+import {
+  buildExecutionContext,
+  resolvePreflightContext,
+  ModelNotConfiguredError,
+} from "./env-builder.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
-import { resolveProviderProfiles, getEffectiveProfileId } from "./connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateFlowReadiness } from "./flow-readiness.ts";
+import { getEffectiveProfileId } from "./connection-profiles.ts";
 import { ApiError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { getRedisConnection } from "../lib/redis.ts";
@@ -215,21 +217,16 @@ async function triggerScheduledExecution(
       return;
     }
 
-    // Resolve provider profiles for this actor + package
-    const manifestProviders = resolveManifestProviders(flow.manifest);
-    const [providerProfiles, config] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, actor, packageId, orgId),
-      getPackageConfig(orgId, packageId),
-    ]);
-
-    // Validate flow readiness (prompt, skills, tools, providers, config)
+    // Resolve provider profiles, config, and validate readiness
+    let providerProfiles: Record<string, string>;
+    let config: Record<string, unknown>;
     try {
-      await validateFlowReadiness({
+      ({ providerProfiles, config } = await resolvePreflightContext({
         flow,
-        providerProfiles,
+        actor,
+        packageId,
         orgId,
-        config,
-      });
+      }));
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Flow readiness check failed, skipping schedule", {

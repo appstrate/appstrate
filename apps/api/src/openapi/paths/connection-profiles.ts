@@ -240,7 +240,7 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "Delete a connection profile",
       description:
-        "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to a flow admin connection.",
+        "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to a flow provider binding.",
       parameters: [
         {
           name: "id",

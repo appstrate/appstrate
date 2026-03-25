@@ -14,7 +14,7 @@ export interface DependencyValidationDeps {
   isProviderEnabled: (orgId: string, providerId: string) => Promise<boolean>;
   getConnectionStatus: (
     provider: string,
-    profileId: string,
+    connectionProfileId: string,
     orgId: string,
   ) => Promise<ConnectionStatus>;
   validateScopes: (granted: string[], required: string[]) => { sufficient: boolean };
@@ -28,7 +28,7 @@ const defaultDeps: DependencyValidationDeps = {
 
 /**
  * Validate that all required provider dependencies are satisfied.
- * providerProfiles maps providerId → profileId.
+ * providerProfiles maps providerId → connectionProfileId.
  * Throws ApiError on first unsatisfied dependency.
  */
 export async function validateFlowDependencies(
@@ -53,8 +53,8 @@ export async function validateFlowDependencies(
 
   // Check for missing profiles first (no async needed)
   for (const svc of providers) {
-    const profileId = providerProfiles[svc.id];
-    if (!profileId) {
+    const connectionProfileId = providerProfiles[svc.id];
+    if (!connectionProfileId) {
       const mode = svc.connectionMode ?? "user";
       if (mode === "admin") {
         throw new ApiError({

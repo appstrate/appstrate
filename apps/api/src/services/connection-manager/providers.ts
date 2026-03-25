@@ -16,7 +16,7 @@ import {
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
 
-export interface IntegrationWithStatus {
+export interface AvailableProviderWithStatus {
   uniqueKey: string;
   provider: string;
   displayName: string;
@@ -34,10 +34,10 @@ export async function getProviderAuthMode(
   return getProviderAuthModeRaw(db, orgId, provider);
 }
 
-export async function getIntegrationsWithStatus(
+export async function getAvailableProvidersWithStatus(
   profileId: string,
   orgId: string,
-): Promise<IntegrationWithStatus[]> {
+): Promise<AvailableProviderWithStatus[]> {
   const [providers, connections] = await Promise.all([
     listProviders(db, orgId),
     listConnectionsRaw(db, profileId, orgId),

@@ -11,7 +11,7 @@ import {
   handleOAuth1CallbackAndSave,
   saveApiKeyConnection,
   saveCredentialsConnection,
-  getIntegrationsWithStatus,
+  getAvailableProvidersWithStatus,
   disconnectProvider,
   disconnectConnectionById,
   getProviderAuthMode,
@@ -184,12 +184,12 @@ router.get("/callback", async (c) => {
   }
 });
 
-// GET /auth/integrations — list all integrations with connection status for current actor
+// GET /auth/integrations — list all available providers with connection status for current actor
 router.get("/integrations", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
   const profileId = c.req.query("profileId") ?? (await getEffectiveProfileId(actor));
-  const integrations = await getIntegrationsWithStatus(profileId, orgId);
+  const integrations = await getAvailableProvidersWithStatus(profileId, orgId);
   return c.json({ integrations });
 });
 

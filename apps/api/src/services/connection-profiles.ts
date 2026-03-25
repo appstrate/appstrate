@@ -11,7 +11,7 @@ import {
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
-import { getAdminConnections } from "./state/index.ts";
+import { getFlowProviderBindings } from "./state/index.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
@@ -254,13 +254,13 @@ export async function resolveProviderProfiles(
   profileIdOverride?: string,
 ): Promise<Record<string, string>> {
   const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(actor, packageId));
-  const adminConns = await getAdminConnections(orgId, packageId);
+  const bindings = await getFlowProviderBindings(orgId, packageId);
   const map: Record<string, string> = {};
 
   for (const svc of providers) {
     const mode = svc.connectionMode ?? "user";
     if (mode === "admin") {
-      const adminProfileId = adminConns[svc.id];
+      const adminProfileId = bindings[svc.id];
       if (adminProfileId) {
         map[svc.id] = adminProfileId;
       }

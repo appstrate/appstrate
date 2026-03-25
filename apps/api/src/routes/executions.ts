@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedFlow, AppEnv } from "../types/index.ts";
 import {
-  getPackageConfig,
   createExecution,
   updateExecution,
   appendExecutionLog,
@@ -16,11 +15,15 @@ import {
   listExecutionLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { getAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
+import {
+  buildExecutionContext,
+  resolvePreflightContext,
+  ModelNotConfiguredError,
+} from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -30,8 +33,6 @@ import { idempotency } from "../middleware/idempotency.ts";
 import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
 import { requireFlow, requireAdmin } from "../middleware/guards.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchWebhookEvents } from "../services/webhooks.ts";
 import { type Actor, getActor } from "../lib/actor.ts";
@@ -396,23 +397,20 @@ export function createExecutionsRouter() {
       }
 
       // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
-      const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
-      const [providerProfiles, config, userProfileId, inputResult] = await Promise.all([
-        resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
-        getPackageConfig(orgId, packageId),
+      const [preflightResult, userProfileId, inputResult] = await Promise.all([
+        resolvePreflightContext({
+          flow: effectiveFlow,
+          actor,
+          packageId,
+          orgId,
+          profileIdOverride,
+        }),
         profileIdOverride
           ? Promise.resolve(profileIdOverride)
           : getEffectiveProfileId(actor, packageId),
         parseRequestInput(c, effectiveFlow.manifest.input?.schema),
       ]);
-
-      // Validate flow readiness (prompt, skills, tools, providers, config) — throws on failure
-      await validateFlowReadiness({
-        flow: effectiveFlow,
-        providerProfiles,
-        orgId,
-        config,
-      });
+      const { providerProfiles, config } = preflightResult;
 
       const {
         input: parsedInput,

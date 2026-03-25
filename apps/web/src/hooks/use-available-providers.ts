@@ -2,16 +2,16 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentProfileId } from "./use-current-profile";
-import type { Integration } from "@appstrate/shared-types";
+import type { AvailableProvider } from "@appstrate/shared-types";
 
-export function useIntegrations() {
+export function useAvailableProviders() {
   const orgId = useCurrentOrgId();
   const profileId = useCurrentProfileId();
   return useQuery({
-    queryKey: ["integrations", orgId, profileId],
+    queryKey: ["available-providers", orgId, profileId],
     queryFn: async () => {
       const qs = profileId ? `?profileId=${profileId}` : "";
-      const data = await apiFetch<{ integrations: Integration[] }>(`/auth/integrations${qs}`);
+      const data = await apiFetch<{ integrations: AvailableProvider[] }>(`/auth/integrations${qs}`);
       return data.integrations;
     },
   });

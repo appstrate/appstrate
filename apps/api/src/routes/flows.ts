@@ -6,8 +6,8 @@ import {
   setFlowModelId,
   setFlowProxyId,
   getRunningExecutionsCounts,
-  bindAdminConnection,
-  unbindAdminConnection,
+  bindFlowProvider,
+  unbindFlowProvider,
   getPackageMemories,
   deletePackageMemory,
   deleteAllPackageMemories,
@@ -130,7 +130,7 @@ export function createFlowsRouter() {
         throw invalidRequest(`No active connection for '${svc.provider}'`);
       }
 
-      await bindAdminConnection(orgId, flow.id, providerId, effectiveProfileId);
+      await bindFlowProvider(orgId, flow.id, providerId, effectiveProfileId);
       return c.json({ bound: true });
     },
   );
@@ -149,7 +149,7 @@ export function createFlowsRouter() {
         throw notFound(`Provider '${providerId}' not found`);
       }
 
-      await unbindAdminConnection(c.get("orgId"), flow.id, providerId);
+      await unbindFlowProvider(c.get("orgId"), flow.id, providerId);
       return c.json({ unbound: true });
     },
   );

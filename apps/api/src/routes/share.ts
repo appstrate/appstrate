@@ -7,19 +7,17 @@ import { getShareLink, useShareLink } from "../services/share-links.ts";
 import { getPackage } from "../services/flow-service.ts";
 import {
   createExecution,
-  getAdminConnections,
-  getPackageConfig,
+  getFlowProviderBindings,
   listExecutionLogs,
 } from "../services/state/index.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
-import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
-import { validateFlowReadiness } from "../services/flow-readiness.ts";
+import { buildExecutionContext, resolvePreflightContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import type { PromptContext } from "../services/adapters/types.ts";
 import { executeFlowInBackground } from "./executions.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { ApiError, notFound, gone } from "../lib/errors.ts";
-import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import type { Actor } from "../lib/actor.ts";
 import { getEndUserApplicationId } from "../services/end-users.ts";
@@ -48,10 +46,10 @@ export function createShareRouter() {
       : flow.manifest;
 
     // Resolve provider statuses
-    const adminConns = await getAdminConnections(orgId, flow.id);
+    const bindings = await getFlowProviderBindings(orgId, flow.id);
     const providerStatuses = await resolveProviderStatuses(
       resolveManifestProviders(manifest),
-      adminConns,
+      bindings,
       orgId,
       undefined,
     );
@@ -147,18 +145,11 @@ export function createShareRouter() {
     const inputSchema = effectiveFlow.manifest.input?.schema;
     const { input: parsedInput, uploadedFiles } = await parseRequestInput(c, inputSchema);
 
-    const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
-    const [providerProfiles, config] = await Promise.all([
-      resolveProviderProfiles(manifestProviders, actor, packageId, orgId),
-      getPackageConfig(orgId, packageId),
-    ]);
-
-    // Throws on failure
-    await validateFlowReadiness({
+    const { providerProfiles, config } = await resolvePreflightContext({
       flow: effectiveFlow,
-      providerProfiles,
+      actor,
+      packageId,
       orgId,
-      config,
     });
 
     // --- All validations passed — now atomically use the link ---

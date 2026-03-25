@@ -7,7 +7,7 @@ import {
   useConnectCredentials,
   useDisconnect,
 } from "../hooks/use-mutations";
-import { useIntegrations } from "../hooks/use-integrations";
+import { useAvailableProviders } from "../hooks/use-available-providers";
 import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { connectedLabelWithProfile } from "../lib/provider-status";
@@ -20,7 +20,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
   const { data: profiles } = useConnectionProfiles();
-  const { data: integrations } = useIntegrations();
+  const { data: availableProviders } = useAvailableProviders();
 
   const connectMutation = useConnect();
   const connectApiKeyMutation = useConnectApiKey();
@@ -43,7 +43,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
     connectCredentialsMutation.isPending ||
     disconnectMutation.isPending;
 
-  const isConnected = integrations?.some(
+  const isConnected = availableProviders?.some(
     (i) => i.provider === provider.id && i.status === "connected",
   );
 

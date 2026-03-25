@@ -16,7 +16,7 @@ import {
   deleteShareLink,
   listShareLinkUsages,
 } from "../services/share-links.ts";
-import { getAdminConnections } from "../services/state/index.ts";
+import { getFlowProviderBindings } from "../services/state/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { resolveVersionManifest } from "../services/package-versions.ts";
 import { invalidRequest, notFound } from "../lib/errors.ts";
@@ -88,9 +88,9 @@ export function createShareLinksRouter() {
           );
         }
 
-        const adminConns = await getAdminConnections(orgId, flow.id);
+        const bindings = await getFlowProviderBindings(orgId, flow.id);
         for (const svc of providers) {
-          if (!adminConns[svc.id]) {
+          if (!bindings[svc.id]) {
             throw invalidRequest(
               "All admin providers must be bound before generating a public link.",
             );

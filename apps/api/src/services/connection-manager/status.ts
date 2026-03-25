@@ -15,10 +15,10 @@ export interface ConnectionStatus {
 
 export async function getConnectionStatus(
   provider: string,
-  profileId: string,
+  connectionProfileId: string,
   orgId: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, profileId, provider, orgId);
+  const conn = await getConnection(db, connectionProfileId, provider, orgId);
   if (conn) {
     return {
       provider,
@@ -51,11 +51,11 @@ function buildScopeInfo(
 
 /**
  * Resolve provider statuses for a flow's required providers.
- * Uses profileId for both user and admin connections (via providerProfiles map).
+ * Uses connectionProfileId for both user and admin connections (via flow provider bindings map).
  */
 export async function resolveProviderStatuses(
   providers: FlowProviderRequirement[],
-  adminConns: Record<string, string>,
+  bindings: Record<string, string>,
   orgId: string,
   userProfileId?: string,
 ): Promise<ProviderStatus[]> {
@@ -73,7 +73,7 @@ export async function resolveProviderStatuses(
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
 
       if (mode === "admin") {
-        const adminProfileId = adminConns[svc.id];
+        const adminProfileId = bindings[svc.id];
         if (adminProfileId) {
           const conn = await getConnectionStatus(svc.provider, adminProfileId, orgId);
           return {

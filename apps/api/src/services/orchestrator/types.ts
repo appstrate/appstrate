@@ -29,12 +29,18 @@ export interface IsolationBoundary {
   readonly name: string;
 }
 
-// Mirrored in runtime-pi/sidecar/helpers.ts. Keep in sync.
+// Mirrored in runtime-pi/sidecar/helpers.ts — keep both definitions identical.
 export interface SidecarConfig {
   executionToken: string;
   platformApiUrl: string;
   proxyUrl?: string;
-  llm?: { baseUrl: string; apiKey: string; placeholder: string };
+  llm?: LlmProxyConfig;
+}
+
+export interface LlmProxyConfig {
+  baseUrl: string;
+  apiKey: string;
+  placeholder: string;
 }
 
 export interface CleanupReport {

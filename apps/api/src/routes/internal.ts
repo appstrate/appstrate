@@ -7,7 +7,7 @@ import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/execution-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { getRecentExecutions, getAdminConnections } from "../services/state/index.ts";
+import { getRecentExecutions, getFlowProviderBindings } from "../services/state/index.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
@@ -167,8 +167,8 @@ export function createInternalRouter() {
       let profileId: string;
 
       if (connectionMode === "admin") {
-        const adminConns = await getAdminConnections(execution.orgId, execution.packageId);
-        const adminProfileId = adminConns[providerId];
+        const bindings = await getFlowProviderBindings(execution.orgId, execution.packageId);
+        const adminProfileId = bindings[providerId];
         if (!adminProfileId) {
           throw notFound(`No admin binding for provider '${providerId}'`);
         }
