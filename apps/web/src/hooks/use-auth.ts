@@ -95,18 +95,28 @@ export function useAuth() {
     }
   }, []);
 
-  const signup = useCallback(async (email: string, password: string, displayName?: string) => {
-    const result = await authClient.signUp.email({
-      email,
-      password,
-      name: displayName || email,
-    });
-    if (result.error) throw new Error(result.error.message);
-    const profile = await fetchProfile();
-    if (result.data?.user) {
+  const signup = useCallback(
+    async (
+      email: string,
+      password: string,
+      displayName?: string,
+    ): Promise<{ emailVerificationRequired: boolean }> => {
+      const result = await authClient.signUp.email({
+        email,
+        password,
+        name: displayName || email,
+      });
+      if (result.error) throw new Error(result.error.message);
+      // When email verification is enabled, Better Auth does not return a session
+      if (!result.data?.user) {
+        return { emailVerificationRequired: true };
+      }
+      const profile = await fetchProfile();
       setAuthenticatedUser(result.data.user, profile);
-    }
-  }, []);
+      return { emailVerificationRequired: false };
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await authClient.signOut();
@@ -121,6 +131,30 @@ export function useAuth() {
     if (result.error) throw new Error(result.error.message);
   }, []);
 
+  const signInWithGoogle = useCallback(async () => {
+    await authClient.signIn.social({
+      provider: "google",
+      callbackURL: "/",
+    });
+  }, []);
+
+  const linkGoogle = useCallback(async () => {
+    await authClient.linkSocial({
+      provider: "google",
+      callbackURL: "/preferences#security",
+    });
+  }, []);
+
+  const unlinkAccount = useCallback(async (providerId: string) => {
+    const result = await authClient.unlinkAccount({ providerId });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
+  const resendVerificationEmail = useCallback(async (email: string) => {
+    const result = await authClient.sendVerificationEmail({ email });
+    if (result.error) throw new Error(result.error.message);
+  }, []);
+
   return {
     user: state.user,
     profile: state.profile,
@@ -129,5 +163,9 @@ export function useAuth() {
     signup,
     logout,
     updatePassword,
+    signInWithGoogle,
+    linkGoogle,
+    unlinkAccount,
+    resendVerificationEmail,
   };
 }

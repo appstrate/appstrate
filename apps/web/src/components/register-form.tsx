@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils";
@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "../hooks/use-theme";
 import { useAuth } from "../hooks/use-auth";
-import { AppleIcon, GoogleIcon } from "./icons";
+import { useAppConfig } from "../hooks/use-app-config";
+import { GoogleSignInButton } from "./google-sign-in-button";
 
 type RegisterFormData = {
   displayName: string;
@@ -19,6 +20,8 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
   const { t } = useTranslation(["settings", "common"]);
   const { resolvedTheme } = useTheme();
   const { signup } = useAuth();
+  const { features } = useAppConfig();
+  const navigate = useNavigate();
 
   const {
     register,
@@ -32,7 +35,10 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
 
   const onSubmit = async (data: RegisterFormData) => {
     try {
-      await signup(data.email, data.password, data.displayName.trim() || undefined);
+      const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
+      if (result.emailVerificationRequired) {
+        navigate("/verify-email", { state: { email: data.email } });
+      }
     } catch (err) {
       setError("root", {
         message: err instanceof Error ? err.message : t("login.error"),
@@ -125,22 +131,19 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
             <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
               {isSubmitting ? t("loading") : t("login.signup")}
             </Button>
-            <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
-              <span className="relative z-10 bg-background px-2 text-muted-foreground">
-                {t("login.or")}
-              </span>
+            {features.googleAuth && (
+              <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+                <span className="relative z-10 bg-background px-2 text-muted-foreground">
+                  {t("login.or")}
+                </span>
+              </div>
+            )}
+          </div>
+          {features.googleAuth && (
+            <div className="mx-auto w-full max-w-sm">
+              <GoogleSignInButton />
             </div>
-          </div>
-          <div className="mx-auto w-full max-w-sm sm:max-w-none grid gap-4 sm:grid-cols-2">
-            <Button variant="outline" className="w-full text-foreground" type="button">
-              <AppleIcon />
-              {t("login.continueApple")}
-            </Button>
-            <Button variant="outline" className="w-full text-foreground" type="button">
-              <GoogleIcon />
-              {t("login.continueGoogle")}
-            </Button>
-          </div>
+          )}
         </div>
       </form>
       <div className="text-balance text-center text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-4 hover:[&_a]:text-primary">

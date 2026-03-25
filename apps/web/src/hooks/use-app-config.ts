@@ -8,7 +8,13 @@ declare global {
 
 const DEFAULT_CONFIG: AppConfig = {
   platform: "oss",
-  features: { billing: false, models: true, providerKeys: true },
+  features: {
+    billing: false,
+    models: true,
+    providerKeys: true,
+    googleAuth: false,
+    emailVerification: false,
+  },
 };
 
 export type { AppConfig };

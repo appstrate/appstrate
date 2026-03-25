@@ -25,6 +25,8 @@ export interface AppConfig {
     billing: boolean;
     models: boolean;
     providerKeys: boolean;
+    googleAuth: boolean;
+    emailVerification: boolean;
   };
 }
 

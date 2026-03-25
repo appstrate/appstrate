@@ -46,7 +46,7 @@ bun test                          # All 1000+ tests across all packages
 | Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                        |
 | DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                      |
 | Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
-| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
+| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. Email/password + optional Google social login (opt-in via env vars). Optional email verification (opt-in via SMTP env vars). Account linking with trusted providers. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
 | Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas    |
 | Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
 | Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state |
@@ -80,7 +80,7 @@ appstrate/
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
 │   ├── schema.ts             # Full schema (33 tables, 5 enums, indexes) — barrel re-export from schema/
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
-│   └── auth.ts               # Better Auth config (auto profile+org on signup)
+│   └── auth.ts               # Better Auth config (email/password, Google social, email verification, account linking)
 │
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
@@ -102,7 +102,7 @@ appstrate/
 ```
 User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |
-     |-- Login/Signup --------------->|-- Better Auth (email/password → cookie session)
+     |-- Login/Signup --------------->|-- Better Auth (email/password + optional Google social → cookie session)
      |                                |
      |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
      |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
@@ -170,7 +170,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Styling**: Tailwind 4 CSS (`@tailwindcss/vite` plugin + `tailwind-merge`). Single `styles.css` with `@import "tailwindcss"` and custom `@theme inline` dark theme variables. All components use Tailwind utility classes.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
 - **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly. `useGlobalExecutionSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it. `GlobalRealtimeSync` is mounted inside `MainLayout` (not on onboarding/welcome routes) to avoid SSE reconnection loops when org state is settling.
-- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode.
+- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys, googleAuth, emailVerification } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode. Google sign-in button and account linking UI hidden when `googleAuth` is false. Email verification flow hidden when `emailVerification` is false.
 - **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
 - **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["flows", orgId]`, `["flow", orgId, packageId]`, `["executions", orgId, packageId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
@@ -180,7 +180,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 - **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, admin connections). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
-- **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed.
+- **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
 - **Cloud module** (`lib/cloud-loader.ts`): `loadCloud()` at boot tries `import("@appstrate/cloud")`. If the module is installed (via `bun link` in dev, or git dependency in prod), the platform runs in Cloud mode. If absent, OSS mode. `getCloudModule()` returns the loaded module or `null`.
 - **Cost tracking**: `executions.cost` (doublePrecision) stores the dollar cost per execution. Cost flows: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `ExecutionMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (from API key), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `flow` (set by `requireFlow()`).
@@ -410,6 +410,13 @@ Full schema: `packages/db/src/schema.ts` (33 tables + 5 enums, Drizzle ORM). Mig
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
 | `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret (if unset, tokens are unsigned)                                             |
+| `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |
+| `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                                                                 |
+| `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification when all SMTP vars are set)                                   |
+| `SMTP_PORT`                 | No       | `587`                                         | SMTP server port                                                                                           |
+| `SMTP_USER`                 | No       | —                                             | SMTP authentication username                                                                               |
+| `SMTP_PASS`                 | No       | —                                             | SMTP authentication password                                                                               |
+| `SMTP_FROM`                 | No       | —                                             | Sender email address for verification emails                                                               |
 
 ## Flow & Extension Gotchas
 

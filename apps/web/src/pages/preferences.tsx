@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useForm, useWatch } from "react-hook-form";
+import { useQuery } from "@tanstack/react-query";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "../hooks/use-theme";
 import { useUpdateLanguage, useUpdateDisplayName } from "../hooks/use-profile";
 import { useAuth, refreshAuth } from "../hooks/use-auth";
+import { useAppConfig } from "../hooks/use-app-config";
 import { authClient } from "../lib/auth-client";
 import { useDisconnect, useDeleteAllConnections } from "../hooks/use-mutations";
 import {
@@ -28,8 +30,9 @@ import {
   useDeleteConnectionProfile,
 } from "../hooks/use-connection-profiles";
 import { ProfileSelector } from "../components/profile-selector";
+import { GoogleIcon } from "../components/icons";
 import { formatDateField } from "../lib/markdown";
-import { Unplug } from "lucide-react";
+import { Unplug, Mail } from "lucide-react";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
@@ -149,11 +152,109 @@ function AppearanceTab({
   );
 }
 
+function LinkedAccountsSection() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { features } = useAppConfig();
+  const { linkGoogle, unlinkAccount } = useAuth();
+  const [unlinking, setUnlinking] = useState(false);
+  const [linking, setLinking] = useState(false);
+
+  const { data: accounts, refetch } = useQuery({
+    queryKey: ["linked-accounts"],
+    queryFn: async () => {
+      const result = await authClient.listAccounts();
+      if (result.error) throw new Error(result.error.message);
+      return result.data ?? [];
+    },
+  });
+
+  if (!features.googleAuth) return null;
+
+  const googleAccount = accounts?.find((a) => a.providerId === "google");
+  const credentialAccount = accounts?.find((a) => a.providerId === "credential");
+  const totalAccounts = accounts?.length ?? 0;
+  const canUnlink = totalAccounts > 1;
+
+  return (
+    <div className="mb-6">
+      <div className="text-sm font-medium text-muted-foreground mb-4">
+        {t("preferences.linkedAccounts")}
+      </div>
+      <p className="text-sm text-muted-foreground mb-4">
+        {t("preferences.linkedAccountsDescription")}
+      </p>
+      <div className="space-y-3">
+        {credentialAccount && (
+          <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                <Mail size={16} />
+              </div>
+              <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {t("preferences.linkedVia", { provider: "Email" })}
+            </span>
+          </div>
+        )}
+        {googleAccount ? (
+          <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-3">
+              <GoogleIcon className="h-5 w-5" />
+              <span className="text-sm font-medium">Google</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!canUnlink || unlinking}
+              title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
+              onClick={async () => {
+                setUnlinking(true);
+                try {
+                  await unlinkAccount("google");
+                  await refetch();
+                } finally {
+                  setUnlinking(false);
+                }
+              }}
+            >
+              {unlinking ? t("preferences.unlinking") : t("preferences.unlinkGoogle")}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between rounded-lg border border-border border-dashed bg-card p-4">
+            <div className="flex items-center gap-3">
+              <GoogleIcon className="h-5 w-5" />
+              <span className="text-sm font-medium text-muted-foreground">Google</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={linking}
+              onClick={async () => {
+                setLinking(true);
+                try {
+                  await linkGoogle();
+                } finally {
+                  setLinking(false);
+                }
+              }}
+            >
+              {linking ? t("preferences.linkingGoogle") : t("preferences.linkGoogle")}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SecurityTab() {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
     <>
+      <LinkedAccountsSection />
       <div className="text-sm font-medium text-muted-foreground mb-4">
         {t("preferences.changePassword")}
       </div>
