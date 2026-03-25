@@ -17,9 +17,8 @@ export interface BillingInfo {
   plan: BillingPlan;
   plans: BillingPlanDetail[];
   usagePercent: number;
-  // TODO(debug): remove budgetUsedCents/budgetLimitCents before production
-  budgetUsedCents?: number;
-  budgetLimitCents?: number;
+  creditsUsed: number;
+  creditQuota: number;
   periodEnd: string | null;
   status:
     | "active"
@@ -31,6 +30,12 @@ export interface BillingInfo {
     | "canceled"
     | "none";
   upgrades: BillingPlanDetail[];
+}
+
+export function getUsageBarColor(usagePercent: number): string {
+  if (usagePercent >= 90) return "bg-destructive";
+  if (usagePercent >= 70) return "bg-yellow-500";
+  return "bg-primary";
 }
 
 export function useBilling(options?: { enabled?: boolean }) {

@@ -19,10 +19,13 @@ import {
   KeyRound,
   Star,
   LayoutGrid,
+  Coins,
 } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
+import { useAppConfig } from "../hooks/use-app-config";
+import { useBilling, getUsageBarColor } from "../hooks/use-billing";
 import { Spinner } from "./spinner";
 import { ImportModal } from "./import-modal";
 import {
@@ -117,6 +120,8 @@ export function NavMenu() {
   const currentAppId = useCurrentApplicationId();
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
   const [importOpen, setImportOpen] = useState(false);
+  const { features } = useAppConfig();
+  const { data: billing } = useBilling({ enabled: features.billing });
 
   return (
     <>
@@ -218,6 +223,35 @@ export function NavMenu() {
                   {t("nav.appSettings")}
                 </Link>
               </DropdownMenuItem>
+            </>
+          )}
+
+          {billing && (
+            <>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-2">
+                <Link
+                  to="/org-settings#billing"
+                  className="block rounded-md p-2 -mx-0.5 hover:bg-accent transition-colors"
+                >
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <Coins size={13} />
+                      {t("nav.credits")}
+                    </span>
+                    <span className="font-medium text-foreground">
+                      {billing.creditsUsed.toLocaleString()} /{" "}
+                      {billing.creditQuota.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
+                      style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
+                    />
+                  </div>
+                </Link>
+              </div>
             </>
           )}
         </DropdownMenuContent>

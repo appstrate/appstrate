@@ -415,6 +415,7 @@
   "billing.manage": "Gérer l'abonnement",
   "billing.upgrade": "Passer à un plan supérieur",
   "billing.usage": "Utilisation",
+  "billing.creditsCount": "{{used}} / {{quota}} crédits",
   "billing.month": "mois",
   "billing.upgradePlans": "Plans disponibles",
   "billing.noAccount": "Aucun compte de facturation",
