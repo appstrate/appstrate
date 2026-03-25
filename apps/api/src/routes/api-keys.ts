@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, notFound } from "../lib/errors.ts";
+import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
 import {
   generateApiKey,
   hashApiKey,
@@ -42,13 +42,9 @@ export function createApiKeysRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
-    const parsed = createApiKeySchema.safeParse(body);
+    const data = parseBody(createApiKeySchema, body);
 
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-
-    const { applicationId, name, expiresAt } = parsed.data;
+    const { applicationId, name, expiresAt } = data;
     const rawKey = generateApiKey();
     const keyHash = await hashApiKey(rawKey);
     const keyPrefix = extractKeyPrefix(rawKey);

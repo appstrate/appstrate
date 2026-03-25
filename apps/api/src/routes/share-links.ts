@@ -19,7 +19,7 @@ import {
 import { getFlowProviderBindings } from "../services/state/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { resolveVersionManifest } from "../services/package-versions.ts";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
 
 const createShareLinkSchema = z.object({
@@ -63,17 +63,14 @@ export function createShareLinksRouter() {
       const flow = c.get("flow");
       const orgId = c.get("orgId");
       const body = await c.req.json().catch(() => ({}));
-      const parsed = createShareLinkSchema.safeParse(body);
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]!.message);
-      }
+      const data = parseBody(createShareLinkSchema, body);
 
       // Resolve manifest to snapshot
       let manifest = flow.manifest as Record<string, unknown>;
-      if (parsed.data.version && flow.source !== "system") {
-        const versionManifest = await resolveVersionManifest(flow.id, parsed.data.version);
+      if (data.version && flow.source !== "system") {
+        const versionManifest = await resolveVersionManifest(flow.id, data.version);
         if (!versionManifest) {
-          throw notFound(`Version '${parsed.data.version}' not found`);
+          throw notFound(`Version '${data.version}' not found`);
         }
         manifest = versionManifest;
       }
@@ -101,9 +98,9 @@ export function createShareLinksRouter() {
       const actor = getActor(c);
       const link = await createShareLink(flow.id, actor, orgId, {
         manifest,
-        label: parsed.data.label ?? undefined,
-        maxUses: parsed.data.maxUses ?? undefined,
-        expiresInDays: parsed.data.expiresInDays,
+        label: data.label ?? undefined,
+        maxUses: data.maxUses ?? undefined,
+        expiresInDays: data.expiresInDays,
       });
 
       return c.json(link, 201);
@@ -135,16 +132,13 @@ export function createShareLinksRouter() {
       const orgId = c.get("orgId");
       const linkId = c.req.param("linkId")!;
       const body = await c.req.json();
-      const parsed = updateShareLinkSchema.safeParse(body);
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]!.message);
-      }
+      const input = parseBody(updateShareLinkSchema, body);
 
       const updates: Parameters<typeof updateShareLink>[2] = {};
-      if (parsed.data.label !== undefined) updates.label = parsed.data.label;
-      if (parsed.data.maxUses !== undefined) updates.maxUses = parsed.data.maxUses;
-      if (parsed.data.isActive !== undefined) updates.isActive = parsed.data.isActive;
-      if (parsed.data.expiresAt !== undefined) updates.expiresAt = new Date(parsed.data.expiresAt);
+      if (input.label !== undefined) updates.label = input.label;
+      if (input.maxUses !== undefined) updates.maxUses = input.maxUses;
+      if (input.isActive !== undefined) updates.isActive = input.isActive;
+      if (input.expiresAt !== undefined) updates.expiresAt = new Date(input.expiresAt);
 
       const link = await updateShareLink(linkId, orgId, updates);
       if (!link) throw notFound("Share link not found.");

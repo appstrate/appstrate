@@ -62,8 +62,6 @@ export const webhooksPaths = {
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
-            "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
-            "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
           },
           content: {
             "application/json": {

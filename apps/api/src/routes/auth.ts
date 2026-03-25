@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
-import { ApiError, invalidRequest, forbidden, internalError } from "../lib/errors.ts";
+import { ApiError, forbidden, internalError, parseBody } from "../lib/errors.ts";
 import {
   listActorConnections,
   initiateConnection,
@@ -75,17 +75,16 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
 
   try {
     const body = await c.req.json();
-    const parsed = z
-      .object({
+    const data = parseBody(
+      z.object({
         apiKey: z.string().min(1, "API key is required"),
         profileId: z.string().optional(),
-      })
-      .safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message, "apiKey");
-    }
-    const profileId = parsed.data.profileId ?? (await getEffectiveProfileId(actor));
-    await saveApiKeyConnection(provider, parsed.data.apiKey.trim(), profileId, orgId);
+      }),
+      body,
+      "apiKey",
+    );
+    const profileId = data.profileId ?? (await getEffectiveProfileId(actor));
+    await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
@@ -106,22 +105,21 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
 
   try {
     const body = await c.req.json();
-    const parsed = z
-      .object({
+    const data = parseBody(
+      z.object({
         credentials: z.record(z.string(), z.string()),
         profileId: z.string().optional(),
-      })
-      .safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message, "credentials");
-    }
+      }),
+      body,
+      "credentials",
+    );
 
     // Resolve the auth mode from the provider
     const authMode = await getProviderAuthMode(provider, orgId);
     const mode = authMode === "basic" ? "basic" : "custom";
 
-    const profileId = parsed.data.profileId ?? (await getEffectiveProfileId(actor));
-    await saveCredentialsConnection(provider, mode, parsed.data.credentials, profileId, orgId);
+    const profileId = data.profileId ?? (await getEffectiveProfileId(actor));
+    await saveCredentialsConnection(provider, mode, data.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;

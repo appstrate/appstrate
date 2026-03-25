@@ -86,7 +86,8 @@ export const flowsPaths = {
       operationId: "bindFlowProvider",
       tags: ["Flows"],
       summary: "Bind flow provider",
-      description: "Bind the current admin user's connection profile to a flow provider. Admin only.",
+      description:
+        "Bind the current admin user's connection profile to a flow provider. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },

@@ -8,7 +8,15 @@ import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { requireAdmin, checkScopeMatch } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
+import {
+  ApiError,
+  invalidRequest,
+  notFound,
+  conflict,
+  internalError,
+  parseBody,
+  systemEntityForbidden,
+} from "../lib/errors.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { listPackages } from "../services/flow-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -127,25 +135,14 @@ export function createProvidersRouter() {
   router.post("/", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = createProviderSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-
-    const data = parsed.data;
+    const data = parseBody(createProviderSchema, body);
 
     const scopeErr = checkScopeMatch(c, data.id);
     if (scopeErr) throw scopeErr;
 
     // Block creation if ID matches a system provider
     if (await isSystemProviderInDb(data.id)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot create provider '${data.id}': conflicts with a system provider`,
-      });
+      throw systemEntityForbidden("provider", data.id, "create");
     }
 
     // Check ID doesn't already exist for this org
@@ -310,20 +307,11 @@ export function createProvidersRouter() {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
-    const parsed = updateProviderSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateProviderSchema, body);
 
     // Block editing system providers (DB-based guard)
     if (await isSystemProviderInDb(providerId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot modify system provider '${providerId}'`,
-      });
+      throw systemEntityForbidden("system provider", providerId);
     }
 
     // Fetch existing package
@@ -342,8 +330,6 @@ export function createProvidersRouter() {
     if (!existingPkg) {
       throw notFound(`Provider '${providerId}' not found`);
     }
-
-    const data = parsed.data;
 
     // Build complete definition from request (no merge with old values)
     const definition: Record<string, unknown> = {
@@ -453,10 +439,7 @@ export function createProvidersRouter() {
       credentials: z.record(z.string(), z.string().min(1)).optional(),
       enabled: z.boolean().optional(),
     });
-    const parsed = credSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(credSchema, body);
 
     // Verify the provider exists and get its admin credential schema
     const [pkg] = await db
@@ -469,8 +452,7 @@ export function createProvidersRouter() {
       throw notFound("Provider not found");
     }
 
-    const hasCredentials =
-      parsed.data.credentials && Object.keys(parsed.data.credentials).length > 0;
+    const hasCredentials = data.credentials && Object.keys(data.credentials).length > 0;
 
     // Validate required fields against admin credential schema only when credentials are provided
     if (hasCredentials) {
@@ -481,7 +463,7 @@ export function createProvidersRouter() {
         (def.adminCredentialSchema as JSONSchemaObject) ??
         (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | null);
       if (adminSchema?.required) {
-        const missing = adminSchema.required.filter((k) => !parsed.data.credentials![k]);
+        const missing = adminSchema.required.filter((k) => !data.credentials![k]);
         if (missing.length > 0) {
           throw invalidRequest(`Missing required fields: ${missing.join(", ")}`);
         }
@@ -490,10 +472,10 @@ export function createProvidersRouter() {
 
     const setClause: Record<string, unknown> = { updatedAt: new Date() };
     if (hasCredentials) {
-      setClause.credentialsEncrypted = encryptCredentials(parsed.data.credentials!);
+      setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
     }
-    if (parsed.data.enabled !== undefined) {
-      setClause.enabled = parsed.data.enabled;
+    if (data.enabled !== undefined) {
+      setClause.enabled = data.enabled;
     }
 
     await db
@@ -501,8 +483,8 @@ export function createProvidersRouter() {
       .values({
         providerId,
         orgId,
-        credentialsEncrypted: hasCredentials ? encryptCredentials(parsed.data.credentials!) : null,
-        enabled: parsed.data.enabled ?? false,
+        credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
+        enabled: data.enabled ?? false,
       })
       .onConflictDoUpdate({
         target: [providerCredentials.providerId, providerCredentials.orgId],
@@ -534,12 +516,7 @@ export function createProvidersRouter() {
 
     // Block deleting system providers (DB-based guard)
     if (await isSystemProviderInDb(providerId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot delete system provider '${providerId}'`,
-      });
+      throw systemEntityForbidden("system provider", providerId, "delete");
     }
 
     // Block deleting providers that are in use by flows

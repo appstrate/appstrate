@@ -14,7 +14,13 @@ import {
 } from "../services/org-provider-keys.ts";
 import { testModelConfig } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, internalError } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  internalError,
+  parseBody,
+  systemEntityForbidden,
+} from "../lib/errors.ts";
 
 const createSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -53,12 +59,9 @@ export function createProviderKeysRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
-    const parsed = createSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(createSchema, body);
     try {
-      const { label, api, baseUrl, apiKey } = parsed.data;
+      const { label, api, baseUrl, apiKey } = data;
       const id = await createOrgProviderKey(orgId, label, api, baseUrl, apiKey, user.id);
       return c.json({ id }, 201);
     } catch (err) {
@@ -73,13 +76,10 @@ export function createProviderKeysRouter() {
   router.post("/test", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = testInlineSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-    let { apiKey } = parsed.data;
-    if (!apiKey && parsed.data.existingKeyId) {
-      const existing = await loadProviderKeyCredentials(orgId, parsed.data.existingKeyId);
+    const data = parseBody(testInlineSchema, body);
+    let { apiKey } = data;
+    if (!apiKey && data.existingKeyId) {
+      const existing = await loadProviderKeyCredentials(orgId, data.existingKeyId);
       if (existing) apiKey = existing.apiKey;
     }
     if (!apiKey) {
@@ -87,8 +87,8 @@ export function createProviderKeysRouter() {
     }
     try {
       const result = await testModelConfig({
-        api: parsed.data.api,
-        baseUrl: parsed.data.baseUrl,
+        api: data.api,
+        baseUrl: data.baseUrl,
         modelId: "_test",
         apiKey,
       });
@@ -125,20 +125,12 @@ export function createProviderKeysRouter() {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemProviderKey(id)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot modify built-in provider key '${id}'`,
-      });
+      throw systemEntityForbidden("provider key", id);
     }
     const body = await c.req.json();
-    const parsed = updateSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateSchema, body);
     try {
-      await updateOrgProviderKey(orgId, id, parsed.data);
+      await updateOrgProviderKey(orgId, id, data);
       return c.json({ id });
     } catch (err) {
       logger.error("Provider key update failed", {
@@ -154,12 +146,7 @@ export function createProviderKeysRouter() {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemProviderKey(id)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot delete built-in provider key '${id}'`,
-      });
+      throw systemEntityForbidden("provider key", id, "delete");
     }
     try {
       await deleteOrgProviderKey(orgId, id);

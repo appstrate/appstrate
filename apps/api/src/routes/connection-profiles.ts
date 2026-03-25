@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import {
   listProfiles,
   createProfile,
@@ -34,11 +34,8 @@ export function createConnectionProfilesRouter() {
   router.post("/", async (c) => {
     const actor = getActor(c);
     const body = await c.req.json();
-    const parsed = profileNameSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message, "name");
-    }
-    const profile = await createProfile(actor, parsed.data.name.trim());
+    const data = parseBody(profileNameSchema, body, "name");
+    const profile = await createProfile(actor, data.name.trim());
     return c.json({ profile }, 201);
   });
 
@@ -61,12 +58,9 @@ export function createConnectionProfilesRouter() {
     const actor = getActor(c);
     const profileId = c.req.param("id");
     const body = await c.req.json();
-    const parsed = profileNameSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message, "name");
-    }
+    const data = parseBody(profileNameSchema, body, "name");
     try {
-      await renameProfile(profileId, actor, parsed.data.name.trim());
+      await renameProfile(profileId, actor, data.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";

@@ -4,6 +4,7 @@ import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemModel } from "../services/model-registry.ts";
+import { modelCostSchema } from "../services/adapters/types.ts";
 import {
   listOrgModels,
   createOrgModel,
@@ -15,7 +16,14 @@ import {
   loadModel,
 } from "../services/org-models.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, internalError } from "../lib/errors.ts";
+import {
+  ApiError,
+  invalidRequest,
+  notFound,
+  internalError,
+  parseBody,
+  systemEntityForbidden,
+} from "../lib/errors.ts";
 
 const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -27,14 +35,7 @@ const createModelSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   maxTokens: z.number().int().positive().optional(),
   reasoning: z.boolean().optional(),
-  cost: z
-    .object({
-      input: z.number().nonnegative(),
-      output: z.number().nonnegative(),
-      cacheRead: z.number().nonnegative(),
-      cacheWrite: z.number().nonnegative(),
-    })
-    .optional(),
+  cost: modelCostSchema.optional(),
 });
 
 const updateModelSchema = z.object({
@@ -48,15 +49,7 @@ const updateModelSchema = z.object({
   contextWindow: z.number().int().positive().nullable().optional(),
   maxTokens: z.number().int().positive().nullable().optional(),
   reasoning: z.boolean().nullable().optional(),
-  cost: z
-    .object({
-      input: z.number().nonnegative(),
-      output: z.number().nonnegative(),
-      cacheRead: z.number().nonnegative(),
-      cacheWrite: z.number().nonnegative(),
-    })
-    .nullable()
-    .optional(),
+  cost: modelCostSchema.nullable().optional(),
 });
 
 const setDefaultSchema = z.object({
@@ -89,11 +82,7 @@ export function createModelsRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
-    const parsed = createModelSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(createModelSchema, body);
 
     try {
       const {
@@ -107,7 +96,7 @@ export function createModelsRouter() {
         maxTokens,
         reasoning,
         cost,
-      } = parsed.data;
+      } = data;
       const id = await createOrgModel(orgId, label, api, baseUrl, modelId, user.id, providerKeyId, {
         input,
         contextWindow,
@@ -129,14 +118,10 @@ export function createModelsRouter() {
   router.put("/default", async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = setDefaultSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(setDefaultSchema, body);
 
     try {
-      await setDefaultModel(orgId, parsed.data.modelId);
+      await setDefaultModel(orgId, data.modelId);
       return c.json({ success: true });
     } catch (err) {
       logger.error("Set default model failed", {
@@ -243,17 +228,13 @@ export function createModelsRouter() {
   router.post("/test", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = testInlineSchema.safeParse(body);
+    const data = parseBody(testInlineSchema, body);
 
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-
-    let { apiKey } = parsed.data;
+    let { apiKey } = data;
 
     // In edit mode, if no apiKey provided, fall back to the stored key
-    if (!apiKey && parsed.data.existingModelId) {
-      const existing = await loadModel(orgId, parsed.data.existingModelId);
+    if (!apiKey && data.existingModelId) {
+      const existing = await loadModel(orgId, data.existingModelId);
       if (existing) apiKey = existing.apiKey;
     }
 
@@ -263,9 +244,9 @@ export function createModelsRouter() {
 
     try {
       const result = await testModelConfig({
-        api: parsed.data.api,
-        baseUrl: parsed.data.baseUrl,
-        modelId: parsed.data.modelId,
+        api: data.api,
+        baseUrl: data.baseUrl,
+        modelId: data.modelId,
         apiKey,
       });
       return c.json(result);
@@ -301,23 +282,14 @@ export function createModelsRouter() {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id");
     const body = await c.req.json();
-    const parsed = updateModelSchema.safeParse(body);
-
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateModelSchema, body);
 
     if (isSystemModel(modelId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot modify built-in model '${modelId}'`,
-      });
+      throw systemEntityForbidden("model", modelId);
     }
 
     try {
-      await updateOrgModel(orgId, modelId, parsed.data);
+      await updateOrgModel(orgId, modelId, data);
       return c.json({ id: modelId });
     } catch (err) {
       logger.error("Model update failed", {
@@ -334,12 +306,7 @@ export function createModelsRouter() {
     const modelId = c.req.param("id");
 
     if (isSystemModel(modelId)) {
-      throw new ApiError({
-        status: 403,
-        code: "operation_not_allowed",
-        title: "Forbidden",
-        detail: `Cannot delete built-in model '${modelId}'`,
-      });
+      throw systemEntityForbidden("model", modelId, "delete");
     }
 
     try {

@@ -16,6 +16,17 @@ export function requireAdmin() {
   };
 }
 
+/** Middleware: reject with 403 if the current user is not org owner. */
+export function requireOwner() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const orgRole = c.get("orgRole");
+    if (orgRole !== "owner") {
+      throw forbidden("Owner access required");
+    }
+    return next();
+  };
+}
+
 /** Middleware: load a flow by route param and set it on context, or 404. */
 export function requireFlow() {
   return async (c: Context<AppEnv>, next: Next) => {

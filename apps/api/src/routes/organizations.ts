@@ -19,7 +19,7 @@ import {
   updateOrgSettings,
   orgSettingsSchema,
 } from "../services/organizations.ts";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import {
   createInvitation,
   getOrgInvitations,
@@ -56,6 +56,18 @@ const updateRoleSchema = z.object({
   role: z.enum(["member", "admin"]),
 });
 
+async function requireOrgRole(
+  orgId: string,
+  userId: string,
+  roles: string[],
+  message: string,
+): Promise<void> {
+  const member = await getOrgMember(orgId, userId);
+  if (!member || !roles.includes(member.role)) {
+    throw forbidden(message);
+  }
+}
+
 const router = new Hono<AppEnv>();
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
@@ -78,12 +90,9 @@ router.get("/", async (c) => {
 router.post("/", async (c) => {
   const user = c.get("user");
   const body = await c.req.json();
-  const parsed = createOrgSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(createOrgSchema, body);
 
-  const slug = parsed.data.slug?.trim() || slugify(parsed.data.name);
+  const slug = data.slug?.trim() || slugify(data.name);
   if (!slug) {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
@@ -97,7 +106,7 @@ router.post("/", async (c) => {
     });
   }
 
-  const org = await createOrganization(parsed.data.name.trim(), slug, user.id);
+  const org = await createOrganization(data.name.trim(), slug, user.id);
 
   // Cloud billing: create billing account with free tier credits (non-fatal)
   await getCloudModule()
@@ -181,31 +190,25 @@ router.put("/:orgId", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || member.role !== "owner") {
-    throw forbidden("Only the owner can modify the organization");
-  }
+  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can modify the organization");
 
   const body = await c.req.json();
-  const parsed = updateOrgSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(updateOrgSchema, body);
 
-  if (parsed.data.slug) {
-    if (!(await isSlugAvailable(parsed.data.slug))) {
+  if (data.slug) {
+    if (!(await isSlugAvailable(data.slug))) {
       throw new ApiError({
         status: 400,
         code: "slug_taken",
         title: "Bad Request",
-        detail: `Slug '${parsed.data.slug}' is already in use`,
+        detail: `Slug '${data.slug}' is already in use`,
       });
     }
   }
 
   const updated = await updateOrganization(orgId, {
-    ...(parsed.data.name?.trim() ? { name: parsed.data.name.trim() } : {}),
-    ...(parsed.data.slug ? { slug: parsed.data.slug } : {}),
+    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+    ...(data.slug ? { slug: data.slug } : {}),
   });
 
   return c.json(updated);
@@ -216,10 +219,7 @@ router.delete("/:orgId", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || member.role !== "owner") {
-    throw forbidden("Only the owner can delete the organization");
-  }
+  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can delete the organization");
 
   try {
     // Cloud billing: clean up billing account before org deletion (non-fatal — FK CASCADE handles cleanup)
@@ -246,20 +246,14 @@ router.post("/:orgId/members", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || !["owner", "admin"].includes(member.role)) {
-    throw forbidden("Only admins can add members");
-  }
+  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Only admins can add members");
 
   const body = await c.req.json();
-  const parsed = addMemberSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(addMemberSchema, body);
 
-  const role = parsed.data.role;
+  const role = data.role;
 
-  const targetUser = await findUserByEmail(parsed.data.email.trim());
+  const targetUser = await findUserByEmail(data.email.trim());
 
   if (targetUser) {
     // User exists — add directly
@@ -279,7 +273,7 @@ router.post("/:orgId/members", async (c) => {
   // User doesn't exist — create invitation
   try {
     const invitation = await createInvitation({
-      email: parsed.data.email.trim(),
+      email: data.email.trim(),
       orgId,
       role,
       invitedBy: user.id,
@@ -302,10 +296,7 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || !["owner", "admin"].includes(member.role)) {
-    throw forbidden("Only admins can cancel invitations");
-  }
+  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Only admins can cancel invitations");
 
   await cancelInvitation(invitationId, orgId);
   return c.json({ ok: true });
@@ -317,18 +308,12 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || member.role !== "owner") {
-    throw forbidden("Only the owner can change roles");
-  }
+  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
 
   const body = await c.req.json();
-  const parsed = updateRoleSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(updateRoleSchema, body);
 
-  const updated = await updateInvitationRole(invitationId, orgId, parsed.data.role);
+  const updated = await updateInvitationRole(invitationId, orgId, data.role);
   if (!updated) {
     throw notFound("Invitation not found or already accepted");
   }
@@ -366,24 +351,18 @@ router.put("/:orgId/members/:userId", async (c) => {
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || member.role !== "owner") {
-    throw forbidden("Only the owner can change roles");
-  }
+  await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can change roles");
 
   const body = await c.req.json();
-  const parsed = updateRoleSchema.safeParse(body);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(updateRoleSchema, body);
 
   // Cannot change own role
   if (targetUserId === user.id) {
     throw forbidden("Cannot change your own role");
   }
 
-  await updateMemberRole(orgId, targetUserId, parsed.data.role);
-  return c.json({ userId: targetUserId, role: parsed.data.role });
+  await updateMemberRole(orgId, targetUserId, data.role);
+  return c.json({ userId: targetUserId, role: data.role });
 });
 
 // GET /api/orgs/:orgId/settings — get org settings
@@ -391,10 +370,7 @@ router.get("/:orgId/settings", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || !["owner", "admin"].includes(member.role)) {
-    throw forbidden("Admin access required");
-  }
+  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
 
   const settings = await getOrgSettings(orgId);
   return c.json(settings);
@@ -405,18 +381,12 @@ router.put("/:orgId/settings", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || !["owner", "admin"].includes(member.role)) {
-    throw forbidden("Admin access required");
-  }
+  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
 
   const raw = await c.req.json();
-  const parsed = orgSettingsSchema.partial().safeParse(raw);
-  if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message);
-  }
+  const data = parseBody(orgSettingsSchema.partial(), raw);
 
-  const settings = await updateOrgSettings(orgId, parsed.data);
+  const settings = await updateOrgSettings(orgId, data);
   return c.json(settings);
 });
 

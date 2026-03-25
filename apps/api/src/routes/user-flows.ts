@@ -4,7 +4,7 @@ import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { setFlowItems, SKILL_CONFIG, TOOL_CONFIG } from "../services/package-items/index.ts";
 import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, parseBody } from "../lib/errors.ts";
 
 const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
@@ -29,11 +29,8 @@ export function createUserFlowsRouter() {
       const packageId = flow.id;
 
       const body = await c.req.json();
-      const parsed = updateSkillsSchema.safeParse(body);
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]!.message, "skillIds");
-      }
-      const { skillIds } = parsed.data;
+      const data = parseBody(updateSkillsSchema, body, "skillIds");
+      const { skillIds } = data;
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {
@@ -65,11 +62,8 @@ export function createUserFlowsRouter() {
       const packageId = flow.id;
 
       const body = await c.req.json();
-      const parsed = updateToolsSchema.safeParse(body);
-      if (!parsed.success) {
-        throw invalidRequest(parsed.error.issues[0]!.message, "toolIds");
-      }
-      const { toolIds } = parsed.data;
+      const data = parseBody(updateToolsSchema, body, "toolIds");
+      const { toolIds } = data;
 
       const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
       if (invalidIds.length > 0) {

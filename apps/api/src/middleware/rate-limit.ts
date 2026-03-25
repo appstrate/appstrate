@@ -44,7 +44,7 @@ function extractRetryAfter(rej: unknown): number | undefined {
     : undefined;
 }
 
-/** Throw a 429 ApiError with IETF + legacy rate-limit headers. */
+/** Throw a 429 ApiError with IETF rate-limit headers. */
 function throwRateLimited(maxPerMinute: number, retryAfter: number | undefined): never {
   const reset = retryAfter ?? 60;
   throw new ApiError({
@@ -61,15 +61,13 @@ function throwRateLimited(maxPerMinute: number, retryAfter: number | undefined):
   });
 }
 
-/** Set IETF + legacy rate-limit headers on a successful response. */
+/** Set IETF rate-limit headers on a successful response. */
 function setRateLimitHeaders(
   c: Context,
   maxPerMinute: number,
   remaining: number,
   reset: number,
 ): void {
-  c.header("X-RateLimit-Remaining", String(remaining));
-  c.header("X-RateLimit-Reset", String(reset));
   c.header("RateLimit", `limit=${maxPerMinute}, remaining=${remaining}, reset=${reset}`);
   c.header("RateLimit-Policy", `${maxPerMinute};w=60`);
 }

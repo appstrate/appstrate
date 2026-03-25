@@ -73,8 +73,6 @@ export const responses = {
       "Retry-After": { $ref: "#/components/headers/RetryAfter" },
       RateLimit: { $ref: "#/components/headers/RateLimit" },
       "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
-      "X-RateLimit-Remaining": { $ref: "#/components/headers/XRateLimitRemaining" },
-      "X-RateLimit-Reset": { $ref: "#/components/headers/XRateLimitReset" },
     },
     content: {
       "application/problem+json": {

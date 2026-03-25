@@ -19,7 +19,7 @@ import {
   listDeliveries,
   buildEventEnvelope,
 } from "../services/webhooks.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { parseBody } from "../lib/errors.ts";
 import { getApplication } from "../services/applications.ts";
 
 const webhookEventsEnum = z.enum([
@@ -54,20 +54,17 @@ export function createWebhooksRouter() {
   router.post("/", rateLimit(10), idempotency(), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = createWebhookSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(createWebhookSchema, body);
 
     // Verify applicationId belongs to this org (throws 404 if not found)
-    await getApplication(orgId, parsed.data.applicationId);
+    await getApplication(orgId, data.applicationId);
 
-    const result = await createWebhook(orgId, parsed.data.applicationId, {
-      url: parsed.data.url,
-      events: parsed.data.events,
-      flowId: parsed.data.flowId,
-      payloadMode: parsed.data.payloadMode,
-      active: parsed.data.active,
+    const result = await createWebhook(orgId, data.applicationId, {
+      url: data.url,
+      events: data.events,
+      flowId: data.flowId,
+      payloadMode: data.payloadMode,
+      active: data.active,
     });
     return c.json(result, 201);
   });
@@ -91,12 +88,9 @@ export function createWebhooksRouter() {
   router.put("/:id", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
-    const parsed = updateWebhookSchema.safeParse(body);
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
+    const data = parseBody(updateWebhookSchema, body);
 
-    const result = await updateWebhook(orgId, c.req.param("id")!, parsed.data);
+    const result = await updateWebhook(orgId, c.req.param("id")!, data);
     return c.json(result);
   });
 

@@ -3,7 +3,6 @@
  *
  * Resolution order: `Appstrate-Version` header > org settings > CURRENT_API_VERSION.
  * Sets `c.set("apiVersion")` and the `Appstrate-Version` response header on every request.
- * Adds `Sunset` response header when the resolved version is deprecated.
  */
 
 import type { Context, Next } from "hono";
@@ -12,7 +11,6 @@ import {
   CURRENT_API_VERSION,
   isValidVersionFormat,
   isVersionSupported,
-  getVersionSunsetDate,
 } from "../lib/api-versions.ts";
 import { ApiError } from "../lib/errors.ts";
 
@@ -66,10 +64,5 @@ export function apiVersion(deps: ApiVersionDeps = defaultDeps) {
     await next();
 
     c.header("Appstrate-Version", version);
-
-    const sunset = getVersionSunsetDate(version);
-    if (sunset) {
-      c.header("Sunset", sunset);
-    }
   };
 }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError } from "../lib/errors.ts";
+import { ApiError, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
 import {
   createApplication,
   listApplications,
@@ -49,19 +49,15 @@ export function createApplicationsRouter() {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
-    const parsed = createApplicationSchema.safeParse(body);
+    const data = parseBody(createApplicationSchema, body);
 
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-
-    if (parsed.data.settings?.allowedRedirectDomains) {
-      const validationError = validateDomainList(parsed.data.settings.allowedRedirectDomains);
+    if (data.settings?.allowedRedirectDomains) {
+      const validationError = validateDomainList(data.settings.allowedRedirectDomains);
       if (validationError) throw invalidRequest(validationError);
     }
 
     try {
-      const app = await createApplication(orgId, parsed.data, user.id);
+      const app = await createApplication(orgId, data, user.id);
       return c.json({ object: "application", ...app }, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -95,19 +91,15 @@ export function createApplicationsRouter() {
     const orgId = c.get("orgId");
     const appId = c.req.param("id");
     const body = await c.req.json();
-    const parsed = updateApplicationSchema.safeParse(body);
+    const data = parseBody(updateApplicationSchema, body);
 
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]!.message);
-    }
-
-    if (parsed.data.settings?.allowedRedirectDomains) {
-      const validationError = validateDomainList(parsed.data.settings.allowedRedirectDomains);
+    if (data.settings?.allowedRedirectDomains) {
+      const validationError = validateDomainList(data.settings.allowedRedirectDomains);
       if (validationError) throw invalidRequest(validationError);
     }
 
     try {
-      const app = await updateApplication(orgId, appId, parsed.data);
+      const app = await updateApplication(orgId, appId, data);
       return c.json({ object: "application", ...app });
     } catch (err) {
       if (err instanceof ApiError) throw err;

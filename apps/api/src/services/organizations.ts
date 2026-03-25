@@ -26,13 +26,6 @@ interface OrgResult {
   updatedAt: string;
 }
 
-interface OrgMemberResult {
-  orgId: string;
-  userId: string;
-  role: string;
-  joinedAt: string;
-}
-
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
   return {
     id: row.id,
@@ -41,15 +34,6 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdBy: row.createdBy ?? "",
     createdAt: row.createdAt?.toISOString() ?? "",
     updatedAt: row.updatedAt?.toISOString() ?? "",
-  };
-}
-
-function toOrgMemberResult(row: typeof organizationMembers.$inferSelect): OrgMemberResult {
-  return {
-    orgId: row.orgId,
-    userId: row.userId,
-    role: row.role,
-    joinedAt: row.joinedAt?.toISOString() ?? "",
   };
 }
 
@@ -152,20 +136,17 @@ export async function updateOrgSettings(
   return (row?.settings as OrgSettings) ?? {};
 }
 
-export async function getOrgMembers(
-  orgId: string,
-): Promise<(OrgMemberResult & { displayName?: string; email?: string })[]> {
+export async function getOrgMembers(orgId: string) {
   const rows = await db
     .select()
     .from(organizationMembers)
     .where(eq(organizationMembers.orgId, orgId))
     .orderBy(organizationMembers.joinedAt);
 
-  const members = rows.map(toOrgMemberResult);
-  if (members.length === 0) return [];
+  if (rows.length === 0) return [];
 
   // Fetch display names and emails
-  const userIds = members.map((m) => m.userId);
+  const userIds = rows.map((m) => m.userId);
   const [profileRows, userRows] = await Promise.all([
     db
       .select({ id: profiles.id, displayName: profiles.displayName })
@@ -177,21 +158,21 @@ export async function getOrgMembers(
   const profileMap = new Map(profileRows.map((p) => [p.id, p.displayName]));
   const emailMap = new Map(userRows.map((u) => [u.id, u.email]));
 
-  return members.map((row) => ({
+  return rows.map((row) => ({
     ...row,
     displayName: profileMap.get(row.userId) ?? undefined,
     email: emailMap.get(row.userId) ?? undefined,
   }));
 }
 
-export async function getOrgMember(orgId: string, userId: string): Promise<OrgMemberResult | null> {
+export async function getOrgMember(orgId: string, userId: string) {
   const [row] = await db
     .select()
     .from(organizationMembers)
     .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
     .limit(1);
 
-  return row ? toOrgMemberResult(row) : null;
+  return row ?? null;
 }
 
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
