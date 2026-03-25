@@ -59,7 +59,7 @@ import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 import { CopyLinkButton } from "../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
-import { useBilling, useCheckout, usePortal } from "../hooks/use-billing";
+import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
 import { toast } from "../hooks/use-toast";
 import type {
   OrganizationMember,
@@ -1126,24 +1126,16 @@ function BillingTab() {
           <div className="flex items-center justify-between text-sm mb-1">
             <span className="text-muted-foreground">{t("billing.usage")}</span>
             <span className="font-medium">
-              {billing.usagePercent}%{/* TODO(debug): remove raw cents display before production */}
-              {billing.budgetUsedCents != null && billing.budgetLimitCents != null && (
-                <span className="ml-2 text-xs text-muted-foreground font-normal">
-                  ({billing.budgetUsedCents}¢ / {billing.budgetLimitCents}¢)
-                </span>
-              )}
+              {billing.usagePercent}%
+              <span className="ml-2 text-xs text-muted-foreground font-normal">
+                ({t("billing.creditsCount", { used: billing.creditsUsed, quota: billing.creditQuota })})
+              </span>
             </span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
-                billing.usagePercent >= 90
-                  ? "bg-destructive"
-                  : billing.usagePercent >= 70
-                    ? "bg-yellow-500"
-                    : "bg-primary"
-              }`}
-              style={{ width: `${billing.usagePercent}%` }}
+              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
+              style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
             />
           </div>
         </div>

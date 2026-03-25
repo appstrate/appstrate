@@ -415,6 +415,7 @@
   "billing.manage": "Manage subscription",
   "billing.upgrade": "Upgrade",
   "billing.usage": "Usage",
+  "billing.creditsCount": "{{used}} / {{quota}} credits",
   "billing.month": "month",
   "billing.upgradePlans": "Available plans",
   "billing.noAccount": "No billing account",
