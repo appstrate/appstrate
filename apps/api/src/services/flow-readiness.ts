@@ -3,7 +3,7 @@
  * before execution. Called from all execution paths (manual, scheduled, share link).
  */
 
-import type { LoadedFlow } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { validateFlowDependencies } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -23,7 +23,7 @@ import { ApiError } from "../lib/errors.ts";
  * Throws ApiError on first validation failure.
  */
 export async function validateFlowReadiness(params: {
-  flow: LoadedFlow;
+  flow: LoadedPackage;
   providerProfiles: Record<string, string>;
   orgId: string;
   config?: Record<string, unknown>;

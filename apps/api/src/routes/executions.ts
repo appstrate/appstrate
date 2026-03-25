@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
-import type { LoadedFlow, AppEnv } from "../types/index.ts";
+import type { LoadedPackage, AppEnv } from "../types/index.ts";
 import {
   createExecution,
   updateExecution,
@@ -75,7 +75,7 @@ export async function executeFlowInBackground(
   executionId: string,
   _actor: Actor,
   orgId: string,
-  flow: LoadedFlow,
+  flow: LoadedPackage,
   promptContext: PromptContext,
   flowPackage?: Buffer | null,
   inputFiles?: UploadedFile[],

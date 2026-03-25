@@ -1,7 +1,7 @@
-import { useEffect } from "react";
 import { useStore } from "zustand";
 import { appStore, getCurrentApplicationId } from "../stores/app-store";
 import { useApplications } from "./use-applications";
+import { useAutoSelect } from "./use-auto-select";
 
 // Re-export non-hook accessor
 export { getCurrentApplicationId };
@@ -25,14 +25,10 @@ export function useApplicationResolver(): void {
   const currentAppId = useStore(appStore, (s) => s.id);
   const { data: applications } = useApplications();
 
-  useEffect(() => {
-    if (!applications || applications.length === 0) return;
-
-    const storedExists = currentAppId && applications.some((a) => a.id === currentAppId);
-
-    if (!storedExists) {
-      const defaultApp = applications.find((a) => a.isDefault) ?? applications[0];
-      appStore.getState().setId(defaultApp.id);
-    }
-  }, [applications, currentAppId]);
+  useAutoSelect(
+    applications,
+    currentAppId,
+    (id) => appStore.getState().setId(id),
+    (items) => items.find((a) => a.isDefault),
+  );
 }

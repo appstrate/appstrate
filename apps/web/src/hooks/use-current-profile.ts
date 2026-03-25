@@ -1,7 +1,7 @@
-import { useEffect } from "react";
 import { useStore } from "zustand";
 import { profileStore } from "../stores/profile-store";
 import { useConnectionProfiles } from "./use-connection-profiles";
+import { useAutoSelect } from "./use-auto-select";
 
 export function setCurrentProfileId(profileId: string | null) {
   profileStore.getState().setId(profileId);
@@ -20,14 +20,9 @@ export function useProfileAutoSelect() {
   const { data: profiles } = useConnectionProfiles();
   const currentProfileId = useCurrentProfileId();
 
-  useEffect(() => {
-    if (!profiles || profiles.length === 0) return;
-    const storedExists = currentProfileId && profiles.some((p) => p.id === currentProfileId);
-    if (!storedExists) {
-      const defaultProfile = profiles.find((p) => p.isDefault) ?? profiles[0];
-      setCurrentProfileId(defaultProfile.id);
-    }
-  }, [profiles, currentProfileId]);
+  useAutoSelect(profiles, currentProfileId, setCurrentProfileId, (items) =>
+    items.find((p) => p.isDefault),
+  );
 }
 
 /** Spread helper: returns `{ profileId }` when set, empty object otherwise */

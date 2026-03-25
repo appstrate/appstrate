@@ -1,5 +1,5 @@
 import type { PromptContext } from "./adapters/types.ts";
-import type { LoadedFlow, FlowProviderRequirement } from "../types/index.ts";
+import type { LoadedPackage, FlowProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
@@ -34,7 +34,7 @@ export class ModelNotConfiguredError extends Error {
  * Shared preflight logic for all execution paths (manual run, scheduled, share link).
  */
 export async function resolvePreflightContext(params: {
-  flow: LoadedFlow;
+  flow: LoadedPackage;
   actor: Actor;
   packageId: string;
   orgId: string;
@@ -95,7 +95,7 @@ export function buildExecutionApi(executionId: string): { url: string; token: st
  * Builds a structured PromptContext from flow data.
  */
 export function buildPromptContext(params: {
-  flow: LoadedFlow;
+  flow: LoadedPackage;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousState: Record<string, unknown> | null;
@@ -146,7 +146,7 @@ export function buildPromptContext(params: {
  */
 export async function buildExecutionContext(params: {
   executionId: string;
-  flow: LoadedFlow;
+  flow: LoadedPackage;
   providerProfiles: Record<string, string>;
   orgId: string;
   actor: Actor;
