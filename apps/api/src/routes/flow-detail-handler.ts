@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/flow-service.ts";
 import { getPackageById } from "../services/package-items/index.ts";

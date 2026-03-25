@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { orgProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemProviderKeys } from "./model-registry.ts";

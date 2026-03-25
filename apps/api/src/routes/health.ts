@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { getSystemPackagesByType } from "../services/system-packages.ts";
 
 const startedAt = Date.now();

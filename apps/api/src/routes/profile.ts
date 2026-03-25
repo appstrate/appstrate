@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { profiles, user as userTable } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";

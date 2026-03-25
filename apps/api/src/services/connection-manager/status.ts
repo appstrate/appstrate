@@ -1,4 +1,4 @@
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import type { FlowProviderRequirement } from "../../types/index.ts";
 import type { ProviderStatus } from "@appstrate/shared-types";
 import { getConnection, validateScopes } from "@appstrate/connect";

@@ -1,6 +1,6 @@
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 

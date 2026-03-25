@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { eq, desc } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { executions, shareLinkUsages } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { getShareLink, useShareLink } from "../services/share-links.ts";

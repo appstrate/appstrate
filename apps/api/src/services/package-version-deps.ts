@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packageVersionDependencies } from "@appstrate/db/schema";
 import type { DepEntry } from "@appstrate/core/dependencies";
 

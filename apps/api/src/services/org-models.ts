@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { modelCostSchema, type ModelCost } from "./adapters/types.ts";

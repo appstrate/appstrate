@@ -1,5 +1,5 @@
 import { eq, and, isNull, lt } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { apiKeys, user as userTable, profiles, organizations } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";

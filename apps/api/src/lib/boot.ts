@@ -1,5 +1,5 @@
 import { and, eq, lt } from "drizzle-orm";
-import { db } from "./db.ts";
+import { db } from "@appstrate/db/client";
 import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";

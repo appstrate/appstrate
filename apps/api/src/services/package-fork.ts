@@ -16,7 +16,7 @@ import {
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions-impl.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { asRecord } from "../lib/safe-json.ts";

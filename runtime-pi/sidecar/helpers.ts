@@ -14,7 +14,6 @@ export interface LlmProxyConfig {
   placeholder: string;
 }
 
-// Mirrored in apps/api/src/services/orchestrator/types.ts — keep both definitions identical.
 export interface SidecarConfig {
   executionToken: string;
   platformApiUrl: string;

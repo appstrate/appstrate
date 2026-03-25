@@ -6,7 +6,7 @@ import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/z
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
@@ -70,8 +70,6 @@ import {
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
-
-const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 const githubImportSchema = z.object({
   url: z.url("Missing 'url' field"),
@@ -144,7 +142,7 @@ async function parsePackageUpload(
     }
 
     const id = file.name.replace(/\.(afps|zip)$/i, "");
-    if (!SLUG_RE.test(id)) {
+    if (!SLUG_REGEX.test(id)) {
       throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
     }
 
@@ -211,7 +209,7 @@ async function parsePackageUpload(
     throw invalidRequest("id and content are required");
   }
 
-  if (!SLUG_RE.test(body.id)) {
+  if (!SLUG_REGEX.test(body.id)) {
     throw invalidRequest("Invalid id (kebab-case slug required)", "id");
   }
 

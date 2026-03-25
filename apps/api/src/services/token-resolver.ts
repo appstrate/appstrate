@@ -4,7 +4,7 @@
  */
 
 import { getCredentials } from "@appstrate/connect";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 

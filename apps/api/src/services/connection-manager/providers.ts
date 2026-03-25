@@ -1,4 +1,4 @@
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import type { UserConnectionProviderGroup, AvailableProvider } from "@appstrate/shared-types";
 import { eq, inArray } from "drizzle-orm";
 import {

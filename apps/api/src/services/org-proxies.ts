@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { orgProxies } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
