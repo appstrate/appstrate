@@ -95,7 +95,16 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description: "List all webhooks for the organization. Admin only.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "applicationId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Filter webhooks by application ID",
+        },
+      ],
       responses: {
         "200": {
           description: "Webhook list",

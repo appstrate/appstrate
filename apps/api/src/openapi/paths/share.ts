@@ -102,6 +102,7 @@ export const sharePaths = {
                   },
                   result: { type: "object" },
                   error: { type: "string" },
+                  logs: { type: "array", items: { type: "object" } },
                 },
               },
             },

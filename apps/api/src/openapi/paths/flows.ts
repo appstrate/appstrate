@@ -139,7 +139,7 @@ export const flowsPaths = {
       ],
       responses: {
         "200": {
-          description: "Admin connection unbound",
+          description: "Flow provider binding removed",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

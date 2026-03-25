@@ -561,6 +561,12 @@ export const schemas = {
           schema: { type: "object" },
         },
       },
+      output: {
+        type: "object",
+        properties: {
+          schema: { type: "object" },
+        },
+      },
       providers: { type: "array", items: { type: "object" } },
       usageCount: { type: "integer" },
       maxUses: { type: ["integer", "null"] },
@@ -572,6 +578,7 @@ export const schemas = {
           status: { type: "string" },
           result: { type: "object" },
           error: { type: "string" },
+          logs: { type: "array", items: { type: "object" } },
         },
       },
     },
@@ -646,6 +653,16 @@ export const schemas = {
         description: "Provider key ID for API key credentials",
       },
       providerKeyLabel: { type: ["string", "null"], description: "Provider key label for display" },
+      cost: {
+        type: ["object", "null"],
+        description: "Cost per million tokens",
+        properties: {
+          input: { type: "number" },
+          output: { type: "number" },
+          cacheRead: { type: "number" },
+          cacheWrite: { type: "number" },
+        },
+      },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
