@@ -65,7 +65,7 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (173 endpoints)
+│   │   └── paths/            # One file per route domain (178 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -78,7 +78,7 @@ appstrate/
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (33 tables, 5 enums, indexes) — barrel re-export from schema/
+│   ├── schema.ts             # Full schema (34 tables, 5 enums, indexes) — barrel re-export from schema/
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (email/password, Google social, email verification, account linking)
 │
@@ -316,7 +316,7 @@ For testing middleware that calls services (e.g., `requireFlow` calls `getPackag
 |---|---|
 | `app.ts` | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler) |
 | `auth.ts` | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
-| `db.ts` | `truncateAll()` — DELETE FROM all 33 tables in FK-safe order |
+| `db.ts` | `truncateAll()` — DELETE FROM all 34 tables in FK-safe order |
 | `seed.ts` | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
 | `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification |
 | `redis.ts` | `getRedis()`, `flushRedis()` — test Redis client |
@@ -370,18 +370,18 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 173 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 178 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `share-links`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (33 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app_ prefix), `endUsers` (eu_ prefix), `webhooks` (wh_ prefix), `webhookDeliveries`.
+Full schema: `packages/db/src/schema.ts` (34 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app_ prefix), `endUsers` (eu_ prefix), `webhooks` (wh_ prefix), `webhookDeliveries`.
 
 ## Environment Variables
 

@@ -23,6 +23,7 @@ export const providersPaths = {
                     type: "array",
                     items: { $ref: "#/components/schemas/ProviderConfig" },
                   },
+                  callbackUrl: { type: "string" },
                 },
               },
             },
