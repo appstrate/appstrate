@@ -24,6 +24,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): FlowEd
         tools: {
           "@appstrate/log": "*",
           "@appstrate/output": "*",
+          "@appstrate/report": "*",
           "@appstrate/set-state": "*",
           "@appstrate/add-memory": "*",
         },

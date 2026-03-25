@@ -26,7 +26,6 @@ export function resolveManifestProviders(manifest: Partial<Manifest>): FlowProvi
 
   return Object.entries(providersRecord).map(([providerId, _version]) => ({
     id: providerId,
-    provider: providerId,
     scopes: config[providerId]?.scopes,
     connectionMode: config[providerId]?.connectionMode,
   }));

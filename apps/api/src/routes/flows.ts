@@ -3,8 +3,7 @@ import type { AppEnv } from "../types/index.ts";
 import {
   setPackageConfig,
   getFlowOverrides,
-  setFlowModelId,
-  setFlowProxyId,
+  setFlowOverride,
   getRunningExecutionsCounts,
   bindFlowProvider,
   unbindFlowProvider,
@@ -125,9 +124,9 @@ export function createFlowsRouter() {
 
       // Verify the profile has a connection for this provider
       const orgId = c.get("orgId");
-      const conn = await getConnectionStatus(svc.provider, effectiveProfileId, orgId);
+      const conn = await getConnectionStatus(svc.id, effectiveProfileId, orgId);
       if (conn.status !== "connected") {
-        throw invalidRequest(`No active connection for '${svc.provider}'`);
+        throw invalidRequest(`No active connection for '${svc.id}'`);
       }
 
       await bindFlowProvider(orgId, flow.id, providerId, effectiveProfileId);
@@ -192,7 +191,7 @@ export function createFlowsRouter() {
     const body = await c.req.json();
     const data = parseBody(proxyIdSchema, body);
 
-    await setFlowProxyId(orgId, flow.id, data.proxyId);
+    await setFlowOverride(orgId, flow.id, "proxyId", data.proxyId);
 
     return c.json({ success: true });
   });
@@ -213,7 +212,7 @@ export function createFlowsRouter() {
     const body = await c.req.json();
     const data = parseBody(modelIdSchema, body);
 
-    await setFlowModelId(orgId, flow.id, data.modelId);
+    await setFlowOverride(orgId, flow.id, "modelId", data.modelId);
 
     return c.json({ success: true });
   });

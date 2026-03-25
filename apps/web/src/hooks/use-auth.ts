@@ -41,32 +41,7 @@ function setAuthenticatedUser(
   });
 }
 
-let initialized = false;
-function initAuth() {
-  if (initialized) return;
-  initialized = true;
-
-  authClient
-    .getSession()
-    .then(async (result) => {
-      if (result.data?.user) {
-        const profile = await fetchProfile();
-        if (!profile) {
-          await authClient.signOut();
-          clearAuth();
-          return;
-        }
-        setAuthenticatedUser(result.data.user, profile);
-      } else {
-        clearAuth();
-      }
-    })
-    .catch(() => {
-      clearAuth();
-    });
-}
-
-export async function refreshAuth() {
+async function syncAuth() {
   const result = await authClient.getSession();
   if (result.data?.user) {
     const profile = await fetchProfile();
@@ -79,6 +54,19 @@ export async function refreshAuth() {
   } else {
     clearAuth();
   }
+}
+
+let initialized = false;
+function initAuth() {
+  if (initialized) return;
+  initialized = true;
+  syncAuth().catch(() => {
+    clearAuth();
+  });
+}
+
+export async function refreshAuth() {
+  await syncAuth();
 }
 
 export function useAuth() {

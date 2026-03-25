@@ -6,7 +6,9 @@ import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
+import { syncFlowDepsJunctionTable } from "./dependencies.ts";
 import { deletePackageFiles } from "./storage.ts";
+import { extractDepsFromManifest } from "../../lib/manifest-utils.ts";
 import { asRecord } from "../../lib/safe-json.ts";
 import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
 
@@ -139,6 +141,13 @@ export async function createOrgItem(
       .returning();
 
     if (!row) throw new Error("Failed to insert package: no row returned");
+
+    // Auto-sync dependency junction table for flows
+    if (cfg.type === "flow") {
+      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(finalManifest);
+      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
+    }
+
     return row;
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {

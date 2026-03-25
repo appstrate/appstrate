@@ -10,13 +10,13 @@ const HELLO_WORLD_MANIFEST = {
   author: "Appstrate",
   description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",
   keywords: ["demo", "example", "getting-started"],
-  output: {
-    schema: {
-      type: "object",
-      properties: {
-        report: { type: "string", description: "The generated welcome report in Markdown format" },
-      },
-      required: ["report"],
+  dependencies: {
+    tools: {
+      "@appstrate/log": "*",
+      "@appstrate/output": "*",
+      "@appstrate/report": "*",
+      "@appstrate/set-state": "*",
+      "@appstrate/add-memory": "*",
     },
   },
 };
@@ -51,6 +51,8 @@ export async function provisionDefaultFlowForOrg(
   try {
     const packageId = `@${orgSlug}/hello-world`;
 
+    const manifest = { ...HELLO_WORLD_MANIFEST, name: packageId };
+
     await createOrgItem(
       orgId,
       {
@@ -61,7 +63,7 @@ export async function provisionDefaultFlowForOrg(
         createdBy,
       },
       FLOW_CONFIG,
-      { ...HELLO_WORLD_MANIFEST, name: packageId },
+      manifest,
     );
 
     logger.info("Provisioned default hello-world flow", { orgId, packageId });

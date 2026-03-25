@@ -44,7 +44,6 @@ export async function buildProviderTokens(
         if (!token) {
           logger.warn("No token resolved for provider", {
             providerId: svc.id,
-            provider: svc.provider,
             connectionProfileId,
           });
         }

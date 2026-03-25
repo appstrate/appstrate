@@ -186,12 +186,7 @@ export function createInternalRouter() {
       }
 
       // Unified credential resolution
-      const result = await resolveCredentialsForProxy(
-        db,
-        profileId,
-        provider.provider,
-        execution.orgId,
-      );
+      const result = await resolveCredentialsForProxy(db, profileId, provider.id, execution.orgId);
 
       if (!result) {
         throw notFound(`No credentials for provider '${providerId}'`);
@@ -200,7 +195,6 @@ export function createInternalRouter() {
       logger.info("Credential access", {
         executionId,
         providerId,
-        provider: provider.provider,
         packageId: execution.packageId,
         connectionMode,
         profileId,

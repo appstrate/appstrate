@@ -77,112 +77,93 @@ function isAdminRole(role: string): boolean {
   return role === "admin" || role === "owner";
 }
 
+/** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */
+function openRealtimeStream(
+  c: Parameters<typeof streamSSE>[0],
+  subId: string,
+  filter: { executionId?: string; packageId?: string; orgId: string; isAdmin: boolean },
+  verbose: boolean,
+) {
+  return streamSSE(c, async (stream) => {
+    const send = (evt: RealtimeEvent) => {
+      const payload = verbose ? evt.data : stripPayload(evt);
+      stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
+    };
+
+    addSubscriber({ id: subId, filter, send });
+    stream.onAbort(() => {
+      removeSubscriber(subId);
+    });
+
+    while (true) {
+      await stream.writeSSE({ event: "ping", data: "" });
+      await stream.sleep(30000);
+    }
+  });
+}
+
 export function createRealtimeRouter() {
   const router = new Hono();
 
   // GET /api/realtime/executions/:id — stream execution status + log changes
   router.get("/executions/:id", async (c) => {
     const validated = await validateSSEAuth(c);
-    if (!validated) {
-      throw unauthorized("Invalid session or org");
-    }
+    if (!validated) throw unauthorized("Invalid session or org");
 
     const executionId = c.req.param("id");
     const subId = `exec-${executionId}-${crypto.randomUUID().slice(0, 8)}`;
-
     const verbose = c.req.query("verbose") === "true";
 
-    return streamSSE(c, async (stream) => {
-      const send = (evt: RealtimeEvent) => {
-        const payload = verbose ? evt.data : stripPayload(evt);
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
-      };
-
-      addSubscriber({
-        id: subId,
-        filter: { executionId, orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
-        send,
-      });
-
-      stream.onAbort(() => {
-        removeSubscriber(subId);
-      });
-
-      // Keep alive with periodic pings
-      while (true) {
-        await stream.writeSSE({ event: "ping", data: "" });
-        await stream.sleep(30000);
-      }
-    });
+    return openRealtimeStream(
+      c,
+      subId,
+      {
+        executionId,
+        orgId: validated.orgId,
+        isAdmin: isAdminRole(validated.role),
+      },
+      verbose,
+    );
   });
 
   // GET /api/realtime/flows/:packageId/executions — stream execution changes for a flow
   router.get("/flows/:packageId/executions", async (c) => {
     const validated = await validateSSEAuth(c);
-    if (!validated) {
-      throw unauthorized("Invalid session or org");
-    }
+    if (!validated) throw unauthorized("Invalid session or org");
 
     const packageId = c.req.param("packageId");
     const subId = `flow-${packageId}-${crypto.randomUUID().slice(0, 8)}`;
-
     const verbose = c.req.query("verbose") === "true";
 
-    return streamSSE(c, async (stream) => {
-      const send = (evt: RealtimeEvent) => {
-        const payload = verbose ? evt.data : stripPayload(evt);
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
-      };
-
-      addSubscriber({
-        id: subId,
-        filter: { packageId, orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
-        send,
-      });
-
-      stream.onAbort(() => {
-        removeSubscriber(subId);
-      });
-
-      while (true) {
-        await stream.writeSSE({ event: "ping", data: "" });
-        await stream.sleep(30000);
-      }
-    });
+    return openRealtimeStream(
+      c,
+      subId,
+      {
+        packageId,
+        orgId: validated.orgId,
+        isAdmin: isAdminRole(validated.role),
+      },
+      verbose,
+    );
   });
 
   // GET /api/realtime/executions — stream all execution changes (for flow list)
   router.get("/executions", async (c) => {
     const validated = await validateSSEAuth(c);
-    if (!validated) {
-      throw unauthorized("Invalid session or org");
-    }
+    if (!validated) throw unauthorized("Invalid session or org");
 
     const subId = `all-exec-${crypto.randomUUID().slice(0, 8)}`;
-
     const verbose = c.req.query("verbose") === "true";
 
-    return streamSSE(c, async (stream) => {
-      const send = (evt: RealtimeEvent) => {
-        const payload = verbose ? evt.data : stripPayload(evt);
-        stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
-      };
-
-      addSubscriber({
-        id: subId,
-        filter: { orgId: validated.orgId, isAdmin: isAdminRole(validated.role) },
-        send,
-      });
-
-      stream.onAbort(() => {
-        removeSubscriber(subId);
-      });
-
-      while (true) {
-        await stream.writeSSE({ event: "ping", data: "" });
-        await stream.sleep(30000);
-      }
-    });
+    return openRealtimeStream(
+      c,
+      subId,
+      {
+        orgId: validated.orgId,
+        isAdmin: isAdminRole(validated.role),
+      },
+      verbose,
+    );
   });
 
   return router;

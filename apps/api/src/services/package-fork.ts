@@ -5,7 +5,6 @@ import {
   getOrgItem,
   getPackageById,
   createOrgItem,
-  syncFlowDepsJunctionTable,
   uploadPackageFiles,
   type PackageTypeConfig,
   FLOW_CONFIG,
@@ -13,7 +12,7 @@ import {
   TOOL_CONFIG,
   PROVIDER_CONFIG,
 } from "./package-items/index.ts";
-import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { db } from "@appstrate/db/client";
@@ -169,13 +168,6 @@ async function forkWithConfig(
     zipBuffer: newZipBuffer,
     manifest: updatedManifest,
   });
-
-  // Sync flow dependencies if it's a flow
-  if (cfg.type === "flow") {
-    const manifest = (updatedManifest ?? {}) as Partial<Manifest>;
-    const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
-    await syncFlowDepsJunctionTable(newPkg.id, orgId, skillIds, toolIds, providerIds);
-  }
 
   return {
     packageId: newPkg.id,
