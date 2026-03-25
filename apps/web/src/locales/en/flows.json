@@ -69,8 +69,6 @@
   "exec.tabResult": "Data",
   "exec.tabState": "State",
   "exec.emptyExecution": "No public logs",
-  "exec.emptyResult": "No result",
-  "exec.emptyState": "No state",
   "exec.breadcrumb": "Execution #{{number}}",
   "exec.draft": "draft",
   "exec.user": "by {{name}}",
