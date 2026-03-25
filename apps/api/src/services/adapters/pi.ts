@@ -84,29 +84,17 @@ export class PiAdapter implements ExecutionAdapter {
         containerEnv.MODEL_COST = JSON.stringify(llmConfig.cost);
       }
 
-      // Conditionally disable tools based on output mode (mutually exclusive)
-      const disabledTools: string[] = [];
-      const outputMode = ctx.outputMode ?? "data";
+      // Output schema injection (optional — enables constrained decoding when present)
       const hasOutputSchema =
         ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
 
-      if (outputMode === "data") {
-        if (!hasOutputSchema) {
-          throw new Error("Output mode 'data' requires an output schema");
-        }
-        disabledTools.push("report");
-      } else {
-        // report mode — structured_output always disabled
-        disabledTools.push("structured-output");
-      }
-
+      const disabledTools: string[] = [];
       if (ctx.logsEnabled === false) disabledTools.push("log");
       if (disabledTools.length > 0) {
         containerEnv.DISABLED_TOOLS = disabledTools.join(",");
       }
 
-      // Inject output schema for native LLM tool parameter enforcement
-      if (outputMode === "data" && hasOutputSchema) {
+      if (hasOutputSchema) {
         containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
       }
 
@@ -275,11 +263,8 @@ export function parsePiStreamLine(line: string): ExecutionMessage | null {
       case "assistant_message":
         return null;
 
-      case "report":
-        return { type: obj.final ? "report_final" : "report", content: obj.content || "" };
-
-      case "structured_output":
-        return { type: "structured_output", data: obj.data };
+      case "output":
+        return { type: "output", data: obj.data };
 
       case "set_state":
         return { type: "set_state", data: obj.state };

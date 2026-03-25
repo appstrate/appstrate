@@ -187,8 +187,6 @@
   "editor.execution": "Exécution",
   "editor.execTimeout": "Timeout",
   "editor.execTimeoutDesc": "En secondes (défaut: 300)",
-  "editor.execOutputMode": "Mode de sortie",
-  "editor.execOutputModeDesc": "Report : contenu narratif en Markdown. Data : sortie JSON structurée uniquement.",
   "editor.execLogs": "Logs de progression",
   "editor.execLogsDesc": "Permet à l'agent d'envoyer des messages de progression à l'utilisateur",
   "editor.inputTitle": "Entrées (input)",

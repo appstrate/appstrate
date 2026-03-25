@@ -60,32 +60,13 @@ describe("processPiLogs", () => {
     expect(messages[0]!.message).toBe("Hello world");
   });
 
-  it("passes through report events", async () => {
-    const lines = [JSON.stringify({ type: "report", content: "## Summary\nAll good." })];
+  it("passes through output events", async () => {
+    const lines = [JSON.stringify({ type: "output", data: { count: 42 } })];
 
     const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
 
     expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("report");
-    expect(messages[0]!.content).toBe("## Summary\nAll good.");
-  });
-
-  it("passes through report_final events", async () => {
-    const lines = [JSON.stringify({ type: "report", content: "Done.", final: true })];
-
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("report_final");
-  });
-
-  it("passes through structured_output events", async () => {
-    const lines = [JSON.stringify({ type: "structured_output", data: { count: 42 } })];
-
-    const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.type).toBe("structured_output");
+    expect(messages[0]!.type).toBe("output");
     expect(messages[0]!.data).toEqual({ count: 42 });
   });
 
@@ -137,16 +118,16 @@ describe("processPiLogs", () => {
   it("flushes text buffer when non-text event arrives", async () => {
     const lines = [
       JSON.stringify({ type: "text_delta", text: "buffered text" }),
-      JSON.stringify({ type: "report", content: "report content" }),
+      JSON.stringify({ type: "output", data: { result: "done" } }),
     ];
 
     const messages = await collectMessages(processPiLogs(linesGenerator(lines)));
 
-    // Should have: flushed "buffered text", then report
+    // Should have: flushed "buffered text", then output
     expect(messages).toHaveLength(2);
     expect(messages[0]!.type).toBe("progress");
     expect(messages[0]!.message).toBe("buffered text");
-    expect(messages[1]!.type).toBe("report");
+    expect(messages[1]!.type).toBe("output");
   });
 
   it("handles tool_start events as progress with data", async () => {

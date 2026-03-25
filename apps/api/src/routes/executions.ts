@@ -96,7 +96,6 @@ export async function executeFlowInBackground(
     const adapter = getAdapter();
 
     const timeout = (flow.manifest.timeout as number | undefined) ?? 300;
-    let report = "";
     const structuredData: Record<string, unknown> = {};
     let state: Record<string, unknown> | null = null;
     const memories: string[] = [];
@@ -141,27 +140,13 @@ export async function executeFlowInBackground(
             );
             break;
 
-          case "report":
-          case "report_final":
-            report += (msg.content ?? "") + "\n\n";
-            await appendExecutionLog(
-              executionId,
-              orgId,
-              "report",
-              msg.type === "report_final" ? "report_final" : "report_chunk",
-              msg.content ?? null,
-              null,
-              "info",
-            );
-            break;
-
-          case "structured_output":
+          case "output":
             if (msg.data) Object.assign(structuredData, msg.data);
             await appendExecutionLog(
               executionId,
               orgId,
               "result",
-              "structured_output",
+              "output",
               null,
               msg.data ?? null,
               "info",
@@ -216,14 +201,12 @@ export async function executeFlowInBackground(
       throw err;
     }
 
-    const hasReport = report.length > 0;
-    const hasData = Object.keys(structuredData).length > 0;
-    const hasResult = hasReport || hasData;
+    const hasResult = Object.keys(structuredData).length > 0;
 
     if (hasResult) {
-      // Validate structured output against schema (if defined)
+      // Validate output against schema (if defined)
       const outputSchema = flow.manifest.output?.schema;
-      if (outputSchema && hasData) {
+      if (outputSchema) {
         const outputValidation = validateOutput(structuredData, outputSchema);
         if (!outputValidation.valid) {
           await appendExecutionLog(
@@ -246,9 +229,7 @@ export async function executeFlowInBackground(
       const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
 
       // Build result object
-      const result: Record<string, unknown> = {};
-      if (hasReport) result.report = report;
-      if (hasData) result.data = structuredData;
+      const result: Record<string, unknown> = { data: structuredData };
 
       // Persist memories
       if (memories.length > 0) {

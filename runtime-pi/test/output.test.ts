@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 /**
- * Tests for buildDataSchema() in structured-output extension.
+ * Tests for buildDataSchema() in output extension.
  *
  * Since the extension reads process.env.OUTPUT_SCHEMA at import time,
  * we must set the env var BEFORE dynamically importing the module.
@@ -30,7 +30,7 @@ async function importExtension(envValue?: string) {
 
   // Cache-bust to force re-evaluation of module-level code
   const cacheBuster = `${Date.now()}-${Math.random()}`;
-  const mod = await import(`../extensions/structured-output.ts?v=${cacheBuster}`);
+  const mod = await import(`../extensions/output.ts?v=${cacheBuster}`);
   const factory = mod.default;
 
   const pi = createMockPi();
@@ -38,7 +38,7 @@ async function importExtension(envValue?: string) {
   return pi.tools[0];
 }
 
-describe("structured-output extension", () => {
+describe("output extension", () => {
   beforeEach(() => {
     delete process.env.OUTPUT_SCHEMA;
   });
@@ -46,7 +46,7 @@ describe("structured-output extension", () => {
   it("uses generic object schema when OUTPUT_SCHEMA is not set", async () => {
     const tool = await importExtension(undefined);
 
-    expect(tool.name).toBe("structured_output");
+    expect(tool.name).toBe("output");
     // The data parameter should be a generic object
     const dataSchema = tool.parameters.properties.data;
     expect(dataSchema.type).toBe("object");
@@ -124,6 +124,6 @@ describe("structured-output extension", () => {
     const tool = await importExtension(JSON.stringify(schema));
 
     const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.description).toBe("JSON object to merge into the structured output");
+    expect(dataSchema.description).toBe("JSON object to merge into the output");
   });
 });
