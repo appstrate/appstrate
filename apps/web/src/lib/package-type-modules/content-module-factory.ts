@@ -1,5 +1,6 @@
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
+import { getManifestName } from "../../components/flow-editor/utils";
 
 /**
  * Factory for skill/tool modules — they share identical logic
@@ -12,12 +13,12 @@ export function makeContentPackageModule(
 ): PackageTypeModule {
   return {
     detailToFormState(detail: ContentPackageInput): PackageFormState {
-      const scopeMatch = detail.id.match(/^@([^/]+)\/(.+)$/);
+      const { scope, id } = getManifestName({ name: detail.id });
       return {
         _type: type,
         metadata: {
-          id: scopeMatch ? scopeMatch[2] : detail.id,
-          scope: scopeMatch ? scopeMatch[1] : "",
+          id,
+          scope,
           version: detail.version ?? "1.0.0",
           displayName: detail.displayName,
           description: detail.description,

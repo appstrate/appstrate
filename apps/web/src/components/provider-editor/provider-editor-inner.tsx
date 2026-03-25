@@ -18,23 +18,13 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { JsonEditor } from "../json-editor";
-import { MetadataSection } from "../flow-editor/metadata-section";
+import { MetadataSection, type MetadataState } from "../flow-editor/metadata-section";
 import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
-import { schemaToFields, fieldsToSchema } from "../flow-editor/utils";
+import { schemaToFields, fieldsToSchema, getManifestName } from "../flow-editor/utils";
 import { EditorShell } from "../editor-shell";
 import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "json";
-
-interface ProviderMetadata {
-  id: string;
-  scope: string;
-  version: string;
-  displayName: string;
-  description: string;
-  author: string;
-  keywords: string[];
-}
 
 interface ProviderFields {
   authMode: string;
@@ -62,7 +52,7 @@ interface ProviderFields {
 function getInitialMetadata(
   provider: ProviderConfig | null | undefined,
   orgSlug?: string,
-): ProviderMetadata {
+): MetadataState {
   if (!provider) {
     return {
       id: "",
@@ -74,10 +64,10 @@ function getInitialMetadata(
       keywords: [],
     };
   }
-  const scopeMatch = provider.id.match(/^@([^/]+)\/(.+)$/);
+  const { scope, id } = getManifestName({ name: provider.id });
   return {
-    id: scopeMatch ? scopeMatch[2] : provider.id,
-    scope: scopeMatch ? scopeMatch[1] : (orgSlug ?? ""),
+    id,
+    scope: scope || (orgSlug ?? ""),
     version: provider.version ?? "1.0.0",
     displayName: provider.displayName,
     description: provider.description ?? "",
@@ -136,7 +126,7 @@ function getInitialFields(provider: ProviderConfig | null | undefined): Provider
 }
 
 function buildPayload(
-  metadata: ProviderMetadata,
+  metadata: MetadataState,
   fields: ProviderFields,
   isEdit: boolean,
   availableScopes: AvailableScope[],
@@ -234,7 +224,7 @@ export function ProviderEditorInner({
   const createProvider = useCreateProvider();
   const updateProvider = useUpdateProvider();
 
-  const [metadata, setMetadata] = useState<ProviderMetadata>(() =>
+  const [metadata, setMetadata] = useState<MetadataState>(() =>
     getInitialMetadata(provider, orgSlug),
   );
   const [fields, setFields] = useState<ProviderFields>(() => getInitialFields(provider));
@@ -768,15 +758,14 @@ export function ProviderEditorInner({
         <JsonEditor
           value={buildPayload(metadata, fields, isEdit, availableScopes, credentialFields)}
           onApply={(parsed) => {
-            const idStr = parsed.id as string | undefined;
-            const scopeMatch = idStr?.match(/^@([^/]+)\/(.+)$/);
+            const parsedName = getManifestName({ name: parsed.id as string });
             setMetadata((prev) => ({
               ...prev,
               displayName: (parsed.displayName as string) ?? prev.displayName,
               description: (parsed.description as string) ?? prev.description,
               version: (parsed.version as string) ?? prev.version,
               author: (parsed.author as string) ?? prev.author,
-              ...(scopeMatch ? { scope: scopeMatch[1], id: scopeMatch[2] } : {}),
+              ...(parsedName.scope ? { scope: parsedName.scope, id: parsedName.id } : {}),
             }));
             setFields((prev) => ({
               ...prev,
