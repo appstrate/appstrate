@@ -1,32 +1,5 @@
 {
   "name": "appstrate",
-  "private": true,
-  "packageManager": "bun@1.3.9",
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "runtime-pi",
-    "runtime-pi/sidecar"
-  ],
-  "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
-    "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
-    "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
-    "check": "turbo typecheck && eslint . && prettier --check \"apps/*/src/**\" \"packages/*/src/**\" && bun scripts/verify-openapi.ts && bun scripts/build-system-packages.ts --check",
-    "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
-    "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
-    "db:generate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit generate",
-    "db:migrate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit migrate",
-    "docker:dev": "docker compose up -d",
-    "docker:prod": "docker compose --profile prod up -d",
-    "verify:openapi": "bun scripts/verify-openapi.ts"
-  },
-  "dependencies": {
-    "@appstrate/core": "^2.8.4"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^5.5.0",
@@ -44,5 +17,32 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "packageManager": "bun@1.3.9",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
+    "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
+    "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
+    "check": "turbo typecheck && eslint . && prettier --check \"apps/*/src/**\" \"packages/*/src/**\" && bun scripts/verify-openapi.ts && bun scripts/build-system-packages.ts --check",
+    "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
+    "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
+    "db:generate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit generate",
+    "db:migrate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit migrate",
+    "docker:dev": "docker compose up -d",
+    "docker:prod": "docker compose --profile prod up -d",
+    "verify:openapi": "bun scripts/verify-openapi.ts"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "runtime-pi",
+    "runtime-pi/sidecar"
+  ],
+  "dependencies": {
+    "@appstrate/core": "2.8.5"
   }
 }

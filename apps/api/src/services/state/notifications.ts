@@ -1,5 +1,5 @@
 import { eq, and, or, isNotNull, isNull, desc, count, type SQL } from "drizzle-orm";
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { executions, packageVersions } from "@appstrate/db/schema";
 
 // --- Notifications ---

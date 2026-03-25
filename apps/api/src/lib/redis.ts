@@ -32,10 +32,6 @@ export function getRedisConnection(): Redis {
   return publisher;
 }
 
-export function getRedisPublisher(): Redis {
-  return getRedisConnection();
-}
-
 export function getRedisSubscriber(): Redis {
   if (!subscriber) {
     // Subscriber needs its own connection (cannot share with publisher in Pub/Sub mode)

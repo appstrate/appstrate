@@ -1,5 +1,5 @@
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packages, packageDependencies } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";

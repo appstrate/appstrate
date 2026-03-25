@@ -3,7 +3,7 @@ import type { LoadedPackage, FlowProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";

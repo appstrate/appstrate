@@ -1,5 +1,5 @@
 import { eq, and, asc, count } from "drizzle-orm";
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packageMemories } from "@appstrate/db/schema";
 
 // --- Package Memories (org-scoped, accumulate across executions) ---

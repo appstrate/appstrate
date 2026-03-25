@@ -1,7 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
 import { eq, and, asc } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packageSchedules } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule } from "@appstrate/shared-types";

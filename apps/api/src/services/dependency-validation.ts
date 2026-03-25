@@ -6,7 +6,7 @@
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
 import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import type { FlowProviderRequirement } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
 

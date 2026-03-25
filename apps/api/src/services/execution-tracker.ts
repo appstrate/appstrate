@@ -1,7 +1,7 @@
 // Tracks in-flight executions for graceful shutdown and cancellation.
 // Cross-instance cancel signaling via Redis Pub/Sub.
 
-import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.ts";
+import { getRedisConnection, getRedisSubscriber } from "../lib/redis.ts";
 import { logger } from "../lib/logger.ts";
 
 const CANCEL_CHANNEL = "executions:cancel";
@@ -38,7 +38,7 @@ export function abortExecution(executionId: string): void {
 async function publishCancelWithRetry(executionId: string): Promise<void> {
   for (let attempt = 0; attempt < PUBLISH_MAX_RETRIES; attempt++) {
     try {
-      await getRedisPublisher().publish(CANCEL_CHANNEL, executionId);
+      await getRedisConnection().publish(CANCEL_CHANNEL, executionId);
       return;
     } catch (err) {
       if (attempt === PUBLISH_MAX_RETRIES - 1) throw err;

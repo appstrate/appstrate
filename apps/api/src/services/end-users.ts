@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import { eq, and, desc, lt, gt } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";

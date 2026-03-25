@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { profiles, user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";

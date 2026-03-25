@@ -19,7 +19,7 @@ import {
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { isProviderEnabled } from "@appstrate/connect";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 
 const router = new Hono<AppEnv>();
 

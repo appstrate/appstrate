@@ -16,7 +16,7 @@ import {
 } from "../services/connection-manager/index.ts";
 import { getActor } from "../lib/actor.ts";
 import { listConnections } from "@appstrate/connect";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 

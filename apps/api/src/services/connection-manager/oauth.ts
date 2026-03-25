@@ -1,4 +1,4 @@
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import {

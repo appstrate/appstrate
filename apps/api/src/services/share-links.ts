@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { eq, and, gt, sql } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { shareLinks, shareLinkUsages } from "@appstrate/db/schema";
 import type { Actor } from "../lib/actor.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";

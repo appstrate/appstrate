@@ -1,4 +1,4 @@
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import {
   organizations,

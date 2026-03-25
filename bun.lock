@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "^2.8.4",
+        "@appstrate/core": "2.8.5",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -174,7 +174,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
+    "@appstrate/core": ["@appstrate/core@2.8.5", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-CSE2F3il1LZYS0bf7OEPCKDvAeY1uW6l9heIam2ToHhMvmOCk/4II9QhGeEjpc1i/XN+h7u3iYvVfcSQvfrvpw=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 
@@ -1982,7 +1982,15 @@
 
     "@anthropic-ai/sdk/json-schema-to-ts": ["json-schema-to-ts@3.1.1", "", { "dependencies": { "@babel/runtime": "^7.18.3", "ts-algebra": "^2.0.0" } }, "sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g=="],
 
+    "@appstrate/api/@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
+
     "@appstrate/api/@types/bun": ["@types/bun@1.3.11", "", { "dependencies": { "bun-types": "1.3.11" } }, "sha512-5vPne5QvtpjGpsGYXiFyycfpDF2ECyPcTSsFBMa0fraoxiQyMJ3SmuQIGhzPg2WJuWxVBoxWJ2kClYTcw/4fAg=="],
+
+    "@appstrate/env/@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
+
+    "@appstrate/shared-types/@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
+
+    "@appstrate/web/@appstrate/core": ["@appstrate/core@2.8.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.2", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-Zng5i0doxa556TE+rwZAVjapPKcO9Nl1F+XcpMM7gJslFOmMGPPhd7jfz/+v1aRIOa/WhIWEOcxGeMag+UrmZA=="],
 
     "@aws-crypto/sha1-browser/@smithy/util-utf8": ["@smithy/util-utf8@2.3.0", "", { "dependencies": { "@smithy/util-buffer-from": "^2.2.0", "tslib": "^2.6.2" } }, "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A=="],
 

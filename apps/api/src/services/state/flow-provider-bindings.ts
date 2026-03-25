@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { flowProviderBindings } from "@appstrate/db/schema";
 
 // --- Flow Provider Bindings (per-org) ---

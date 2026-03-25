@@ -1,4 +1,4 @@
-import { closeDb } from "./db.ts";
+import { closeDb } from "@appstrate/db/client";
 import { closeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";

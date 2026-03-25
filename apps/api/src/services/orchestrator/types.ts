@@ -29,7 +29,6 @@ export interface IsolationBoundary {
   readonly name: string;
 }
 
-// Mirrored in runtime-pi/sidecar/helpers.ts — keep both definitions identical.
 export interface SidecarConfig {
   executionToken: string;
   platformApiUrl: string;

@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
 

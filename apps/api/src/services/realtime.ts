@@ -1,4 +1,4 @@
-import { listenClient } from "../lib/db.ts";
+import { listenClient } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 
 export type RealtimeEvent = {

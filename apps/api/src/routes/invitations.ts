@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth.ts";

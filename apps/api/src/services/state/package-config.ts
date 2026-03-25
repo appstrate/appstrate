@@ -1,5 +1,5 @@
 import { eq, and } from "drizzle-orm";
-import { db } from "../../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { packageConfigs } from "@appstrate/db/schema";
 import { asRecord } from "../../lib/safe-json.ts";
 

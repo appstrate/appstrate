@@ -6,7 +6,7 @@ import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { Queue, Worker, UnrecoverableError } from "bullmq";
 import type { Job } from "bullmq";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";

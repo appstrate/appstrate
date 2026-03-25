@@ -1,18 +1,18 @@
-export type {
-  Profile,
-  ExecutionLog,
-  ConnectionProfile,
-  Application,
-  EndUser,
-} from "@appstrate/db/schema";
-export type {
+export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
+import type {
   AuthMode,
   AvailableScope,
   PackageType,
   ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";
-import type { PackageType } from "@appstrate/core/validation";
+export type {
+  AuthMode,
+  AvailableScope,
+  PackageType,
+  ProviderSetupGuide,
+  ResolvedProviderDefinition,
+};
 
 import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
@@ -367,13 +367,6 @@ export interface AvailableProvider {
 
 // --- Provider Config Types ---
 
-import type {
-  AuthMode as _AuthMode,
-  AvailableScope as _AvailableScope,
-  ProviderSetupGuide as _ProviderSetupGuide,
-  ResolvedProviderDefinition,
-} from "@appstrate/core/validation";
-
 /** Provider config returned by the API — extends core's resolved definition with UI state. */
 export interface ProviderConfig extends Omit<
   ResolvedProviderDefinition,
@@ -386,7 +379,7 @@ export interface ProviderConfig extends Omit<
   hasCredentials: boolean;
   enabled: boolean;
   adminCredentialSchema?: JSONSchemaObject;
-  setupGuide?: _ProviderSetupGuide;
+  setupGuide?: ProviderSetupGuide;
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
   authorizationParams?: Record<string, string>;
   tokenParams?: Record<string, string>;

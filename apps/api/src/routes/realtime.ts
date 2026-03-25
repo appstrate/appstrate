@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { auth } from "../lib/auth.ts";
 import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";

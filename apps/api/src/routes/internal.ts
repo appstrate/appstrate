@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/execution-token.ts";

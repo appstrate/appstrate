@@ -3,7 +3,7 @@
  */
 
 import { eq, and, count } from "drizzle-orm";
-import { db } from "../lib/db.ts";
+import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
   userPackageProfiles,
