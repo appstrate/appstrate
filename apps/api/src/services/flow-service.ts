@@ -61,9 +61,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 }
 
 /** Resolve dependency refs from a package's manifest. */
-async function resolveDepRefs(
-  manifest: unknown,
-): Promise<NonNullable<DbPackageRow["depRefs"]>> {
+async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = asRecord(manifest) as Partial<Manifest>;
   const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
   const allDepIds = [...skillIds, ...toolIds, ...providerIds];

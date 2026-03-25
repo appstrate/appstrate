@@ -121,4 +121,3 @@ export const packageVersionDependencies = pgTable(
     index("idx_pkg_ver_deps_version_id").on(table.versionId),
   ],
 );
-

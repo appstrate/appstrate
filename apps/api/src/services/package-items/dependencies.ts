@@ -86,9 +86,7 @@ export async function collectAllDepIds(
 }
 
 /** Build dependencies object from a package's manifest (transitive). */
-export async function buildDependencies(
-  packageId: string,
-): Promise<Dependencies | null> {
+export async function buildDependencies(packageId: string): Promise<Dependencies | null> {
   const allDeps = await collectAllDepIds(packageId);
   const allDepIds = [...allDeps.skillIds, ...allDeps.toolIds, ...allDeps.providerIds];
   if (allDepIds.length === 0) return null;

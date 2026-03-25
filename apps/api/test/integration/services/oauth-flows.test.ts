@@ -90,7 +90,7 @@ describe("OAuth2 flows", () => {
   const PROVIDER_ID = "@testorg/test-oauth-provider";
   const CLIENT_ID = "test-client-id-12345";
   const CLIENT_SECRET = "test-client-secret-67890";
-  const REDIRECT_URI = "http://localhost:3000/auth/callback";
+  const REDIRECT_URI = "http://localhost:3000/api/connections/callback";
 
   beforeEach(async () => {
     await truncateAll();

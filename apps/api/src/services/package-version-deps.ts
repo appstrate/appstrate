@@ -24,4 +24,3 @@ export async function clearVersionDependencies(versionId: number): Promise<void>
     .delete(packageVersionDependencies)
     .where(eq(packageVersionDependencies.versionId, versionId));
 }
-
