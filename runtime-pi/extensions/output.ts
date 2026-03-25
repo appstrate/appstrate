@@ -1,5 +1,5 @@
 /**
- * Structured Output Tool — Return machine-readable data as part of the execution result.
+ * Output Tool — Return data as part of the execution result.
  *
  * Each call is deep-merged into the final output. If an output schema
  * is defined, the merged result is validated against it.
@@ -11,14 +11,14 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { emitStructuredOutput } from "../lib/emit.ts";
+import { emitOutput } from "../lib/emit.ts";
 
 function buildDataSchema() {
   const raw = process.env.OUTPUT_SCHEMA;
   if (!raw) {
     return Type.Unsafe<Record<string, unknown>>({
       type: "object",
-      description: "JSON object to merge into the structured output",
+      description: "JSON object to merge into the output",
     });
   }
   try {
@@ -28,23 +28,22 @@ function buildDataSchema() {
     const { required: _required, ...rest } = schema;
     return Type.Unsafe<Record<string, unknown>>({
       ...rest,
-      description: rest.description || "JSON object to merge into the structured output",
+      description: rest.description || "JSON object to merge into the output",
     });
   } catch {
     return Type.Unsafe<Record<string, unknown>>({
       type: "object",
-      description: "JSON object to merge into the structured output",
+      description: "JSON object to merge into the output",
     });
   }
 }
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
-    name: "structured_output",
-    label: "Structured Output",
+    name: "output",
+    label: "Output",
     description:
-      "Return structured data as part of the execution result. Each call is deep-merged into the final output. " +
-      "Use this for machine-readable data (stats, lists, records) that complement the report. " +
+      "Return data as the execution result. Each call is deep-merged into the final output. " +
       "If an output schema is defined, the merged result is validated against it.",
     parameters: Type.Object({
       data: buildDataSchema(),
@@ -52,9 +51,9 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params) {
       const { data } = params as { data: Record<string, unknown> };
-      emitStructuredOutput(data);
+      emitOutput(data);
       return {
-        content: [{ type: "text", text: "Structured output recorded" }],
+        content: [{ type: "text", text: "Output recorded" }],
       };
     },
   });

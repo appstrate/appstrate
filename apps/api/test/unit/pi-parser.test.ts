@@ -83,28 +83,10 @@ describe("parsePiStreamLine", () => {
   });
 
   describe("output tool events", () => {
-    it("report returns report message with content", () => {
-      const line = JSON.stringify({ type: "report", content: "## Summary\n\nAll good." });
+    it("output returns data", () => {
+      const line = JSON.stringify({ type: "output", data: { count: 42, items: ["a"] } });
       const msg = parsePiStreamLine(line);
-      expect(msg).toEqual({ type: "report", content: "## Summary\n\nAll good." });
-    });
-
-    it("report with final flag returns report_final type", () => {
-      const line = JSON.stringify({ type: "report", content: "Done.", final: true });
-      const msg = parsePiStreamLine(line);
-      expect(msg).toEqual({ type: "report_final", content: "Done." });
-    });
-
-    it("report with empty content", () => {
-      const line = JSON.stringify({ type: "report" });
-      const msg = parsePiStreamLine(line);
-      expect(msg).toEqual({ type: "report", content: "" });
-    });
-
-    it("structured_output returns data", () => {
-      const line = JSON.stringify({ type: "structured_output", data: { count: 42, items: ["a"] } });
-      const msg = parsePiStreamLine(line);
-      expect(msg).toEqual({ type: "structured_output", data: { count: 42, items: ["a"] } });
+      expect(msg).toEqual({ type: "output", data: { count: 42, items: ["a"] } });
     });
 
     it("set_state returns state as data", () => {

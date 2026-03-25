@@ -89,20 +89,15 @@ export function ExecutionDetailPage() {
   );
   const hasUserSelected = useRef(false);
 
-  const { historicalLogs, report, reportComplete, structuredData } = useMemo(() => {
-    if (!logs)
-      return { historicalLogs: [], report: "", reportComplete: false, structuredData: null };
-    const { entries, report, reportComplete, data } = buildLogEntries(logs as RawLog[]);
-    return { historicalLogs: entries, report, reportComplete, structuredData: data };
+  const { historicalLogs, structuredData } = useMemo(() => {
+    if (!logs) return { historicalLogs: [], structuredData: null };
+    const { entries, data } = buildLogEntries(logs as RawLog[]);
+    return { historicalLogs: entries, structuredData: data };
   }, [logs]);
 
-  const execResult = execution?.result as {
-    report?: string;
-    data?: Record<string, unknown>;
-  } | null;
-  const finalReport = report || execResult?.report || "";
+  const execResult = execution?.result as { data?: Record<string, unknown> } | null;
   const finalData = structuredData || execResult?.data || null;
-  const hasResult = !!finalReport || (finalData && Object.keys(finalData).length > 0);
+  const hasResult = finalData && Object.keys(finalData).length > 0;
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
 
@@ -283,11 +278,7 @@ export function ExecutionDetailPage() {
 
       {activeTab === "result" &&
         (hasResult ? (
-          <ResultRenderer
-            report={finalReport || undefined}
-            data={finalData ?? undefined}
-            reportStreaming={isRunning && !!finalReport && !reportComplete}
-          />
+          <ResultRenderer data={finalData ?? undefined} />
         ) : (
           <EmptyState message={t("exec.emptyResult")} icon={FileText} compact />
         ))}

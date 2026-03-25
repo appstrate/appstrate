@@ -12,14 +12,9 @@ export function log(
   emit({ type: "log", level, message, ...(data ? { data } : {}) });
 }
 
-/** Emit a report chunk (streamed markdown content). */
-export function emitReport(content: string, final = false): void {
-  emit({ type: "report", content, final });
-}
-
-/** Emit structured output data (deep-merged by platform). */
-export function emitStructuredOutput(data: Record<string, unknown>): void {
-  emit({ type: "structured_output", data });
+/** Emit output data (deep-merged by platform). */
+export function emitOutput(data: Record<string, unknown>): void {
+  emit({ type: "output", data });
 }
 
 /** Set execution state for next run (last call wins). */

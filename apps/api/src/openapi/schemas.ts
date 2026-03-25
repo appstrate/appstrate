@@ -721,14 +721,6 @@ export const schemas = {
       {
         type: "object",
         properties: {
-          "x-output-mode": {
-            type: "string",
-            enum: ["report", "data"],
-            description:
-              "Output mode. 'report': agent produces narrative Markdown via the report tool. " +
-              "'data': agent returns structured JSON via the structured_output tool (requires output.schema). " +
-              "Modes are mutually exclusive. API default: 'data'. UI default: 'report'.",
-          },
           "x-logs": {
             type: "boolean",
             description: "Enable progress log messages from the agent to the user (default: true)",

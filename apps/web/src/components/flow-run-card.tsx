@@ -34,7 +34,7 @@ export interface FlowRunCardProps {
   // State
   status: RunCardStatus;
   error?: string | null;
-  result?: { report?: string; data?: Record<string, unknown> } | null;
+  result?: Record<string, unknown> | null;
   logEntries?: LogEntry[];
   submitting?: boolean;
 
@@ -292,7 +292,7 @@ export function FlowRunCard({
               {error}
             </div>
           )}
-          {result && <ResultRenderer report={result.report} data={result.data} />}
+          {result && <ResultRenderer data={result} />}
           {onRerun && (
             <Button variant="outline" className="w-full" onClick={onRerun}>
               {t("shareable.rerun")}

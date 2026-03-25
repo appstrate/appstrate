@@ -10,7 +10,15 @@ const HELLO_WORLD_MANIFEST = {
   author: "Appstrate",
   description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",
   keywords: ["demo", "example", "getting-started"],
-  "x-output-mode": "report",
+  output: {
+    schema: {
+      type: "object",
+      properties: {
+        report: { type: "string", description: "The generated welcome report in Markdown format" },
+      },
+      required: ["report"],
+    },
+  },
 };
 
 const HELLO_WORLD_PROMPT = `# Hello World

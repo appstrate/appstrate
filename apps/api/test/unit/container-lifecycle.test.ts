@@ -174,7 +174,7 @@ describe("runContainerLifecycle", () => {
     });
     const handle = createHandle();
 
-    // Should not throw because a report was yielded
+    // Should not throw because an output was yielded
     const messages = await collectMessages(
       runContainerLifecycle({
         orchestrator,
@@ -183,12 +183,12 @@ describe("runContainerLifecycle", () => {
         executionId: "exec-1",
         timeout: 30,
         processLogs: async function* () {
-          yield { type: "report_final" as const, content: "Done." };
+          yield { type: "output" as const, data: { done: true } };
         },
       }),
     );
 
-    expect(messages.some((m) => m.type === "report_final")).toBe(true);
+    expect(messages.some((m) => m.type === "output")).toBe(true);
   });
 
   it("always removes workload in finally block", async () => {

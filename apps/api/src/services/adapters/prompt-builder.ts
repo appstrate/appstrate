@@ -296,35 +296,16 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
   // --- Output tools ---
   const outputSchema = ctx.schemas.output;
-  const outputMode = ctx.outputMode ?? "data";
   sections.push("## Output\n");
   sections.push(
     "Use the following tools to produce your output. " +
       "Do NOT write a JSON code block — use tool calls instead.\n",
   );
 
-  if (outputMode === "report") {
-    sections.push("### report(content)");
+  if (outputSchema?.properties && Object.keys(outputSchema.properties).length > 0) {
+    sections.push("### output(data)");
     sections.push(
-      "Stream narrative content in Markdown format. Each call appends to the report. " +
-        "Use headings, lists, bold, and tables to structure your content. " +
-        "Set `final: true` on your last call to signal the report is complete.\n",
-    );
-    sections.push(
-      "For short reports, a single `report(..., final=true)` call is fine. " +
-        "For longer reports (multiple sections), split by section so the user sees progress, " +
-        "and set `final: true` on the last call.\n",
-    );
-  }
-
-  if (
-    outputMode === "data" &&
-    outputSchema?.properties &&
-    Object.keys(outputSchema.properties).length > 0
-  ) {
-    sections.push("### structured_output(data)");
-    sections.push(
-      "Return machine-readable data as a JSON object. Each call is deep-merged into the result. " +
+      "Return data as a JSON object. Each call is deep-merged into the result. " +
         "Include **only** the fields listed below — do not add extra fields.\n",
     );
     sections.push("Fields:");
@@ -333,6 +314,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
     }
     sections.push("");
+  } else {
+    sections.push("### output(data)");
+    sections.push(
+      "Return any JSON object as the execution result. Each call is deep-merged into the final output. " +
+        "Structure the data in whatever way best serves the task.\n",
+    );
   }
 
   sections.push("### set_state(state)");

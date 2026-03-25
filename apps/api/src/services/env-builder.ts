@@ -111,9 +111,6 @@ export function buildPromptContext(params: {
       description: s.description,
     })),
     logsEnabled: (params.flow.manifest["x-logs"] as boolean | undefined) ?? true,
-    // API default: "data" (dev/headless flows). Frontend default: "report" (UI flows).
-    // assemblePayload always writes an explicit value, so only manifests created outside the UI hit this default.
-    outputMode: (params.flow.manifest["x-output-mode"] as "report" | "data" | undefined) ?? "data",
   };
 }
 

@@ -18,15 +18,7 @@ export const tokenUsageSchema = z.object({
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
 export interface ExecutionMessage {
-  type:
-    | "progress"
-    | "usage"
-    | "error"
-    | "report"
-    | "report_final"
-    | "structured_output"
-    | "set_state"
-    | "add_memory";
+  type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory";
   message?: string;
   data?: Record<string, unknown>;
   usage?: TokenUsage;
@@ -102,7 +94,6 @@ export interface PromptContext {
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
   logsEnabled?: boolean;
-  outputMode?: "report" | "data";
 }
 
 export interface ExecutionAdapter {

@@ -31,7 +31,7 @@ export function defaultFormState(orgSlug?: string, userEmail?: string): FlowForm
     inputSchema: [],
     outputSchema: [],
     configSchema: [],
-    execution: { timeout: 300, logs: true, outputMode: "report" },
+    execution: { timeout: 300, logs: true },
     _manifestBase: {
       $schema: AFPS_SCHEMA_URLS.flow,
       schemaVersion: "1.0",
@@ -185,7 +185,6 @@ export function detailToFormState(detail: FlowDetail): FlowFormState {
     execution: {
       timeout: (m.timeout as number) ?? 300,
       logs: (m["x-logs"] as boolean | undefined) ?? true,
-      outputMode: (m["x-output-mode"] as "report" | "data" | undefined) ?? "report",
     },
     _manifestBase: { ...m },
   };
@@ -315,17 +314,11 @@ export function assemblePayload(state: FlowFormState) {
   } else {
     delete manifest.timeout;
   }
-  // Clean up legacy x-outputRetries if present in base manifest
-  delete manifest["x-outputRetries"];
   if ("x-logs" in state._manifestBase || state.execution.logs !== true) {
     manifest["x-logs"] = state.execution.logs;
   } else {
     delete manifest["x-logs"];
   }
-  // Output mode: UI default is "report", API default is "data" — always write to manifest
-  // to avoid ambiguity between the two defaults.
-  // No frontend fallback — the backend validates at execution time (data mode requires output schema).
-  manifest["x-output-mode"] = state.execution.outputMode;
 
   return {
     manifest,
@@ -387,7 +380,6 @@ export function payloadToFormState(payload: {
     execution: {
       timeout: (manifest.timeout as number) ?? 300,
       logs: (manifest["x-logs"] as boolean | undefined) ?? true,
-      outputMode: (manifest["x-output-mode"] as "report" | "data" | undefined) ?? "report",
     },
     _manifestBase: { ...manifest },
   };
