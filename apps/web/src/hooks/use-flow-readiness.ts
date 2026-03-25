@@ -1,10 +1,6 @@
 import { useMemo } from "react";
 import type { FlowDetail, JSONSchemaObject, OrgModelInfo } from "@appstrate/shared-types";
-import {
-  isPromptEmpty,
-  findMissingDependencies,
-  checkRequiredConfig,
-} from "../lib/flow-readiness.ts";
+import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
 
 export function useFlowReadiness(
   detail: FlowDetail | undefined,
@@ -26,7 +22,10 @@ export function useFlowReadiness(
         ? detail.dependencies.providers.some((s) => s.status === "needs_reconnection")
         : false,
       hasRequiredConfig: detail
-        ? checkRequiredConfig(detail.config?.current || {}, configSchema?.required || []).valid
+        ? (configSchema?.required || []).every((key) => {
+            const val = (detail.config?.current || {})[key];
+            return val !== undefined && val !== null && val !== "";
+          })
         : false,
       hasConfigSchema: !!(
         configSchema?.properties && Object.keys(configSchema.properties).length > 0

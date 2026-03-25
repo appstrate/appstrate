@@ -9,6 +9,7 @@ import { z } from "zod";
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
+import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { getDefaultApplication } from "./applications.ts";
@@ -23,29 +24,6 @@ export const endUserMetadataSchema = z
     z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
   )
   .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys");
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface EndUserResponse {
-  id: string;
-  object: "end_user";
-  applicationId: string;
-  name: string | null;
-  email: string | null;
-  externalId: string | null;
-  metadata: Record<string, unknown> | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EndUserListResponse {
-  object: "list";
-  data: EndUserResponse[];
-  hasMore: boolean;
-  limit: number;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,7 +42,7 @@ function toEndUserResponse(row: {
   metadata: unknown;
   createdAt: Date;
   updatedAt: Date;
-}): EndUserResponse {
+}): EndUserInfo {
   return {
     id: row.id,
     object: "end_user",
@@ -104,7 +82,7 @@ export async function createEndUser(
     externalId?: string;
     metadata?: Record<string, unknown>;
   },
-): Promise<EndUserResponse> {
+): Promise<EndUserInfo> {
   const endUserId = generateEndUserId();
   const now = new Date();
 
@@ -222,7 +200,7 @@ export async function listEndUsers(
   return { object: "list", data, hasMore, limit };
 }
 
-export async function getEndUser(orgId: string, endUserId: string): Promise<EndUserResponse> {
+export async function getEndUser(orgId: string, endUserId: string): Promise<EndUserInfo> {
   const [row] = await db
     .select({
       id: endUsers.id,
@@ -254,7 +232,7 @@ export async function updateEndUser(
     externalId?: string;
     metadata?: Record<string, unknown>;
   },
-): Promise<EndUserResponse> {
+): Promise<EndUserInfo> {
   // Verify end-user exists and belongs to org
   const existing = await getEndUser(orgId, endUserId);
 

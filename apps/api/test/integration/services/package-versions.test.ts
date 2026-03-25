@@ -12,7 +12,7 @@ import {
   removeDistTag,
   getMatchingDistTags,
   getVersionCount,
-} from "../../../src/services/package-versions-impl.ts";
+} from "../../../src/services/package-versions.ts";
 import { packageDistTags } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 

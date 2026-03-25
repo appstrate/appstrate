@@ -14,7 +14,7 @@ import {
   PROVIDER_CONFIG,
 } from "./package-items/index.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
-import { getLatestVersionId, createVersionAndUpload } from "./package-versions-impl.ts";
+import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
