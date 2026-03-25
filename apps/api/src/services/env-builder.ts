@@ -14,7 +14,7 @@ import {
   getPackageMemories,
 } from "./state/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import { getPackageZip } from "./package-storage.ts";
+import { buildFlowPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
@@ -104,6 +104,7 @@ export function buildPromptContext(params: {
   files?: FileReference[];
   providers?: PromptContext["providers"];
   memories?: PromptContext["memories"];
+  toolDocs?: PromptContext["toolDocs"];
   proxyUrl?: string | null;
   llmConfig: PromptContext["llmConfig"];
 }): PromptContext {
@@ -136,7 +137,7 @@ export function buildPromptContext(params: {
       name: s.name,
       description: s.description,
     })),
-    logsEnabled: (params.flow.manifest["x-logs"] as boolean | undefined) ?? true,
+    toolDocs: params.toolDocs,
   };
 }
 
@@ -174,7 +175,7 @@ export async function buildExecutionContext(params: {
     flowOverrides,
     previousState,
     providerDefs,
-    flowPackage,
+    flowPackageResult,
     latestVersion,
     memories,
   ] = await Promise.all([
@@ -183,7 +184,7 @@ export async function buildExecutionContext(params: {
     getFlowOverrides(orgId, flow.id),
     getLastExecutionState(flow.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
-    getPackageZip(flow, orgId),
+    buildFlowPackage(flow, orgId),
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)
       : flow.source !== "system"
@@ -191,6 +192,9 @@ export async function buildExecutionContext(params: {
         : null,
     getPackageMemories(flow.id, orgId),
   ]);
+
+  const flowPackage = flowPackageResult.zip;
+  const { toolDocs } = flowPackageResult;
 
   // Step 2: resolve model and proxy with cascade (request override → flow column → org/system default)
   const effectiveModelId = params.modelId ?? flowOverrides.modelId;
@@ -249,6 +253,7 @@ export async function buildExecutionContext(params: {
       content: m.content,
       createdAt: m.createdAt?.toISOString() ?? null,
     })),
+    toolDocs,
     proxyUrl,
     llmConfig,
   });

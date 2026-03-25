@@ -5,6 +5,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { buildDependenciesFromRows, type Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
+import { asRecord } from "../../lib/safe-json.ts";
 
 // ─────────────────────────────────────────────
 // Flow ↔ package item dependency management
@@ -109,7 +110,7 @@ export async function buildDependencies(
 
   const rows = deps.map((dep) => {
     const parsed = parseScopedName(dep.dependencyId);
-    const m = (dep.draftManifest ?? {}) as Record<string, unknown>;
+    const m = asRecord(dep.draftManifest);
     return {
       type: dep.type,
       registryScope: parsed?.scope ?? null,

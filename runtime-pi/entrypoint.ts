@@ -64,17 +64,28 @@ async function initGitWorkspace(): Promise<void> {
 
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
-const disabledTools = new Set(
-  (process.env.DISABLED_TOOLS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
-);
 
 /**
- * Load all .ts extension files from a directory, skipping already-loaded IDs
- * and tools listed in the DISABLED_TOOLS env var.
- * Uses native import() — Bun handles TypeScript natively without tsx.
+ * Load a single extension from a file path, skipping already-loaded IDs.
+ */
+async function loadExtensionFromFile(filePath: string, id: string, label: string) {
+  if (loadedExtensionIds.has(id)) return;
+  const mod = await import(filePath);
+  const factory = resolveDefaultExport(mod);
+  if (typeof factory !== "function") {
+    emit({
+      type: "error",
+      message: `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
+    });
+    return;
+  }
+  extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
+  loadedExtensionIds.add(id);
+}
+
+/**
+ * Load all .ts extension files from a flat directory, skipping already-loaded IDs.
+ * Used for runtime built-in extensions fallback.
  */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!(await exists(dir))) return;
@@ -82,29 +93,65 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
   const results = await Promise.allSettled(
     entries
-      .filter((e) => {
-        const id = e.replace(/\.ts$/, "");
-        return !loadedExtensionIds.has(id) && !disabledTools.has(id);
-      })
+      .filter((e) => !loadedExtensionIds.has(e.replace(/\.ts$/, "")))
       .map(async (entry) => {
         const id = entry.replace(/\.ts$/, "");
-        const mod = await import(path.join(dir, entry));
-        const factory = resolveDefaultExport(mod);
-        if (typeof factory !== "function") {
-          emit({
-            type: "error",
-            message: `Extension '${entry}' (${label}): default export is not a function (got ${typeof factory})`,
-          });
-          return;
-        }
-        extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
-        loadedExtensionIds.add(id);
+        await loadExtensionFromFile(path.join(dir, entry), id, label);
       }),
   );
 
   for (const result of results) {
     if (result.status === "rejected") {
       emit({ type: "error", message: `Failed to load extension (${label}): ${result.reason}` });
+    }
+  }
+}
+
+/**
+ * Load tools declared in the flow manifest from the extracted flow package.
+ * Reads manifest.json to get tool IDs, then loads each from tools/{toolId}/.
+ * Also installs TOOL.md to .pi/tools/{toolId}/TOOL.md.
+ */
+async function loadToolsFromFlowPackage(packageDir: string, label: string) {
+  const flowManifestPath = path.join(packageDir, "manifest.json");
+  if (!(await exists(flowManifestPath))) return;
+
+  let flowManifest: Record<string, unknown>;
+  try {
+    flowManifest = JSON.parse(await fs.readFile(flowManifestPath, "utf-8"));
+  } catch {
+    return;
+  }
+
+  const deps = (flowManifest.dependencies ?? {}) as Record<string, unknown>;
+  const toolDeps = (deps.tools ?? {}) as Record<string, string>;
+  const toolIds = Object.keys(toolDeps);
+
+  for (const toolId of toolIds) {
+    const toolPath = path.join(packageDir, "tools", toolId);
+    if (!(await exists(toolPath))) continue;
+
+    try {
+      const toolManifestPath = path.join(toolPath, "manifest.json");
+      if (!(await exists(toolManifestPath))) continue;
+      const toolManifest = JSON.parse(await fs.readFile(toolManifestPath, "utf-8"));
+      const entrypoint = toolManifest.entrypoint;
+      if (!entrypoint) continue;
+
+      const id = toolManifest.tool?.name || toolId;
+      if (loadedExtensionIds.has(id)) continue;
+
+      // Install TOOL.md if present
+      const toolMd = path.join(toolPath, "TOOL.md");
+      if (await exists(toolMd)) {
+        const dest = path.join(WORKSPACE, ".pi", "tools", toolId);
+        await fs.mkdir(dest, { recursive: true });
+        await fs.copyFile(toolMd, path.join(dest, "TOOL.md"));
+      }
+
+      await loadExtensionFromFile(path.join(toolPath, entrypoint), id, label);
+    } catch (err) {
+      emit({ type: "error", message: `Failed to load tool '${toolId}' (${label}): ${err}` });
     }
   }
 }
@@ -136,8 +183,8 @@ if (hasPackage) {
     };
     await Promise.all([installDir("skills"), installDir("providers")]);
 
-    // Load flow-package tools first (they take priority over runtime built-ins)
-    await loadExtensionsFromDir(path.join(WORKSPACE, ".flow-package", "tools"), "flow-package");
+    // Load flow-package tools (reads manifest to know which tools to load)
+    await loadToolsFromFlowPackage(path.join(WORKSPACE, ".flow-package"), "flow-package");
 
     // Cleanup extracted package (fire-and-forget)
     run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]).catch(() => {});

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/slack",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Slack",
+  "description": "Team messaging and workflow automation",
+  "iconUrl": "https://cdn.simpleicons.org/slack",
+  "categories": [
+    "messaging",
+    "productivity"
+  ],
+  "docsUrl": "https://api.slack.com/docs",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://slack.com/oauth/v2/authorize",
+      "tokenUrl": "https://slack.com/api/oauth.v2.access",
+      "defaultScopes": [
+        "channels:read",
+        "chat:write",
+        "users:read"
+      ],
+      "scopeSeparator": ",",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://slack.com/api/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "channels:read",
+        "label": "View channels"
+      },
+      {
+        "value": "channels:history",
+        "label": "View channel messages"
+      },
+      {
+        "value": "chat:write",
+        "label": "Send messages"
+      },
+      {
+        "value": "users:read",
+        "label": "View users"
+      },
+      {
+        "value": "users:read.email",
+        "label": "View user emails"
+      },
+      {
+        "value": "files:read",
+        "label": "View files"
+      },
+      {
+        "value": "files:write",
+        "label": "Upload files"
+      },
+      {
+        "value": "reactions:read",
+        "label": "View reactions"
+      },
+      {
+        "value": "reactions:write",
+        "label": "Add reactions"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Slack app",
+        "url": "https://api.slack.com/apps"
+      },
+      {
+        "label": "Configure OAuth & Permissions"
+      },
+      {
+        "label": "Copy your credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

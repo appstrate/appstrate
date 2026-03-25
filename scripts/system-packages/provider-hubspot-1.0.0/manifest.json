@@ -1,0 +1,79 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/hubspot",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "HubSpot",
+  "description": "CRM, marketing, and sales platform",
+  "iconUrl": "https://cdn.simpleicons.org/hubspot",
+  "categories": [
+    "crm",
+    "marketing"
+  ],
+  "docsUrl": "https://developers.hubspot.com/docs/api/overview",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://app.hubspot.com/oauth/authorize",
+      "tokenUrl": "https://api.hubapi.com/oauth/v1/token",
+      "refreshUrl": "https://api.hubapi.com/oauth/v1/token",
+      "defaultScopes": [
+        "crm.objects.contacts.read"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.hubapi.com/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "crm.objects.contacts.read",
+        "label": "Read contacts"
+      },
+      {
+        "value": "crm.objects.contacts.write",
+        "label": "Write contacts"
+      },
+      {
+        "value": "crm.objects.companies.read",
+        "label": "Read companies"
+      },
+      {
+        "value": "crm.objects.companies.write",
+        "label": "Write companies"
+      },
+      {
+        "value": "crm.objects.deals.read",
+        "label": "Read deals"
+      },
+      {
+        "value": "crm.objects.deals.write",
+        "label": "Write deals"
+      },
+      {
+        "value": "content",
+        "label": "Content access"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a HubSpot app",
+        "url": "https://developers.hubspot.com/"
+      },
+      {
+        "label": "Configure OAuth settings"
+      },
+      {
+        "label": "Copy your credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

@@ -1,6 +1,6 @@
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { getManifestName } from "../../components/flow-editor/utils";
+import { manifestToMetadata, metadataToManifestPatch } from "../../components/flow-editor/utils";
 
 /**
  * Factory for skill/tool modules — they share identical logic
@@ -13,18 +13,16 @@ export function makeContentPackageModule(
 ): PackageTypeModule {
   return {
     detailToFormState(detail: ContentPackageInput): PackageFormState {
-      const { scope, id } = getManifestName({ name: detail.id });
+      const metadata = manifestToMetadata({
+        name: detail.id,
+        version: detail.version,
+        displayName: detail.displayName,
+        description: detail.description,
+        ...(detail.manifest ?? {}),
+      });
       return {
         _type: type,
-        metadata: {
-          id,
-          scope,
-          version: detail.version ?? "1.0.0",
-          displayName: detail.displayName,
-          description: detail.description,
-          author: "",
-          keywords: [],
-        },
+        metadata,
         content: detail.content ?? "",
         _manifestBase: detail.manifest ?? {},
         _lockVersion: detail.lockVersion,
@@ -50,18 +48,13 @@ export function makeContentPackageModule(
 
     assemblePayload(state: PackageFormState): Record<string, unknown> {
       if (state._type !== type) throw new Error(`Expected ${type} form state`);
-      const scopedName = state.metadata.scope
-        ? `@${state.metadata.scope}/${state.metadata.id}`
-        : undefined;
+      const metaPatch = metadataToManifestPatch(state.metadata);
       const manifest: Record<string, unknown> = {
         $schema: AFPS_SCHEMA_URLS[type],
         schemaVersion: "1.0",
         ...state._manifestBase,
         type: state._type,
-        version: state.metadata.version,
-        displayName: state.metadata.displayName,
-        description: state.metadata.description,
-        ...(scopedName ? { name: scopedName } : {}),
+        ...metaPatch,
       };
 
       // Tool packages require entrypoint + tool interface in manifest

@@ -716,18 +716,7 @@ export const schemas = {
     description:
       "AFPS Flow manifest extended with Appstrate platform fields. " +
       "Standard fields are defined by the AFPS Flow schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [
-      { $ref: "https://afps.appstrate.dev/schema/v1/flow.schema.json" },
-      {
-        type: "object",
-        properties: {
-          "x-logs": {
-            type: "boolean",
-            description: "Enable progress log messages from the agent to the user (default: true)",
-          },
-        },
-      },
-    ],
+    allOf: [{ $ref: "https://afps.appstrate.dev/schema/v1/flow.schema.json" }],
   },
   SkillManifest: {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",

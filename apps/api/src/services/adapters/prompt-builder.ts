@@ -45,16 +45,6 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "You may use the filesystem for temporary processing during this execution only.\n",
   );
 
-  sections.push("### Persistence");
-  sections.push(
-    "You have two ways to persist data between executions:\n" +
-      "- **State**: Use the `set_state` tool to save a JSON object — overwritten each run. " +
-      "Use this for structured data you need to process next time (cursors, timestamps, counters).\n" +
-      "- **Memory**: Use the `add_memory` tool to save text memos — accumulated across all runs, shared across all users. " +
-      "Use this to capture discoveries, learnings, and insights that should persist long-term.\n" +
-      "Everything else — files, variables, computations — is lost when this container stops.\n",
-  );
-
   // Available tools
   if (ctx.availableTools && ctx.availableTools.length > 0) {
     sections.push("### Tools");
@@ -66,6 +56,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       sections.push(`- **${tool.name || tool.id}**${desc}`);
     }
     sections.push("");
+  }
+
+  // Tool documentation (from TOOL.md files)
+  if (ctx.toolDocs && ctx.toolDocs.length > 0) {
+    for (const doc of ctx.toolDocs) {
+      sections.push(doc.content);
+      sections.push("");
+    }
   }
 
   // Available skills
@@ -223,8 +221,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // --- Previous state ---
-  if (ctx.previousState) {
+  // --- Previous state (only when set_state tool is available) ---
+  const hasSetState = ctx.availableTools?.some((t) => t.id === "@appstrate/set-state");
+  if (ctx.previousState && hasSetState) {
     sections.push("## Previous State\n");
     sections.push(
       "This flow supports stateful execution across runs. " +
@@ -239,8 +238,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // --- Memory ---
-  if (ctx.memories && ctx.memories.length > 0) {
+  // --- Memory (only when add_memory tool is available) ---
+  const hasAddMemory = ctx.availableTools?.some((t) => t.id === "@appstrate/add-memory");
+  if (ctx.memories && ctx.memories.length > 0 && hasAddMemory) {
     sections.push("## Memory\n");
     sections.push(
       "This flow has accumulated the following memories from previous executions. " +
@@ -276,64 +276,6 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
     );
   }
-
-  // --- User communication (only when log tool is enabled) ---
-  if (ctx.logsEnabled !== false) {
-    sections.push("## User Communication\n");
-    sections.push(
-      "Use the `log` tool to keep the user informed of your progress. " +
-        "Messages appear in real time in the user's interface.\n",
-    );
-    sections.push(
-      "Levels: **info** (progress, milestones), **warn** (non-blocking issues), **error** (failures).\n",
-    );
-    sections.push(
-      "Start with a `log` call to announce what you are about to do — " +
-        "the user sees a loading indicator until the first message appears. " +
-        "Then log at meaningful milestones. Write naturally, as you would to a colleague.\n",
-    );
-  }
-
-  // --- Output tools ---
-  const outputSchema = ctx.schemas.output;
-  sections.push("## Output\n");
-  sections.push(
-    "Use the following tools to produce your output. " +
-      "Do NOT write a JSON code block — use tool calls instead.\n",
-  );
-
-  if (outputSchema?.properties && Object.keys(outputSchema.properties).length > 0) {
-    sections.push("### output(data)");
-    sections.push(
-      "Return data as a JSON object. Each call is deep-merged into the result. " +
-        "Include **only** the fields listed below — do not add extra fields.\n",
-    );
-    sections.push("Fields:");
-    for (const [key, prop] of Object.entries(outputSchema.properties)) {
-      const req = outputSchema.required?.includes(key) ? "required" : "optional";
-      sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}`);
-    }
-    sections.push("");
-  } else {
-    sections.push("### output(data)");
-    sections.push(
-      "Return any JSON object as the execution result. Each call is deep-merged into the final output. " +
-        "Structure the data in whatever way best serves the task.\n",
-    );
-  }
-
-  sections.push("### set_state(state)");
-  sections.push(
-    "Persist a JSON object for the next execution run. Only the last call is kept — " +
-      "design the state to be self-contained. " +
-      "Use for cursors, timestamps, counters, or any data needed to resume work.\n",
-  );
-
-  sections.push("### add_memory(content)");
-  sections.push(
-    "Save a discovery or learning as a long-term memory (shared across all users, persists indefinitely). " +
-      "Use for insights worth remembering across runs.\n",
-  );
 
   // Append raw prompt at the end, without any interpolation
   return sections.join("\n") + "\n---\n\n" + ctx.rawPrompt;

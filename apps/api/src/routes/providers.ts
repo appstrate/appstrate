@@ -26,6 +26,7 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
+import { asRecord } from "../lib/safe-json.ts";
 
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
@@ -456,8 +457,8 @@ export function createProvidersRouter() {
 
     // Validate required fields against admin credential schema only when credentials are provided
     if (hasCredentials) {
-      const manifest = (pkg.draftManifest ?? {}) as Record<string, unknown>;
-      const def = (manifest.definition ?? {}) as Record<string, unknown>;
+      const manifest = asRecord(pkg.draftManifest);
+      const def = asRecord(manifest.definition);
       const authMode = (def.authMode as string) ?? "oauth2";
       const adminSchema =
         (def.adminCredentialSchema as JSONSchemaObject) ??

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/log",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Log",
+  "description": "Send progress messages to the user in real time.",
+  "schemaVersion": "1.0",
+  "entrypoint": "log.ts",
+  "tool": {
+    "name": "log",
+    "description": "Send a progress message to the user. Write naturally — the user reads these in real time.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ],
+          "description": "info: progress and milestones, warn: non-blocking issues, error: failures"
+        },
+        "message": {
+          "type": "string",
+          "description": "Message for the user"
+        }
+      },
+      "required": [
+        "level",
+        "message"
+      ]
+    }
+  }
+}

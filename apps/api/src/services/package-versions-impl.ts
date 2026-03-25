@@ -24,6 +24,7 @@ import { buildDependencies } from "./package-items/dependencies.ts";
 import { prepareManifestForPublish } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
+import { asRecord, asRecordOrNull } from "../lib/safe-json.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 
 // ─────────────────────────────────────────────
@@ -191,11 +192,7 @@ export async function getLatestVersionWithManifest(
   if (!row) return null;
   return {
     id: row.id,
-    manifest: (row.manifest !== null &&
-    typeof row.manifest === "object" &&
-    !Array.isArray(row.manifest)
-      ? row.manifest
-      : {}) as Record<string, unknown>,
+    manifest: asRecord(row.manifest),
   };
 }
 
@@ -262,11 +259,7 @@ export async function resolveVersionManifest(
     .limit(1);
 
   if (!row?.manifest) return null;
-  return (
-    row.manifest !== null && typeof row.manifest === "object" && !Array.isArray(row.manifest)
-      ? row.manifest
-      : null
-  ) as Record<string, unknown> | null;
+  return asRecordOrNull(row.manifest);
 }
 
 // ─────────────────────────────────────────────
@@ -340,11 +333,7 @@ export async function getVersionDetail(
   return {
     id: row.id,
     version: row.version,
-    manifest: (row.manifest !== null &&
-    typeof row.manifest === "object" &&
-    !Array.isArray(row.manifest)
-      ? row.manifest
-      : {}) as Record<string, unknown>,
+    manifest: asRecord(row.manifest),
     textContent,
     content,
     yanked: row.yanked,
@@ -544,12 +533,7 @@ export async function getVersionInfo(
       .limit(1),
   ]);
 
-  const draftManifest =
-    pkg?.draftManifest !== null &&
-    typeof pkg?.draftManifest === "object" &&
-    !Array.isArray(pkg?.draftManifest)
-      ? (pkg.draftManifest as Record<string, unknown>)
-      : null;
+  const draftManifest = asRecordOrNull(pkg?.draftManifest);
   const draftVersion = typeof draftManifest?.version === "string" ? draftManifest.version : null;
 
   let latestVersion: string | null = null;
@@ -603,13 +587,7 @@ export async function createVersionFromDraft(params: {
 
   if (!pkg) return null;
 
-  const baseManifest = (
-    pkg.draftManifest !== null &&
-    typeof pkg.draftManifest === "object" &&
-    !Array.isArray(pkg.draftManifest)
-      ? pkg.draftManifest
-      : {}
-  ) as Record<string, unknown>;
+  const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;
 
   // Use override version if provided, otherwise use manifest version

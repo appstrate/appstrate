@@ -4,6 +4,7 @@ import {
   getDefaultAdminCredentialSchema,
   buildProviderDefinitionFromManifest,
 } from "@appstrate/core/validation";
+import { asRecord } from "./safe-json.ts";
 
 export function packageToProviderConfig(
   pkg: {
@@ -13,8 +14,8 @@ export function packageToProviderConfig(
   },
   credRow?: { credentialsEncrypted: string | null; enabled: boolean } | null,
 ): ProviderConfig {
-  const manifest = (pkg.manifest ?? {}) as Record<string, unknown>;
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const manifest = asRecord(pkg.manifest);
+  const def = asRecord(manifest.definition);
   const resolved = buildProviderDefinitionFromManifest(pkg.id, manifest);
   const isSystem = pkg.source === "system";
   const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;

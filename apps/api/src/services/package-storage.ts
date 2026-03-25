@@ -72,13 +72,13 @@ export async function uploadPackageZip(
   }
 }
 
-/** Get the package ZIP for any flow (system or user). */
-export async function getPackageZip(flow: LoadedPackage, orgId: string): Promise<Buffer | null> {
-  return buildUserFlowZip(flow, orgId);
+export interface FlowPackageResult {
+  zip: Buffer;
+  toolDocs: Array<{ id: string; content: string }>;
 }
 
-/** Build a flow package ZIP on-the-fly from DB-backed packages. */
-async function buildUserFlowZip(flow: LoadedPackage, orgId: string): Promise<Buffer> {
+/** Build a flow package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
+export async function buildFlowPackage(flow: LoadedPackage, orgId: string): Promise<FlowPackageResult> {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(flow.prompt),
@@ -97,9 +97,9 @@ async function buildUserFlowZip(flow: LoadedPackage, orgId: string): Promise<Buf
     }
   }
 
-  for (const [, files] of toolFiles) {
+  for (const [toolId, files] of toolFiles) {
     for (const [filePath, content] of Object.entries(files)) {
-      entries[`tools/${filePath}`] = content;
+      entries[`tools/${toolId}/${filePath}`] = content;
     }
   }
 
@@ -109,7 +109,16 @@ async function buildUserFlowZip(flow: LoadedPackage, orgId: string): Promise<Buf
     }
   }
 
-  return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
+  // Extract TOOL.md content from tool files (avoids a second S3 fetch)
+  const toolDocs: Array<{ id: string; content: string }> = [];
+  for (const [toolId, files] of toolFiles) {
+    const md = files["TOOL.md"];
+    if (md) {
+      toolDocs.push({ id: toolId, content: new TextDecoder().decode(md) });
+    }
+  }
+
+  return { zip: Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL)), toolDocs };
 }
 
 /** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */

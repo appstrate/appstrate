@@ -1,0 +1,69 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/google-sheets",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Google Sheets",
+  "description": "Online spreadsheet editor",
+  "iconUrl": "https://cdn.simpleicons.org/googlesheets",
+  "categories": [
+    "productivity",
+    "spreadsheets"
+  ],
+  "docsUrl": "https://developers.google.com/workspace/sheets/api",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "defaultScopes": [
+        "https://www.googleapis.com/auth/spreadsheets"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "access_type": "offline",
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://sheets.googleapis.com/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "https://www.googleapis.com/auth/spreadsheets",
+        "label": "Full spreadsheet access"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "label": "Read-only access"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/drive.file",
+        "label": "Per-file access (recommended)"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Google Cloud project",
+        "url": "https://console.cloud.google.com/apis/library/sheets.googleapis.com"
+      },
+      {
+        "label": "Configure the OAuth consent screen",
+        "url": "https://console.cloud.google.com/apis/credentials/consent"
+      },
+      {
+        "label": "Create OAuth credentials",
+        "url": "https://console.cloud.google.com/apis/credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

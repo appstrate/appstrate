@@ -12,6 +12,7 @@ import {
   resolvePreflightContext,
   ModelNotConfiguredError,
 } from "./env-builder.ts";
+import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import { getEffectiveProfileId } from "./connection-profiles.ts";
@@ -45,10 +46,7 @@ interface ScheduleJobData {
 function toSchedule(row: typeof packageSchedules.$inferSelect): Schedule {
   return {
     ...row,
-    input:
-      row.input !== null && typeof row.input === "object" && !Array.isArray(row.input)
-        ? (row.input as Record<string, unknown>)
-        : null,
+    input: asRecordOrNull(row.input),
   };
 }
 
@@ -80,12 +78,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     userId: schedule.userId ?? undefined,
     endUserId: schedule.endUserId ?? undefined,
     orgId,
-    input:
-      schedule.input !== null &&
-      typeof schedule.input === "object" &&
-      !Array.isArray(schedule.input)
-        ? (schedule.input as Record<string, unknown>)
-        : undefined,
+    input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
   await queue.upsertJobScheduler(

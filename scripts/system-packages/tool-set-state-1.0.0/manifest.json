@@ -1,0 +1,26 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@appstrate/set-state",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Set State",
+  "description": "Persist state for the next execution run.",
+  "schemaVersion": "1.0",
+  "entrypoint": "set-state.ts",
+  "tool": {
+    "name": "set_state",
+    "description": "Persist a JSON object for the next execution run. Only the last call is kept.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "object",
+          "description": "State object to persist for the next run"
+        }
+      },
+      "required": [
+        "state"
+      ]
+    }
+  }
+}

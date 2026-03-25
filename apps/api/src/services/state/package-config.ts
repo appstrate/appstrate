@@ -1,6 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { packageConfigs } from "@appstrate/db/schema";
+import { asRecord } from "../../lib/safe-json.ts";
 
 // --- Package Config (per-org) ---
 
@@ -13,7 +14,7 @@ export async function getPackageConfig(
     .from(packageConfigs)
     .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
     .limit(1);
-  return (row?.config ?? {}) as Record<string, unknown>;
+  return asRecord(row?.config);
 }
 
 export async function setPackageConfig(

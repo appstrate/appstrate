@@ -1,0 +1,54 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/firecrawl",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Firecrawl",
+  "description": "Web scraping and crawling API — extract clean data from any website",
+  "iconUrl": "https://avatars.githubusercontent.com/u/135057108",
+  "categories": [
+    "web-scraping",
+    "data-extraction",
+    "ai"
+  ],
+  "docsUrl": "https://docs.firecrawl.dev",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Firecrawl API key (starts with fc-)"
+          }
+        },
+        "required": [
+          "api_key"
+        ]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.firecrawl.dev/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Create an account on Firecrawl",
+        "url": "https://www.firecrawl.dev/signup"
+      },
+      {
+        "label": "Get your API key",
+        "url": "https://www.firecrawl.dev/app/api-keys"
+      },
+      {
+        "label": "Connect on the Connectors page"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

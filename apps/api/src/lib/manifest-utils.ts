@@ -1,12 +1,13 @@
 import type { Manifest } from "@appstrate/core/validation";
 import type { FlowProviderRequirement } from "../types/index.ts";
+import { asRecord } from "./safe-json.ts";
 
 /** Extract skill, tool, and provider IDs from a manifest's dependencies section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {
-  const dependencies = (manifest.dependencies ?? {}) as Record<string, unknown>;
-  const skillsMap = (dependencies.skills ?? {}) as Record<string, string>;
-  const toolsMap = (dependencies.tools ?? {}) as Record<string, string>;
-  const providersMap = (dependencies.providers ?? {}) as Record<string, string>;
+  const dependencies = asRecord(manifest.dependencies);
+  const skillsMap = asRecord(dependencies.skills) as Record<string, string>;
+  const toolsMap = asRecord(dependencies.tools) as Record<string, string>;
+  const providersMap = asRecord(dependencies.providers) as Record<string, string>;
   return {
     skillIds: Object.keys(skillsMap).filter(Boolean),
     toolIds: Object.keys(toolsMap).filter(Boolean),
@@ -16,9 +17,9 @@ export function extractDepsFromManifest(manifest: Partial<Manifest>) {
 
 /** Merge dependencies.providers + providersConfiguration into FlowProviderRequirement[]. */
 export function resolveManifestProviders(manifest: Partial<Manifest>): FlowProviderRequirement[] {
-  const dependencies = (manifest.dependencies ?? {}) as Record<string, unknown>;
-  const providersRecord = (dependencies.providers ?? {}) as Record<string, string>;
-  const config = ((manifest as Record<string, unknown>).providersConfiguration ?? {}) as Record<
+  const dependencies = asRecord(manifest.dependencies);
+  const providersRecord = asRecord(dependencies.providers) as Record<string, string>;
+  const config = asRecord((manifest as Record<string, unknown>).providersConfiguration) as Record<
     string,
     { scopes?: string[]; connectionMode?: "user" | "admin" }
   >;

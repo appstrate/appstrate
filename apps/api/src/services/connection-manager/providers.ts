@@ -15,6 +15,7 @@ import {
 } from "@appstrate/connect";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
+import { asRecord } from "../../lib/safe-json.ts";
 
 export async function getProviderAuthMode(
   provider: string,
@@ -113,13 +114,7 @@ export async function listAllActorConnections(
 
   const providerInfo = new Map<string, { displayName: string; logo: string }>();
   for (const pkg of providerPkgs) {
-    const manifest = (
-      pkg.draftManifest !== null &&
-      typeof pkg.draftManifest === "object" &&
-      !Array.isArray(pkg.draftManifest)
-        ? pkg.draftManifest
-        : {}
-    ) as Record<string, unknown>;
+    const manifest = asRecord(pkg.draftManifest);
     providerInfo.set(pkg.id, {
       displayName: typeof manifest.displayName === "string" ? manifest.displayName : pkg.id,
       logo: typeof manifest.iconUrl === "string" ? manifest.iconUrl : "",
