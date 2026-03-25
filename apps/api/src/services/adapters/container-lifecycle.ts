@@ -44,12 +44,12 @@ export async function* runContainerLifecycle(
     }
   }, timeoutMs);
 
-  let hasResult = false;
+  let hasOutput = false;
   let lastError: string | undefined;
 
   try {
     for await (const msg of options.processLogs(orchestrator.streamLogs(handle, signal))) {
-      if (msg.type === "output") hasResult = true;
+      if (msg.type === "output") hasOutput = true;
       if (msg.type === "error") lastError = msg.message;
       yield msg;
     }
@@ -65,7 +65,7 @@ export async function* runContainerLifecycle(
       throw new TimeoutError(`Execution timed out after ${timeout}s`);
     }
 
-    if (exitCode !== 0 && !hasResult) {
+    if (exitCode !== 0 && !hasOutput) {
       throw new Error(lastError ?? `${adapterName} workload exited with code ${exitCode}`);
     }
   } finally {

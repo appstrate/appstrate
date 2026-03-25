@@ -76,8 +76,8 @@ export function PublicShareRunPage() {
           setStatus(resolved.pageStatus);
           if (resolved.error) setError(data.execution.error || resolved.error);
           if (data.execution.result) {
-            const r = data.execution.result as { data?: Record<string, unknown> };
-            setResult(r.data ?? null);
+            const r = data.execution.result as { output?: Record<string, unknown> };
+            setResult(r.output ?? null);
           }
           if (data.execution.logs) setRawLogs(data.execution.logs);
         } else if (data.exhausted) {
@@ -110,8 +110,8 @@ export function PublicShareRunPage() {
         setStatus(resolved.pageStatus);
         if (resolved.error) setError(data.error || resolved.error);
         if (data.result) {
-          const r = data.result as { data?: Record<string, unknown> };
-          setResult(r.data ?? null);
+          const r = data.result as { output?: Record<string, unknown> };
+          setResult(r.output ?? null);
         }
         stopPolling();
       }

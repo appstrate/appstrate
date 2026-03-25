@@ -54,8 +54,8 @@ export function ShareableRunPage() {
     if (s === "success") {
       setStatus("success");
       if (execution.result) {
-        const r = execution.result as { data?: Record<string, unknown> };
-        setResult(r.data ?? null);
+        const r = execution.result as { output?: Record<string, unknown> };
+        setResult(r.output ?? null);
       }
     } else if (s === "failed") {
       setStatus("failed");

@@ -97,9 +97,10 @@ export async function executeFlowInBackground(
     const adapter = getAdapter();
 
     const timeout = (flow.manifest.timeout as number | undefined) ?? 300;
-    const structuredData: Record<string, unknown> = {};
+    const structuredOutput: Record<string, unknown> = {};
     let state: Record<string, unknown> | null = null;
     const memories: string[] = [];
+    let reportContent = "";
     let lastAdapterError: string | null = null;
     const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
 
@@ -142,7 +143,7 @@ export async function executeFlowInBackground(
             break;
 
           case "output":
-            if (msg.data) Object.assign(structuredData, msg.data);
+            if (msg.data) Object.assign(structuredOutput, msg.data);
             await appendExecutionLog(
               executionId,
               orgId,
@@ -160,6 +161,21 @@ export async function executeFlowInBackground(
 
           case "add_memory":
             if (msg.content) memories.push(msg.content);
+            break;
+
+          case "report":
+            if (msg.content) {
+              reportContent += (reportContent ? "\n\n" : "") + msg.content;
+            }
+            await appendExecutionLog(
+              executionId,
+              orgId,
+              "result",
+              "report",
+              null,
+              { content: msg.content } as Record<string, unknown>,
+              "info",
+            );
             break;
         }
       }
@@ -203,7 +219,7 @@ export async function executeFlowInBackground(
     }
 
     // Determine outcome: fail only on adapter error or zero tokens (LLM unreachable).
-    // A flow without the output tool succeeds even without structured data.
+    // A flow without the output tool succeeds even without structured output.
     const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
     const error =
       lastAdapterError ??
@@ -236,14 +252,14 @@ export async function executeFlowInBackground(
       );
       dispatchWebhooks(orgId, "failed", executionId, flow.id, { error, duration }, applicationId);
     } else {
-      // --- Success path (with or without output data) ---
+      // --- Success path (with or without structured output) ---
 
       // Validate output against schema (if any output was produced)
-      const hasResult = Object.keys(structuredData).length > 0;
-      if (hasResult) {
+      const hasOutput = Object.keys(structuredOutput).length > 0;
+      if (hasOutput) {
         const outputSchema = flow.manifest.output?.schema;
         if (outputSchema) {
-          const outputValidation = validateOutput(structuredData, outputSchema);
+          const outputValidation = validateOutput(structuredOutput, outputSchema);
           if (!outputValidation.valid) {
             await appendExecutionLog(
               executionId,
@@ -262,7 +278,11 @@ export async function executeFlowInBackground(
         }
       }
 
-      const result: Record<string, unknown> = hasResult ? { data: structuredData } : {};
+      const hasReport = reportContent.length > 0;
+      const result: Record<string, unknown> = {
+        ...(hasOutput ? { output: structuredOutput } : {}),
+        ...(hasReport ? { report: reportContent } : {}),
+      };
 
       if (memories.length > 0) {
         await addPackageMemories(flow.id, orgId, memories, executionId);
@@ -293,7 +313,7 @@ export async function executeFlowInBackground(
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
-      if (hasResult) {
+      if (hasOutput) {
         await appendExecutionLog(executionId, orgId, "result", "result", null, result, "info");
       }
       await appendExecutionLog(
