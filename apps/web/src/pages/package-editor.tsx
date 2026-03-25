@@ -24,6 +24,7 @@ import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { FormField } from "../components/form-field";
+import { SectionCard } from "../components/section-card";
 import { Spinner } from "../components/spinner";
 import { EmptyState } from "../components/page-states";
 import { EditorShell } from "../components/editor-shell";
@@ -237,33 +238,28 @@ function FlowEditorInner({
       {activeTab === "general" && (
         <>
           <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
-          <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
-            <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
-              {t("editor.execution")}
-            </div>
-            <div className="space-y-3 p-4">
-              <FormField
-                id="exec-timeout"
-                label={t("editor.execTimeout")}
-                type="number"
-                value={String((state.manifest.timeout as number) ?? 300)}
-                onChange={(v) => updateManifest({ timeout: parseInt(v) || 300 })}
-                description={t("editor.execTimeoutDesc")}
-              />
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{t("editor.execLogs")}</p>
-                  <p className="text-xs text-muted-foreground">{t("editor.execLogsDesc")}</p>
-                </div>
-                <input
-                  id="exec-logs"
-                  type="checkbox"
-                  checked={(state.manifest["x-logs"] as boolean | undefined) ?? true}
-                  onChange={(e) => updateManifest({ "x-logs": e.target.checked })}
-                />
+          <SectionCard title={t("editor.execution")}>
+            <FormField
+              id="exec-timeout"
+              label={t("editor.execTimeout")}
+              type="number"
+              value={String((state.manifest.timeout as number) ?? 300)}
+              onChange={(v) => updateManifest({ timeout: parseInt(v) || 300 })}
+              description={t("editor.execTimeoutDesc")}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">{t("editor.execLogs")}</p>
+                <p className="text-xs text-muted-foreground">{t("editor.execLogsDesc")}</p>
               </div>
+              <input
+                id="exec-logs"
+                type="checkbox"
+                checked={(state.manifest["x-logs"] as boolean | undefined) ?? true}
+                onChange={(e) => updateManifest({ "x-logs": e.target.checked })}
+              />
             </div>
-          </div>
+          </SectionCard>
         </>
       )}
       {activeTab === "prompt" && (

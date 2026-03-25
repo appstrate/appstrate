@@ -2,6 +2,7 @@ import { type ChangeEvent, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { SectionCard } from "../section-card";
 import {
   usePackageList,
   useUploadPackage,
@@ -120,85 +121,83 @@ export function ResourceSection({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
-      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border flex items-center justify-between">
-        {title}
-        <label className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer normal-case tracking-normal">
-          {upload.isPending ? <Spinner /> : t("editor.importZip")}
-          <input
-            type="file"
-            accept=".afps"
-            ref={fileInputRef}
-            onChange={handleUpload}
-            className="hidden"
-            disabled={upload.isPending}
-          />
-        </label>
-      </div>
-      <div className="space-y-3 p-4">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-6 text-muted-foreground">
-            <Spinner />
-          </div>
-        ) : !items || items.length === 0 ? (
-          <>
-            <p className="text-xs text-muted-foreground">{emptyLabel}</p>
-            <p className="text-xs text-muted-foreground">
-              <Link to="/skills">{t("editor.goToPackages")}</Link>
-            </p>
-          </>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {items.map((item) => {
-              const isSelected = selectedMap.has(item.id);
-              const isBuiltIn = item.source === "system";
-              const entry = selectedMap.get(item.id);
+  const uploadButton = (
+    <label className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer normal-case tracking-normal">
+      {upload.isPending ? <Spinner /> : t("editor.importZip")}
+      <input
+        type="file"
+        accept=".afps"
+        ref={fileInputRef}
+        onChange={handleUpload}
+        className="hidden"
+        disabled={upload.isPending}
+      />
+    </label>
+  );
 
-              return (
-                <label
-                  key={item.id}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer transition-colors hover:bg-muted/50",
-                    isSelected && "border-primary bg-primary/5",
+  return (
+    <SectionCard title={title} headerRight={uploadButton}>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-6 text-muted-foreground">
+          <Spinner />
+        </div>
+      ) : !items || items.length === 0 ? (
+        <>
+          <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+          <p className="text-xs text-muted-foreground">
+            <Link to="/skills">{t("editor.goToPackages")}</Link>
+          </p>
+        </>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {items.map((item) => {
+            const isSelected = selectedMap.has(item.id);
+            const isBuiltIn = item.source === "system";
+            const entry = selectedMap.get(item.id);
+
+            return (
+              <label
+                key={item.id}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer transition-colors hover:bg-muted/50",
+                  isSelected && "border-primary bg-primary/5",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggle(item.id)}
+                  className="w-3.5 h-3.5 rounded"
+                />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-medium truncate">{item.name || item.id}</span>
+                  {item.description && (
+                    <span className="text-xs text-muted-foreground truncate">
+                      {item.description}
+                    </span>
                   )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggle(item.id)}
-                    className="w-3.5 h-3.5 rounded"
-                  />
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">{item.name || item.id}</span>
-                    {item.description && (
-                      <span className="text-xs text-muted-foreground truncate">
-                        {item.description}
+                </div>
+                {isSelected && (
+                  <div className="ml-auto shrink-0">
+                    {isBuiltIn ? (
+                      <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
+                        {t("editor.builtIn", "Integree")}
                       </span>
+                    ) : (
+                      <VersionSelect
+                        type={type}
+                        packageId={item.id}
+                        value={entry?.version ?? "*"}
+                        onChange={(v) => updateVersion(item.id, v)}
+                      />
                     )}
                   </div>
-                  {isSelected && (
-                    <div className="ml-auto shrink-0">
-                      {isBuiltIn ? (
-                        <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
-                          {t("editor.builtIn", "Integree")}
-                        </span>
-                      ) : (
-                        <VersionSelect
-                          type={type}
-                          packageId={item.id}
-                          value={entry?.version ?? "*"}
-                          onChange={(v) => updateVersion(item.id, v)}
-                        />
-                      )}
-                    </div>
-                  )}
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+                )}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </SectionCard>
   );
 }
