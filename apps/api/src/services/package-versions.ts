@@ -608,7 +608,7 @@ export async function createVersionFromDraft(params: {
 
   // Enrich manifest with dependencies so the version ZIP
   // matches what would be published to the registry (same integrity).
-  const deps = await buildDependencies(packageId, orgId);
+  const deps = await buildDependencies(packageId);
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
   const finalManifest = parsed
     ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, deps)

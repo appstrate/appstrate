@@ -42,18 +42,6 @@ export async function getPackageConfigFull(
   };
 }
 
-export async function getFlowOverrides(
-  orgId: string,
-  packageId: string,
-): Promise<{ modelId: string | null; proxyId: string | null }> {
-  const [row] = await db
-    .select({ modelId: packageConfigs.modelId, proxyId: packageConfigs.proxyId })
-    .from(packageConfigs)
-    .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
-    .limit(1);
-  return { modelId: row?.modelId ?? null, proxyId: row?.proxyId ?? null };
-}
-
 export async function setPackageConfig(
   orgId: string,
   packageId: string,

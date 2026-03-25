@@ -14,7 +14,7 @@ function formatFileSize(bytes: number): string {
 
 export function buildEnrichedPrompt(ctx: PromptContext): string {
   const sections: string[] = [];
-  const connectedServices = ctx.providers.filter((s) => ctx.tokens[s.id]);
+  const connectedProviders = ctx.providers.filter((p) => ctx.tokens[p.id]);
 
   // --- System identity & environment ---
   sections.push("## System\n");
@@ -80,7 +80,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Authenticated provider API access ---
-  if (connectedServices.length > 0) {
+  if (connectedProviders.length > 0) {
     sections.push("## Authenticated Provider API\n");
     sections.push(
       "The sidecar credential proxy at `$SIDECAR_URL/proxy` injects the user's credentials into requests " +
@@ -116,17 +116,17 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
     sections.push("### Connected Providers\n");
 
-    for (const svc of connectedServices) {
-      const displayName = svc.displayName ?? svc.id;
-      const authorizedUris = getDefaultAuthorizedUris(svc as ProviderDefinition);
-      const allowAllUris = svc.allowAllUris ?? false;
+    for (const provider of connectedProviders) {
+      const displayName = provider.displayName ?? provider.id;
+      const authorizedUris = getDefaultAuthorizedUris(provider as ProviderDefinition);
+      const allowAllUris = provider.allowAllUris ?? false;
 
-      sections.push(`- **${displayName}** (provider ID: \`${svc.id}\`)`);
+      sections.push(`- **${displayName}** (provider ID: \`${provider.id}\`)`);
 
       // For providers with credentialSchema, show all credential variables
-      if (svc.credentialSchema) {
+      if (provider.credentialSchema) {
         const props =
-          (svc.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
+          (provider.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
         const varNames = Object.keys(props);
         const varDescriptions = varNames.map((name) => {
           const desc = props[name]?.description ?? name;
@@ -137,16 +137,16 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         }
       } else {
         // OAuth2 / API key — single credential field with header info
-        const fieldName = getCredentialFieldName(svc as ProviderDefinition);
-        const headerName = svc.credentialHeaderName ?? "Authorization";
-        const headerPrefix = svc.credentialHeaderPrefix ?? "Bearer ";
+        const fieldName = getCredentialFieldName(provider as ProviderDefinition);
+        const headerName = provider.credentialHeaderName ?? "Authorization";
+        const headerPrefix = provider.credentialHeaderPrefix ?? "Bearer ";
         sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
       }
 
-      if (svc.hasProviderDoc) {
-        sections.push(`  API docs: \`.pi/providers/${svc.id}/PROVIDER.md\``);
-      } else if (svc.docsUrl) {
-        sections.push(`  Documentation: ${svc.docsUrl}`);
+      if (provider.hasProviderDoc) {
+        sections.push(`  API docs: \`.pi/providers/${provider.id}/PROVIDER.md\``);
+      } else if (provider.docsUrl) {
+        sections.push(`  Documentation: ${provider.docsUrl}`);
       }
 
       if (allowAllUris) {

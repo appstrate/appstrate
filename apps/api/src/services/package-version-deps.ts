@@ -25,18 +25,3 @@ export async function clearVersionDependencies(versionId: number): Promise<void>
     .where(eq(packageVersionDependencies.versionId, versionId));
 }
 
-/** Get all dependencies for a specific version. */
-export async function getVersionDependencies(versionId: number): Promise<DepEntry[]> {
-  const rows = await db
-    .select({
-      depScope: packageVersionDependencies.depScope,
-      depName: packageVersionDependencies.depName,
-      depType: packageVersionDependencies.depType,
-      versionRange: packageVersionDependencies.versionRange,
-    })
-    .from(packageVersionDependencies)
-    .where(eq(packageVersionDependencies.versionId, versionId));
-
-  // Safe: extractDependencies() only produces "skill" | "tool" deps
-  return rows as DepEntry[];
-}

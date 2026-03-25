@@ -12,11 +12,7 @@ const HELLO_WORLD_MANIFEST = {
   keywords: ["demo", "example", "getting-started"],
   dependencies: {
     tools: {
-      "@appstrate/log": "*",
-      "@appstrate/output": "*",
       "@appstrate/report": "*",
-      "@appstrate/set-state": "*",
-      "@appstrate/add-memory": "*",
     },
   },
 };
