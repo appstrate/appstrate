@@ -57,7 +57,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
-  const providerIds = [...new Set(manifestProviders.map((p) => p.provider))];
+  const providerIds = [...new Set(manifestProviders.map((p) => p.id))];
   let populatedProviders: Record<string, unknown> = {};
   if (providerIds.length > 0) {
     const [providerPkgs, providerCreds] = await Promise.all([

@@ -64,18 +64,18 @@ export async function resolveProviderStatuses(
       const mode = svc.connectionMode ?? "user";
       const base = {
         id: svc.id,
-        provider: svc.provider,
+        provider: svc.id,
         description: svc.description ?? "",
       };
 
-      const authMode = await getProviderAuthMode(svc.provider, orgId);
+      const authMode = await getProviderAuthMode(svc.id, orgId);
       const label = authModeLabel(authMode);
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
 
       if (mode === "admin") {
         const adminProfileId = bindings[svc.id];
         if (adminProfileId) {
-          const conn = await getConnectionStatus(svc.provider, adminProfileId, orgId);
+          const conn = await getConnectionStatus(svc.id, adminProfileId, orgId);
           return {
             ...base,
             status: conn.status,
@@ -96,7 +96,7 @@ export async function resolveProviderStatuses(
       }
 
       const conn = userProfileId
-        ? await getConnectionStatus(svc.provider, userProfileId, orgId)
+        ? await getConnectionStatus(svc.id, userProfileId, orgId)
         : { status: "not_connected" as const };
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {

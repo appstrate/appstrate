@@ -319,12 +319,6 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     jsonBodyCreate: true,
     requireMutableForVersionOps: true,
     getHandler: flowDetailHandler,
-    afterCreate: async ({ packageId, orgId, manifest }) => {
-      const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
-        manifest as Partial<Manifest>,
-      );
-      await syncFlowDepsJunctionTable(packageId, orgId, skillIds, toolIds, providerIds);
-    },
     afterUpdate: async ({ packageId, orgId, manifest }) => {
       const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
         manifest as Partial<Manifest>,

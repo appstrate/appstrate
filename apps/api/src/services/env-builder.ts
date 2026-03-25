@@ -9,7 +9,7 @@ import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
 import {
   getPackageConfig,
-  getFlowOverrides,
+  getPackageConfigFull,
   getLastExecutionState,
   getPackageMemories,
 } from "./state/index.ts";
@@ -61,7 +61,7 @@ export async function resolveProviderDefs(
   orgId: string,
   providers: FlowProviderRequirement[],
 ): Promise<NonNullable<PromptContext["providers"]>> {
-  const uniqueProviders = [...new Set(providers.map((s) => s.provider))];
+  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
   return defs
     .filter((def): def is NonNullable<typeof def> => def != null)
@@ -168,11 +168,10 @@ export async function buildExecutionContext(params: {
 
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
-  // Step 1: load config, flow overrides, and independent data in parallel
+  // Step 1: load config + overrides and independent data in parallel
   const [
     tokens,
-    config,
-    flowOverrides,
+    configFull,
     previousState,
     providerDefs,
     flowPackageResult,
@@ -180,8 +179,7 @@ export async function buildExecutionContext(params: {
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    params.config ?? getPackageConfig(orgId, flow.id),
-    getFlowOverrides(orgId, flow.id),
+    getPackageConfigFull(orgId, flow.id),
     getLastExecutionState(flow.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
     buildFlowPackage(flow, orgId),
@@ -193,12 +191,13 @@ export async function buildExecutionContext(params: {
     getPackageMemories(flow.id, orgId),
   ]);
 
+  const config = params.config ?? configFull.config;
   const flowPackage = flowPackageResult.zip;
   const { toolDocs } = flowPackageResult;
 
   // Step 2: resolve model and proxy with cascade (request override → flow column → org/system default)
-  const effectiveModelId = params.modelId ?? flowOverrides.modelId;
-  const effectiveProxyId = params.proxyId ?? flowOverrides.proxyId;
+  const effectiveModelId = params.modelId ?? configFull.modelId;
+  const effectiveProxyId = params.proxyId ?? configFull.proxyId;
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, flow.id, effectiveProxyId),

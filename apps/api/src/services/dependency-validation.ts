@@ -38,7 +38,7 @@ export async function validateFlowDependencies(
   deps: DependencyValidationDeps = defaultDeps,
 ): Promise<void> {
   // Check provider enabled status
-  const uniqueProviders = [...new Set(providers.map((s) => s.provider))];
+  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   for (const providerId of uniqueProviders) {
     const enabled = await deps.isProviderEnabled(orgId, providerId);
     if (!enabled) {
@@ -75,9 +75,7 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((svc) =>
-      deps.getConnectionStatus(svc.provider, providerProfiles[svc.id]!, orgId),
-    ),
+    providers.map((svc) => deps.getConnectionStatus(svc.id, providerProfiles[svc.id]!, orgId)),
   );
 
   for (let i = 0; i < providers.length; i++) {

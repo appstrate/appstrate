@@ -57,7 +57,7 @@ describe("token-resolver", () => {
 
     it("returns an empty map when providers have no matching profiles", async () => {
       const providers: FlowProviderRequirement[] = [
-        { id: "@system/gmail", provider: "gmail" },
+        { id: "@system/gmail" },
       ];
 
       // providerProfiles is empty -- no profile assigned
@@ -79,7 +79,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-oauth" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -101,7 +101,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-apikey" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -124,7 +124,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-both" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -154,7 +154,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-custom" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -177,7 +177,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-basic" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -197,7 +197,7 @@ describe("token-resolver", () => {
       // No connection saved for this provider -- getCredentials returns null
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-missing" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -230,9 +230,9 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerA, provider: "provider-a" },
-        { id: providerB, provider: "provider-b" },
-        { id: providerC, provider: "provider-c" },
+        { id: providerA },
+        { id: providerB },
+        { id: providerC },
       ];
       const providerProfiles: Record<string, string> = {
         [providerA]: profileId,
@@ -263,8 +263,8 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerMapped, provider: "mapped" },
-        { id: providerUnmapped, provider: "unmapped" },
+        { id: providerMapped },
+        { id: providerUnmapped },
       ];
       // Only providerMapped has a profile mapping
       const providerProfiles: Record<string, string> = {
@@ -288,7 +288,7 @@ describe("token-resolver", () => {
       await saveConnection(db, profileId, providerId, orgId, {});
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "test-empty-creds" },
+        { id: providerId },
       ];
       const providerProfiles: Record<string, string> = {
         [providerId]: profileId,
@@ -319,8 +319,8 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerA, provider: "diff-profile-a" },
-        { id: providerB, provider: "diff-profile-b" },
+        { id: providerA },
+        { id: providerB },
       ];
       const providerProfiles: Record<string, string> = {
         [providerA]: profileId,
@@ -347,7 +347,7 @@ describe("token-resolver", () => {
       });
 
       const providers: FlowProviderRequirement[] = [
-        { id: providerId, provider: "cross-org" },
+        { id: providerId },
       ];
       // Try to resolve using our org but pointing to the other profile
       const providerProfiles: Record<string, string> = {

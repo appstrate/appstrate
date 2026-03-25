@@ -22,8 +22,8 @@ describe("validateFlowDependencies", () => {
   it("succeeds when all providers are connected with sufficient scopes", async () => {
     const deps = createMockDeps();
     const providers = [
-      { id: "@test/gmail", provider: "@test/gmail", scopes: ["read"] },
-      { id: "@test/clickup", provider: "@test/clickup" },
+      { id: "@test/gmail", scopes: ["read"] },
+      { id: "@test/clickup" },
     ];
     const profiles = { "@test/gmail": "profile-1", "@test/clickup": "profile-2" };
 
@@ -32,7 +32,7 @@ describe("validateFlowDependencies", () => {
 
   it("throws when provider is not enabled", async () => {
     const deps = createMockDeps({ isProviderEnabled: async () => false });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const providers = [{ id: "@test/gmail" }];
     const profiles = { "@test/gmail": "profile-1" };
 
     try {
@@ -48,7 +48,7 @@ describe("validateFlowDependencies", () => {
 
   it("throws when profile is missing for user-mode provider", async () => {
     const deps = createMockDeps();
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const providers = [{ id: "@test/gmail" }];
     const profiles = {};
 
     try {
@@ -63,9 +63,7 @@ describe("validateFlowDependencies", () => {
 
   it("throws when profile is missing for admin-mode provider", async () => {
     const deps = createMockDeps();
-    const providers = [
-      { id: "@test/service", provider: "@test/service", connectionMode: "admin" as const },
-    ];
+    const providers = [{ id: "@test/service", connectionMode: "admin" as const }];
     const profiles = {};
 
     try {
@@ -85,7 +83,7 @@ describe("validateFlowDependencies", () => {
         status: "not_connected" as const,
       }),
     });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const providers = [{ id: "@test/gmail" }];
     const profiles = { "@test/gmail": "profile-1" };
 
     try {
@@ -106,7 +104,7 @@ describe("validateFlowDependencies", () => {
         scopesGranted: ["read"],
       }),
     });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const providers = [{ id: "@test/gmail" }];
     const profiles = { "@test/gmail": "profile-1" };
 
     try {
@@ -122,7 +120,7 @@ describe("validateFlowDependencies", () => {
     const deps = createMockDeps({
       validateScopes: () => ({ sufficient: false }),
     });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail", scopes: ["read", "write"] }];
+    const providers = [{ id: "@test/gmail", scopes: ["read", "write"] }];
     const profiles = { "@test/gmail": "profile-1" };
 
     try {
@@ -142,7 +140,7 @@ describe("validateFlowDependencies", () => {
         return { sufficient: true };
       },
     });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail" }];
+    const providers = [{ id: "@test/gmail" }];
     const profiles = { "@test/gmail": "profile-1" };
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -157,7 +155,7 @@ describe("validateFlowDependencies", () => {
         return { sufficient: true };
       },
     });
-    const providers = [{ id: "@test/gmail", provider: "@test/gmail", scopes: [] }];
+    const providers = [{ id: "@test/gmail", scopes: [] }];
     const profiles = { "@test/gmail": "profile-1" };
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -172,18 +170,14 @@ describe("validateFlowDependencies", () => {
         return { provider, status: "connected" as const, scopesGranted: [] };
       },
     });
-    const providers = [
-      { id: "@test/gmail", provider: "@test/gmail" },
-      { id: "@test/clickup", provider: "@test/clickup" },
-      { id: "@test/stripe", provider: "@test/stripe" },
-    ];
+    const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }, { id: "@test/stripe" }];
     const profiles = { "@test/gmail": "p1", "@test/clickup": "p2", "@test/stripe": "p3" };
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
     expect(statusCallCount).toBe(3);
   });
 
-  it("deduplicates provider enabled checks", async () => {
+  it("deduplicates provider enabled checks for identical IDs", async () => {
     let enabledCallCount = 0;
     const deps = createMockDeps({
       isProviderEnabled: async () => {
@@ -191,14 +185,12 @@ describe("validateFlowDependencies", () => {
         return true;
       },
     });
-    const providers = [
-      { id: "@test/gmail-read", provider: "@test/gmail" },
-      { id: "@test/gmail-write", provider: "@test/gmail" },
-    ];
-    const profiles = { "@test/gmail-read": "p1", "@test/gmail-write": "p2" };
+    // Two providers with different IDs → 2 enabled checks (no dedup needed)
+    const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }];
+    const profiles = { "@test/gmail": "p1", "@test/clickup": "p2" };
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
-    expect(enabledCallCount).toBe(1);
+    expect(enabledCallCount).toBe(2);
   });
 
   it("succeeds with empty providers list", async () => {

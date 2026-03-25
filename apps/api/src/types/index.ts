@@ -14,7 +14,6 @@ export type { ToolMeta };
 
 export interface FlowProviderRequirement {
   id: string;
-  provider: string;
   description?: string;
   scopes?: string[];
   connectionMode?: "user" | "admin";
