@@ -4,7 +4,7 @@ import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import {
-  getFlowItemFiles,
+  getPackageDepFiles,
   SKILL_CONFIG,
   TOOL_CONFIG,
   PROVIDER_CONFIG,
@@ -89,9 +89,9 @@ export async function buildFlowPackage(
 
   // Fetch skill, tool, and provider files in parallel
   const [skillFiles, toolFiles, providerFiles] = await Promise.all([
-    getFlowItemFiles(flow.id, orgId, SKILL_CONFIG),
-    getFlowItemFiles(flow.id, orgId, TOOL_CONFIG),
-    getFlowItemFiles(flow.id, orgId, PROVIDER_CONFIG),
+    getPackageDepFiles(flow.id, orgId, SKILL_CONFIG),
+    getPackageDepFiles(flow.id, orgId, TOOL_CONFIG),
+    getPackageDepFiles(flow.id, orgId, PROVIDER_CONFIG),
   ]);
 
   for (const [skillId, files] of skillFiles) {

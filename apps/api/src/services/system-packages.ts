@@ -5,8 +5,6 @@ import type { PackageType } from "./package-items/config.ts";
 
 export type { SystemPackageEntry };
 
-export const BUILTIN_SCOPE = "appstrate";
-
 /** System packages dir: AFPS packages live alongside the API source. */
 const SYSTEM_PACKAGES_DIR = join(import.meta.dir, "../../../../system-packages");
 
@@ -45,10 +43,6 @@ export function getSystemPackages(): ReadonlyMap<string, SystemPackageEntry> {
 
 export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
-}
-
-export function getSystemPackageEntry(id: string): SystemPackageEntry | undefined {
-  return systemPackages.get(id);
 }
 
 export function getSystemPackagesByType(type: PackageType): SystemPackageEntry[] {

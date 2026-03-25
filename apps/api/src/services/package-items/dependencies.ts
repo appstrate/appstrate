@@ -13,21 +13,84 @@ import type { Manifest } from "@appstrate/core/validation";
 // Dependency resolution from manifest (single source of truth)
 // ─────────────────────────────────────────────
 
-/** Build dependencies object from a package's manifest. */
-export async function buildDependencies(
-  packageId: string,
-  _orgId: string,
-): Promise<Dependencies | null> {
-  const [pkg] = await db
+/**
+ * Collect all transitive dependency IDs via BFS, grouped by type.
+ * Handles cycles via a visited set. Batches DB reads per iteration.
+ */
+export async function collectAllDepIds(
+  rootPackageId: string,
+): Promise<{ skillIds: string[]; toolIds: string[]; providerIds: string[] }> {
+  const skills = new Set<string>();
+  const tools = new Set<string>();
+  const providers = new Set<string>();
+  const visited = new Set<string>();
+
+  // Seed: read root manifest
+  const [rootPkg] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
-    .where(eq(packages.id, packageId))
+    .where(eq(packages.id, rootPackageId))
     .limit(1);
-  if (!pkg) return null;
+  if (!rootPkg) return { skillIds: [], toolIds: [], providerIds: [] };
 
-  const manifest = asRecord(pkg.draftManifest) as Partial<Manifest>;
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
-  const allDepIds = [...skillIds, ...toolIds, ...providerIds];
+  const rootDeps = extractDepsFromManifest(asRecord(rootPkg.draftManifest) as Partial<Manifest>);
+  for (const id of rootDeps.skillIds) skills.add(id);
+  for (const id of rootDeps.toolIds) tools.add(id);
+  for (const id of rootDeps.providerIds) providers.add(id);
+
+  // BFS: process unvisited deps in batches
+  let frontier = [...skills, ...tools, ...providers];
+  visited.add(rootPackageId);
+
+  while (frontier.length > 0) {
+    const toFetch = frontier.filter((id) => !visited.has(id));
+    if (toFetch.length === 0) break;
+
+    for (const id of toFetch) visited.add(id);
+
+    const rows = await db
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(inArray(packages.id, toFetch));
+
+    const nextFrontier: string[] = [];
+    for (const row of rows) {
+      const deps = extractDepsFromManifest(asRecord(row.draftManifest) as Partial<Manifest>);
+      for (const id of deps.skillIds) {
+        if (!skills.has(id)) {
+          skills.add(id);
+          nextFrontier.push(id);
+        }
+      }
+      for (const id of deps.toolIds) {
+        if (!tools.has(id)) {
+          tools.add(id);
+          nextFrontier.push(id);
+        }
+      }
+      for (const id of deps.providerIds) {
+        if (!providers.has(id)) {
+          providers.add(id);
+          nextFrontier.push(id);
+        }
+      }
+    }
+    frontier = nextFrontier;
+  }
+
+  return {
+    skillIds: [...skills],
+    toolIds: [...tools],
+    providerIds: [...providers],
+  };
+}
+
+/** Build dependencies object from a package's manifest (transitive). */
+export async function buildDependencies(
+  packageId: string,
+): Promise<Dependencies | null> {
+  const allDeps = await collectAllDepIds(packageId);
+  const allDepIds = [...allDeps.skillIds, ...allDeps.toolIds, ...allDeps.providerIds];
   if (allDepIds.length === 0) return null;
 
   const depRows = await db
@@ -49,27 +112,17 @@ export async function buildDependencies(
   return buildDependenciesFromRows(rows);
 }
 
-/** Get all files for a package's referenced items of a type. Returns Map<itemId, files>. */
-export async function getFlowItemFiles(
+/** Get all files for a package's transitive deps of a type. Returns Map<itemId, files>. */
+export async function getPackageDepFiles(
   packageId: string,
   orgId: string,
   cfg: PackageTypeConfig,
 ): Promise<Map<string, Record<string, Uint8Array>>> {
-  const [pkg] = await db
-    .select({ draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  if (!pkg) return new Map();
-
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
-    asRecord(pkg.draftManifest) as Partial<Manifest>,
-  );
-
+  const allDeps = await collectAllDepIds(packageId);
   const typeToIds: Record<string, string[]> = {
-    skill: skillIds,
-    tool: toolIds,
-    provider: providerIds,
+    skill: allDeps.skillIds,
+    tool: allDeps.toolIds,
+    provider: allDeps.providerIds,
   };
   const depIds = typeToIds[cfg.type] ?? [];
 
