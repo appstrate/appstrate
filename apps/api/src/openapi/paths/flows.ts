@@ -81,7 +81,7 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{scope}/{name}/providers/{svcScope}/{svcName}/bind": {
+  "/api/flows/{scope}/{name}/providers/{providerScope}/{providerName}/bind": {
     post: {
       operationId: "bindFlowProvider",
       tags: ["Flows"],
@@ -92,8 +92,8 @@ export const flowsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
-        { name: "svcScope", in: "path", required: true, schema: { type: "string" } },
-        { name: "svcName", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerScope", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerName", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         content: {
@@ -134,8 +134,8 @@ export const flowsPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
-        { name: "svcScope", in: "path", required: true, schema: { type: "string" } },
-        { name: "svcName", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerScope", in: "path", required: true, schema: { type: "string" } },
+        { name: "providerName", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

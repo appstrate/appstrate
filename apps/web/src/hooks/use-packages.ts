@@ -10,6 +10,8 @@ import type {
   FlowListItem,
   FlowDetail,
   PackageType,
+  VersionListItem,
+  VersionDetailResponse,
 } from "@appstrate/shared-types";
 
 // --- Packages — config-driven factory ---
@@ -140,28 +142,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
 
 // --- Version queries ---
 
-export interface VersionDetailResponse {
-  id: number;
-  version: string;
-  manifest: Record<string, unknown>;
-  content?: string | null;
-  yanked: boolean;
-  yankedReason: string | null;
-  integrity: string;
-  artifactSize: number;
-  createdAt: string | null;
-  distTags: string[];
-}
-
-export interface VersionListItem {
-  id: number;
-  version: string;
-  integrity: string;
-  artifactSize: number;
-  yanked: boolean;
-  createdBy: string | null;
-  createdAt: string | null;
-}
+export type { VersionDetailResponse, VersionListItem };
 
 function packageBasePath(type: PackageType, packageId: string | undefined) {
   return `/packages/${PACKAGE_CONFIG[type].path}/${packageId}`;

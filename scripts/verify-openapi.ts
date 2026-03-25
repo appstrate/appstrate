@@ -30,8 +30,8 @@ const expectedEndpoints = [
   // Flows (runtime — flows.ts + user-flows.ts junction endpoints)
   "GET /api/flows",
   "PUT /api/flows/{scope}/{name}/config",
-  "POST /api/flows/{scope}/{name}/providers/{svcScope}/{svcName}/bind",
-  "DELETE /api/flows/{scope}/{name}/providers/{svcScope}/{svcName}/bind",
+  "POST /api/flows/{scope}/{name}/providers/{providerScope}/{providerName}/bind",
+  "DELETE /api/flows/{scope}/{name}/providers/{providerScope}/{providerName}/bind",
   "GET /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
