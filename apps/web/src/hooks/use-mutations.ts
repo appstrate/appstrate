@@ -7,6 +7,13 @@ import { packageDetailPath } from "../lib/package-paths";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
+function buildQs(params: Record<string, string | undefined>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v!)}`);
+  return parts.length > 0 ? `?${parts.join("&")}` : "";
+}
+
 function onMutationError(err: Error) {
   alert(i18n.t("error.prefix", { message: err.message }));
 }
@@ -38,10 +45,7 @@ export function useRunFlow(packageId: string) {
       version?: string;
     }) => {
       const { input, files, profileId, version } = params ?? {};
-      const qsParts: string[] = [];
-      if (profileId) qsParts.push(`profileId=${encodeURIComponent(profileId)}`);
-      if (version) qsParts.push(`version=${encodeURIComponent(version)}`);
-      const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
+      const qs = buildQs({ profileId, version });
 
       // If files are present, use FormData
       const hasFiles = files && Object.values(files).some((f) => f.length > 0);
@@ -152,10 +156,10 @@ export function useDisconnect() {
       const provider = typeof params === "string" ? params : params.provider;
       const profileId = typeof params === "string" ? undefined : params.profileId;
       const connectionId = typeof params === "string" ? undefined : params.connectionId;
-      const qsParts: string[] = [];
-      if (connectionId) qsParts.push(`connectionId=${connectionId}`);
-      else if (profileId) qsParts.push(`profileId=${profileId}`);
-      const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
+      const qs = buildQs({
+        connectionId,
+        ...(!connectionId ? { profileId } : {}),
+      });
       return apiFetch(`/auth/connections/${provider}${qs}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateProviderRelated(qc),

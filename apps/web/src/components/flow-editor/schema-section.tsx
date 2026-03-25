@@ -26,6 +26,7 @@ import { toSlug, toLiveSlug } from "../../lib/strings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SectionCard } from "../section-card";
 
 export interface SchemaField {
   _id: string;
@@ -271,38 +272,33 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
-      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
-        {title}
-      </div>
-      <div className="space-y-3 p-4">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
-            {fields.map((field, i) => (
-              <SortableFieldCard
-                key={field._id}
-                field={field}
-                index={i}
-                mode={mode}
-                readOnly={readOnly}
-                onUpdate={update}
-                onRemove={remove}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-        {!readOnly && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="border-dashed text-muted-foreground hover:text-foreground"
-            onClick={add}
-          >
-            {t("editor.addField")}
-          </Button>
-        )}
-      </div>
-    </div>
+    <SectionCard title={title}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
+          {fields.map((field, i) => (
+            <SortableFieldCard
+              key={field._id}
+              field={field}
+              index={i}
+              mode={mode}
+              readOnly={readOnly}
+              onUpdate={update}
+              onRemove={remove}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      {!readOnly && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="border-dashed text-muted-foreground hover:text-foreground"
+          onClick={add}
+        >
+          {t("editor.addField")}
+        </Button>
+      )}
+    </SectionCard>
   );
 }

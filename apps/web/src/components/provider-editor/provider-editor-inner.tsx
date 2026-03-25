@@ -21,6 +21,7 @@ import { JsonEditor } from "../json-editor";
 import { MetadataSection, type MetadataState } from "../flow-editor/metadata-section";
 import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema, getManifestName } from "../flow-editor/utils";
+import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
 import type { ProviderConfig, JSONSchemaObject, AvailableScope } from "@appstrate/shared-types";
 
@@ -333,66 +334,61 @@ export function ProviderEditorInner({
         <>
           <MetadataSection value={metadata} onChange={setMetadata} isEdit={isEdit} />
 
-          <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
-            <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border">
-              {t("providers.form.sectionProvider")}
+          <SectionCard title={t("providers.form.sectionProvider")}>
+            <div className="space-y-2">
+              <Label htmlFor="pe-authMode">{t("providers.form.authMode")}</Label>
+              <Select
+                value={fields.authMode}
+                onValueChange={(v) => setField("authMode", v)}
+                disabled={isEdit}
+              >
+                <SelectTrigger id="pe-authMode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="oauth2">{t("providers.authMode.oauth2")}</SelectItem>
+                  <SelectItem value="oauth1">{t("providers.authMode.oauth1")}</SelectItem>
+                  <SelectItem value="api_key">{t("providers.authMode.apiKey")}</SelectItem>
+                  <SelectItem value="basic">{t("providers.authMode.basic")}</SelectItem>
+                  <SelectItem value="custom">{t("providers.authMode.custom")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-3 p-4">
-              <div className="space-y-2">
-                <Label htmlFor="pe-authMode">{t("providers.form.authMode")}</Label>
-                <Select
-                  value={fields.authMode}
-                  onValueChange={(v) => setField("authMode", v)}
-                  disabled={isEdit}
-                >
-                  <SelectTrigger id="pe-authMode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="oauth2">{t("providers.authMode.oauth2")}</SelectItem>
-                    <SelectItem value="oauth1">{t("providers.authMode.oauth1")}</SelectItem>
-                    <SelectItem value="api_key">{t("providers.authMode.apiKey")}</SelectItem>
-                    <SelectItem value="basic">{t("providers.authMode.basic")}</SelectItem>
-                    <SelectItem value="custom">{t("providers.authMode.custom")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
 
-              <div className="flex gap-3">
-                <div className="space-y-1 flex-1">
-                  <Label htmlFor="pe-iconUrl">{t("providers.form.iconUrl")}</Label>
-                  <Input
-                    id="pe-iconUrl"
-                    type="text"
-                    value={fields.iconUrl}
-                    onChange={(e) => setField("iconUrl", e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-                <div className="space-y-1 flex-1">
-                  <Label htmlFor="pe-docsUrl">{t("providers.form.docsUrl")}</Label>
-                  <Input
-                    id="pe-docsUrl"
-                    type="text"
-                    value={fields.docsUrl}
-                    onChange={(e) => setField("docsUrl", e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="pe-categories">{t("providers.form.categories")}</Label>
+            <div className="flex gap-3">
+              <div className="space-y-1 flex-1">
+                <Label htmlFor="pe-iconUrl">{t("providers.form.iconUrl")}</Label>
                 <Input
-                  id="pe-categories"
+                  id="pe-iconUrl"
                   type="text"
-                  value={fields.categories}
-                  onChange={(e) => setField("categories", e.target.value)}
-                  placeholder={t("providers.form.categoriesPlaceholder")}
+                  value={fields.iconUrl}
+                  onChange={(e) => setField("iconUrl", e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="space-y-1 flex-1">
+                <Label htmlFor="pe-docsUrl">{t("providers.form.docsUrl")}</Label>
+                <Input
+                  id="pe-docsUrl"
+                  type="text"
+                  value={fields.docsUrl}
+                  onChange={(e) => setField("docsUrl", e.target.value)}
+                  placeholder="https://..."
                 />
               </div>
             </div>
-          </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="pe-categories">{t("providers.form.categories")}</Label>
+              <Input
+                id="pe-categories"
+                type="text"
+                value={fields.categories}
+                onChange={(e) => setField("categories", e.target.value)}
+                placeholder={t("providers.form.categoriesPlaceholder")}
+              />
+            </div>
+          </SectionCard>
         </>
       )}
 
