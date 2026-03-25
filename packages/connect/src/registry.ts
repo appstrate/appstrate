@@ -199,4 +199,3 @@ export async function isProviderEnabled(
     .limit(1);
   return rows.length > 0 && !!rows[0]!.enabled;
 }
-

@@ -67,7 +67,7 @@ export function JsonView({ data }: JsonViewProps) {
       <div className="absolute right-2 top-2 z-10">
         <CopyButton text={jsonString} />
       </div>
-      <div className="font-mono text-sm bg-card border border-border rounded-lg p-4 overflow-auto max-h-[500px]">
+      <div className="font-mono text-sm overflow-auto max-h-[500px]">
         <JsonViewLite
           data={data as Record<string, unknown>}
           shouldExpandNode={allExpanded}

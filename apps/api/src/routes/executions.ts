@@ -289,9 +289,7 @@ export async function executeFlowInBackground(
         duration,
         notifiedAt: new Date().toISOString(),
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
-        ...(totalTokens > 0
-          ? { tokenUsage: { ...accumulated } as Record<string, unknown> }
-          : {}),
+        ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
       });
 
@@ -307,7 +305,14 @@ export async function executeFlowInBackground(
         { executionId, status: "success" },
         "info",
       );
-      dispatchWebhooks(orgId, "completed", executionId, flow.id, { result, duration }, applicationId);
+      dispatchWebhooks(
+        orgId,
+        "completed",
+        executionId,
+        flow.id,
+        { result, duration },
+        applicationId,
+      );
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
