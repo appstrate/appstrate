@@ -24,7 +24,6 @@ export {
   getDefaultAuthorizedUris,
   getCredentialFieldName,
   isProviderEnabled,
-  hasCredentialsConfigured,
 } from "./registry.ts";
 
 // OAuth2

@@ -107,6 +107,25 @@ export function getOrderedKeys(schema: JSONSchemaObject): string[] {
   return rest.length ? [...ordered, ...rest] : ordered;
 }
 
+// --- Flow Readiness Utilities ---
+
+/** Check if a prompt is empty or whitespace-only. */
+export function isPromptEmpty(prompt: string): boolean {
+  return prompt.trim().length === 0;
+}
+
+/**
+ * Find IDs declared in `required` but missing from `installed`.
+ * Works for both skills and tools.
+ */
+export function findMissingDependencies(
+  required: Record<string, string>,
+  installedIds: string[],
+): string[] {
+  const installed = new Set(installedIds);
+  return Object.keys(required).filter((id) => !installed.has(id));
+}
+
 // --- User Connection Types ---
 
 export interface UserConnectionEntry {
@@ -333,9 +352,9 @@ export interface ApiKeyInfo {
   createdAt: string;
 }
 
-// --- Integration Types ---
+// --- Available Provider Types ---
 
-export interface Integration {
+export interface AvailableProvider {
   uniqueKey: string;
   provider: string;
   displayName: string;

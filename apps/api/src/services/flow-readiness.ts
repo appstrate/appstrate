@@ -7,7 +7,7 @@ import type { LoadedFlow } from "../types/index.ts";
 import { validateFlowDependencies } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { isPromptEmpty, findMissingDependencies } from "../lib/flow-readiness.ts";
+import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
 import { ApiError } from "../lib/errors.ts";
 
 /**

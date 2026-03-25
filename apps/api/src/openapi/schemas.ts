@@ -357,7 +357,7 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  Integration: {
+  AvailableProvider: {
     type: "object",
     properties: {
       uniqueKey: { type: "string" },

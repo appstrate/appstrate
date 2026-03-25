@@ -13,9 +13,9 @@ export {
   validateScopes,
 } from "./operations.ts";
 
-export type { IntegrationWithStatus } from "./providers.ts";
+export type { AvailableProviderWithStatus } from "./providers.ts";
 export {
   getProviderAuthMode,
-  getIntegrationsWithStatus,
+  getAvailableProvidersWithStatus,
   listAllActorConnections,
 } from "./providers.ts";

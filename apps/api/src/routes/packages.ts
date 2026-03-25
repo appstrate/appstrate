@@ -8,6 +8,7 @@ import { eq, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "../lib/db.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
+import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/flow-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
@@ -176,17 +177,12 @@ async function parsePackageUpload(
     let manifest: Record<string, unknown> | undefined;
     const manifestBytes = normalizedFiles["manifest.json"];
     if (manifestBytes) {
-      try {
-        const parsed = JSON.parse(new TextDecoder().decode(manifestBytes));
-        if (typeof parsed === "object" && parsed !== null) {
-          manifest = parsed as Record<string, unknown>;
-          // Extract display fields as fallbacks (not for manifest storage)
-          if (!name && typeof parsed.displayName === "string") name = parsed.displayName;
-          if (!description && typeof parsed.description === "string")
-            description = parsed.description;
-        }
-      } catch {
-        // Ignore invalid manifest.json — not required for package uploads
+      manifest = parseManifestBytesSafe(manifestBytes);
+      if (manifest) {
+        // Extract display fields as fallbacks (not for manifest storage)
+        if (!name && typeof manifest.displayName === "string") name = manifest.displayName;
+        if (!description && typeof manifest.description === "string")
+          description = manifest.description;
       }
     }
 

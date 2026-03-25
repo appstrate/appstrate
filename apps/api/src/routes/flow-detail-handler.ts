@@ -7,7 +7,7 @@ import { getPackage } from "../services/flow-service.ts";
 import { getPackageById } from "../services/package-items/index.ts";
 import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
 import {
-  getAdminConnections,
+  getFlowProviderBindings,
   getPackageConfig,
   getLastExecution,
   getRunningExecutionsForPackage,
@@ -41,8 +41,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const m = flow.manifest;
   const queryProfileId = c.req.query("profileId");
 
-  const [adminConns, userProfileId] = await Promise.all([
-    getAdminConnections(orgId, flow.id),
+  const [bindings, userProfileId] = await Promise.all([
+    getFlowProviderBindings(orgId, flow.id),
     queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(actor, flow.id),
   ]);
 
@@ -50,7 +50,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const providerStatuses = await resolveProviderStatuses(
     manifestProviders,
-    adminConns,
+    bindings,
     orgId,
     userProfileId,
   );

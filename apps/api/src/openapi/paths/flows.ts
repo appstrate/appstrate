@@ -85,8 +85,8 @@ export const flowsPaths = {
     post: {
       operationId: "bindFlowProvider",
       tags: ["Flows"],
-      summary: "Bind admin connection to provider",
-      description: "Bind the current admin user's connection for a flow provider. Admin only.",
+      summary: "Bind flow provider",
+      description: "Bind the current admin user's connection profile to a flow provider. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -108,7 +108,7 @@ export const flowsPaths = {
       },
       responses: {
         "200": {
-          description: "Admin connection bound",
+          description: "Flow provider bound",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -127,8 +127,8 @@ export const flowsPaths = {
     delete: {
       operationId: "unbindFlowProvider",
       tags: ["Flows"],
-      summary: "Unbind admin connection from provider",
-      description: "Remove the admin connection binding for a flow provider. Admin only.",
+      summary: "Unbind flow provider",
+      description: "Remove the flow provider binding. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },

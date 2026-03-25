@@ -1,4 +1,5 @@
 import { logger } from "../lib/logger.ts";
+import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
   createOrgItem,
@@ -12,28 +13,6 @@ import {
 } from "./package-items/index.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "./package-items/config.ts";
-
-/** Parse manifest.json from normalized ZIP files. Throws if not found. */
-function parseManifestFromFiles(files: Record<string, Uint8Array>): Record<string, unknown> {
-  const data = files["manifest.json"];
-  if (!data) {
-    throw new Error(
-      `manifest.json not found in files dict. Available keys: ${Object.keys(files).join(", ")}`,
-    );
-  }
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(data));
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error("manifest.json is not a valid JSON object");
-    }
-    return parsed as Record<string, unknown>;
-  } catch (err) {
-    if (err instanceof SyntaxError) {
-      throw new Error("manifest.json is not valid JSON", { cause: err });
-    }
-    throw err;
-  }
-}
 
 /** Insert or update a skill/tool during post-install. */
 async function upsertItem(

@@ -1,19 +1,5 @@
-/** Check if a prompt is empty or whitespace-only. */
-export function isPromptEmpty(prompt: string): boolean {
-  return prompt.trim().length === 0;
-}
-
-/**
- * Find IDs declared in `required` but missing from `installed`.
- * Works for both skills and tools.
- */
-export function findMissingDependencies(
-  required: Record<string, string>,
-  installedIds: string[],
-): string[] {
-  const installed = new Set(installedIds);
-  return Object.keys(required).filter((id) => !installed.has(id));
-}
+// Re-export shared utilities from @appstrate/shared-types
+export { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
 
 /**
  * Check config completeness: all required fields must be present and non-empty.

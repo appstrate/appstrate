@@ -14,11 +14,11 @@ export interface LlmProxyConfig {
   placeholder: string;
 }
 
-// Mirrored in apps/api/src/services/orchestrator/types.ts. Keep in sync.
+// Mirrored in apps/api/src/services/orchestrator/types.ts — keep both definitions identical.
 export interface SidecarConfig {
-  platformApiUrl: string;
   executionToken: string;
-  proxyUrl: string;
+  platformApiUrl: string;
+  proxyUrl?: string;
   llm?: LlmProxyConfig;
 }
 

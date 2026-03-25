@@ -2,9 +2,9 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../../lib/db.ts";
 import { flowProviderBindings } from "@appstrate/db/schema";
 
-// --- Admin Connections (per-org) ---
+// --- Flow Provider Bindings (per-org) ---
 
-export async function getAdminConnections(
+export async function getFlowProviderBindings(
   orgId: string,
   packageId: string,
 ): Promise<Record<string, string>> {
@@ -26,7 +26,7 @@ export async function getAdminConnections(
   return result;
 }
 
-export async function bindAdminConnection(
+export async function bindFlowProvider(
   orgId: string,
   packageId: string,
   providerId: string,
@@ -51,7 +51,7 @@ export async function bindAdminConnection(
     });
 }
 
-export async function unbindAdminConnection(
+export async function unbindFlowProvider(
   orgId: string,
   packageId: string,
   providerId: string,

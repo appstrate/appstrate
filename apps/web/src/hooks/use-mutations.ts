@@ -77,7 +77,7 @@ export function useRunFlow(packageId: string) {
 }
 
 function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["integrations"] });
+  qc.invalidateQueries({ queryKey: ["available-providers"] });
   qc.invalidateQueries({ queryKey: ["user-connections"] });
   // Invalidate all flow detail queries (service status may have changed)
   qc.invalidateQueries({ queryKey: ["packages", "flow"] });
@@ -393,7 +393,7 @@ function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
   qc.invalidateQueries({ queryKey: ["packages", cfg.detailKey] });
   qc.invalidateQueries({ queryKey: ["version-info"] });
-  qc.invalidateQueries({ queryKey: ["integrations"] });
+  qc.invalidateQueries({ queryKey: ["available-providers"] });
 }
 
 export function useConfigureProviderCredentials() {

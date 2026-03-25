@@ -42,7 +42,7 @@ export const connectionsPaths = {
   },
   "/auth/integrations": {
     get: {
-      operationId: "listIntegrations",
+      operationId: "listAvailableProviders",
       tags: ["Connections"],
       summary: "List all providers with connection status",
       description:
@@ -59,7 +59,7 @@ export const connectionsPaths = {
       ],
       responses: {
         "200": {
-          description: "Integration list",
+          description: "Available provider list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -71,7 +71,7 @@ export const connectionsPaths = {
                 properties: {
                   integrations: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/Integration" },
+                    items: { $ref: "#/components/schemas/AvailableProvider" },
                   },
                 },
               },

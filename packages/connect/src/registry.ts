@@ -200,23 +200,3 @@ export async function isProviderEnabled(
   return rows.length > 0 && !!rows[0]!.enabled;
 }
 
-/**
- * Check if credentials are configured for a provider.
- */
-export async function hasCredentialsConfigured(
-  db: Db,
-  orgId: string,
-  providerId: string,
-): Promise<boolean> {
-  const rows = await db
-    .select({
-      credentialsEncrypted: providerCredentials.credentialsEncrypted,
-    })
-    .from(providerCredentials)
-    .where(
-      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
-    )
-    .limit(1);
-
-  return rows.length > 0 && !!rows[0]!.credentialsEncrypted;
-}
