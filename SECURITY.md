@@ -296,7 +296,7 @@ app.use("*", async (c, next) => {
 });
 ```
 
-Sessions are managed by Better Auth (email/password + cookie-based sessions). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
+Sessions are managed by Better Auth (email/password + optional Google social login, cookie-based sessions). Account linking uses trusted providers (Google) with verified emails to prevent pre-account takeover. Email verification is opt-in (requires SMTP configuration). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
 ### Organization context verification
 

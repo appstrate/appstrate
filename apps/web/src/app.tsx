@@ -30,6 +30,7 @@ import { ProvidersPage } from "./pages/providers-page";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
+import { VerifyEmailPage } from "./pages/verify-email";
 import { ErrorBoundary } from "./components/error-boundary";
 import { OrgSwitcher, NavMenu } from "./components/org-switcher";
 import { NotificationBell } from "./components/notification-bell";
@@ -245,6 +246,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/share/:token" element={<PublicShareRunPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />

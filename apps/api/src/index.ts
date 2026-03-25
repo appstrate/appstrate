@@ -80,6 +80,8 @@ function buildAppConfig(): AppConfig {
       billing: isCloud,
       models: !isCloud,
       providerKeys: !isCloud,
+      googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+      emailVerification: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
   };
 }
