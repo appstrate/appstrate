@@ -286,8 +286,11 @@ function FlowEditorInner({
       )}
       {activeTab === "tools" && (
         <>
-          {(state.manifest.output as { schema?: { properties?: Record<string, unknown> } } | undefined)
-            ?.schema?.properties &&
+          {(
+            state.manifest.output as
+              | { schema?: { properties?: Record<string, unknown> } }
+              | undefined
+          )?.schema?.properties &&
             !getResourceEntries(state.manifest, "tools").some(
               (e) => e.id === "@appstrate/output",
             ) && (

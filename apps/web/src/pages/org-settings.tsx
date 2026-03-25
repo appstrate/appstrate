@@ -1128,7 +1128,12 @@ function BillingTab() {
             <span className="font-medium">
               {billing.usagePercent}%
               <span className="ml-2 text-xs text-muted-foreground font-normal">
-                ({t("billing.creditsCount", { used: billing.creditsUsed, quota: billing.creditQuota })})
+                (
+                {t("billing.creditsCount", {
+                  used: billing.creditsUsed,
+                  quota: billing.creditQuota,
+                })}
+                )
               </span>
             </span>
           </div>

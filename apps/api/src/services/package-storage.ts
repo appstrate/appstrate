@@ -78,7 +78,10 @@ export interface FlowPackageResult {
 }
 
 /** Build a flow package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
-export async function buildFlowPackage(flow: LoadedPackage, orgId: string): Promise<FlowPackageResult> {
+export async function buildFlowPackage(
+  flow: LoadedPackage,
+  orgId: string,
+): Promise<FlowPackageResult> {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(flow.prompt),
