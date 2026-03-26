@@ -119,10 +119,10 @@ export function useAuth() {
     if (result.error) throw new Error(result.error.message);
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithGoogle = useCallback(async (callbackURL?: string) => {
     await authClient.signIn.social({
       provider: "google",
-      callbackURL: "/",
+      callbackURL: callbackURL ?? "/",
     });
   }, []);
 

@@ -81,6 +81,7 @@ function buildAppConfig(): AppConfig {
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       emailVerification: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
+    trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
 

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PackageList } from "./pages/package-list";
@@ -36,6 +37,7 @@ import { NotificationBell } from "./components/notification-bell";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "./stores/theme-store";
 import { useAuth } from "./hooks/use-auth";
+import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
@@ -225,8 +227,30 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function useExternalRedirect(isAuthenticated: boolean) {
+  const { trustedOrigins } = useAppConfig();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const redirect = params.get("redirect");
+    if (!redirect) return;
+
+    try {
+      const origin = new URL(redirect).origin;
+      if (trustedOrigins.includes(origin)) {
+        window.location.assign(redirect);
+      }
+    } catch {
+      // Invalid URL — ignore
+    }
+  }, [isAuthenticated, trustedOrigins]);
+}
+
 export function App() {
   const { user, loading } = useAuth();
+  useExternalRedirect(!!user);
 
   if (loading) {
     return (

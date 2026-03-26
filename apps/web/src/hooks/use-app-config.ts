@@ -15,6 +15,7 @@ const DEFAULT_CONFIG: AppConfig = {
     googleAuth: false,
     emailVerification: false,
   },
+  trustedOrigins: [],
 };
 
 export type { AppConfig };

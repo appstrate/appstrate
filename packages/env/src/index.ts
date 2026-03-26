@@ -40,6 +40,7 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
   PORT: z.coerce.number().int().positive().default(3000),
+  COOKIE_DOMAIN: z.string().optional(),
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
   PLATFORM_API_URL: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

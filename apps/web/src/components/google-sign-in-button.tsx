@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "../hooks/use-auth";
 import { GoogleIcon } from "./icons";
@@ -7,6 +8,7 @@ import { GoogleIcon } from "./icons";
 export function GoogleSignInButton() {
   const { t } = useTranslation("settings");
   const { signInWithGoogle } = useAuth();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
 
   return (
@@ -18,7 +20,10 @@ export function GoogleSignInButton() {
       onClick={async () => {
         setLoading(true);
         try {
-          await signInWithGoogle();
+          // Preserve ?redirect param through Google OAuth flow
+          const redirect = searchParams.get("redirect");
+          const callbackURL = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/";
+          await signInWithGoogle(callbackURL);
         } finally {
           setLoading(false);
         }
