@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,8 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "../../api";
 import { useOrg } from "../../hooks/use-org";
+import { useAuth } from "../../hooks/use-auth";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
+
+function suggestOrgDefaults(
+  user: { email: string; name?: string },
+  language: string,
+): { name: string; slug: string } {
+  const displayName = user.name || user.email.split("@")[0];
+  const name =
+    language === "fr" ? `Organisation de ${displayName}` : `${displayName}'s Organization`;
+  return { name, slug: toSlug(displayName) };
+}
 
 interface CreateOrgFormData {
   name: string;
@@ -17,10 +28,11 @@ interface CreateOrgFormData {
 }
 
 export function OnboardingCreateStep() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t, i18n } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { switchOrg, currentOrg, loading } = useOrg();
+  const { switchOrg, currentOrg, orgs, loading } = useOrg();
+  const { user } = useAuth();
   const { nextRoute } = useOnboardingNav("create");
 
   const location = useLocation();
@@ -41,6 +53,7 @@ export function OnboardingCreateStep() {
     handleSubmit,
     control,
     setValue,
+    reset,
     setError,
     formState: { errors },
   } = useForm<CreateOrgFormData>({
@@ -51,6 +64,20 @@ export function OnboardingCreateStep() {
   const [slugEdited, setSlugEdited] = useState(false);
   const nameValue = useWatch({ control, name: "name" });
   const slugValue = useWatch({ control, name: "slug" });
+
+  // Pre-fill form for first org once user data is available.
+  // reset() sets both fields atomically without triggering the name→slug watcher.
+  // setSlugEdited is intentional here: one-shot init, not a cascading pattern.
+  const defaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (defaultAppliedRef.current) return;
+    const isFirstOrg = !fromSwitcher && orgs.length === 0;
+    if (!isFirstOrg || !user) return;
+    defaultAppliedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot pre-fill, not cascading
+    setSlugEdited(true);
+    reset(suggestOrgDefaults(user, i18n.language));
+  }, [fromSwitcher, orgs, user, i18n.language, reset]);
 
   useEffect(() => {
     if (!slugEdited) {
