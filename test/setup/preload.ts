@@ -39,7 +39,19 @@ process.env.S3_ENDPOINT = "http://localhost:9002";
 process.env.AWS_ACCESS_KEY_ID = "minioadmin";
 process.env.AWS_SECRET_ACCESS_KEY = "minioadmin";
 process.env.APP_URL = "http://localhost:3000";
+process.env.TRUSTED_ORIGINS = "http://localhost:3000";
 process.env.LOG_LEVEL = "error"; // Suppress logs during tests
+
+// Disable email verification in tests (SMTP vars from .env would enable it)
+delete process.env.SMTP_HOST;
+delete process.env.SMTP_PORT;
+delete process.env.SMTP_USER;
+delete process.env.SMTP_PASS;
+delete process.env.SMTP_FROM;
+
+// Disable Google social auth in tests
+delete process.env.GOOGLE_CLIENT_ID;
+delete process.env.GOOGLE_CLIENT_SECRET;
 process.env.SIDECAR_POOL_SIZE = "0"; // Disable sidecar pool in tests
 process.env.DOCKER_SOCKET = "http://localhost:2375";
 
