@@ -28,6 +28,7 @@ export interface AppConfig {
     googleAuth: boolean;
     emailVerification: boolean;
   };
+  trustedOrigins: string[];
 }
 
 // --- Package Types ---

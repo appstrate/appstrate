@@ -96,6 +96,17 @@ export const auth = betterAuth({
 
   trustedOrigins: env.TRUSTED_ORIGINS,
 
+  ...(env.COOKIE_DOMAIN
+    ? {
+        advanced: {
+          crossSubDomainCookies: {
+            enabled: true,
+            domain: env.COOKIE_DOMAIN,
+          },
+        },
+      }
+    : {}),
+
   databaseHooks: {
     user: {
       create: {
