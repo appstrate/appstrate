@@ -41,8 +41,7 @@ export function ExecutionRow({
   return (
     <Link
       className={cn(
-        "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
-        isUnread && "border-l-2 border-l-destructive",
+        "flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
       )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber }}
@@ -53,18 +52,18 @@ export function ExecutionRow({
         )}
         {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
         <Badge status={execution.status} />
+        {isUnread && <span className="size-2 rounded-full bg-destructive shrink-0" />}
         {userName ? (
           <span className="text-muted-foreground text-xs">
             {t("exec.user", { name: userName })}
           </span>
         ) : null}
-        <span className="text-muted-foreground text-xs">{date}</span>
-        {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
-        <UIBadge variant={execution.packageVersion ? "outline" : "secondary"}>
-          {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
-        </UIBadge>
         {execution.proxyLabel && <Shield size={12} className="text-muted-foreground" />}
         {execution.scheduleId && <UIBadge variant="secondary">cron</UIBadge>}
+        <div className="ml-auto flex items-center gap-2">
+          {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
+          <span className="text-muted-foreground text-xs">{date}</span>
+        </div>
       </div>
     </Link>
   );

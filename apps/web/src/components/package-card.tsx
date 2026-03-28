@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
 import { ShieldCheck } from "lucide-react";
-import { Spinner } from "./spinner";
+import { Badge } from "./badge";
 import { RunFlowButton } from "./run-flow-button";
 import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
@@ -69,9 +69,7 @@ export function PackageCard({
             </span>
           )}
           {type === "flow" && !!runningExecutions && runningExecutions > 0 && (
-            <span className="text-[0.7rem] px-2 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1.5">
-              <Spinner /> {t("list.running", { count: runningExecutions })}
-            </span>
+            <Badge status="running" />
           )}
           {type === "flow" && (
             <div

@@ -128,7 +128,7 @@ export function DashboardPage() {
             {t("dashboard.seeAll")}
           </Link>
         </div>
-        <div className="space-y-1">
+        <div className="rounded-md border border-border">
           {recentExecutions.map((exec: Execution, index: number) => (
             <ExecutionRow
               key={exec.id}

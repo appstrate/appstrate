@@ -70,7 +70,7 @@ export function FlowExecutionsTab({
           />
         </EmptyState>
       ) : (
-        <div className="space-y-1">
+        <div className="rounded-md border border-border">
           {executions.map((exec, index) => (
             <ExecutionRow
               key={exec.id}
