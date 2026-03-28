@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -262,14 +263,16 @@ function ScheduleForm({
 
       {schedule && (
         <div className="space-y-2">
-          <Label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="schedule-enabled"
               checked={enabled}
-              onChange={(e) => setValue("enabled", e.target.checked)}
+              onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
             />
-            {t("schedule.enabled")}
-          </Label>
+            <Label htmlFor="schedule-enabled" className="font-normal cursor-pointer">
+              {t("schedule.enabled")}
+            </Label>
+          </div>
         </div>
       )}
 

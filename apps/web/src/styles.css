@@ -141,9 +141,10 @@
     @apply w-auto;
   }
 
-  /* Radix Checkbox/Switch renders as <button> — reset global button padding */
+  /* Radix Checkbox/Switch/Radio renders as <button> — reset global button padding */
   button[role="checkbox"],
-  button[role="switch"] {
+  button[role="switch"],
+  button[role="radio"] {
     @apply p-0;
   }
 

@@ -6,6 +6,7 @@ import { useCreateProvider, useUpdateProvider } from "../../hooks/use-mutations"
 import { api } from "../../api";
 import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -512,15 +513,13 @@ export function ProviderEditorInner({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1 flex-1 flex items-end gap-2">
-                  <input
+                <div className="flex-1 flex items-end gap-2">
+                  <Checkbox
                     id="pe-pkce"
-                    type="checkbox"
                     checked={fields.pkceEnabled}
-                    onChange={(e) => setField("pkceEnabled", e.target.checked)}
-                    className="w-auto"
+                    onCheckedChange={(checked) => setField("pkceEnabled", Boolean(checked))}
                   />
-                  <Label htmlFor="pe-pkce" className="text-sm text-muted-foreground cursor-pointer">
+                  <Label htmlFor="pe-pkce" className="text-sm text-muted-foreground font-normal cursor-pointer">
                     {t("providers.form.pkceEnabled")}
                   </Label>
                 </div>
@@ -722,14 +721,16 @@ export function ProviderEditorInner({
         <div className="space-y-4">
           <>
             <div className="space-y-2">
-              <Label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="pe-allow-all-uris"
                   checked={fields.allowAllUris}
-                  onChange={(e) => setField("allowAllUris", e.target.checked)}
+                  onCheckedChange={(checked) => setField("allowAllUris", Boolean(checked))}
                 />
-                {t("providers.form.allowAllUris")}
-              </Label>
+                <Label htmlFor="pe-allow-all-uris" className="text-sm text-muted-foreground font-normal cursor-pointer">
+                  {t("providers.form.allowAllUris")}
+                </Label>
+              </div>
               <div className="text-sm text-muted-foreground">
                 {t("providers.form.allowAllUrisHint")}
               </div>

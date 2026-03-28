@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ShieldCheck } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
@@ -164,11 +165,9 @@ export function ResourceSection({
                   isSelected && "border-primary bg-primary/5",
                 )}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={isSelected}
-                  onChange={() => toggle(item.id)}
-                  className="w-3.5 h-3.5 rounded"
+                  onCheckedChange={() => toggle(item.id)}
                 />
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-medium truncate flex items-center gap-1.5">

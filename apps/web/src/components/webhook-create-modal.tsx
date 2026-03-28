@@ -5,9 +5,9 @@ import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "./spinner";
-import { WEBHOOK_EVENTS, useCreateWebhook } from "../hooks/use-webhooks";
+import { WebhookFormFields } from "./webhook-form-fields";
+import { useCreateWebhook } from "../hooks/use-webhooks";
 
 interface Props {
   open: boolean;
@@ -16,7 +16,6 @@ interface Props {
 
 type FormData = {
   url: string;
-  payloadMode: "full" | "summary";
 };
 
 export function WebhookCreateModal({ open, onClose }: Props) {
@@ -26,6 +25,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
 
   const {
     register,
@@ -34,14 +34,15 @@ export function WebhookCreateModal({ open, onClose }: Props) {
     setError,
     formState: { errors },
   } = useForm<FormData>({
-    defaultValues: { url: "", payloadMode: "full" },
+    defaultValues: { url: "" },
   });
 
   const handleClose = () => {
-    reset({ url: "", payloadMode: "full" });
+    reset({ url: "" });
     setCreatedSecret(null);
     setCopied(false);
     setSelectedEvents([]);
+    setPayloadMode("full");
     createMutation.reset();
     onClose();
   };
@@ -62,7 +63,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
       {
         url: data.url.trim(),
         events: selectedEvents,
-        payloadMode: data.payloadMode,
+        payloadMode,
       },
       {
         onSuccess: (result) => {
@@ -145,44 +146,13 @@ export function WebhookCreateModal({ open, onClose }: Props) {
           <p className="text-xs text-muted-foreground">{t("settings:webhooks.urlHint")}</p>
         </div>
 
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.eventsLabel")}</Label>
-          <div className="space-y-2">
-            {WEBHOOK_EVENTS.map((event) => (
-              <label key={event} className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={selectedEvents.includes(event)}
-                  onCheckedChange={() => toggleEvent(event)}
-                />
-                <span className="text-sm font-mono">{event}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.payloadModeLabel")}</Label>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                value="full"
-                {...register("payloadMode")}
-                className="accent-primary"
-              />
-              <span className="text-sm">{t("settings:webhooks.payloadModeFull")}</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                value="summary"
-                {...register("payloadMode")}
-                className="accent-primary"
-              />
-              <span className="text-sm">{t("settings:webhooks.payloadModeSummary")}</span>
-            </label>
-          </div>
-        </div>
+        <WebhookFormFields
+          selectedEvents={selectedEvents}
+          onToggleEvent={toggleEvent}
+          payloadMode={payloadMode}
+          onPayloadModeChange={setPayloadMode}
+          idPrefix="create-"
+        />
 
         {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
       </form>
