@@ -24,7 +24,7 @@ export function OnboardingDoneStep() {
   const { prevRoute } = useOnboardingNav("complete");
 
   const { data: models } = useModels();
-  const { data: billing } = useBilling({ enabled: features.billing });
+  const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
   const { data: providersData } = useProviders();
   const { data: orgData } = useQuery({
     queryKey: ["org-members", orgId],

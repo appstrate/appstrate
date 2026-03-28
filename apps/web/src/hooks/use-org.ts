@@ -28,9 +28,9 @@ export function useOrg() {
     },
   });
 
-  useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, (id) =>
-    orgStore.getState().setId(id),
-  );
+  const setOrgId = useCallback((id: string) => orgStore.getState().setId(id), []);
+
+  useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, setOrgId);
 
   const switchOrg = useCallback(
     (orgId: string) => {

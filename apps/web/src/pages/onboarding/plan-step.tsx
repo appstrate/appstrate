@@ -26,7 +26,7 @@ export function OnboardingPlanStep() {
     }
   }, [features.billing, navigate, nextRoute]);
 
-  const { data: billing, isLoading } = useBilling();
+  const { data: billing, isLoading } = useBilling({ enabled: !!orgId });
   const checkoutMutation = useCheckout();
 
   const goNext = () => nextRoute && navigate(nextRoute);
