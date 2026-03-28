@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appstrate/core": "^2.9.4",
+    "@appstrate/core": "^2.9.5",
     "zod": "^4.3.6"
   }
 }

@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@appstrate/connect": "workspace:*",
-    "@appstrate/core": "^2.9.4",
+    "@appstrate/core": "^2.9.5",
     "@appstrate/emails": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",

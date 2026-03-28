@@ -1,4 +1,4 @@
-import { unzipArtifact, type ParsedPackageZip } from "@appstrate/core/zip";
+import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/index.ts";
@@ -20,25 +20,10 @@ export async function tryParseSkillOnlyZip(
     return { ok: false, reason: "not_a_skill" };
   }
 
-  // Find SKILL.md — may be at root or inside a single wrapper folder
-  let skillRaw = files["SKILL.md"];
-  if (!skillRaw) {
-    // Look for prefix/SKILL.md (one level deep) and re-base all files
-    const skillEntry = Object.keys(files).find(
-      (k) => k.endsWith("/SKILL.md") && !k.includes("/", k.indexOf("/") + 1),
-    );
-    if (!skillEntry) return { ok: false, reason: "not_a_skill" };
+  // Strip single wrapper folder if present (e.g. ZIPs from macOS Finder)
+  files = stripWrapperPrefix(files);
 
-    const prefix = skillEntry.slice(0, skillEntry.indexOf("/") + 1);
-    const rebased: Record<string, Uint8Array> = {};
-    for (const [path, data] of Object.entries(files)) {
-      if (path.startsWith(prefix)) {
-        rebased[path.slice(prefix.length)] = data;
-      }
-    }
-    files = rebased;
-    skillRaw = files["SKILL.md"];
-  }
+  const skillRaw = files["SKILL.md"];
   if (!skillRaw) return { ok: false, reason: "not_a_skill" };
 
   const skillMd = new TextDecoder().decode(skillRaw);
