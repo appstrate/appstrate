@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";
-import { Mail, AlertCircle } from "lucide-react";
+import { Mail, AlertCircle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthLayout } from "../components/auth-layout";
 import { useAuth } from "../hooks/use-auth";
 
 export function VerifyEmailPage() {
-  const { t } = useTranslation("settings");
-  const { resendVerificationEmail } = useAuth();
+  const { t } = useTranslation(["settings", "common"]);
+  const { user, resendVerificationEmail, logout } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const email = (location.state as { email?: string })?.email ?? "";
+  // Prefer user email from store (authenticated but unverified), fallback to location state (post-signup redirect)
+  const email = user?.email ?? (location.state as { email?: string })?.email ?? "";
   const error = searchParams.get("error");
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 
@@ -61,12 +62,22 @@ export function VerifyEmailPage() {
                 : t("verifyEmail.resend")}
           </Button>
         )}
-        <Link
-          to="/login"
-          className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
-        >
-          {t("verifyEmail.backToLogin")}
-        </Link>
+        {user ? (
+          <button
+            onClick={() => void logout()}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+          >
+            <LogOut size={14} />
+            {t("userMenu.logout", { ns: "common" })}
+          </button>
+        ) : (
+          <Link
+            to="/login"
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+          >
+            {t("verifyEmail.backToLogin")}
+          </Link>
+        )}
       </div>
     </AuthLayout>
   );
