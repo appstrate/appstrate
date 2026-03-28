@@ -41,8 +41,8 @@ import { ApiError, unauthorized } from "./lib/errors.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
+import { getAppConfig } from "./lib/app-config.ts";
 import type { AppEnv } from "./types/index.ts";
-import type { AppConfig } from "@appstrate/shared-types";
 
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
@@ -67,23 +67,6 @@ app.route("/", healthRouter);
 app.get("/api/openapi.json", (c) => c.json(openApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
-// Platform config — computed once at boot, injected into SPA HTML.
-// In OSS (no cloud module): models & provider keys visible, billing hidden.
-// In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
-function buildAppConfig(): AppConfig {
-  const isCloud = getCloudModule() !== null;
-  return {
-    platform: isCloud ? "cloud" : "oss",
-    features: {
-      billing: isCloud,
-      models: !isCloud,
-      providerKeys: !isCloud,
-      googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-      emailVerification: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
-    },
-    trustedOrigins: env.TRUSTED_ORIGINS,
-  };
-}
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -251,7 +234,7 @@ app.use("*", async (c, next) => {
 await boot();
 
 // Pre-compute config script (config is static after boot — cloud module is loaded or not)
-const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(buildAppConfig())};</script>`;
+const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(getAppConfig())};</script>`;
 
 // Graceful shutdown
 const shutdown = createShutdownHandler(() => {
