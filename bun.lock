@@ -35,6 +35,7 @@
         "@appstrate/connect": "workspace:*",
         "@appstrate/core": "^2.9.4",
         "@appstrate/db": "workspace:*",
+        "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
         "@hono/swagger-ui": "^0.5.3",
@@ -123,18 +124,23 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@aws-sdk/client-s3": "^3.1011.0",
         "@better-auth/drizzle-adapter": "^1.5.3",
         "better-auth": "^1.2.8",
         "drizzle-orm": "^0.39.3",
-        "nodemailer": "^8.0.3",
+        "nodemailer": "^8.0.4",
         "postgres": "^3.4.7",
       },
       "devDependencies": {
         "@types/nodemailer": "^7.0.11",
         "drizzle-kit": "^0.30.5",
       },
+    },
+    "packages/emails": {
+      "name": "@appstrate/emails",
+      "version": "0.0.0",
     },
     "packages/env": {
       "name": "@appstrate/env",
@@ -181,6 +187,8 @@
     "@appstrate/core": ["@appstrate/core@2.9.4", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-aWmboVz6EBsXrekkHUBf6ZHblv9OXMVV7wDl6Bf7xj+dxm97k7GIyL0IghaUpz7X4DSYR8mbpgBC+2Clr3ozzA=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
+
+    "@appstrate/emails": ["@appstrate/emails@workspace:packages/emails"],
 
     "@appstrate/env": ["@appstrate/env@workspace:packages/env"],
 

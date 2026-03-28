@@ -67,7 +67,6 @@ app.route("/", healthRouter);
 app.get("/api/openapi.json", (c) => c.json(openApiSpec));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
-
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
 

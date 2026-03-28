@@ -1,3 +1,6 @@
+import type { EmailType, EmailRenderer } from "@appstrate/emails";
+import { registerEmailOverrides } from "@appstrate/emails";
+
 export interface CloudModule {
   initCloud(config: { databaseUrl: string; redisUrl: string; appUrl: string }): Promise<void>;
   getCloudConfig(): { platform: "cloud" };
@@ -11,6 +14,7 @@ export interface CloudModule {
     onOrgDeleted(orgId: string): Promise<void>;
   };
   registerCloudRoutes(app: unknown): void;
+  emailOverrides?: Partial<{ [K in EmailType]: EmailRenderer<K> }>;
 }
 
 let _cloud: CloudModule | null | undefined = undefined;
@@ -35,6 +39,12 @@ export async function loadCloud(): Promise<CloudModule | null> {
     redisUrl: process.env.REDIS_URL!,
     appUrl: process.env.APP_URL ?? "http://localhost:3000",
   });
+
+  // Step 3: register email template overrides if provided
+  if (mod.emailOverrides) {
+    registerEmailOverrides(mod.emailOverrides);
+  }
+
   _cloud = mod;
   return _cloud;
 }

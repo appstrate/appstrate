@@ -17,12 +17,13 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@aws-sdk/client-s3": "^3.1011.0",
     "@better-auth/drizzle-adapter": "^1.5.3",
     "better-auth": "^1.2.8",
     "drizzle-orm": "^0.39.3",
-    "nodemailer": "^8.0.3",
+    "nodemailer": "^8.0.4",
     "postgres": "^3.4.7"
   },
   "devDependencies": {

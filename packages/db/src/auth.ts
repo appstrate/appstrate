@@ -1,13 +1,11 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createTransport } from "nodemailer";
-import { createLogger } from "@appstrate/core/logger";
+import { renderEmail } from "@appstrate/emails";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
-
-const logger = createLogger(getEnv().LOG_LEVEL);
 
 const env = getEnv();
 
@@ -61,14 +59,19 @@ export const auth = betterAuth({
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
         try {
+          const { subject, html } = renderEmail("verification", {
+            user,
+            url,
+            locale: "fr",
+          });
           await smtpTransport!.sendMail({
             from: env.SMTP_FROM,
             to: user.email,
-            subject: "Vérifiez votre adresse email",
-            html: `<p>Cliquez sur le lien pour vérifier votre email :</p><p><a href="${url}">${url}</a></p>`,
+            subject,
+            html,
           });
-        } catch (err) {
-          logger.error("Failed to send verification email", { err, to: user.email });
+        } catch {
+          // Fire-and-forget — don't block signup if email fails
         }
       },
     },
