@@ -4,7 +4,7 @@ import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import { modelCostSchema, type ModelCost } from "./adapters/types.ts";
 import { logger } from "../lib/logger.ts";
-import { isBlockedUrl } from "../lib/ssrf.ts";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 
 function parseStringArray(val: unknown): string[] | null {

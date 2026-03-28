@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { getActor } from "../lib/actor.ts";
 import {
   getUnreadNotificationCount,
   getUnreadCountsByFlow,
@@ -14,51 +15,41 @@ export function createNotificationsRouter() {
 
   // GET /api/notifications/unread-count
   router.get("/notifications/unread-count", async (c) => {
-    const user = c.get("user");
-    const endUser = c.get("endUser");
+    const actor = getActor(c);
     const orgId = c.get("orgId");
-    const actorId = endUser ? endUser.id : user.id;
-    const count = await getUnreadNotificationCount(actorId, orgId);
+    const count = await getUnreadNotificationCount(actor.id, orgId);
     return c.json({ count });
   });
 
   // GET /api/notifications/unread-counts-by-flow
   router.get("/notifications/unread-counts-by-flow", async (c) => {
-    const user = c.get("user");
-    const endUser = c.get("endUser");
+    const actor = getActor(c);
     const orgId = c.get("orgId");
-    const actorId = endUser ? endUser.id : user.id;
-    const counts = await getUnreadCountsByFlow(actorId, orgId);
+    const counts = await getUnreadCountsByFlow(actor.id, orgId);
     return c.json({ counts });
   });
 
   // PUT /api/notifications/read/:executionId
   router.put("/notifications/read/:executionId", async (c) => {
-    const user = c.get("user");
-    const endUser = c.get("endUser");
+    const actor = getActor(c);
     const orgId = c.get("orgId");
-    const actorId = endUser ? endUser.id : user.id;
     const executionId = c.req.param("executionId");
-    const ok = await markNotificationRead(executionId, actorId, orgId);
+    const ok = await markNotificationRead(executionId, actor.id, orgId);
     return c.json({ ok });
   });
 
   // PUT /api/notifications/read-all
   router.put("/notifications/read-all", async (c) => {
-    const user = c.get("user");
-    const endUser = c.get("endUser");
+    const actor = getActor(c);
     const orgId = c.get("orgId");
-    const actorId = endUser ? endUser.id : user.id;
-    const updated = await markAllNotificationsRead(actorId, orgId);
+    const updated = await markAllNotificationsRead(actor.id, orgId);
     return c.json({ updated });
   });
 
   // GET /api/executions (all user executions across flows)
   router.get("/executions", async (c) => {
-    const user = c.get("user");
-    const endUser = c.get("endUser");
+    const actor = getActor(c);
     const orgId = c.get("orgId");
-    const actorId = endUser ? endUser.id : user.id;
     const limit = z.coerce
       .number()
       .int()
@@ -72,7 +63,7 @@ export function createNotificationsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listUserExecutions(actorId, orgId, { limit, offset });
+    const result = await listUserExecutions(actor.id, orgId, { limit, offset });
     return c.json(result);
   });
 

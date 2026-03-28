@@ -11,7 +11,7 @@ import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";
 import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
-import { isBlockedUrl } from "../lib/ssrf.ts";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { getRedisConnection } from "../lib/redis.ts";
 import { getEnv } from "@appstrate/env";
 
