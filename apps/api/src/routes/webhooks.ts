@@ -30,14 +30,22 @@ const webhookEventsEnum = z.enum([
   "execution.cancelled",
 ]);
 
-const createWebhookSchema = z.object({
-  applicationId: z.string().min(1, "applicationId is required"),
-  url: z.url("url must be a valid URL"),
-  events: z.array(webhookEventsEnum).min(1, "events is required"),
-  packageId: z.string().nullable().optional(),
-  payloadMode: z.enum(["full", "summary"]).optional(),
-  active: z.boolean().optional(),
-});
+const webhookScopeEnum = z.enum(["organization", "application"]);
+
+const createWebhookSchema = z
+  .object({
+    scope: webhookScopeEnum.optional().default("application"),
+    applicationId: z.string().min(1).optional(),
+    url: z.url("url must be a valid URL"),
+    events: z.array(webhookEventsEnum).min(1, "events is required"),
+    packageId: z.string().nullable().optional(),
+    payloadMode: z.enum(["full", "summary"]).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine(
+    (data) => data.scope !== "application" || (data.applicationId && data.applicationId.length > 0),
+    { message: "applicationId is required when scope is 'application'", path: ["applicationId"] },
+  );
 
 const updateWebhookSchema = z.object({
   url: z.url().optional(),
@@ -56,10 +64,14 @@ export function createWebhooksRouter() {
     const body = await c.req.json();
     const data = parseBody(createWebhookSchema, body);
 
-    // Verify applicationId belongs to this org (throws 404 if not found)
-    await getApplication(orgId, data.applicationId);
+    // Verify applicationId belongs to this org when scope is "application"
+    if (data.scope === "application" && data.applicationId) {
+      await getApplication(orgId, data.applicationId);
+    }
 
-    const result = await createWebhook(orgId, data.applicationId, {
+    const result = await createWebhook(orgId, {
+      scope: data.scope,
+      applicationId: data.applicationId,
       url: data.url,
       events: data.events,
       packageId: data.packageId,
@@ -69,11 +81,12 @@ export function createWebhooksRouter() {
     return c.json(result, 201);
   });
 
-  // GET /api/webhooks — list webhooks (optionally filtered by applicationId)
+  // GET /api/webhooks — list webhooks (optionally filtered by scope/applicationId)
   router.get("/", rateLimit(300), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.req.query("applicationId");
-    const result = await listWebhooks(orgId, applicationId);
+    const scope = c.req.query("scope");
+    const result = await listWebhooks(orgId, { applicationId, scope });
     return c.json({ object: "list", data: result });
   });
 

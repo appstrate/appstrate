@@ -1,8 +1,14 @@
+import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { WEBHOOK_EVENTS } from "../hooks/use-webhooks";
+
+/** Toggle an event in a state setter — shared by create and edit forms. */
+export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {
+  setter((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
+}
 
 interface WebhookFormFieldsProps {
   selectedEvents: string[];
