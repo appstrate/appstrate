@@ -10,12 +10,10 @@ import type { Execution } from "@appstrate/shared-types";
 
 export function ExecutionRow({
   execution,
-  executionNumber,
   flowName,
   userName,
 }: {
   execution: Execution;
-  executionNumber?: number;
   flowName?: string;
   userName?: string;
 }) {
@@ -44,11 +42,13 @@ export function ExecutionRow({
         "flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
       )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
-      state={{ executionNumber }}
+      state={{ executionNumber: execution.executionNumber }}
     >
       <div className="flex flex-1 items-center gap-2 min-w-0">
-        {executionNumber != null && (
-          <span className="text-muted-foreground font-mono text-xs">#{executionNumber}</span>
+        {execution.executionNumber != null && (
+          <span className="text-muted-foreground font-mono text-xs">
+            #{execution.executionNumber}
+          </span>
         )}
         {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
         <Badge status={execution.status} />

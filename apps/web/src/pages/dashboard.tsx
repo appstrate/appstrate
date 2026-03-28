@@ -22,7 +22,6 @@ export function DashboardPage() {
   if (error) return <ErrorState message={error.message} />;
 
   const executions = execData?.executions ?? [];
-  const total = execData?.total ?? 0;
 
   // Build flow lookup map
   const flowMap = new Map<
@@ -129,11 +128,10 @@ export function DashboardPage() {
           </Link>
         </div>
         <div className="rounded-md border border-border">
-          {recentExecutions.map((exec: Execution, index: number) => (
+          {recentExecutions.map((exec: Execution) => (
             <ExecutionRow
               key={exec.id}
               execution={exec}
-              executionNumber={total - index}
               flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
             />
           ))}
