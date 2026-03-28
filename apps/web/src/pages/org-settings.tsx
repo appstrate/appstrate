@@ -309,7 +309,7 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      <PageHeader title={t("orgSettings.pageTitle")} breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("orgSettings.pageTitle") }]} />
+      <PageHeader title={t("orgSettings.pageTitle")} emoji="⚙️" breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("orgSettings.pageTitle") }]} />
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="mb-4">
           <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>

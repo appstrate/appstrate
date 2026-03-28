@@ -377,6 +377,7 @@ export function WebhookDetailPage() {
     <div>
       <PageHeader
         title={webhook.url}
+        emoji="🪝"
         breadcrumbs={[
           { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
           { label: "", node: <AppBreadcrumbSwitcher /> },

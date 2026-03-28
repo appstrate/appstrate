@@ -67,6 +67,7 @@ export function AppSettingsPage() {
     <>
       <PageHeader
         title={application.name}
+        emoji="⚙️"
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("applications.pageTitle", { ns: "settings" }), href: "/applications" },
