@@ -1,5 +1,6 @@
 import type { EmailType, EmailRenderer } from "@appstrate/emails";
 import { registerEmailOverrides } from "@appstrate/emails";
+import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
@@ -21,6 +22,7 @@ export interface CloudModule {
     recordUsage(orgId: string, executionId: string, cost: number): Promise<void>;
     onOrgCreated(orgId: string, userEmail: string): Promise<void>;
     onOrgDeleted(orgId: string): Promise<void>;
+    onBeforeSignup?(email: string): void;
   };
   registerCloudRoutes(app: unknown): void;
   emailOverrides?: Partial<{ [K in EmailType]: EmailRenderer<K> }>;
@@ -59,6 +61,11 @@ export async function loadCloud(): Promise<CloudModule | null> {
   // Step 4: register email template overrides if provided
   if (mod.emailOverrides) {
     registerEmailOverrides(mod.emailOverrides);
+  }
+
+  // Step 5: wire domain allowlist hook into Better Auth signup
+  if (mod.cloudHooks.onBeforeSignup) {
+    setBeforeSignupHook(mod.cloudHooks.onBeforeSignup);
   }
 
   _cloud = mod;
