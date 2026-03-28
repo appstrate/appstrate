@@ -65,6 +65,7 @@
   "executions.colInput": "Entrée",
   "exec.rerun": "Relancer",
   "exec.tabLogs": "Logs",
+  "exec.tabResultGroup": "Résultat",
   "exec.tabResult": "Data",
   "exec.tabState": "State",
   "exec.tabReport": "Rapport",
