@@ -46,9 +46,7 @@ import {
   fieldsToSchema,
 } from "../components/flow-editor/utils";
 import type { SchemaField } from "../components/flow-editor/schema-section";
-import flowSchema from "../lib/schemas/flow.schema.json";
-import skillSchema from "../lib/schemas/skill.schema.json";
-import toolSchema from "../lib/schemas/tool.schema.json";
+import { flowSchema, skillSchema, toolSchema } from "@appstrate/core/schemas";
 import type { PackageFormState } from "../lib/package-type-modules";
 import { getPackageTypeModule } from "../lib/package-type-modules";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
@@ -100,28 +98,28 @@ function FlowEditorInner({
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
-  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() => ({
-    input: schemaToFields(
-      (state.manifest.input as { schema?: JSONSchemaObject } | undefined)?.schema,
-      "input",
-    ),
-    output: schemaToFields(
-      (state.manifest.output as { schema?: JSONSchemaObject } | undefined)?.schema,
-      "output",
-    ),
-    config: schemaToFields(
-      (state.manifest.config as { schema?: JSONSchemaObject } | undefined)?.schema,
-      "config",
-    ),
-  }));
+  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() => {
+    type ManifestWrapper = {
+      schema?: JSONSchemaObject;
+      fileConstraints?: Record<string, { accept?: string; maxSize?: number }>;
+      uiHints?: Record<string, { placeholder?: string }>;
+      propertyOrder?: string[];
+    };
+    const wrapperFor = (key: string) => state.manifest[key] as ManifestWrapper | undefined;
+    return {
+      input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
+      output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
+      config: schemaToFields(wrapperFor("config")?.schema, "config", wrapperFor("config")),
+    };
+  });
 
   const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];
 
   const onSchemaChange = (key: "input" | "output" | "config") => (fields: SchemaField[]) => {
     setSchemaFields((prev) => ({ ...prev, [key]: fields }));
-    const schema = fieldsToSchema(fields, key);
-    if (schema) {
-      updateManifest({ [key]: { schema } });
+    const wrapper = fieldsToSchema(fields, key);
+    if (wrapper) {
+      updateManifest({ [key]: wrapper });
     } else {
       setState((s) => {
         const { [key]: _, ...rest } = s.manifest;

@@ -5,7 +5,7 @@
 
 import type { Context } from "hono";
 import type { UploadedFile } from "./adapters/types.ts";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, FileConstraint } from "@appstrate/shared-types";
 import {
   validateInput,
   validateFileInputs,
@@ -28,6 +28,7 @@ export interface ParsedInput {
 export async function parseRequestInput(
   c: Context,
   inputSchema?: JSONSchemaObject,
+  fileConstraints?: Record<string, FileConstraint>,
 ): Promise<ParsedInput> {
   const hasFileFields = schemaHasFileFields(inputSchema);
 
@@ -47,7 +48,7 @@ export async function parseRequestInput(
     }
 
     // Always validate file inputs — catches missing required files even when none uploaded
-    const fileValidation = validateFileInputs(uploadedFiles, inputSchema!);
+    const fileValidation = validateFileInputs(uploadedFiles, inputSchema!, fileConstraints);
     if (!fileValidation.valid) {
       const first = fileValidation.errors[0]!;
       throw invalidRequest(first.message, first.field);

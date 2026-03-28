@@ -1,8 +1,14 @@
 import type { FlowEditorState, ProviderEntry, ResourceEntry } from "./types";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
-import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
-import { getOrderedKeys } from "@appstrate/shared-types";
+import type {
+  JSONSchemaObject,
+  JSONSchemaProperty,
+  FileConstraint,
+  UIHint,
+  SchemaWrapper,
+} from "@appstrate/shared-types";
+import { getOrderedKeys, isFileField, isMultipleFileField } from "@appstrate/shared-types";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 // ─── Default state ──────────────────────────────────────────
@@ -164,29 +170,37 @@ function convertDefaultValue(value: string, type: string): unknown {
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output" | "config" | "credentials",
+  wrapper?: {
+    fileConstraints?: Record<string, FileConstraint>;
+    uiHints?: Record<string, UIHint>;
+    propertyOrder?: string[];
+  },
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  const keys = getOrderedKeys(schema);
+  const keys = getOrderedKeys(schema, wrapper?.propertyOrder);
   return keys.map((key) => {
     const prop = schema.properties[key];
+    const fileField = isFileField(prop);
+    const constraints = wrapper?.fileConstraints?.[key];
+    const hint = wrapper?.uiHints?.[key];
     return {
       _id: crypto.randomUUID(),
       key,
-      type: prop.type || "string",
+      type: fileField ? "file" : prop.type || "string",
       description: prop.description || "",
       required: requiredSet.has(key),
-      ...(mode === "input" && prop.type === "file"
+      ...(mode === "input" && fileField
         ? {
-            accept: prop.accept || "",
-            maxSize: prop.maxSize != null ? String(prop.maxSize) : "",
-            multiple: prop.multiple ?? false,
-            maxFiles: prop.maxFiles != null ? String(prop.maxFiles) : "",
+            accept: constraints?.accept || "",
+            maxSize: constraints?.maxSize != null ? String(constraints.maxSize) : "",
+            multiple: isMultipleFileField(prop),
+            maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
           }
         : {}),
-      ...(mode === "input" && prop.type !== "file"
+      ...(mode === "input" && !fileField
         ? {
-            placeholder: prop.placeholder || "",
+            placeholder: hint?.placeholder || "",
             default: prop.default != null ? String(prop.default) : "",
           }
         : {}),
@@ -203,46 +217,73 @@ export function schemaToFields(
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output" | "config" | "credentials",
-): JSONSchemaObject | null {
+): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
   const properties: Record<string, JSONSchemaProperty> = {};
   const required: string[] = [];
+  const fileConstraints: Record<string, FileConstraint> = {};
+  const uiHints: Record<string, UIHint> = {};
   for (const f of filtered) {
-    const prop: JSONSchemaProperty = { type: f.type };
-    if (f.description) prop.description = f.description;
+    const key = f.key.trim();
     if (mode === "input" && f.type === "file") {
-      if (f.accept) prop.accept = f.accept;
+      // Generate standard JSON Schema for file fields
+      const fileItemProp: JSONSchemaProperty = {
+        type: "string",
+        format: "uri",
+        contentMediaType: "application/octet-stream",
+      };
+      if (f.multiple) {
+        const prop: JSONSchemaProperty = { type: "array", items: fileItemProp };
+        if (f.description) prop.description = f.description;
+        if (f.maxFiles) {
+          const n = Number(f.maxFiles);
+          if (!isNaN(n)) prop.maxItems = n;
+        }
+        properties[key] = prop;
+      } else {
+        const prop: JSONSchemaProperty = { ...fileItemProp };
+        if (f.description) prop.description = f.description;
+        properties[key] = prop;
+      }
+      // Build fileConstraints
+      const constraint: FileConstraint = {};
+      if (f.accept) constraint.accept = f.accept;
       if (f.maxSize) {
         const n = Number(f.maxSize);
-        if (!isNaN(n)) prop.maxSize = n;
+        if (!isNaN(n)) constraint.maxSize = n;
       }
-      if (f.multiple) prop.multiple = true;
-      if (f.multiple && f.maxFiles) {
-        const n = Number(f.maxFiles);
-        if (!isNaN(n)) prop.maxFiles = n;
-      }
+      if (Object.keys(constraint).length > 0) fileConstraints[key] = constraint;
     } else {
+      const prop: JSONSchemaProperty = { type: f.type };
+      if (f.description) prop.description = f.description;
       if (mode === "input" || mode === "config") {
         const def = convertDefaultValue(f.default || "", f.type);
         if (def !== undefined) prop.default = def;
       }
-      if (mode === "input" && f.placeholder) prop.placeholder = f.placeholder;
+      if (mode === "config") {
+        const enumVals = f.enumValues
+          ?.split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (enumVals && enumVals.length > 0) prop.enum = enumVals;
+      }
+      properties[key] = prop;
+      // Build uiHints for placeholder
+      if (mode === "input" && f.placeholder) {
+        uiHints[key] = { placeholder: f.placeholder };
+      }
     }
-    if (mode === "config") {
-      const enumVals = f.enumValues
-        ?.split(",")
-        .map((v) => v.trim())
-        .filter(Boolean);
-      if (enumVals && enumVals.length > 0) prop.enum = enumVals;
-    }
-    if (f.required) required.push(f.key.trim());
-    properties[f.key.trim()] = prop;
+    if (f.required) required.push(key);
   }
   return {
-    type: "object",
-    properties,
-    ...(required.length > 0 ? { required } : {}),
+    schema: {
+      type: "object",
+      properties,
+      ...(required.length > 0 ? { required } : {}),
+    },
+    ...(Object.keys(fileConstraints).length > 0 ? { fileConstraints } : {}),
+    ...(Object.keys(uiHints).length > 0 ? { uiHints } : {}),
     propertyOrder: filtered.map((f) => f.key.trim()),
   };
 }

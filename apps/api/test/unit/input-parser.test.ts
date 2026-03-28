@@ -49,7 +49,12 @@ function formDataApp(formData: FormData, inputSchema: Parameters<typeof parseReq
 const FILE_SCHEMA_WITH_REQUIRED = {
   type: "object" as const,
   properties: {
-    files: { type: "file", description: "Upload file", multiple: false },
+    files: {
+      type: "string",
+      description: "Upload file",
+      format: "uri",
+      contentMediaType: "application/octet-stream",
+    },
     title: { type: "string", description: "Optional title" },
   },
   required: ["files"],
@@ -194,7 +199,12 @@ describe("parseRequestInput — required file validation", () => {
     const optionalFileSchema = {
       type: "object" as const,
       properties: {
-        files: { type: "file", description: "Optional file" },
+        files: {
+          type: "string",
+          description: "Optional file",
+          format: "uri",
+          contentMediaType: "application/octet-stream",
+        },
       },
     };
     const formData = new FormData();

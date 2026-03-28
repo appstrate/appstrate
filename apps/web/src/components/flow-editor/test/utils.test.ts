@@ -9,6 +9,7 @@ import {
   schemaToFields,
   fieldsToSchema,
 } from "../utils";
+import type { SchemaField } from "../schema-section";
 
 // ─── getManifestName ────────────────────────────────────────
 
@@ -152,9 +153,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
         count: { type: "number", description: "Total count" },
       },
       required: ["summary"],
-      propertyOrder: ["summary", "count"],
     };
-    const fields = schemaToFields(schema, "output");
+    const fields = schemaToFields(schema, "output", { propertyOrder: ["summary", "count"] });
     expect(fields).toHaveLength(2);
     expect(fields[0]!.key).toBe("summary");
     expect(fields[0]!.required).toBe(true);
@@ -163,8 +163,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
     const result = fieldsToSchema(fields, "output");
     expect(result).not.toBeNull();
-    expect(result!.properties.summary.type).toBe("string");
-    expect(result!.required).toEqual(["summary"]);
+    expect(result!.schema.properties.summary.type).toBe("string");
+    expect(result!.schema.required).toEqual(["summary"]);
   });
 
   it("roundtrips config schema with defaults and enums", () => {
@@ -173,30 +173,63 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
       properties: {
         mode: { type: "string", description: "Mode", default: "fast", enum: ["fast", "slow"] },
       },
-      propertyOrder: ["mode"],
     };
-    const fields = schemaToFields(schema, "config");
+    const fields = schemaToFields(schema, "config", { propertyOrder: ["mode"] });
     expect(fields[0]!.default).toBe("fast");
     expect(fields[0]!.enumValues).toBe("fast, slow");
 
     const result = fieldsToSchema(fields, "config");
-    expect(result!.properties.mode.default).toBe("fast");
-    expect(result!.properties.mode.enum).toEqual(["fast", "slow"]);
+    expect(result!.schema.properties.mode.default).toBe("fast");
+    expect(result!.schema.properties.mode.enum).toEqual(["fast", "slow"]);
   });
 
-  it("roundtrips input schema with placeholder", () => {
+  it("roundtrips input schema with placeholder via uiHints", () => {
     const schema = {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search query", placeholder: "Enter query..." },
+        query: { type: "string", description: "Search query" },
       },
+    };
+    const wrapper = {
+      uiHints: { query: { placeholder: "Enter query..." } },
       propertyOrder: ["query"],
     };
-    const fields = schemaToFields(schema, "input");
+    const fields = schemaToFields(schema, "input", wrapper);
     expect(fields[0]!.placeholder).toBe("Enter query...");
 
     const result = fieldsToSchema(fields, "input");
-    expect(result!.properties.query.placeholder).toBe("Enter query...");
+    expect(result!.uiHints?.query?.placeholder).toBe("Enter query...");
+  });
+
+  it("roundtrips input schema with file field", () => {
+    const schema = {
+      type: "object" as const,
+      properties: {
+        doc: {
+          type: "array",
+          items: { type: "string", format: "uri", contentMediaType: "application/octet-stream" },
+          maxItems: 5,
+          description: "Upload docs",
+        },
+      },
+    };
+    const wrapper = {
+      fileConstraints: { doc: { accept: ".pdf", maxSize: 10485760 } },
+      propertyOrder: ["doc"],
+    };
+    const fields = schemaToFields(schema, "input", wrapper);
+    expect(fields[0]!.type).toBe("file");
+    expect(fields[0]!.multiple).toBe(true);
+    expect(fields[0]!.accept).toBe(".pdf");
+    expect(fields[0]!.maxFiles).toBe("5");
+
+    const result = fieldsToSchema(fields, "input");
+    expect(result!.schema.properties.doc.type).toBe("array");
+    expect(result!.schema.properties.doc.items?.format).toBe("uri");
+    expect(result!.schema.properties.doc.items?.contentMediaType).toBe("application/octet-stream");
+    expect(result!.schema.properties.doc.maxItems).toBe(5);
+    expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
+    expect(result!.fileConstraints?.doc?.maxSize).toBe(10485760);
   });
 
   it("returns null for empty fields", () => {
@@ -205,5 +238,173 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
   it("returns empty array for undefined schema", () => {
     expect(schemaToFields(undefined, "output")).toEqual([]);
+  });
+});
+
+// ─── JSON Schema purity — fieldsToSchema output ─────────────
+
+const BANNED_SCHEMA_KEYWORDS = [
+  "placeholder",
+  "accept",
+  "maxSize",
+  "multiple",
+  "maxFiles",
+  "propertyOrder",
+];
+
+function findKeywordInObject(obj: unknown, keyword: string, path = ""): string[] {
+  const found: string[] = [];
+  if (obj && typeof obj === "object") {
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (key === keyword) found.push(`${path}.${key}`);
+      if (value && typeof value === "object") {
+        found.push(...findKeywordInObject(value, keyword, `${path}.${key}`));
+      }
+    }
+  }
+  return found;
+}
+
+describe("fieldsToSchema — JSON Schema purity", () => {
+  it("schema never contains non-standard keywords for input with file + text fields", () => {
+    const fields = [
+      {
+        _id: "1",
+        key: "query",
+        type: "string",
+        description: "Search",
+        required: true,
+        placeholder: "Enter query...",
+        default: "",
+      },
+      {
+        _id: "2",
+        key: "doc",
+        type: "file",
+        description: "Upload",
+        required: false,
+        accept: ".pdf,.docx",
+        maxSize: "10485760",
+        multiple: true,
+        maxFiles: "5",
+      },
+    ];
+    const result = fieldsToSchema(fields as SchemaField[], "input");
+    expect(result).not.toBeNull();
+
+    // Check the schema object (not the wrapper) for banned keywords
+    for (const keyword of BANNED_SCHEMA_KEYWORDS) {
+      const violations = findKeywordInObject(result!.schema, keyword);
+      expect(violations).toEqual([]);
+    }
+  });
+
+  it("schema never contains type:'file'", () => {
+    const fields = [
+      {
+        _id: "1",
+        key: "attachment",
+        type: "file",
+        description: "File",
+        required: false,
+        accept: "",
+        maxSize: "",
+        multiple: false,
+        maxFiles: "",
+      },
+    ];
+    const result = fieldsToSchema(fields as SchemaField[], "input");
+    expect(result).not.toBeNull();
+
+    const violations = findKeywordInObject(result!.schema, "type")
+      .map((path) => {
+        const parts = path.split(".");
+        let obj: unknown = result!.schema;
+        for (const p of parts.slice(1)) {
+          obj = (obj as Record<string, unknown>)?.[p];
+        }
+        return { path, value: obj };
+      })
+      .filter((v) => v.value === "file");
+
+    expect(violations).toEqual([]);
+  });
+
+  it("placeholder goes to uiHints, not into schema properties", () => {
+    const fields = [
+      {
+        _id: "1",
+        key: "email",
+        type: "string",
+        description: "Email",
+        required: true,
+        placeholder: "user@example.com",
+        default: "",
+      },
+    ];
+    const result = fieldsToSchema(fields as SchemaField[], "input");
+    expect(result).not.toBeNull();
+
+    // Not in schema
+    expect(result!.schema.properties.email).not.toHaveProperty("placeholder");
+    // In wrapper uiHints
+    expect(result!.uiHints?.email?.placeholder).toBe("user@example.com");
+  });
+
+  it("file constraints go to fileConstraints, not into schema properties", () => {
+    const fields = [
+      {
+        _id: "1",
+        key: "doc",
+        type: "file",
+        description: "Document",
+        required: false,
+        accept: ".pdf",
+        maxSize: "5242880",
+        multiple: false,
+        maxFiles: "",
+      },
+    ];
+    const result = fieldsToSchema(fields as SchemaField[], "input");
+    expect(result).not.toBeNull();
+
+    // Not in schema
+    expect(result!.schema.properties.doc).not.toHaveProperty("accept");
+    expect(result!.schema.properties.doc).not.toHaveProperty("maxSize");
+    expect(result!.schema.properties.doc).not.toHaveProperty("multiple");
+    expect(result!.schema.properties.doc).not.toHaveProperty("maxFiles");
+    // In wrapper
+    expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
+    expect(result!.fileConstraints?.doc?.maxSize).toBe(5242880);
+  });
+
+  it("propertyOrder is at wrapper level, not in schema", () => {
+    const fields = [
+      {
+        _id: "1",
+        key: "a",
+        type: "string",
+        description: "",
+        required: false,
+        placeholder: "",
+        default: "",
+      },
+      {
+        _id: "2",
+        key: "b",
+        type: "number",
+        description: "",
+        required: false,
+        placeholder: "",
+        default: "",
+      },
+    ];
+    const result = fieldsToSchema(fields as SchemaField[], "input");
+    expect(result).not.toBeNull();
+
+    // Not in schema
+    expect(result!.schema).not.toHaveProperty("propertyOrder");
+    // In wrapper
+    expect(result!.propertyOrder).toEqual(["a", "b"]);
   });
 });

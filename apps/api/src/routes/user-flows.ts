@@ -54,7 +54,6 @@ export function createUserFlowsRouter() {
     requireMutableFlow(),
     async (c) => {
       const flow = c.get("flow");
-      const orgId = c.get("orgId");
       const packageId = flow.id;
 
       const body = await c.req.json();
@@ -83,7 +82,6 @@ export function createUserFlowsRouter() {
     requireMutableFlow(),
     async (c) => {
       const flow = c.get("flow");
-      const orgId = c.get("orgId");
       const packageId = flow.id;
 
       const body = await c.req.json();

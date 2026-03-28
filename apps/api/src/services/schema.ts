@@ -1,5 +1,6 @@
 import Ajv from "ajv";
-import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
+import type { JSONSchemaObject, JSONSchemaProperty, FileConstraint } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { normalizeConfigForValidation } from "../lib/flow-readiness.ts";
@@ -55,7 +56,7 @@ export function validateInput(
   // Exclude file fields from AJV validation (they're validated separately)
   const nonFileProps: Record<string, JSONSchemaProperty> = {};
   for (const [key, prop] of Object.entries(schema.properties)) {
-    if (prop.type !== "file") nonFileProps[key] = prop;
+    if (!isFileField(prop)) nonFileProps[key] = prop;
   }
   if (Object.keys(nonFileProps).length === 0) {
     return { valid: true, errors: [], data: input ?? {} };
@@ -74,11 +75,12 @@ export function validateInput(
 export function validateFileInputs(
   files: UploadedFile[],
   schema: JSONSchemaObject,
+  fileConstraints?: Record<string, FileConstraint>,
 ): ValidationResult {
   const errors: { field: string; message: string }[] = [];
 
   for (const [key, prop] of Object.entries(schema.properties)) {
-    if (prop.type !== "file") continue;
+    if (!isFileField(prop)) continue;
 
     const fieldFiles = files.filter((f) => f.fieldName === key);
     const isRequired = schema.required?.includes(key);
@@ -88,26 +90,29 @@ export function validateFileInputs(
       continue;
     }
 
-    if (!prop.multiple && fieldFiles.length > 1) {
+    const multiple = prop.type === "array";
+    if (!multiple && fieldFiles.length > 1) {
       errors.push({ field: key, message: `Field '${key}' accepts only one file` });
     }
 
-    if (prop.maxFiles && fieldFiles.length > prop.maxFiles) {
+    const maxFiles = prop.maxItems;
+    if (maxFiles && fieldFiles.length > maxFiles) {
       errors.push({
         field: key,
-        message: `Field '${key}' accepts at most ${prop.maxFiles} files`,
+        message: `Field '${key}' accepts at most ${maxFiles} files`,
       });
     }
 
-    // Validate each file
-    const allowedExts = prop.accept
+    // Read upload constraints from wrapper-level fileConstraints
+    const constraints = fileConstraints?.[key];
+    const allowedExts = constraints?.accept
       ?.split(",")
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean);
 
     for (const file of fieldFiles) {
-      if (prop.maxSize && file.size > prop.maxSize) {
-        const maxMB = (prop.maxSize / (1024 * 1024)).toFixed(1);
+      if (constraints?.maxSize && file.size > constraints.maxSize) {
+        const maxMB = (constraints.maxSize / (1024 * 1024)).toFixed(1);
         errors.push({
           field: key,
           message: `File '${file.name}' exceeds max size (${maxMB} MB)`,
@@ -119,7 +124,7 @@ export function validateFileInputs(
         if (!allowedExts.some((a) => a === ext)) {
           errors.push({
             field: key,
-            message: `File '${file.name}' has a disallowed extension (accepted: ${prop.accept})`,
+            message: `File '${file.name}' has a disallowed extension (accepted: ${constraints?.accept})`,
           });
         }
       }
@@ -129,10 +134,10 @@ export function validateFileInputs(
   return { valid: errors.length === 0, errors };
 }
 
-/** Check if a schema has any file fields */
+/** Check if a schema has any file fields (format: "uri" + contentMediaType). */
 export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
   if (!schema?.properties) return false;
-  return Object.values(schema.properties).some((p) => p.type === "file");
+  return Object.values(schema.properties).some(isFileField);
 }
 
 /** Parse FormData to extract input JSON + uploaded files from a multipart request */
@@ -146,7 +151,7 @@ export async function parseFormDataFiles(
   const files: UploadedFile[] = [];
   const nameCounts = new Map<string, number>();
   for (const [key, prop] of Object.entries(schema.properties)) {
-    if (prop.type !== "file") continue;
+    if (!isFileField(prop)) continue;
     const entries = formData.getAll(key);
     for (const entry of entries) {
       if (!(entry instanceof File)) continue;

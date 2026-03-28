@@ -153,7 +153,7 @@ describe("buildEnrichedPrompt — user input", () => {
           type: "object",
           properties: {
             text: { type: "string" },
-            document: { type: "file" },
+            document: { type: "string", format: "uri", contentMediaType: "application/octet-stream" },
           },
         },
       },

@@ -189,8 +189,8 @@ function buildPayload(
   }
 
   if (fields.authMode === "custom") {
-    const schema = fieldsToSchema(credentialFields, "credentials");
-    if (schema) data.credentialSchema = schema;
+    const wrapper = fieldsToSchema(credentialFields, "credentials");
+    if (wrapper) data.credentialSchema = wrapper.schema;
   }
 
   if (fields.allowAllUris) {

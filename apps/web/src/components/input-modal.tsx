@@ -6,6 +6,7 @@ import { InputFields } from "./input-fields";
 import { Spinner } from "./spinner";
 import { initInputValues, buildInputPayload } from "./input-utils";
 import type { FlowDetail } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/shared-types";
 
 interface InputModalProps {
   open: boolean;
@@ -102,7 +103,7 @@ function InputModalForm({
     const fieldErrs: Record<string, string> = {};
     for (const key of Object.keys(schema.properties)) {
       const prop = schema.properties[key]!;
-      if (prop.type === "file") {
+      if (isFileField(prop)) {
         if (schema.required?.includes(key) && (!fileValues[key] || fileValues[key]!.length === 0)) {
           fieldErrs[key] = t("input.fileRequired", { field: key });
         }
@@ -137,6 +138,8 @@ function InputModalForm({
         fileValues={fileValues}
         onFileChange={handleFileChange}
         errors={fieldErrors}
+        fileConstraints={flow.input?.fileConstraints}
+        uiHints={flow.input?.uiHints}
       />
       <div className="flex justify-end gap-2 pt-4">
         <Button variant="outline" onClick={onClose} disabled={isPending}>
