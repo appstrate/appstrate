@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { refreshAuth, useAuth } from "../hooks/use-auth";
 import { orgStore } from "../stores/org-store";
@@ -22,6 +23,7 @@ export function InviteAcceptPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, logout } = useAuth();
 
   const [info, setInfo] = useState<InviteInfo | null>(null);
@@ -74,14 +76,15 @@ export function InviteAcceptPage() {
         throw new Error(data.detail || t("invite.error"));
       }
       const data = await res.json();
+      await refreshAuth();
+      // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect
+      await queryClient.invalidateQueries({ queryKey: ["orgs"] });
       if (data.orgId) {
         orgStore.getState().setId(data.orgId);
       }
-      await refreshAuth();
       navigate("/");
-      window.location.reload();
     },
-    [token, navigate, t],
+    [token, navigate, t, queryClient],
   );
 
   const handleRegisterAndAccept = useCallback(

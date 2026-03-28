@@ -22,10 +22,12 @@ import {
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import {
   createInvitation,
+  sendMagicLinkInvitation,
   getOrgInvitations,
   cancelInvitation,
   updateInvitationRole,
 } from "../services/invitations.ts";
+import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
 import { createDefaultApplication } from "../services/applications.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
@@ -256,7 +258,19 @@ router.post("/:orgId/members", async (c) => {
   const targetUser = await findUserByEmail(data.email.trim());
 
   if (targetUser) {
-    // User exists — add directly
+    if (getAppConfig().features.smtp) {
+      // User exists + SMTP → create invitation with magic link (auto-auth on click)
+      const invitation = await createInvitation({
+        email: data.email.trim(),
+        orgId,
+        role,
+        invitedBy: user.id,
+        skipEmail: true,
+      });
+      void sendMagicLinkInvitation(invitation);
+      return c.json({ invited: true, email: invitation.email, role }, 201);
+    }
+    // User exists + no SMTP → add directly
     try {
       await addMember(orgId, targetUser.id, role);
     } catch (err) {

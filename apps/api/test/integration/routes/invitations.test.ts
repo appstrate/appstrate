@@ -97,6 +97,73 @@ describe("Invitations API", () => {
       expect(res.status).toBe(410);
     });
 
+    it("accepts invitation for existing user when authenticated with matching email", async () => {
+      const existingUser = await createTestUser({ email: "existing@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "existing@test.com",
+        role: "admin",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: existingUser.cookie,
+        },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(true);
+      expect(body.isNewUser).toBe(false);
+      expect(body.orgId).toBe(ctx.orgId);
+      expect(body.requiresLogin).toBe(false);
+    });
+
+    it("returns requiresLogin when existing user is not authenticated", async () => {
+      await createTestUser({ email: "noauth@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "noauth@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      // Accept without session cookie
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(true);
+      expect(body.isNewUser).toBe(false);
+      expect(body.requiresLogin).toBe(true);
+    });
+
+    it("reports isNewUser=false in info when user exists", async () => {
+      await createTestUser({ email: "known@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "known@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/info`);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.isNewUser).toBe(false);
+      expect(body.email).toBe("known@test.com");
+    });
+
     it("rejects accept when authenticated user email does not match invitation email", async () => {
       // Create the invited user so the backend takes the "existing user" path
       await createTestUser({ email: "invited@test.com" });

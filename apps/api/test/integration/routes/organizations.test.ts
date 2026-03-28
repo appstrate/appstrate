@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestContext, addOrgMember } from "../../helpers/auth.ts";
+import { createTestUser, createTestContext, addOrgMember, authHeaders } from "../../helpers/auth.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, orgInvitations, organizationMembers } from "@appstrate/db/schema";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 import { getOrgSettings } from "../../../src/services/organizations.ts";
 
@@ -166,6 +166,96 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("POST /api/orgs/:orgId/members", () => {
+    it("adds existing user directly when SMTP is disabled", async () => {
+      const ctx = await createTestContext({ orgSlug: "memberorg" });
+      const member = await createTestUser({ email: "member@test.com" });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: "member@test.com", role: "member" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.added).toBe(true);
+      expect(body.userId).toBe(member.id);
+      expect(body.role).toBe("member");
+
+      // Verify membership in DB
+      await assertDbHas(
+        organizationMembers,
+        eq(organizationMembers.userId, member.id),
+      );
+    });
+
+    it("creates invitation for non-existing user", async () => {
+      const ctx = await createTestContext({ orgSlug: "memberorg" });
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: "newuser@test.com", role: "admin" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.invited).toBe(true);
+      expect(body.email).toBe("newuser@test.com");
+      expect(body.role).toBe("admin");
+
+      // Verify invitation in DB
+      await assertDbHas(
+        orgInvitations,
+        eq(orgInvitations.email, "newuser@test.com"),
+      );
+    });
+
+    it("rejects non-admin with 403", async () => {
+      const ctx = await createTestContext({ orgSlug: "memberorg" });
+      const member = await createTestUser({ email: "regular@test.com" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: {
+          Cookie: member.cookie,
+          "X-Org-Id": ctx.orgId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: "someone@test.com" }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("rejects invalid email", async () => {
+      const ctx = await createTestContext({ orgSlug: "memberorg" });
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: "not-an-email" }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("handles adding already existing member gracefully", async () => {
+      const ctx = await createTestContext({ orgSlug: "memberorg" });
+      const member = await createTestUser({ email: "already@test.com" });
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: "already@test.com" }),
+      });
+
+      // Should fail since user is already a member
+      expect(res.status).toBe(400);
     });
   });
 });

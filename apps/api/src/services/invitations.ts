@@ -4,6 +4,8 @@ import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
+import { auth } from "../lib/auth.ts";
+import { logger } from "../lib/logger.ts";
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -14,11 +16,13 @@ export async function createInvitation({
   orgId,
   role,
   invitedBy,
+  skipEmail,
 }: {
   email: string;
   orgId: string;
   role: "member" | "admin";
   invitedBy: string;
+  skipEmail?: boolean;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -51,7 +55,7 @@ export async function createInvitation({
 
   if (!invitation) throw new Error("Failed to create invitation");
 
-  if (getAppConfig().features.smtp) {
+  if (!skipEmail && getAppConfig().features.smtp) {
     const [orgName, inviterName] = await Promise.all([
       getOrgName(orgId),
       getInviterName(invitedBy),
@@ -142,6 +146,33 @@ export async function getInviterName(userId: string): Promise<string> {
     .where(eq(user.id, userId))
     .limit(1);
   return row?.displayName || row?.name || "Un membre";
+}
+
+/**
+ * Trigger Better Auth magic link for an existing user invitation.
+ * The callbackURL contains the invitation token — the sendMagicLink callback
+ * in auth.ts detects this and sends the invitation email instead of the generic one.
+ */
+export async function sendMagicLinkInvitation(invitation: {
+  id: string;
+  token: string;
+  email: string;
+}) {
+  try {
+    await auth.api.signInMagicLink({
+      body: {
+        email: invitation.email,
+        callbackURL: `/invite/${invitation.token}/accept`,
+      },
+      headers: new Headers(),
+    });
+  } catch (err) {
+    logger.error("Failed to send magic link invitation", {
+      error: err instanceof Error ? err.message : String(err),
+      email: invitation.email,
+      invitationId: invitation.id,
+    });
+  }
 }
 
 export async function expireOldInvitations() {

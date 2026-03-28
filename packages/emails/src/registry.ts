@@ -1,11 +1,13 @@
 import type { EmailType, EmailRenderer, EmailPropsMap, RenderedEmail } from "./types.ts";
 import { renderVerificationEmail } from "./templates/verification.ts";
 import { renderInvitationEmail } from "./templates/invitation.ts";
+import { renderMagicLinkEmail } from "./templates/magic-link.ts";
 
 // Default OSS templates
 const defaultRenderers: { [K in EmailType]: EmailRenderer<K> } = {
   verification: renderVerificationEmail,
   invitation: renderInvitationEmail,
+  "magic-link": renderMagicLinkEmail,
 };
 
 // Mutable registry — defaults + overrides merged at boot
