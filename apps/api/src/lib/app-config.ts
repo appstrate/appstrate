@@ -8,7 +8,9 @@ const env = getEnv();
 // In OSS (no cloud module): models & provider keys visible, billing hidden.
 // In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
 export function buildAppConfig(): AppConfig {
-  const isCloud = getCloudModule() !== null;
+  const cloud = getCloudModule();
+  const isCloud = cloud !== null;
+  const cloudConfig = cloud?.getCloudConfig();
   return {
     platform: isCloud ? "cloud" : "oss",
     features: {
@@ -19,6 +21,7 @@ export function buildAppConfig(): AppConfig {
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
+    legalUrls: cloudConfig?.legalUrls,
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }

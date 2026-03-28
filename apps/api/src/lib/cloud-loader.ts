@@ -12,7 +12,7 @@ export interface CloudModule {
     sendMail?: (to: string, subject: string, html: string) => void;
     getOrgAdminEmails?: (orgId: string) => Promise<string[]>;
   }): Promise<void>;
-  getCloudConfig(): { platform: "cloud" };
+  getCloudConfig(): { platform: "cloud"; legalUrls?: { terms?: string; privacy?: string } };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   QuotaExceededError: new (...args: any[]) => Error & { code: "QUOTA_EXCEEDED" };
   publicPaths: string[];

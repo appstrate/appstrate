@@ -11,4 +11,3 @@ export function log(
 ): void {
   emit({ type: "log", level, message, ...(data ? { data } : {}) });
 }
-

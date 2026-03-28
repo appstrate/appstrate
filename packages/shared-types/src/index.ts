@@ -29,6 +29,10 @@ export interface AppConfig {
     githubAuth: boolean;
     smtp: boolean;
   };
+  legalUrls?: {
+    terms?: string;
+    privacy?: string;
+  };
   trustedOrigins: string[];
 }
 
