@@ -10,6 +10,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
+COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
 COPY runtime-pi/package.json runtime-pi/
 COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
@@ -63,6 +64,10 @@ COPY --from=build /app/packages/connect/package.json ./packages/connect/
 COPY --from=build /app/packages/db/src ./packages/db/src
 COPY --from=build /app/packages/db/package.json ./packages/db/
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
+
+# Emails package (templates + rendering — used by API and DB/auth at runtime)
+COPY --from=build /app/packages/emails/src ./packages/emails/src
+COPY --from=build /app/packages/emails/package.json ./packages/emails/
 
 # Env package (Zod-validated env vars — used by API, DB, connect at runtime)
 COPY --from=build /app/packages/env/src ./packages/env/src
