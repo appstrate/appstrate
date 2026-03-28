@@ -422,6 +422,7 @@ Full schema: `packages/db/src/schema.ts` (34 tables + 5 enums, Drizzle ORM). Mig
 
 - **Reference manifest**: See system package ZIPs in `system-packages/`. Validation: `services/schema.ts`.
 - **JSON Schema `required`**: Use top-level `required: ["field1"]` array — NOT `required: true` on individual properties.
+- **Schema wrapper convention**: Input/output/config sections use an AFPS wrapper — NOT a raw JSON Schema object. Structure: `{ schema: JSONSchemaObject, fileConstraints?: Record<string, { accept?, maxSize? }>, uiHints?: Record<string, { placeholder? }>, propertyOrder?: string[] }`. The `schema` member MUST be pure JSON Schema 2020-12 (no `placeholder`, `accept`, `maxSize`, `multiple`, `maxFiles`, `propertyOrder` inside). File fields use `{ type: "string", format: "uri", contentMediaType: "..." }` (single) or `{ type: "array", items: { type: "string", format: "uri", contentMediaType: "..." }, maxItems: N }` (multiple) — NEVER `type: "file"`. Detect file fields via `isFileField()` / `isMultipleFileField()` from `@appstrate/shared-types`, not inline heuristics.
 - **Extension import**: `@mariozechner/pi-coding-agent` (NOT `pi-agent`).
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** argument. Using `execute(args)` receives the toolCallId string.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
