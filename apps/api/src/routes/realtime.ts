@@ -82,19 +82,52 @@ function openRealtimeStream(
   verbose: boolean,
 ) {
   return streamSSE(c, async (stream) => {
+    // Queue + signal so events written by PG NOTIFY callbacks are flushed
+    // immediately via the stream's own async context (avoids Bun buffering).
+    const pending: { event: string; data: string }[] = [];
+    let wake: (() => void) | null = null;
+
     const send = (evt: RealtimeEvent) => {
       const payload = verbose ? evt.data : stripPayload(evt);
-      stream.writeSSE({ event: evt.event, data: JSON.stringify(payload) }).catch(() => {});
+      pending.push({ event: evt.event, data: JSON.stringify(payload) });
+      wake?.();
     };
 
     addSubscriber({ id: subId, filter, send });
     stream.onAbort(() => {
       removeSubscriber(subId);
+      wake?.();
     });
 
-    while (true) {
-      await stream.writeSSE({ event: "ping", data: "" });
-      await stream.sleep(30000);
+    const PING_INTERVAL = 30_000;
+    let lastWrite = Date.now();
+
+    while (!stream.aborted) {
+      // Drain any queued events
+      while (pending.length > 0) {
+        const msg = pending.shift()!;
+        await stream.writeSSE(msg);
+        lastWrite = Date.now();
+      }
+
+      // Wait for next event or ping timeout, whichever comes first
+      const elapsed = Date.now() - lastWrite;
+      const timeout = Math.max(0, PING_INTERVAL - elapsed);
+
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeout);
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      wake = null;
+
+      // If no events were queued during the wait, send a keep-alive ping
+      if (pending.length === 0) {
+        await stream.writeSSE({ event: "ping", data: "" });
+        lastWrite = Date.now();
+      }
     }
   });
 }
