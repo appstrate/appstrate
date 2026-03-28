@@ -272,7 +272,7 @@ function EmailVerificationBadge() {
   const { features } = useAppConfig();
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 
-  if (!features.emailVerification || !user) return null;
+  if (!features.smtp || !user) return null;
 
   if (user.emailVerified) {
     return (
@@ -352,7 +352,7 @@ function EmailChangeForm() {
         }
       } else {
         reset();
-        if (features.emailVerification) {
+        if (features.smtp) {
           setVerificationPendingEmail(data.newEmail.trim());
         } else {
           setSuccess(t("preferences.emailChanged"));

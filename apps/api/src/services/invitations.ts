@@ -1,6 +1,8 @@
 import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
 import { eq, and, lt, desc } from "drizzle-orm";
+import { getAppConfig } from "../lib/app-config.ts";
+import { sendInvitationEmail } from "./email.ts";
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -47,6 +49,20 @@ export async function createInvitation({
     .returning();
 
   if (!invitation) throw new Error("Failed to create invitation");
+
+  if (getAppConfig().features.smtp) {
+    const [orgName, inviterName] = await Promise.all([
+      getOrgName(orgId),
+      getInviterName(invitedBy),
+    ]);
+    void sendInvitationEmail({
+      email: normalizedEmail,
+      token,
+      orgName,
+      inviterName,
+      role,
+    });
+  }
 
   return invitation;
 }
