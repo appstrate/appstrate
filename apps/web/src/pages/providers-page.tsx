@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -130,6 +131,15 @@ export function ProvidersPage() {
             ))}
           </div>
         )}
+        <div className="mt-4 pt-3 border-t border-border">
+          <Link
+            to="/providers/new"
+            className="flex items-center justify-center gap-2 w-full rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors no-underline"
+          >
+            <span className="text-lg leading-none">+</span>
+            {t("providers.newProvider")}
+          </Link>
+        </div>
       </Modal>
       {configureProvider && (
         <ProviderCredentialsModal
