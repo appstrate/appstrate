@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { isFileField } from "@appstrate/shared-types";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
@@ -47,7 +48,7 @@ export function FlowActions({
 
   const hasFileInput =
     detail.input?.schema?.properties &&
-    Object.values(detail.input.schema.properties).some((p) => p.type === "file");
+    Object.values(detail.input.schema.properties).some(isFileField);
 
   return (
     <PackageActionsDropdown

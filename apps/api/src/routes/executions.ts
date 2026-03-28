@@ -424,7 +424,11 @@ export function createExecutionsRouter() {
         profileIdOverride
           ? Promise.resolve(profileIdOverride)
           : getEffectiveProfileId(actor, packageId),
-        parseRequestInput(c, effectiveFlow.manifest.input?.schema),
+        parseRequestInput(
+          c,
+          effectiveFlow.manifest.input?.schema,
+          effectiveFlow.manifest.input?.fileConstraints,
+        ),
       ]);
       const { providerProfiles, config } = preflightResult;
 

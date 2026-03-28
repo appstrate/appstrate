@@ -348,14 +348,14 @@ describe("validateInput", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("schema with custom keyword (placeholder) does not throw", () => {
-    const schema: JSONSchemaObject = {
+  it("schema with unknown keyword does not throw", () => {
+    const schema = {
       type: "object",
       properties: {
-        topic: { type: "string", description: "Search topic", placeholder: "ex: AI" },
+        topic: { type: "string", description: "Search topic", customKeyword: "ignored" },
       },
       required: ["topic"],
-    };
+    } as unknown as JSONSchemaObject;
     expect(() => validateInput({ topic: "AI" }, schema)).not.toThrow();
     const result = validateInput({ topic: "AI" }, schema);
     expect(result.valid).toBe(true);
@@ -366,15 +366,15 @@ describe("validateInput", () => {
 // validateConfig (with custom keywords)
 // =====================================================
 
-describe("validateConfig with custom keywords", () => {
-  it("schema with placeholder does not throw", () => {
-    const schema: JSONSchemaObject = {
+describe("validateConfig with unknown keywords", () => {
+  it("schema with unknown keyword does not throw", () => {
+    const schema = {
       type: "object",
       properties: {
-        api_key: { type: "string", description: "API key", placeholder: "sk-..." },
+        api_key: { type: "string", description: "API key", customKeyword: "ignored" },
       },
       required: ["api_key"],
-    };
+    } as unknown as JSONSchemaObject;
     expect(() => validateConfig({ api_key: "sk-123" }, schema)).not.toThrow();
     const result = validateConfig({ api_key: "sk-123" }, schema);
     expect(result.valid).toBe(true);

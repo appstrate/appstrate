@@ -4,6 +4,7 @@ import {
   getDefaultAuthorizedUris,
   type ProviderDefinition,
 } from "@appstrate/connect";
+import { isFileField } from "@appstrate/shared-types";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
 function formatFileSize(bytes: number): string {
@@ -163,14 +164,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   const inputRequired = ctx.schemas.input?.required ?? [];
   const nonFileInputEntries = Object.entries(ctx.input).filter(([key]) => {
     const prop = inputProps?.[key];
-    return prop?.type !== "file";
+    return prop ? !isFileField(prop) : true;
   });
 
   if (nonFileInputEntries.length > 0 || (inputProps && Object.keys(inputProps).length > 0)) {
     sections.push("## User Input\n");
     if (inputProps) {
       for (const [key, prop] of Object.entries(inputProps)) {
-        if (prop.type === "file") continue;
+        if (isFileField(prop)) continue;
         const req = inputRequired.includes(key) ? "required" : "optional";
         const value = ctx.input[key];
         const valueStr = value !== undefined ? ` — \`${value}\`` : "";

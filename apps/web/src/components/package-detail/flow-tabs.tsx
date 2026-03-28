@@ -10,7 +10,8 @@ import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/shared-types";
 import { useOrg } from "../../hooks/use-org";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { FlowProvidersSection } from "./flow-providers-section";
@@ -96,7 +97,7 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
 
   const hasFileInput =
     detail.input?.schema?.properties &&
-    Object.values(detail.input.schema.properties).some((p) => p.type === "file");
+    Object.values(detail.input.schema.properties).some(isFileField);
 
   if (hasFileInput) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
@@ -189,15 +190,12 @@ export function FlowMemoriesTab({
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 function buildInputExample(
-  properties?: Record<
-    string,
-    { type?: string; default?: unknown; enum?: unknown[]; placeholder?: string }
-  >,
+  properties?: Record<string, JSONSchemaProperty>,
 ): Record<string, unknown> {
   if (!properties) return {};
   const example: Record<string, unknown> = {};
   for (const [key, prop] of Object.entries(properties)) {
-    if (prop.type === "file") continue;
+    if (isFileField(prop)) continue;
     if (prop.default !== undefined) {
       example[key] = prop.default;
     } else if (prop.enum && prop.enum.length > 0) {
@@ -207,7 +205,7 @@ function buildInputExample(
     } else if (prop.type === "boolean") {
       example[key] = false;
     } else {
-      example[key] = prop.placeholder || "";
+      example[key] = "";
     }
   }
   return example;
@@ -217,18 +215,7 @@ interface CurlParams {
   packageId: string;
   orgId: string;
   authToken: string;
-  inputSchema?: {
-    properties?: Record<
-      string,
-      {
-        type?: string;
-        default?: unknown;
-        enum?: unknown[];
-        placeholder?: string;
-        multiple?: boolean;
-      }
-    >;
-  };
+  inputSchema?: JSONSchemaObject;
   baseUrl: string;
 }
 
@@ -270,7 +257,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
   }
 
   for (const [key, prop] of Object.entries(properties)) {
-    if (prop.type !== "file") continue;
+    if (!isFileField(prop)) continue;
     lines.push(`  -F '${key}=@/path/to/${key}.pdf' \\`);
   }
 
@@ -319,7 +306,7 @@ export function FlowApiTab({ packageId, isOrgAdmin }: { packageId: string; isOrg
   const schema = detail.input?.schema;
   const fileKeys = schema?.properties
     ? Object.entries(schema.properties)
-        .filter(([, p]: [string, { type?: string }]) => p.type === "file")
+        .filter(([, p]) => isFileField(p))
         .map(([k]) => k)
     : [];
   const hasFileInput = fileKeys.length > 0;

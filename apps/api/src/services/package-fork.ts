@@ -1,5 +1,5 @@
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
-import type { Manifest } from "@appstrate/core/validation";
+
 import { zipArtifact } from "@appstrate/core/zip";
 import {
   getOrgItem,

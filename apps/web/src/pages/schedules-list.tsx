@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/shared-types";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -106,9 +107,7 @@ export function SchedulesListPage() {
                 inputSchema={createFlowDetail?.input?.schema}
                 blockedMessage={
                   createFlowDetail?.input?.schema?.properties &&
-                  Object.values(createFlowDetail.input.schema.properties).some(
-                    (p) => p.type === "file",
-                  )
+                  Object.values(createFlowDetail.input.schema.properties).some(isFileField)
                     ? tFlows("schedule.fileInputBlocked")
                     : undefined
                 }

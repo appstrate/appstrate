@@ -31,7 +31,6 @@ import {
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
 import { validateToolSource, validateManifest } from "@appstrate/core/validation";
-import type { Manifest } from "@appstrate/core/validation";
 import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
