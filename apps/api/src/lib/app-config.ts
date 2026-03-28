@@ -10,7 +10,6 @@ const env = getEnv();
 export function buildAppConfig(): AppConfig {
   const cloud = getCloudModule();
   const isCloud = cloud !== null;
-  const cloudConfig = cloud?.getCloudConfig();
   return {
     platform: isCloud ? "cloud" : "oss",
     features: {
@@ -21,7 +20,7 @@ export function buildAppConfig(): AppConfig {
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
-    legalUrls: cloudConfig?.legalUrls,
+    legalUrls: cloud?.legalUrls,
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
