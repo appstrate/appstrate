@@ -17,6 +17,9 @@ export interface ContainerOrchestrator {
   /** Clean up orphaned workloads/networks from a previous crash. */
   cleanupOrphans(): Promise<CleanupReport>;
 
+  /** Ensure images are locally available (pull if missing/outdated). No-op when not applicable. */
+  ensureImages(images: string[]): Promise<void>;
+
   /** Create an isolated environment for an execution. Docker: bridge network. K8s: namespace. */
   createIsolationBoundary(executionId: string): Promise<IsolationBoundary>;
 

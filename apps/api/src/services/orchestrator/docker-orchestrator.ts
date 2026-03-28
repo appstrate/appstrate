@@ -50,6 +50,10 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     }
   }
 
+  async ensureImages(images: string[]): Promise<void> {
+    await Promise.all(images.map((image) => docker.pullImage(image)));
+  }
+
   async cleanupOrphans(): Promise<CleanupReport> {
     const { containers, networks } = await docker.cleanupOrphanedContainers();
     return { workloads: containers, isolationBoundaries: networks };

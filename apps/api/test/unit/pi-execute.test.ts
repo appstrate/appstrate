@@ -24,6 +24,7 @@ function createMockOrchestrator(
     initialize: mock(() => Promise.resolve()),
     shutdown: mock(() => Promise.resolve()),
     cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
+    ensureImages: mock(() => Promise.resolve()),
     createIsolationBoundary: mock(
       (executionId: string): Promise<IsolationBoundary> =>
         Promise.resolve({ id: `net-${executionId}`, name: `appstrate-exec-${executionId}` }),
