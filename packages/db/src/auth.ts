@@ -160,6 +160,25 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     requireEmailVerification: smtpEnabled,
+    ...(smtpEnabled && {
+      sendResetPassword: async ({ user, url }) => {
+        try {
+          const { subject, html } = renderEmail("reset-password", {
+            email: user.email,
+            url,
+            locale: "fr",
+          });
+          await smtpTransport!.sendMail({
+            from: env.SMTP_FROM,
+            to: user.email,
+            subject,
+            html,
+          });
+        } catch {
+          // Fire-and-forget — don't block reset flow if email fails
+        }
+      },
+    }),
   },
 
   ...(smtpEnabled && {
