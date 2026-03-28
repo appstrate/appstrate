@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
@@ -8,6 +8,7 @@ import { useFlows } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
+import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 export interface CardItem {
@@ -96,6 +97,7 @@ export function PackageList() {
   const { data: flows, isLoading, error } = useFlows();
   const { isOrgAdmin } = useOrg();
   const { data: unreadCounts } = useUnreadCountsByFlow();
+  const [importOpen, setImportOpen] = useState(false);
 
   const items: CardItem[] | undefined = flows?.map((f) => ({
     id: f.id,
@@ -109,21 +111,29 @@ export function PackageList() {
   }));
 
   return (
-    <PackageTab
-      title={t("list.tabFlows")}
-      items={items}
-      isLoading={isLoading}
-      error={error}
-      emptyMessage={t("list.empty")}
-      emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
-      emptyIcon={Layers}
-      extraActions={
-        isOrgAdmin ? (
-          <Link to="/flows/new">
-            <Button>{t("list.create")}</Button>
-          </Link>
-        ) : undefined
-      }
-    />
+    <>
+      <PackageTab
+        title={t("list.tabFlows")}
+        items={items}
+        isLoading={isLoading}
+        error={error}
+        emptyMessage={t("list.empty")}
+        emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
+        emptyIcon={Layers}
+        extraActions={
+          isOrgAdmin ? (
+            <>
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                {t("nav.import", { ns: "common" })}
+              </Button>
+              <Link to="/flows/new">
+                <Button>{t("list.create")}</Button>
+              </Link>
+            </>
+          ) : undefined
+        }
+      />
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+    </>
   );
 }

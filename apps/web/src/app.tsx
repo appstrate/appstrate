@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
 import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
 import { PackageEditorPage } from "./pages/package-editor";
@@ -34,150 +33,51 @@ import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
-import { OrgSwitcher, NavMenu } from "./components/org-switcher";
+import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
 
-import { useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "./stores/theme-store";
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useApplicationResolver } from "./hooks/use-current-application";
+import { useTheme } from "./stores/theme-store";
 import { Spinner } from "./components/spinner";
-import { User, Settings, FileText, LogOut, Palette } from "lucide-react";
-import { themeOptions } from "./lib/theme";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/toaster";
 
-function UserMenu({
-  displayName,
-  isAdmin,
-  onLogout,
-}: {
-  displayName: string;
-  isAdmin?: boolean;
-  onLogout: () => void;
-}) {
-  const { t } = useTranslation();
-  const { theme, setTheme } = useTheme();
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 text-muted-foreground hover:text-foreground"
-          aria-label={t("userMenu.ariaLabel")}
-        >
-          <User size={18} className="shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuLabel className="flex items-center gap-2">
-          <span>{displayName}</span>
-          {isAdmin && (
-            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium uppercase">
-              {t("admin")}
-            </span>
-          )}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to="/preferences" className="flex items-center gap-2">
-            <Settings size={14} />
-            {t("userMenu.preferences")}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Palette size={14} />
-            {t("userMenu.theme")}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {themeOptions.map(({ value, labelKey, icon: Icon }) => (
-              <DropdownMenuItem
-                key={value}
-                onSelect={() => setTheme(value)}
-                className="flex items-center gap-2"
-              >
-                <Icon size={14} />
-                {t(labelKey)}
-                {theme === value && <span className="ml-auto text-primary">✓</span>}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuItem asChild>
-          <a
-            href="/api/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2"
-          >
-            <FileText size={14} />
-            {t("userMenu.apiDocs")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onLogout} className="flex items-center gap-2">
-          <LogOut size={14} />
-          {t("userMenu.logout")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function MainLayout() {
-  const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
-  const { user, profile, logout } = useAuth();
-  const { isOrgAdmin } = useOrg();
   useApplicationResolver();
 
-  const handleLogout = async () => {
-    await logout();
-    queryClient.clear();
-  };
-
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <header className="flex items-center gap-2 mb-8 pb-4 border-b border-border">
-        <Link to="/" className="flex items-center shrink-0 mr-2">
-          <img
-            src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-            alt="Appstrate"
-            className="h-[34px] w-auto"
-          />
-        </Link>
-        <div className="mx-2 h-5 w-px bg-border" />
-        <OrgSwitcher />
-        <div className="mr-auto" />
-        <NavMenu />
-        <NotificationBell />
-        <div className="mx-2 h-5 w-px bg-border" />
-        <UserMenu
-          displayName={profile?.displayName || user!.email || ""}
-          isAdmin={isOrgAdmin}
-          onLogout={() => void handleLogout()}
-        />
-      </header>
-      <Outlet />
-    </div>
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+            <Link to="/">
+              <img
+                src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+                alt="Appstrate"
+                className="h-7 w-auto"
+              />
+            </Link>
+          </div>
+          <div className="flex-1" />
+          <div className="px-4">
+            <NotificationBell />
+          </div>
+        </header>
+        <div className="flex flex-1 flex-col p-6">
+          <Outlet />
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
@@ -198,10 +98,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Spinner />
-        </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <Spinner />
       </div>
     );
   }
@@ -214,10 +112,8 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   // Orgs exist but none selected yet (auto-select happening)
   if (!currentOrg) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Spinner />
-        </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <Spinner />
       </div>
     );
   }
@@ -253,10 +149,8 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Spinner />
-        </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <Spinner />
       </div>
     );
   }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
-import { AppWindow, Plus, ShieldAlert } from "lucide-react";
+import { AppWindow, Plus, Settings, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
@@ -60,11 +60,9 @@ export function ApplicationsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {applications.map((app) => (
-            <button
+            <div
               key={app.id}
-              type="button"
-              onClick={() => handleAppClick(app.id)}
-              className="rounded-lg border border-border bg-card p-5 hover:border-primary/30 transition-colors text-left w-full"
+              className="rounded-lg border border-border bg-card p-5"
             >
               <div className="flex items-center gap-3">
                 <div className="flex-1">
@@ -80,8 +78,16 @@ export function ApplicationsPage() {
                   </span>
                 </div>
                 {app.isDefault && <Badge variant="running">{t("applications.default")}</Badge>}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleAppClick(app.id)}
+                  title={t("nav.appSettings", { ns: "common" })}
+                >
+                  <Settings size={16} />
+                </Button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
