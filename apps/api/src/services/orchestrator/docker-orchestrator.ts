@@ -51,7 +51,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async ensureImages(images: string[]): Promise<void> {
-    await Promise.all(images.map((image) => docker.pullImage(image)));
+    await Promise.all(images.map((image) => docker.ensureImage(image)));
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
