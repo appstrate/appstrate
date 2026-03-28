@@ -98,8 +98,8 @@ function FlowEditorInner({
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
-  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(
-    () => manifestToSchemaFields(state.manifest),
+  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() =>
+    manifestToSchemaFields(state.manifest),
   );
 
   const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];

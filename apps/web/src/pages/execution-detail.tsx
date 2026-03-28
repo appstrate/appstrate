@@ -111,14 +111,11 @@ export function ExecutionDetailPage() {
   );
 
   // Sub-tab state: report by default if available, otherwise data.
-  const [resultSubTab, setResultSubTab] = useState<"report" | "data">("data");
-  const [subTabInitialized, setSubTabInitialized] = useState(false);
-  useEffect(() => {
-    if (!subTabInitialized && (finalReport || hasOutput)) {
-      setSubTabInitialized(true);
-      setResultSubTab(finalReport ? "report" : "data");
-    }
-  }, [finalReport, hasOutput, subTabInitialized]);
+  // Auto-default is derived; user override is tracked separately.
+  const autoSubTab = finalReport ? "report" : hasOutput ? "data" : null;
+  const [userSubTab, setUserSubTab] = useState<"report" | "data" | null>(null);
+  const resultSubTab = userSubTab ?? autoSubTab ?? "data";
+  const setResultSubTab = (v: "report" | "data") => setUserSubTab(v);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -234,9 +231,7 @@ export function ExecutionDetailPage() {
           onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
         >
           <TabsList>
-            {hasResult && (
-              <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>
-            )}
+            {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
               {allLogs.length > 0 && (
