@@ -263,6 +263,22 @@ describe("ALL /proxy — validation", () => {
       headers: { "X-Provider": "gmail", "X-Target": "https://api.example.com/v1" },
     });
     expect(res.status).toBe(502);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("not found");
+  });
+
+  it("returns 502 with platform detail when provider is unknown", async () => {
+    const fetchCredentials = mock(async () => {
+      throw new Error("Provider '@appstrate/gmail' is not required by this flow");
+    });
+    const app = createApp(makeDeps({ fetchCredentials }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: { "X-Provider": "@appstrate/gmail", "X-Target": "https://api.example.com/v1" },
+    });
+    expect(res.status).toBe(502);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("is not required by this flow");
   });
 
   it("returns 400 for unresolved placeholders in URL", async () => {
