@@ -343,15 +343,14 @@ export function WebhookDetailPage() {
             {webhook.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
           </Badge>
         }
-      />
-
-      {/* Tabs */}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="deliveries">{t("settings:webhooks.deliveries")}</TabsTrigger>
-          <TabsTrigger value="settings">{t("settings:webhooks.settings")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      >
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-2">
+          <TabsList>
+            <TabsTrigger value="deliveries">{t("settings:webhooks.deliveries")}</TabsTrigger>
+            <TabsTrigger value="settings">{t("settings:webhooks.settings")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </PageHeader>
 
       {tab === "deliveries" && <DeliveriesTab webhookId={id!} />}
       {tab === "settings" && <SettingsTab webhookId={id!} />}
