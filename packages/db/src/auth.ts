@@ -22,18 +22,29 @@ const smtpTransport = smtpEnabled
     })
   : null;
 
-// ─── Google social provider (only if configured) ───────────
+// ─── Social providers (only if configured) ──────────────
 
 const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+const githubEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+const anySocialEnabled = googleEnabled || githubEnabled;
 
-const socialProviders = googleEnabled
-  ? {
-      google: {
-        clientId: env.GOOGLE_CLIENT_ID!,
-        clientSecret: env.GOOGLE_CLIENT_SECRET!,
-      },
-    }
-  : undefined;
+const socialProviders: Record<string, { clientId: string; clientSecret: string }> | undefined =
+  anySocialEnabled
+    ? {
+        ...(googleEnabled && {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID!,
+            clientSecret: env.GOOGLE_CLIENT_SECRET!,
+          },
+        }),
+        ...(githubEnabled && {
+          github: {
+            clientId: env.GITHUB_CLIENT_ID!,
+            clientSecret: env.GITHUB_CLIENT_SECRET!,
+          },
+        }),
+      }
+    : undefined;
 
 // ─── Auth ──────────────────────────────────────────────────
 
@@ -81,8 +92,11 @@ export const auth = betterAuth({
 
   account: {
     accountLinking: {
-      enabled: googleEnabled,
-      trustedProviders: googleEnabled ? ["google"] : [],
+      enabled: anySocialEnabled,
+      trustedProviders: [
+        ...(googleEnabled ? ["google" as const] : []),
+        ...(githubEnabled ? ["github" as const] : []),
+      ],
       allowDifferentEmails: true,
     },
   },

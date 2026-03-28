@@ -26,6 +26,7 @@ export interface AppConfig {
     models: boolean;
     providerKeys: boolean;
     googleAuth: boolean;
+    githubAuth: boolean;
     smtp: boolean;
   };
   trustedOrigins: string[];

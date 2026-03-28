@@ -9,6 +9,7 @@ import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { GoogleSignInButton } from "./google-sign-in-button";
+import { GitHubSignInButton } from "./github-sign-in-button";
 
 type RegisterFormData = {
   displayName: string;
@@ -131,7 +132,7 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
             <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
               {isSubmitting ? t("loading") : t("login.signup")}
             </Button>
-            {features.googleAuth && (
+            {(features.googleAuth || features.githubAuth) && (
               <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
                 <span className="relative z-10 bg-background px-2 text-muted-foreground">
                   {t("login.or")}
@@ -139,9 +140,10 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
               </div>
             )}
           </div>
-          {features.googleAuth && (
-            <div className="mx-auto w-full max-w-sm">
-              <GoogleSignInButton />
+          {(features.googleAuth || features.githubAuth) && (
+            <div className="mx-auto w-full max-w-sm flex flex-col gap-2">
+              {features.googleAuth && <GoogleSignInButton />}
+              {features.githubAuth && <GitHubSignInButton />}
             </div>
           )}
         </div>
