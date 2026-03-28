@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, or, desc } from "drizzle-orm";
 import { Queue, Worker, UnrecoverableError } from "bullmq";
 import type { Job } from "bullmq";
 import { db } from "@appstrate/db/client";
@@ -71,6 +71,8 @@ function generateEventId(): string {
 
 function toWebhookResponse(row: {
   id: string;
+  scope: string;
+  applicationId: string | null;
   url: string;
   events: string[] | null;
   packageId: string | null;
@@ -82,6 +84,8 @@ function toWebhookResponse(row: {
   return {
     id: row.id,
     object: "webhook",
+    scope: row.scope === "organization" ? "organization" : "application",
+    applicationId: row.applicationId,
     url: row.url,
     events: row.events ?? [],
     packageId: row.packageId,
@@ -182,8 +186,9 @@ export async function buildSignedHeaders(
 
 export async function createWebhook(
   orgId: string,
-  applicationId: string,
   params: {
+    scope: "organization" | "application";
+    applicationId?: string | null;
     url: string;
     events: string[];
     packageId?: string | null;
@@ -216,7 +221,8 @@ export async function createWebhook(
     .values({
       id,
       orgId,
-      applicationId,
+      scope: params.scope,
+      applicationId: params.scope === "application" ? (params.applicationId ?? null) : null,
       url: params.url,
       events: validatedEvents,
       packageId: params.packageId ?? null,
@@ -229,15 +235,23 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(orgId: string, applicationId?: string): Promise<WebhookInfo[]> {
+export async function listWebhooks(
+  orgId: string,
+  filters?: { applicationId?: string; scope?: string },
+): Promise<WebhookInfo[]> {
   const conditions = [eq(webhooks.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(webhooks.applicationId, applicationId));
+  if (filters?.scope) {
+    conditions.push(eq(webhooks.scope, filters.scope));
+  }
+  if (filters?.applicationId) {
+    conditions.push(eq(webhooks.applicationId, filters.applicationId));
   }
 
   const rows = await db
     .select({
       id: webhooks.id,
+      scope: webhooks.scope,
+      applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
@@ -257,6 +271,8 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
   const [row] = await db
     .select({
       id: webhooks.id,
+      scope: webhooks.scope,
+      applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
@@ -437,6 +453,10 @@ function getDeliveryQueue(): Queue<DeliveryJobData> {
 /**
  * Dispatch webhook events for an execution status change.
  * Called from the execution pipeline after status transitions.
+ *
+ * Matches webhooks in two scopes:
+ * - "organization": fires for ALL executions in the org (dashboard + API)
+ * - "application": fires only for executions via a specific application's API key
  */
 export async function dispatchWebhookEvents(
   orgId: string,
@@ -444,14 +464,13 @@ export async function dispatchWebhookEvents(
   execution: Record<string, unknown>,
   applicationId?: string | null,
 ): Promise<void> {
-  // Webhooks are application-scoped — skip dispatch if no application context
-  if (!applicationId) return;
-
-  const conditions = [
-    eq(webhooks.orgId, orgId),
-    eq(webhooks.active, true),
-    eq(webhooks.applicationId, applicationId),
-  ];
+  // Build OR condition: org-scoped webhooks always match; app-scoped only if applicationId present
+  const scopeConditions = [and(eq(webhooks.scope, "organization"))];
+  if (applicationId) {
+    scopeConditions.push(
+      and(eq(webhooks.scope, "application"), eq(webhooks.applicationId, applicationId)),
+    );
+  }
 
   const rows = await db
     .select({
@@ -461,7 +480,7 @@ export async function dispatchWebhookEvents(
       payloadMode: webhooks.payloadMode,
     })
     .from(webhooks)
-    .where(and(...conditions));
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true), or(...scopeConditions)));
 
   const queue = getDeliveryQueue();
 

@@ -258,11 +258,11 @@ export function App() {
             />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
+            <Route path="/webhooks" element={<WebhooksPage />} />
+            <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route path="/api-keys" element={<ApiKeysPage />} />
-            <Route path="/webhooks" element={<WebhooksPage />} />
-            <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
             <Route path="/app-settings" element={<AppSettingsPage />} />
             <Route path="/org-settings" element={<OrgSettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -16,11 +16,18 @@ export const webhooksPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["url", "events", "applicationId"],
+              required: ["url", "events"],
               properties: {
+                scope: {
+                  type: "string",
+                  enum: ["organization", "application"],
+                  default: "application",
+                  description:
+                    "Webhook scope. 'organization' fires for all executions; 'application' fires only for executions via the linked application's API key",
+                },
                 applicationId: {
                   type: "string",
-                  description: "Application ID (app_ prefix) this webhook belongs to",
+                  description: "Application ID (app_ prefix). Required when scope is 'application'",
                 },
                 url: { type: "string", format: "uri", description: "HTTPS endpoint URL" },
                 events: {
@@ -103,6 +110,13 @@ export const webhooksPaths = {
           required: false,
           schema: { type: "string" },
           description: "Filter webhooks by application ID",
+        },
+        {
+          name: "scope",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["organization", "application"] },
+          description: "Filter webhooks by scope",
         },
       ],
       responses: {
