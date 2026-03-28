@@ -1,5 +1,6 @@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -13,7 +14,7 @@ export interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;
-  type?: "text" | "number";
+  type?: "text" | "number" | "textarea";
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -42,13 +43,9 @@ export function FormField({
   const errorId = error ? `error-${id}` : undefined;
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
 
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>
-        {label}
-        {required ? " *" : ""}
-      </Label>
-      {enumValues ? (
+  const renderInput = () => {
+    if (enumValues) {
+      return (
         <Select value={value} onValueChange={onChange}>
           <SelectTrigger
             id={id}
@@ -66,20 +63,49 @@ export function FormField({
             ))}
           </SelectContent>
         </Select>
-      ) : (
-        <Input
+      );
+    }
+
+    if (type === "textarea") {
+      return (
+        <Textarea
           id={id}
-          type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={placeholder}
           disabled={disabled}
+          rows={4}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={cn(error && "border-destructive")}
         />
-      )}
+      );
+    }
+
+    return (
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        disabled={disabled}
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+        className={cn(error && "border-destructive")}
+      />
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>
+        {label}
+        {required ? " *" : ""}
+      </Label>
+      {renderInput()}
       {description && (
         <p id={hintId} className="text-sm text-muted-foreground">
           {description}

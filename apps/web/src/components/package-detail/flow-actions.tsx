@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { isFileField } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";

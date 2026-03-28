@@ -10,6 +10,7 @@ import {
   fieldsToSchema,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 // ─── getManifestName ────────────────────────────────────────
 
@@ -147,13 +148,13 @@ describe("defaultEditorState", () => {
 describe("schemaToFields / fieldsToSchema roundtrip", () => {
   it("roundtrips output schema", () => {
     const schema = {
-      type: "object" as const,
+      type: "object",
       properties: {
         summary: { type: "string", description: "Brief summary" },
         count: { type: "number", description: "Total count" },
       },
       required: ["summary"],
-    };
+    } satisfies JSONSchemaObject;
     const fields = schemaToFields(schema, "output", { propertyOrder: ["summary", "count"] });
     expect(fields).toHaveLength(2);
     expect(fields[0]!.key).toBe("summary");
@@ -169,11 +170,11 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
   it("roundtrips config schema with defaults and enums", () => {
     const schema = {
-      type: "object" as const,
+      type: "object",
       properties: {
         mode: { type: "string", description: "Mode", default: "fast", enum: ["fast", "slow"] },
       },
-    };
+    } satisfies JSONSchemaObject;
     const fields = schemaToFields(schema, "config", { propertyOrder: ["mode"] });
     expect(fields[0]!.default).toBe("fast");
     expect(fields[0]!.enumValues).toBe("fast, slow");
@@ -185,11 +186,11 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
   it("roundtrips input schema with placeholder via uiHints", () => {
     const schema = {
-      type: "object" as const,
+      type: "object",
       properties: {
         query: { type: "string", description: "Search query" },
       },
-    };
+    } satisfies JSONSchemaObject;
     const wrapper = {
       uiHints: { query: { placeholder: "Enter query..." } },
       propertyOrder: ["query"],
@@ -203,7 +204,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
   it("roundtrips input schema with file field", () => {
     const schema = {
-      type: "object" as const,
+      type: "object",
       properties: {
         doc: {
           type: "array",
@@ -212,7 +213,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
           description: "Upload docs",
         },
       },
-    };
+    } satisfies JSONSchemaObject;
     const wrapper = {
       fileConstraints: { doc: { accept: ".pdf", maxSize: 10485760 } },
       propertyOrder: ["doc"],
@@ -224,9 +225,12 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(fields[0]!.maxFiles).toBe("5");
 
     const result = fieldsToSchema(fields, "input");
-    expect(result!.schema.properties.doc.type).toBe("array");
-    expect(result!.schema.properties.doc.items?.format).toBe("uri");
-    expect(result!.schema.properties.doc.items?.contentMediaType).toBe("application/octet-stream");
+    const docProp = result!.schema.properties.doc;
+    const docItems =
+      typeof docProp.items === "object" && !Array.isArray(docProp.items) ? docProp.items : null;
+    expect(docProp.type).toBe("array");
+    expect(docItems?.format).toBe("uri");
+    expect(docItems?.contentMediaType).toBe("application/octet-stream");
     expect(result!.schema.properties.doc.maxItems).toBe(5);
     expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
     expect(result!.fileConstraints?.doc?.maxSize).toBe(10485760);

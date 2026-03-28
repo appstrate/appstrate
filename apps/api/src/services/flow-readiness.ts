@@ -9,6 +9,7 @@ import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
 import { ApiError } from "../lib/errors.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 
 /**
  * Validate that a flow is ready for execution.
@@ -79,7 +80,7 @@ export async function validateFlowReadiness(params: {
       type: "object" as const,
       properties: {},
     };
-    const configValidation = validateConfig(config, configSchema);
+    const configValidation = validateConfig(config, asJSONSchemaObject(configSchema));
     if (!configValidation.valid) {
       const first = configValidation.errors[0]!;
       throw new ApiError({

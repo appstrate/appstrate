@@ -14,6 +14,7 @@ import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const createScheduleSchema = z.object({
   name: z.string().optional(),
@@ -57,7 +58,7 @@ export function createSchedulesRouter() {
 
     // Block scheduling for flows with file inputs
     const inputSchema = flow.manifest.input?.schema;
-    if (schemaHasFileFields(inputSchema)) {
+    if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
       throw invalidRequest("Cannot schedule flows with file inputs");
     }
 
@@ -68,7 +69,7 @@ export function createSchedulesRouter() {
 
     // Validate input against flow's input schema (catches missing required fields even when input is undefined)
     if (inputSchema) {
-      const inputValidation = validateInput(data.input, inputSchema);
+      const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
       if (!inputValidation.valid) {
         const first = inputValidation.errors[0]!;
         throw invalidRequest(first.message, first.field);

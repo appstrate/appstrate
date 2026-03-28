@@ -18,6 +18,7 @@ import { buildFlowPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { validateFlowReadiness } from "./flow-readiness.ts";
@@ -117,9 +118,15 @@ export function buildPromptContext(params: {
     input: params.input ?? {},
     files: params.files,
     schemas: {
-      input: params.flow.manifest.input?.schema,
-      config: params.flow.manifest.config?.schema,
-      output: params.flow.manifest.output?.schema,
+      input: params.flow.manifest.input?.schema
+        ? asJSONSchemaObject(params.flow.manifest.input.schema)
+        : undefined,
+      config: params.flow.manifest.config?.schema
+        ? asJSONSchemaObject(params.flow.manifest.config.schema)
+        : undefined,
+      output: params.flow.manifest.output?.schema
+        ? asJSONSchemaObject(params.flow.manifest.output.schema)
+        : undefined,
     },
     providers: params.providers ?? [],
     memories: params.memories,

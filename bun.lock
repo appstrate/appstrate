@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@appstrate/core": "2.8.8",
+        "@appstrate/core": "2.9.3",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -13,6 +13,7 @@
         "@readme/openapi-parser": "^5.5.0",
         "@redocly/openapi-core": "^2.19.1",
         "@types/bun": "latest",
+        "@types/json-schema": "7.0.15",
         "@types/semver": "^7.7.1",
         "eslint": "^10.0.3",
         "eslint-config-prettier": "^10.1.8",
@@ -32,7 +33,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/connect": "workspace:*",
-        "@appstrate/core": "^2.8.5",
+        "@appstrate/core": "^2.9.3",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
@@ -55,7 +56,7 @@
     "apps/web": {
       "name": "@appstrate/web",
       "dependencies": {
-        "@appstrate/core": "^2.8.5",
+        "@appstrate/core": "^2.9.3",
         "@appstrate/shared-types": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -137,7 +138,7 @@
       "name": "@appstrate/env",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.8.5",
+        "@appstrate/core": "^2.9.3",
         "zod": "^4.3.6",
       },
     },
@@ -145,7 +146,7 @@
       "name": "@appstrate/shared-types",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/core": "^2.8.5",
+        "@appstrate/core": "^2.9.3",
         "@appstrate/db": "workspace:*",
       },
     },
@@ -175,7 +176,7 @@
 
     "@appstrate/connect": ["@appstrate/connect@workspace:packages/connect"],
 
-    "@appstrate/core": ["@appstrate/core@2.8.8", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-bLqPPksRXl2vTXkGra5gU5fSrBico2ETxdsyHXutKZUyuvpI3VDNOEQBqb5yqr+t3iDSZ2W/mtSEf5Ogoa3Uhw=="],
+    "@appstrate/core": ["@appstrate/core@2.9.3", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-xic6QfTJObZZ1PGGKdF5Jx0DS6L1KXZErV5Ggpb2n4+YcFp/ULppeAIdIXT5J1fGRIDex9b3SV8PRMq2+K0Qyg=="],
 
     "@appstrate/db": ["@appstrate/db@workspace:packages/db"],
 
@@ -1830,14 +1831,6 @@
     "zustand": ["zustand@5.0.12", "", { "peerDependencies": { "@types/react": ">=18.0.0", "immer": ">=9.0.6", "react": ">=18.0.0", "use-sync-external-store": ">=1.2.0" }, "optionalPeers": ["@types/react", "immer", "react", "use-sync-external-store"] }, "sha512-i77ae3aZq4dhMlRhJVCYgMLKuSiZAaUPAct2AksxQ+gOtimhGMdXljRT21P5BNpeT4kXlLIckvkPM029OljD7g=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
-
-    "@appstrate/api/@appstrate/core": ["@appstrate/core@2.8.7", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-64U+oHpNHyIW0a/P7urakNI9mscm3P/tsKsAxHjLFREyUw5Kn6TfqhNAcKTw1ZvMhOD/1wHMp3WxH/8sE+ohyQ=="],
-
-    "@appstrate/env/@appstrate/core": ["@appstrate/core@2.8.7", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-64U+oHpNHyIW0a/P7urakNI9mscm3P/tsKsAxHjLFREyUw5Kn6TfqhNAcKTw1ZvMhOD/1wHMp3WxH/8sE+ohyQ=="],
-
-    "@appstrate/shared-types/@appstrate/core": ["@appstrate/core@2.8.7", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-64U+oHpNHyIW0a/P7urakNI9mscm3P/tsKsAxHjLFREyUw5Kn6TfqhNAcKTw1ZvMhOD/1wHMp3WxH/8sE+ohyQ=="],
-
-    "@appstrate/web/@appstrate/core": ["@appstrate/core@2.8.7", "", { "dependencies": { "@afps-spec/schema": "^1.0.4", "fflate": "^0.8.0", "pino": "^10.3.1", "semver": "^7.7.1", "zod": "^4.3.6" }, "peerDependencies": { "@aws-sdk/client-s3": "^3", "typescript": "^5" }, "optionalPeers": ["@aws-sdk/client-s3"] }, "sha512-64U+oHpNHyIW0a/P7urakNI9mscm3P/tsKsAxHjLFREyUw5Kn6TfqhNAcKTw1ZvMhOD/1wHMp3WxH/8sE+ohyQ=="],
 
     "@aws-crypto/sha1-browser/@smithy/util-utf8": ["@smithy/util-utf8@2.3.0", "", { "dependencies": { "@smithy/util-buffer-from": "^2.2.0", "tslib": "^2.6.2" } }, "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A=="],
 

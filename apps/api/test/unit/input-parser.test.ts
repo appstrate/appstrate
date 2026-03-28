@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import { parseRequestInput } from "../../src/services/input-parser.ts";
 import { ApiError } from "../../src/lib/errors.ts";
+import type { JSONSchemaObject } from "@appstrate/shared-types";
 
 // --- Helpers ---
 
@@ -58,7 +59,7 @@ const FILE_SCHEMA_WITH_REQUIRED = {
     title: { type: "string", description: "Optional title" },
   },
   required: ["files"],
-};
+} as const satisfies JSONSchemaObject;
 
 const INPUT_SCHEMA_WITH_REQUIRED = {
   type: "object" as const,
@@ -67,7 +68,7 @@ const INPUT_SCHEMA_WITH_REQUIRED = {
     message: { type: "string", description: "Optional message" },
   },
   required: ["email"],
-};
+} as const satisfies JSONSchemaObject;
 
 // --- Tests ---
 
@@ -169,7 +170,7 @@ describe("parseRequestInput — input schema validation", () => {
       properties: {
         note: { type: "string" },
       },
-    };
+    } as const satisfies JSONSchemaObject;
     const res = await jsonAppWithSchema({}, optionalSchema);
     expect(res.status).toBe(200);
   });
@@ -206,7 +207,7 @@ describe("parseRequestInput — required file validation", () => {
           contentMediaType: "application/octet-stream",
         },
       },
-    };
+    } as const satisfies JSONSchemaObject;
     const formData = new FormData();
     formData.set("input", JSON.stringify({}));
 

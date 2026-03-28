@@ -7,7 +7,7 @@ import { describe, it, expect } from "bun:test";
 import {
   isFileField,
   isMultipleFileField,
-  type JSONSchemaProperty,
+  type JSONSchema7,
   type JSONSchemaObject,
 } from "@appstrate/shared-types";
 import {
@@ -20,7 +20,7 @@ import {
 
 describe("isFileField", () => {
   it("detects single file field (string + uri + contentMediaType)", () => {
-    const prop: JSONSchemaProperty = {
+    const prop: JSONSchema7 = {
       type: "string",
       format: "uri",
       contentMediaType: "application/octet-stream",
@@ -30,7 +30,7 @@ describe("isFileField", () => {
   });
 
   it("detects multiple file field (array + items with uri + contentMediaType)", () => {
-    const prop: JSONSchemaProperty = {
+    const prop: JSONSchema7 = {
       type: "array",
       items: { type: "string", format: "uri", contentMediaType: "application/pdf" },
       maxItems: 5,
@@ -56,7 +56,7 @@ describe("isFileField", () => {
   });
 
   it("rejects old type:'file' convention", () => {
-    expect(isFileField({ type: "file" } as JSONSchemaProperty)).toBe(false);
+    expect(isFileField({ type: "file" } as unknown as JSONSchema7)).toBe(false);
   });
 
   it("rejects number, boolean, object types", () => {

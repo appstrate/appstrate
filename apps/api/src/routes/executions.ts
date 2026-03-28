@@ -27,6 +27,7 @@ import {
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackExecution, untrackExecution, abortExecution } from "../services/execution-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
@@ -259,7 +260,10 @@ export async function executeFlowInBackground(
       if (hasOutput) {
         const outputSchema = flow.manifest.output?.schema;
         if (outputSchema) {
-          const outputValidation = validateOutput(structuredOutput, outputSchema);
+          const outputValidation = validateOutput(
+            structuredOutput,
+            asJSONSchemaObject(outputSchema),
+          );
           if (!outputValidation.valid) {
             await appendExecutionLog(
               executionId,
@@ -426,7 +430,9 @@ export function createExecutionsRouter() {
           : getEffectiveProfileId(actor, packageId),
         parseRequestInput(
           c,
-          effectiveFlow.manifest.input?.schema,
+          effectiveFlow.manifest.input?.schema
+            ? asJSONSchemaObject(effectiveFlow.manifest.input.schema)
+            : undefined,
           effectiveFlow.manifest.input?.fileConstraints,
         ),
       ]);
