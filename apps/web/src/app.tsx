@@ -250,6 +250,7 @@ function useExternalRedirect(isAuthenticated: boolean) {
 
 export function App() {
   const { user, loading } = useAuth();
+  const { features } = useAppConfig();
   useExternalRedirect(!!user);
 
   if (loading) {
@@ -272,6 +273,16 @@ export function App() {
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
+      </ErrorBoundary>
+    );
+  }
+
+  // Authenticated but email not verified — block access until verified
+  if (features.smtp && !user.emailVerified) {
+    return (
+      <ErrorBoundary>
+        <Toaster />
+        <VerifyEmailPage />
       </ErrorBoundary>
     );
   }

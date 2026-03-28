@@ -95,8 +95,9 @@ export function useAuth() {
         name: displayName || email,
       });
       if (result.error) throw new Error(result.error.message);
-      // When email verification is enabled, Better Auth does not return a session
-      if (!result.data?.user) {
+      // When email verification is enabled, Better Auth may return user data
+      // but without a valid session — detect via missing user or unverified email
+      if (!result.data?.user || !result.data.user.emailVerified) {
         return { emailVerificationRequired: true };
       }
       const profile = await fetchProfile();
