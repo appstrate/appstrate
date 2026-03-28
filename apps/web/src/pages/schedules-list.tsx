@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
-import { isFileField } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/core/form";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);

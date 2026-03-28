@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FormField } from "../form-field";
+import { InputFields } from "../input-fields";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useOrg } from "../../hooks/use-org";
@@ -17,7 +17,12 @@ import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import {
+  initFormValues,
+  buildPayload,
+  type JSONSchemaObject,
+  type SchemaWrapper,
+} from "@appstrate/core/form";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
@@ -35,48 +40,27 @@ function ConfigSection({
 
   const current = detail?.config?.current || {};
   const mutation = useSaveConfig(detail?.id ?? "");
+  const wrapper: SchemaWrapper = { schema };
 
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    if (schema?.properties) {
-      for (const [key, prop] of Object.entries(schema.properties)) {
-        initial[key] = String(current[key] ?? prop.default ?? "");
-      }
-    }
-    return initial;
-  });
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
+    initFormValues(schema, current),
+  );
 
   if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
 
   const handleSave = () => {
-    const config: Record<string, unknown> = {};
-    if (schema.properties) {
-      for (const [key, prop] of Object.entries(schema.properties)) {
-        let value: unknown = values[key];
-        if (prop.type === "number" && value) value = Number(value);
-        config[key] = value || null;
-      }
-    }
-    mutation.mutate(config);
+    mutation.mutate(buildPayload(schema, values));
   };
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <h3 className="text-sm font-medium">{t("editor.configTitle")}</h3>
-      {Object.entries(schema.properties).map(([key, prop]) => (
-        <FormField
-          key={key}
-          id={`config-${key}`}
-          label={key}
-          required={schema.required?.includes(key)}
-          type={prop.type === "number" ? "number" : "text"}
-          value={values[key] || ""}
-          onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
-          placeholder={prop.description}
-          description={prop.description}
-          enumValues={prop.enum as string[] | undefined}
-        />
-      ))}
+      <InputFields
+        schema={wrapper}
+        values={values}
+        onChange={(key, v) => setValues((prev) => ({ ...prev, [key]: v }))}
+        idPrefix="config"
+      />
       <div className="flex justify-end pt-2">
         <Button onClick={handleSave} disabled={mutation.isPending || isHistorical} size="sm">
           {mutation.isPending ? "..." : t("btn.save")}

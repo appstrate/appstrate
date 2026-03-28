@@ -81,66 +81,19 @@ export interface OrgInvitation {
   createdAt: string;
 }
 
-// --- JSON Schema Types ---
+// --- JSON Schema Types & Helpers (re-exported from @appstrate/core/form) ---
 
-export interface JSONSchemaProperty {
-  type: string;
-  description?: string;
-  default?: unknown;
-  enum?: unknown[];
-  format?: string;
-  contentMediaType?: string;
-  items?: JSONSchemaProperty;
-  maxItems?: number;
-}
-
-export interface JSONSchemaObject {
-  type: "object";
-  properties: Record<string, JSONSchemaProperty>;
-  required?: string[];
-}
-
-// --- Schema Wrapper Types (AFPS metadata outside JSON Schema) ---
-
-export interface FileConstraint {
-  accept?: string;
-  maxSize?: number;
-}
-
-export interface UIHint {
-  placeholder?: string;
-}
-
-export interface SchemaWrapper {
-  schema: JSONSchemaObject;
-  fileConstraints?: Record<string, FileConstraint>;
-  uiHints?: Record<string, UIHint>;
-  propertyOrder?: string[];
-}
-
-// --- File Field Detection Helpers ---
-
-/** Detect a file field: format "uri" + contentMediaType present (single or array). */
-export function isFileField(prop: JSONSchemaProperty): boolean {
-  if (prop.format === "uri" && prop.contentMediaType) return true;
-  if (prop.type === "array" && prop.items?.format === "uri" && prop.items?.contentMediaType)
-    return true;
-  return false;
-}
-
-/** Detect a multiple-files field (array of file URIs). */
-export function isMultipleFileField(prop: JSONSchemaProperty): boolean {
-  return prop.type === "array" && prop.items?.format === "uri" && !!prop.items?.contentMediaType;
-}
-
-/** Return schema property keys respecting propertyOrder, with unlisted keys appended. */
-export function getOrderedKeys(schema: JSONSchemaObject, propertyOrder?: string[]): string[] {
-  const allKeys = Object.keys(schema.properties);
-  if (!propertyOrder?.length) return allKeys;
-  const ordered = propertyOrder.filter((k) => k in schema.properties);
-  const rest = allKeys.filter((k) => !propertyOrder.includes(k));
-  return rest.length ? [...ordered, ...rest] : ordered;
-}
+import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
+export type {
+  JSONSchema7,
+  JSONSchema7TypeName,
+  JSONSchema7Type,
+  JSONSchemaObject,
+  SchemaWrapper,
+  FileConstraint,
+  UIHint,
+} from "@appstrate/core/form";
+export { isFileField, isMultipleFileField, getOrderedKeys } from "@appstrate/core/form";
 
 // --- Flow Readiness Utilities ---
 

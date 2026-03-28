@@ -1,5 +1,5 @@
 import Ajv from "ajv";
-import type { JSONSchemaObject, JSONSchemaProperty, FileConstraint } from "@appstrate/shared-types";
+import type { JSONSchemaObject, JSONSchema7, FileConstraint } from "@appstrate/shared-types";
 import { isFileField } from "@appstrate/shared-types";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
@@ -54,7 +54,7 @@ export function validateInput(
     return { valid: true, errors: [], data: input ?? {} };
   }
   // Exclude file fields from AJV validation (they're validated separately)
-  const nonFileProps: Record<string, JSONSchemaProperty> = {};
+  const nonFileProps: Record<string, JSONSchema7> = {};
   for (const [key, prop] of Object.entries(schema.properties)) {
     if (!isFileField(prop)) nonFileProps[key] = prop;
   }

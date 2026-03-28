@@ -10,8 +10,7 @@ import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
-import type { JSONSchemaObject, JSONSchemaProperty } from "@appstrate/shared-types";
-import { isFileField } from "@appstrate/shared-types";
+import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { FlowProvidersSection } from "./flow-providers-section";
@@ -189,9 +188,7 @@ export function FlowMemoriesTab({
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-function buildInputExample(
-  properties?: Record<string, JSONSchemaProperty>,
-): Record<string, unknown> {
+function buildInputExample(properties?: Record<string, JSONSchema7>): Record<string, unknown> {
   if (!properties) return {};
   const example: Record<string, unknown> = {};
   for (const [key, prop] of Object.entries(properties)) {

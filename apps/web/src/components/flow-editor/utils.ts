@@ -1,14 +1,18 @@
 import type { FlowEditorState, ProviderEntry, ResourceEntry } from "./types";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
-import type {
-  JSONSchemaObject,
-  JSONSchemaProperty,
-  FileConstraint,
-  UIHint,
-  SchemaWrapper,
-} from "@appstrate/shared-types";
-import { getOrderedKeys, isFileField, isMultipleFileField } from "@appstrate/shared-types";
+import {
+  getOrderedKeys,
+  isFileField,
+  isMultipleFileField,
+  type JSONSchemaObject,
+  type JSONSchema7,
+  type JSONSchema7TypeName,
+  type JSONSchema7Type,
+  type FileConstraint,
+  type UIHint,
+  type SchemaWrapper,
+} from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 // ─── Default state ──────────────────────────────────────────
@@ -187,7 +191,7 @@ export function schemaToFields(
     return {
       _id: crypto.randomUUID(),
       key,
-      type: fileField ? "file" : prop.type || "string",
+      type: fileField ? "file" : typeof prop.type === "string" ? prop.type : "string",
       description: prop.description || "",
       required: requiredSet.has(key),
       ...(mode === "input" && fileField
@@ -220,7 +224,7 @@ export function fieldsToSchema(
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
-  const properties: Record<string, JSONSchemaProperty> = {};
+  const properties: Record<string, JSONSchema7> = {};
   const required: string[] = [];
   const fileConstraints: Record<string, FileConstraint> = {};
   const uiHints: Record<string, UIHint> = {};
@@ -228,13 +232,13 @@ export function fieldsToSchema(
     const key = f.key.trim();
     if (mode === "input" && f.type === "file") {
       // Generate standard JSON Schema for file fields
-      const fileItemProp: JSONSchemaProperty = {
+      const fileItemProp: JSONSchema7 = {
         type: "string",
         format: "uri",
         contentMediaType: "application/octet-stream",
       };
       if (f.multiple) {
-        const prop: JSONSchemaProperty = { type: "array", items: fileItemProp };
+        const prop: JSONSchema7 = { type: "array", items: fileItemProp };
         if (f.description) prop.description = f.description;
         if (f.maxFiles) {
           const n = Number(f.maxFiles);
@@ -242,7 +246,7 @@ export function fieldsToSchema(
         }
         properties[key] = prop;
       } else {
-        const prop: JSONSchemaProperty = { ...fileItemProp };
+        const prop: JSONSchema7 = { ...fileItemProp };
         if (f.description) prop.description = f.description;
         properties[key] = prop;
       }
@@ -255,11 +259,11 @@ export function fieldsToSchema(
       }
       if (Object.keys(constraint).length > 0) fileConstraints[key] = constraint;
     } else {
-      const prop: JSONSchemaProperty = { type: f.type };
+      const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
       if (f.description) prop.description = f.description;
       if (mode === "input" || mode === "config") {
         const def = convertDefaultValue(f.default || "", f.type);
-        if (def !== undefined) prop.default = def;
+        if (def != null) prop.default = def as JSONSchema7Type;
       }
       if (mode === "config") {
         const enumVals = f.enumValues

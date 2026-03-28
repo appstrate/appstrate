@@ -25,6 +25,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
@@ -73,7 +74,7 @@ export function createFlowsRouter() {
     const schema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
 
     // Validate config with AJV
-    const validation = validateConfig(body, schema);
+    const validation = validateConfig(body, asJSONSchemaObject(schema));
     if (!validation.valid) {
       throw invalidRequest("Invalid configuration");
     }

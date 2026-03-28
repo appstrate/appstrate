@@ -5,7 +5,7 @@ import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getOrderedKeys, type JSONSchemaObject } from "@appstrate/shared-types";
+import { getOrderedKeys, type JSONSchemaObject } from "@appstrate/core/form";
 
 interface CustomCredentialsModalProps {
   open: boolean;

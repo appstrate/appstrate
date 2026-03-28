@@ -2,9 +2,11 @@
   "name": "appstrate",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@mariozechner/pi-ai": "^0.52.12",
     "@readme/openapi-parser": "^5.5.0",
     "@redocly/openapi-core": "^2.19.1",
     "@types/bun": "latest",
+    "@types/json-schema": "7.0.15",
     "@types/semver": "^7.7.1",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
@@ -13,8 +15,7 @@
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
     "turbo": "^2",
-    "typescript-eslint": "^8.55.0",
-    "@mariozechner/pi-ai": "^0.52.12"
+    "typescript-eslint": "^8.55.0"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -44,6 +45,6 @@
     "runtime-pi/sidecar"
   ],
   "dependencies": {
-    "@appstrate/core": "2.8.8"
+    "@appstrate/core": "2.9.3"
   }
 }

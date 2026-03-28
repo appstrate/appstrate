@@ -14,8 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { InputFields } from "./input-fields";
-import { initInputValues, buildInputPayload } from "./input-utils";
-import type { JSONSchemaObject, Schedule } from "@appstrate/shared-types";
+import {
+  initFormValues,
+  buildPayload,
+  type JSONSchemaObject,
+  type SchemaWrapper,
+} from "@appstrate/core/form";
+import type { Schedule } from "@appstrate/shared-types";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -136,11 +141,12 @@ function ScheduleForm({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const schema = inputSchema || { type: "object" as const, properties: {} };
+  const schema: JSONSchemaObject = inputSchema || { type: "object" as const, properties: {} };
   const hasInputSchema = Object.keys(schema.properties).length > 0;
+  const wrapper: SchemaWrapper = { schema };
 
-  const [inputValues, setInputValues] = useState<Record<string, string>>(() =>
-    initInputValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),
+  const [inputValues, setInputValues] = useState<Record<string, unknown>>(() =>
+    initFormValues(schema, (schedule?.input ?? {}) as Record<string, unknown>),
   );
 
   const {
@@ -166,7 +172,7 @@ function ScheduleForm({
   });
 
   const onFormSubmit = handleSubmit((data) => {
-    const input = hasInputSchema ? buildInputPayload(schema, inputValues) : undefined;
+    const input = hasInputSchema ? buildPayload(schema, inputValues) : undefined;
 
     onSave({
       name: data.name || undefined,
@@ -272,7 +278,7 @@ function ScheduleForm({
             {t("schedule.inputTitle")}
           </div>
           <InputFields
-            schema={schema}
+            schema={wrapper}
             values={inputValues}
             onChange={(key, v) => setInputValues((prev) => ({ ...prev, [key]: v }))}
             idPrefix="sched-input"
