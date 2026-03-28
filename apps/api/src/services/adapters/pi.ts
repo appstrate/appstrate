@@ -116,6 +116,9 @@ export class PiAdapter implements ExecutionAdapter {
         }
       }
 
+      // Ensure runtime images are present (may have been pruned since boot)
+      await orchestrator.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
+
       // Phase 2: Setup sidecar + create agent (parallel)
       const [sidecar, agent] = await Promise.all([
         orchestrator.createSidecar(executionId, boundary, sidecarConfig),

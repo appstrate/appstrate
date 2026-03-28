@@ -10,6 +10,7 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     initialize: mock(() => Promise.resolve()),
     shutdown: mock(() => Promise.resolve()),
     cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
+    ensureImages: mock(() => Promise.resolve()),
     createIsolationBoundary: mock(() =>
       Promise.resolve({ id: "boundary-1", name: "test-boundary" }),
     ),
