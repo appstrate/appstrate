@@ -99,6 +99,9 @@ function openRealtimeStream(
       wake?.();
     });
 
+    // Immediate ping confirms the connection is alive
+    await stream.writeSSE({ event: "ping", data: "" });
+
     const PING_INTERVAL = 30_000;
     let lastWrite = Date.now();
 
