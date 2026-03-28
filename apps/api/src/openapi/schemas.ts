@@ -211,21 +211,43 @@ export const schemas = {
       },
       config: {
         type: "object",
+        description: "AFPS schema wrapper for flow configuration (set once, reused across runs).",
         properties: {
-          schema: { type: "object" },
-          current: { type: "object" },
+          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+          current: { type: "object", description: "Current configuration values" },
+          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
+          propertyOrder: {
+            type: "array",
+            items: { type: "string" },
+            description: "Presentation order for schema properties",
+          },
         },
       },
       input: {
         type: "object",
+        description: "AFPS schema wrapper for per-execution input.",
         properties: {
-          schema: { type: "object" },
+          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
+          propertyOrder: {
+            type: "array",
+            items: { type: "string" },
+            description: "Presentation order for schema properties",
+          },
         },
       },
       output: {
         type: "object",
+        description: "AFPS schema wrapper for per-execution output.",
         properties: {
-          schema: { type: "object" },
+          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+          propertyOrder: {
+            type: "array",
+            items: { type: "string" },
+            description: "Presentation order for schema properties",
+          },
         },
       },
       dependencies: {
@@ -681,5 +703,39 @@ export const schemas = {
   ProviderManifest: {
     description: "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
     $ref: "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  },
+  FileConstraintsMap: {
+    type: "object",
+    description:
+      "Upload constraints for file fields, keyed by property name. " +
+      "Lives at the AFPS wrapper level (outside the JSON Schema).",
+    additionalProperties: {
+      type: "object",
+      properties: {
+        accept: {
+          type: "string",
+          description: "Comma-separated accepted file extensions (e.g. .pdf,.docx)",
+        },
+        maxSize: {
+          type: "number",
+          description: "Maximum file size in bytes",
+        },
+      },
+    },
+  },
+  UIHintsMap: {
+    type: "object",
+    description:
+      "UI rendering hints for schema fields, keyed by property name. " +
+      "Lives at the AFPS wrapper level (outside the JSON Schema).",
+    additionalProperties: {
+      type: "object",
+      properties: {
+        placeholder: {
+          type: "string",
+          description: "Hint text shown before the user provides a value",
+        },
+      },
+    },
   },
 } as const;
