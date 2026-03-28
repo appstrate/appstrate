@@ -508,6 +508,69 @@ describe("ALL /proxy — forwarding", () => {
     expect(text.length).toBe(50_000);
   });
 
+  it("X-Max-Response-Size increases the truncation limit", async () => {
+    const largeBody = "x".repeat(100_000);
+    const fetchFn = mock(async () => new Response(largeBody, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    }));
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+        "X-Max-Response-Size": "200000",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+    const text = await res.text();
+    expect(text.length).toBe(100_000);
+  });
+
+  it("X-Max-Response-Size is capped at ABSOLUTE_MAX_RESPONSE_SIZE", async () => {
+    const largeBody = "x".repeat(2_000_000);
+    const fetchFn = mock(async () => new Response(largeBody, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    }));
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/huge",
+        "X-Max-Response-Size": "5000000",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const text = await res.text();
+    expect(text.length).toBe(1_000_000);
+  });
+
+  it("invalid X-Max-Response-Size falls back to default", async () => {
+    const largeBody = "x".repeat(60_000);
+    const fetchFn = mock(async () => new Response(largeBody, {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    }));
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/v1/large",
+        "X-Max-Response-Size": "abc",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const text = await res.text();
+    expect(text.length).toBe(50_000);
+  });
+
   it("stores Set-Cookie headers in cookie jar", async () => {
     const deps = makeDeps();
     const fetchFn = mock(async () => {

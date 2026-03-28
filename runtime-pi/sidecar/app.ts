@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import {
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
+  ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_SUBSTITUTE_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
   LLM_PROXY_TIMEOUT_MS,
@@ -366,8 +367,12 @@ export function createApp(deps: AppDeps): Hono {
 
     // 9. Forward upstream response transparently (pass-through proxy)
     const responseText = await targetRes.text();
-    const truncated = responseText.length > MAX_RESPONSE_SIZE;
-    const text = truncated ? responseText.slice(0, MAX_RESPONSE_SIZE) : responseText;
+    const requestedMaxSize = parseInt(c.req.header("x-max-response-size") || "0", 10);
+    const maxSize = requestedMaxSize > 0
+      ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
+      : MAX_RESPONSE_SIZE;
+    const truncated = responseText.length > maxSize;
+    const text = truncated ? responseText.slice(0, maxSize) : responseText;
 
     const contentType = targetRes.headers.get("content-type") || "application/octet-stream";
     const responseHeaders: Record<string, string> = { "Content-Type": contentType };
