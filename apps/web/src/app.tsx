@@ -43,6 +43,7 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useApplicationResolver } from "./hooks/use-current-application";
 import { useTheme } from "./stores/theme-store";
+import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -50,10 +51,11 @@ import { Toaster } from "@/components/ui/toaster";
 
 function MainLayout() {
   const { resolvedTheme } = useTheme();
+  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
   useApplicationResolver();
 
   return (
-    <SidebarProvider>
+    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
