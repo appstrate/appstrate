@@ -1,8 +1,9 @@
 import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
 import { eq, and, lt, desc } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
-import { sendInvitationEmail } from "./email.ts";
+import { sendEmail } from "./email.ts";
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -55,12 +56,15 @@ export async function createInvitation({
       getOrgName(orgId),
       getInviterName(invitedBy),
     ]);
-    void sendInvitationEmail({
+    const inviteUrl = `${getEnv().APP_URL}/invite/${token}/accept`;
+    void sendEmail("invitation", {
+      to: normalizedEmail,
       email: normalizedEmail,
-      token,
+      inviteUrl,
       orgName,
       inviterName,
       role,
+      locale: "fr",
     });
   }
 

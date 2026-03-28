@@ -82,6 +82,11 @@ appstrate/
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (email/password, Google social, email verification, account linking)
 │
+├── packages/emails/src/      # @appstrate/emails — Email template registry + rendering
+│   ├── types.ts              # EmailType, EmailRenderer, RenderedEmail, SupportedLocale
+│   ├── registry.ts           # renderEmail + registerEmailOverrides (cloud override mechanism)
+│   └── templates/            # Layout + per-type templates (verification, invitation)
+│
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
@@ -95,7 +100,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`. **External npm dep**: `@appstrate/core` (validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages).
+**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/emails`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`. **External npm dep**: `@appstrate/core` (validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages).
 
 ## Architecture
 

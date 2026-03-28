@@ -14,6 +14,7 @@
   "dependencies": {
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "^2.9.4",
+    "@appstrate/emails": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
