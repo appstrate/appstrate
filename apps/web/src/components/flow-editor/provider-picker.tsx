@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import CreatableSelect from "react-select/creatable";
 import type { StylesConfig, MultiValue } from "react-select";
 import { Link } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -241,7 +242,10 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                     <ProviderIcon src={providerDef.iconUrl} className="h-6 w-6" />
                   )}
                   <div className="flex flex-col min-w-0 flex-1">
-                    <strong className="text-sm">{providerDef?.displayName ?? svc.id}</strong>
+                    <strong className="text-sm flex items-center gap-1.5">
+                      {providerDef?.displayName ?? svc.id}
+                      {providerDef?.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    </strong>
                     <span className="text-xs text-muted-foreground">{svc.id}</span>
                   </div>
                   <VersionSelect
@@ -336,7 +340,10 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
               >
                 {p.iconUrl && <ProviderIcon src={p.iconUrl} className="h-6 w-6" />}
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-sm font-medium truncate">{p.displayName}</span>
+                  <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {p.displayName}
+                    {p.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </span>
                   <span className="text-xs text-muted-foreground">{p.id}</span>
                 </div>
                 {isSelected && <span className="text-success text-sm">&#10003;</span>}
@@ -393,7 +400,10 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{p.displayName}</span>
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    {p.displayName}
+                    {p.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </span>
                 </div>
                 <ProviderConfigBadge enabled={p.enabled} />
               </button>
