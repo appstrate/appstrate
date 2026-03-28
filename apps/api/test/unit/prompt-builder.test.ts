@@ -223,15 +223,14 @@ describe("buildEnrichedPrompt — previous state", () => {
     expect(prompt).not.toContain("## Previous State");
   });
 
-  it("omits previous state when set-state tool is not available", () => {
+  it("includes previous state regardless of available tools", () => {
     const ctx = baseContext({
       previousState: { cursor: "abc123" },
-      availableTools: [
-        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
-      ],
+      availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Previous State");
+    expect(prompt).toContain("## Previous State");
+    expect(prompt).toContain("abc123");
   });
 });
 
@@ -258,17 +257,16 @@ describe("buildEnrichedPrompt — memories", () => {
     expect(prompt).not.toContain("## Memory");
   });
 
-  it("omits memory section when add-memory tool is not available", () => {
+  it("includes memories regardless of available tools", () => {
     const ctx = baseContext({
       memories: [
         { id: 1, content: "Some memory", createdAt: "2025-01-15" },
       ],
-      availableTools: [
-        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
-      ],
+      availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Memory");
+    expect(prompt).toContain("## Memory");
+    expect(prompt).toContain("Some memory");
   });
 });
 

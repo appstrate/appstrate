@@ -66,7 +66,7 @@ export function WebhooksPage() {
                   </div>
                   <p className="text-xs text-muted-foreground font-mono">{wh.events.join(", ")}</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {wh.flowId || t("settings:webhooks.allFlows")}
+                    {wh.packageId || t("settings:webhooks.allFlows")}
                     {" · "}
                     {t("settings:webhooks.payloadMode")}: {wh.payloadMode}
                   </p>

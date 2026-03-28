@@ -37,7 +37,7 @@ export const webhooksPaths = {
                   },
                   description: "Event types to subscribe to",
                 },
-                flowId: {
+                packageId: {
                   type: ["string", "null"],
                   description: "Filter by flow ID (null = all flows)",
                 },
@@ -173,7 +173,7 @@ export const webhooksPaths = {
               properties: {
                 url: { type: "string", format: "uri" },
                 events: { type: "array", items: { type: "string" } },
-                flowId: { type: ["string", "null"] },
+                packageId: { type: ["string", "null"] },
                 payloadMode: { type: "string", enum: ["full", "summary"] },
                 active: { type: "boolean" },
               },

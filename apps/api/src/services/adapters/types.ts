@@ -1,5 +1,8 @@
 import { z } from "zod";
 import type { ModelCost } from "@appstrate/shared-types";
+import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
+
 export type { ModelCost };
 
 /** Per-model pricing in $/M tokens (margin included). */
@@ -38,7 +41,6 @@ export interface UploadedFile {
 
 export type FileReference = Omit<UploadedFile, "buffer">;
 
-import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 export type { ToolMeta };
 
 export interface PromptContext {
@@ -50,9 +52,9 @@ export interface PromptContext {
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: {
-    input?: import("@appstrate/shared-types").JSONSchemaObject;
-    config?: import("@appstrate/shared-types").JSONSchemaObject;
-    output?: import("@appstrate/shared-types").JSONSchemaObject;
+    input?: JSONSchemaObject;
+    config?: JSONSchemaObject;
+    output?: JSONSchemaObject;
   };
   providers: Array<{
     id: string;

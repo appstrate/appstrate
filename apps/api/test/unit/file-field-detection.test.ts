@@ -9,7 +9,7 @@ import {
   isMultipleFileField,
   type JSONSchema7,
   type JSONSchemaObject,
-} from "@appstrate/shared-types";
+} from "@appstrate/core/form";
 import {
   schemaHasFileFields,
   validateFileInputs,

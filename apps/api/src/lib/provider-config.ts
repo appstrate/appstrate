@@ -1,4 +1,5 @@
-import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
+import type { ProviderConfig } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { ProviderSetupGuide } from "@appstrate/core/validation";
 import {
   getDefaultAdminCredentialSchema,

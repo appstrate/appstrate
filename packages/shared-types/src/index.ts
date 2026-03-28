@@ -81,19 +81,10 @@ export interface OrgInvitation {
   createdAt: string;
 }
 
-// --- JSON Schema Types & Helpers (re-exported from @appstrate/core/form) ---
+// --- JSON Schema Types (re-exported because FlowDetail/ProviderConfig reference them) ---
 
+export type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
-export type {
-  JSONSchema7,
-  JSONSchema7TypeName,
-  JSONSchema7Type,
-  JSONSchemaObject,
-  SchemaWrapper,
-  FileConstraint,
-  UIHint,
-} from "@appstrate/core/form";
-export { isFileField, isMultipleFileField, getOrderedKeys } from "@appstrate/core/form";
 
 // --- Flow Readiness Utilities ---
 
@@ -252,7 +243,7 @@ export interface ModelCost {
 
 // --- Package Version Types ---
 
-export interface PackageVersionInfo {
+interface PackageVersionInfo {
   id: number;
   version: string;
   integrity: string;
@@ -437,7 +428,7 @@ export interface WebhookInfo {
   object: "webhook";
   url: string;
   events: string[];
-  flowId: string | null;
+  packageId: string | null;
   payloadMode: "full" | "summary";
   active: boolean;
   createdAt: string;

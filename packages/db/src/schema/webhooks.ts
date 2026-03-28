@@ -14,7 +14,7 @@ export const webhooks = pgTable(
       .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["execution.completed", "execution.failed"]
-    flowId: text("flow_id"), // null = all flows
+    packageId: text("flow_id"), // null = all packages (column kept as flow_id for existing migrations)
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     active: boolean("active").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)

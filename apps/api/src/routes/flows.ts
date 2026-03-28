@@ -25,7 +25,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
+import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
@@ -79,11 +79,7 @@ export function createFlowsRouter() {
       throw invalidRequest("Invalid configuration");
     }
 
-    // Merge with defaults
-    const config: Record<string, unknown> = {};
-    for (const [key, prop] of Object.entries(schema.properties)) {
-      config[key] = body[key] ?? prop.default ?? null;
-    }
+    const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
     const orgId = c.get("orgId");
     await setPackageConfig(orgId, flow.id, config);

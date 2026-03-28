@@ -5,7 +5,7 @@
 
 import type { Context } from "hono";
 import type { UploadedFile } from "./adapters/types.ts";
-import type { JSONSchemaObject, FileConstraint } from "@appstrate/shared-types";
+import type { JSONSchemaObject, FileConstraint } from "@appstrate/core/form";
 import {
   validateInput,
   validateFileInputs,

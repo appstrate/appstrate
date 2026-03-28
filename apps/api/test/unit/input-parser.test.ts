@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import { parseRequestInput } from "../../src/services/input-parser.ts";
 import { ApiError } from "../../src/lib/errors.ts";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 // --- Helpers ---
 

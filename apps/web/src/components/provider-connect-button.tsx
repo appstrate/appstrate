@@ -13,7 +13,8 @@ import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { connectedLabelWithProfile } from "../lib/provider-status";
 import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
-import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
+import type { ProviderConfig } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export function ProviderConnectButton({ provider }: { provider: ProviderConfig }) {
   const { t } = useTranslation(["settings", "flows"]);

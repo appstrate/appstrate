@@ -18,7 +18,8 @@ import { ProviderConfigureButton } from "../../components/provider-configure-but
 import { Spinner } from "../../components/spinner";
 import { CheckCircle2 } from "lucide-react";
 import { ProviderIcon } from "../../components/provider-icon";
-import type { ProviderConfig, JSONSchemaObject } from "@appstrate/shared-types";
+import type { ProviderConfig } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export function OnboardingProvidersStep() {
   const { t } = useTranslation(["settings", "common"]);

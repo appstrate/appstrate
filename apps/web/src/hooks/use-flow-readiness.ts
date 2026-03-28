@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { FlowDetail, JSONSchemaObject, OrgModelInfo } from "@appstrate/shared-types";
+import type { FlowDetail, OrgModelInfo } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
 
 export function useFlowReadiness(

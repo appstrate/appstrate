@@ -34,7 +34,7 @@ const createWebhookSchema = z.object({
   applicationId: z.string().min(1, "applicationId is required"),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventsEnum).min(1, "events is required"),
-  flowId: z.string().nullable().optional(),
+  packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
   active: z.boolean().optional(),
 });
@@ -42,7 +42,7 @@ const createWebhookSchema = z.object({
 const updateWebhookSchema = z.object({
   url: z.url().optional(),
   events: z.array(webhookEventsEnum).min(1).optional(),
-  flowId: z.string().nullable().optional(),
+  packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
   active: z.boolean().optional(),
 });
@@ -62,7 +62,7 @@ export function createWebhooksRouter() {
     const result = await createWebhook(orgId, data.applicationId, {
       url: data.url,
       events: data.events,
-      flowId: data.flowId,
+      packageId: data.packageId,
       payloadMode: data.payloadMode,
       active: data.active,
     });
@@ -109,7 +109,7 @@ export function createWebhooksRouter() {
 
     const { eventId, payload } = buildEventEnvelope({
       eventType: "test.ping",
-      execution: { id: "exec_test", flowId: "test", status: "success" },
+      execution: { id: "exec_test", packageId: "test", status: "success" },
       payloadMode:
         wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
     });

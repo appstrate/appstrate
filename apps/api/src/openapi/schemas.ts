@@ -50,7 +50,7 @@ export const schemas = {
       applicationId: { type: "string", description: "Application ID (app_ prefix)" },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },
-      flowId: { type: ["string", "null"] },
+      packageId: { type: ["string", "null"] },
       payloadMode: { type: "string", enum: ["full", "summary"] },
       active: { type: "boolean" },
       createdAt: { type: "string", format: "date-time" },
