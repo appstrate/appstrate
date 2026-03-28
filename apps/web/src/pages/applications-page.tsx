@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { setCurrentApplicationId } from "../hooks/use-current-application";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApplicationCreateModal } from "../components/application-create-modal";
 
@@ -38,13 +39,16 @@ export function ApplicationsPage() {
 
   return (
     <>
-      <div className="mb-6 flex items-center justify-between">
-        <h2>{t("applications.pageTitle")}</h2>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={16} className="mr-1.5" />
-          {t("applications.create")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("applications.pageTitle")}
+        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("applications.pageTitle") }]}
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus size={16} className="mr-1.5" />
+            {t("applications.create")}
+          </Button>
+        }
+      />
 
       {!applications || applications.length === 0 ? (
         <EmptyState

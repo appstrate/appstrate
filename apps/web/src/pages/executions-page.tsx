@@ -5,6 +5,7 @@ import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useUnreadCount, useAllExecutions, useMarkAllRead } from "../hooks/use-notifications";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ExecutionRow } from "../components/execution-row";
 import type { Execution } from "@appstrate/shared-types";
@@ -34,17 +35,20 @@ export function ExecutionsPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-sm font-medium text-muted-foreground">{t("executions.title")}</div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => markAllRead.mutate()}
-          disabled={markAllRead.isPending || !unreadCount}
-        >
-          {t("executions.markAllRead")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("executions.title")}
+        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("executions.title") }]}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => markAllRead.mutate()}
+            disabled={markAllRead.isPending || !unreadCount}
+          >
+            {t("executions.markAllRead")}
+          </Button>
+        }
+      />
 
       {executions.length === 0 ? (
         <EmptyState

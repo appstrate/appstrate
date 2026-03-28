@@ -57,6 +57,7 @@ import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 import { CopyLinkButton } from "../components/copy-link-button";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
@@ -308,9 +309,7 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      <div className="mb-6">
-        <h2>{t("orgSettings.pageTitle")}</h2>
-      </div>
+      <PageHeader title={t("orgSettings.pageTitle")} breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("orgSettings.pageTitle") }]} />
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="mb-4">
           <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>

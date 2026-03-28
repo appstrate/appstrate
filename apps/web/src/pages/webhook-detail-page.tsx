@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Send, Webhook } from "lucide-react";
+import { Send, Webhook } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Modal } from "../components/modal";
 import { Spinner } from "../components/spinner";
+import { PageHeader } from "../components/page-header";
+import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { toast } from "../hooks/use-toast";
@@ -373,23 +375,20 @@ export function WebhookDetailPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="mb-6">
-        <Link
-          to={"/webhooks"}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
-        >
-          <ArrowLeft size={14} />
-          {t("common:btn.back")}
-        </Link>
-        <div className="flex items-center gap-3">
-          <Webhook size={20} className="text-muted-foreground shrink-0" />
-          <h2 className="text-lg font-semibold font-mono truncate">{webhook.url}</h2>
+      <PageHeader
+        title={webhook.url}
+        breadcrumbs={[
+          { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
+          { label: "", node: <AppBreadcrumbSwitcher /> },
+          { label: t("settings:webhooks.pageTitle"), href: "/webhooks" },
+          { label: webhook.url },
+        ]}
+        actions={
           <Badge variant={webhook.active ? "success" : "secondary"}>
             {webhook.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
           </Badge>
-        </div>
-      </div>
+        }
+      />
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>

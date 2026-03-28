@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import type { Schedule } from "@appstrate/shared-types";
 import { isFileField } from "@appstrate/core/form";
@@ -60,12 +61,15 @@ export function SchedulesListPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-sm font-medium text-muted-foreground">{t("schedules.title")}</div>
-        <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
-          {t("btn.add")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("schedules.title")}
+        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("schedules.title") }]}
+        actions={
+          <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
+            {t("btn.add")}
+          </Button>
+        }
+      />
 
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>

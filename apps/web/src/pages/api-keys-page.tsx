@@ -5,7 +5,9 @@ import { KeyRound, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
+import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
@@ -50,21 +52,23 @@ export function ApiKeysPage() {
 
   return (
     <>
-      <div className="mb-6">
-        <h2>{t("settings:apiKeys.pageTitle")}</h2>
-      </div>
-
-      <div className="flex items-center justify-end gap-2 mb-4">
-        <a
-          href="/api/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mr-auto text-primary text-sm no-underline hover:underline"
-        >
-          {t("settings:apiKeys.swaggerLink")}
-        </a>
-        <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
-      </div>
+      <PageHeader
+        title={t("settings:apiKeys.pageTitle")}
+        breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("settings:apiKeys.pageTitle") }]}
+        actions={
+          <>
+            <a
+              href="/api/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary text-sm no-underline hover:underline"
+            >
+              {t("settings:apiKeys.swaggerLink")}
+            </a>
+            <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+          </>
+        }
+      />
 
       {apiKeys && apiKeys.length > 0 ? (
         <div className="flex flex-col gap-3">

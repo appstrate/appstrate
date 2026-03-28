@@ -17,6 +17,7 @@ import { Badge } from "../components/badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { InputModal } from "../components/input-modal";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useProfiles } from "../hooks/use-profiles";
 import { useMarkRead } from "../hooks/use-notifications";
@@ -149,21 +150,23 @@ export function ExecutionDetailPage() {
 
   return (
     <>
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to="/flows" className="text-muted-foreground hover:text-foreground">
-          {t("detail.breadcrumb")}
-        </Link>
-        <span className="opacity-50">/</span>
-        <Link to={`/flows/${packageId}`} className="text-muted-foreground hover:text-foreground">
-          {flow?.displayName || packageId}
-        </Link>
-        <span className="opacity-50">/</span>
-        <span>
-          {executionNumber
+      <PageHeader
+        title={
+          executionNumber
             ? t("exec.breadcrumb", { number: executionNumber })
-            : date || execId?.slice(0, 8)}
-        </span>
-      </nav>
+            : date || execId?.slice(0, 8) || ""
+        }
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("detail.breadcrumb"), href: "/flows" },
+          { label: flow?.displayName || packageId || "", href: `/flows/${packageId}` },
+          {
+            label: executionNumber
+              ? t("exec.breadcrumb", { number: executionNumber })
+              : date || execId?.slice(0, 8) || "",
+          },
+        ]}
+      />
 
       <div className="flex items-center gap-2 flex-wrap mb-4">
         <Badge status={displayStatus} />

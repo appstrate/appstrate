@@ -14,6 +14,7 @@ import {
   useDeleteApplication,
 } from "../hooks/use-applications";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 
@@ -64,10 +65,17 @@ export function AppSettingsPage() {
 
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
-        <h2>{t("applications.tabSettings")}</h2>
-        {application.isDefault && <Badge variant="running">{t("applications.default")}</Badge>}
-      </div>
+      <PageHeader
+        title={application.name}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("applications.pageTitle", { ns: "settings" }), href: "/applications" },
+          { label: application.name },
+        ]}
+        actions={
+          application.isDefault ? <Badge variant="running">{t("applications.default")}</Badge> : undefined
+        }
+      />
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-xl">
         <div className="space-y-2">
