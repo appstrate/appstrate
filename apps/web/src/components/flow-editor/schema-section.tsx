@@ -25,6 +25,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { SectionCard } from "../section-card";
 
@@ -148,16 +149,17 @@ function SortableFieldCard({
           className="flex-1 min-w-0 h-7 text-xs"
           disabled={readOnly}
         />
-        <Label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer font-normal">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id={`field-req-${index}`}
             checked={field.required}
-            onChange={(e) => onUpdate(index, { required: e.target.checked })}
+            onCheckedChange={(checked) => onUpdate(index, { required: Boolean(checked) })}
             disabled={readOnly}
-            className="w-3.5 h-3.5 rounded"
           />
-          {t("editor.fieldReq")}
-        </Label>
+          <Label htmlFor={`field-req-${index}`} className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer">
+            {t("editor.fieldReq")}
+          </Label>
+        </div>
         {!readOnly && (
           <Button
             type="button"
@@ -188,15 +190,16 @@ function SortableFieldCard({
                 onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
                 className="flex-1 min-w-[100px] h-7 text-xs"
               />
-              <Label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer font-normal">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-1.5">
+                <Checkbox
+                  id={`field-multiple-${index}`}
                   checked={field.multiple ?? false}
-                  onChange={(e) => onUpdate(index, { multiple: e.target.checked })}
-                  className="w-3.5 h-3.5 rounded"
+                  onCheckedChange={(checked) => onUpdate(index, { multiple: Boolean(checked) })}
                 />
-                {t("editor.fieldMultiple")}
-              </Label>
+                <Label htmlFor={`field-multiple-${index}`} className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer">
+                  {t("editor.fieldMultiple")}
+                </Label>
+              </div>
               {field.multiple && (
                 <Input
                   type="text"

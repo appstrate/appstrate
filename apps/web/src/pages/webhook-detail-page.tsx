@@ -5,18 +5,17 @@ import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Modal } from "../components/modal";
 import { Spinner } from "../components/spinner";
 import { PageHeader } from "../components/page-header";
 import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
+import { WebhookFormFields } from "../components/webhook-form-fields";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { toast } from "../hooks/use-toast";
 import {
-  WEBHOOK_EVENTS,
   useWebhook,
   useUpdateWebhook,
   useDeleteWebhook,
@@ -176,58 +175,13 @@ function SettingsTab({ webhookId }: { webhookId: string }) {
         <div className="font-mono text-sm bg-muted rounded px-3 py-2 break-all">{webhook.url}</div>
       </div>
 
-      {/* Events */}
-      <div className="space-y-2">
-        <Label>{t("settings:webhooks.eventsLabel")}</Label>
-        <div className="space-y-2">
-          {WEBHOOK_EVENTS.map((event) => (
-            <label key={event} className="flex items-center gap-2 cursor-pointer">
-              <Checkbox
-                checked={selectedEvents.includes(event)}
-                onCheckedChange={() => toggleEvent(event)}
-              />
-              <span className="text-sm font-mono">{event}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Flow filter */}
-      <div className="space-y-2">
-        <Label>{t("settings:webhooks.flowFilterLabel")}</Label>
-        <p className="text-sm text-muted-foreground">
-          {webhook.packageId || t("settings:webhooks.allFlows")}
-        </p>
-      </div>
-
-      {/* Payload mode */}
-      <div className="space-y-2">
-        <Label>{t("settings:webhooks.payloadModeLabel")}</Label>
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="payloadMode"
-              value="full"
-              checked={payloadMode === "full"}
-              onChange={() => setPayloadMode("full")}
-              className="accent-primary"
-            />
-            <span className="text-sm">{t("settings:webhooks.payloadModeFull")}</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="payloadMode"
-              value="summary"
-              checked={payloadMode === "summary"}
-              onChange={() => setPayloadMode("summary")}
-              className="accent-primary"
-            />
-            <span className="text-sm">{t("settings:webhooks.payloadModeSummary")}</span>
-          </label>
-        </div>
-      </div>
+      <WebhookFormFields
+        selectedEvents={selectedEvents}
+        onToggleEvent={toggleEvent}
+        payloadMode={payloadMode}
+        onPayloadModeChange={setPayloadMode}
+        idPrefix="edit-"
+      />
 
       {/* Active toggle */}
       <div className="flex items-center justify-between">

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -639,22 +640,26 @@ function ModelFormBody({
             <div className="space-y-2">
               <Label>{t("models.form.input")}</Label>
               <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="mdl-input-text"
                     checked={inputText}
-                    onChange={(e) => setValue("inputText", e.target.checked)}
+                    onCheckedChange={(checked) => setValue("inputText", Boolean(checked))}
                   />
-                  {t("models.form.inputText")}
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Label htmlFor="mdl-input-text" className="font-normal cursor-pointer">
+                    {t("models.form.inputText")}
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="mdl-input-image"
                     checked={inputImage}
-                    onChange={(e) => setValue("inputImage", e.target.checked)}
+                    onCheckedChange={(checked) => setValue("inputImage", Boolean(checked))}
                   />
-                  {t("models.form.inputImage")}
-                </label>
+                  <Label htmlFor="mdl-input-image" className="font-normal cursor-pointer">
+                    {t("models.form.inputImage")}
+                  </Label>
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -678,13 +683,12 @@ function ModelFormBody({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <input
+              <Checkbox
                 id="mdl-reasoning"
-                type="checkbox"
                 checked={reasoning}
-                onChange={(e) => setValue("reasoning", e.target.checked)}
+                onCheckedChange={(checked) => setValue("reasoning", Boolean(checked))}
               />
-              <Label htmlFor="mdl-reasoning">{t("models.form.reasoning")}</Label>
+              <Label htmlFor="mdl-reasoning" className="font-normal cursor-pointer">{t("models.form.reasoning")}</Label>
             </div>
             <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
           </div>
