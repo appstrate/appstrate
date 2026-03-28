@@ -12,17 +12,3 @@ export function log(
   emit({ type: "log", level, message, ...(data ? { data } : {}) });
 }
 
-/** Emit output data (deep-merged by platform). */
-export function emitOutput(data: Record<string, unknown>): void {
-  emit({ type: "output", data });
-}
-
-/** Set execution state for next run (last call wins). */
-export function emitSetState(state: Record<string, unknown>): void {
-  emit({ type: "set_state", state });
-}
-
-/** Add a long-term memory entry. */
-export function emitAddMemory(content: string): void {
-  emit({ type: "add_memory", content });
-}

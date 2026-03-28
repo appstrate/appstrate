@@ -5,7 +5,7 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
-import { isBlockedUrl } from "../lib/ssrf.ts";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 
 // --- URL Masking ---
