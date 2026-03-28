@@ -4,7 +4,7 @@ import {
   getDefaultAuthorizedUris,
   type ProviderDefinition,
 } from "@appstrate/connect";
-import { isFileField } from "@appstrate/shared-types";
+import { isFileField } from "@appstrate/core/form";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
 function formatFileSize(bytes: number): string {
@@ -222,9 +222,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("");
   }
 
-  // --- Previous state (only when set_state tool is available) ---
-  const hasSetState = ctx.availableTools?.some((t) => t.id === "@appstrate/set-state");
-  if (ctx.previousState && hasSetState) {
+  // --- Previous state ---
+  if (ctx.previousState) {
     sections.push("## Previous State\n");
     sections.push(
       "This flow supports stateful execution across runs. " +
@@ -239,9 +238,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // --- Memory (only when add_memory tool is available) ---
-  const hasAddMemory = ctx.availableTools?.some((t) => t.id === "@appstrate/add-memory");
-  if (ctx.memories && ctx.memories.length > 0 && hasAddMemory) {
+  // --- Memory ---
+  if (ctx.memories && ctx.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push(
       "This flow has accumulated the following memories from previous executions. " +

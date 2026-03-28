@@ -18,6 +18,7 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
@@ -107,13 +108,9 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     getRunningExecutionsForPackage(flow.id, actor),
   ]);
 
-  // Merge defaults with current config
-  const configWithDefaults: Record<string, unknown> = {};
-  if (m.config?.schema?.properties) {
-    for (const [key, prop] of Object.entries(m.config.schema.properties)) {
-      configWithDefaults[key] = currentConfig[key] ?? prop.default ?? null;
-    }
-  }
+  const configWithDefaults = m.config?.schema
+    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), currentConfig)
+    : {};
 
   const parsed = parseScopedName(m.name);
 

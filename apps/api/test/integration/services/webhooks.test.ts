@@ -67,14 +67,14 @@ describe("webhooks service", () => {
       expect(wh.active).toBe(false);
     });
 
-    it("supports flowId filter", async () => {
+    it("supports packageId filter", async () => {
       const wh = await createWebhook(orgId, defaultAppId, {
         url: "https://example.com/hook",
         events: ["execution.completed"],
-        flowId: "@testorg/my-flow",
+        packageId: "@testorg/my-flow",
       });
 
-      expect(wh.flowId).toBe("@testorg/my-flow");
+      expect(wh.packageId).toBe("@testorg/my-flow");
     });
 
     it("supports summary payload mode", async () => {

@@ -1,6 +1,10 @@
 import Ajv from "ajv";
-import type { JSONSchemaObject, JSONSchema7, FileConstraint } from "@appstrate/shared-types";
-import { isFileField } from "@appstrate/shared-types";
+import {
+  isFileField,
+  type JSONSchemaObject,
+  type JSONSchema7,
+  type FileConstraint,
+} from "@appstrate/core/form";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { normalizeConfigForValidation } from "../lib/flow-readiness.ts";

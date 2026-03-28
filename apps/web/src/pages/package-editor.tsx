@@ -31,7 +31,7 @@ import { useProviders } from "../hooks/use-providers";
 
 import type { FlowEditorState } from "../components/flow-editor/types";
 import type { MetadataState } from "../components/flow-editor/metadata-section";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import {
   defaultEditorState,
   getManifestName,

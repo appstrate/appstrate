@@ -41,7 +41,7 @@ export function useCreateWebhook() {
     mutationFn: async (data: {
       url: string;
       events: string[];
-      flowId?: string | null;
+      packageId?: string | null;
       payloadMode?: "full" | "summary";
       active?: boolean;
     }) => {
@@ -67,7 +67,7 @@ export function useUpdateWebhook() {
       data: {
         url?: string;
         events?: string[];
-        flowId?: string | null;
+        packageId?: string | null;
         payloadMode?: "full" | "summary";
         active?: boolean;
       };

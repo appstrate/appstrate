@@ -194,7 +194,7 @@ function SettingsTab({ webhookId }: { webhookId: string }) {
       <div className="space-y-2">
         <Label>{t("settings:webhooks.flowFilterLabel")}</Label>
         <p className="text-sm text-muted-foreground">
-          {webhook.flowId || t("settings:webhooks.allFlows")}
+          {webhook.packageId || t("settings:webhooks.allFlows")}
         </p>
       </div>
 

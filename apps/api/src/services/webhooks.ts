@@ -73,7 +73,7 @@ function toWebhookResponse(row: {
   id: string;
   url: string;
   events: string[] | null;
-  flowId: string | null;
+  packageId: string | null;
   payloadMode: string;
   active: boolean;
   createdAt: Date;
@@ -84,7 +84,7 @@ function toWebhookResponse(row: {
     object: "webhook",
     url: row.url,
     events: row.events ?? [],
-    flowId: row.flowId,
+    packageId: row.packageId,
     payloadMode: row.payloadMode === "summary" ? "summary" : "full",
     active: row.active,
     createdAt: row.createdAt.toISOString(),
@@ -186,7 +186,7 @@ export async function createWebhook(
   params: {
     url: string;
     events: string[];
-    flowId?: string | null;
+    packageId?: string | null;
     payloadMode?: string;
     active?: boolean;
   },
@@ -219,7 +219,7 @@ export async function createWebhook(
       applicationId,
       url: params.url,
       events: validatedEvents,
-      flowId: params.flowId ?? null,
+      packageId: params.packageId ?? null,
       payloadMode: params.payloadMode ?? "full",
       active: params.active ?? true,
       secret,
@@ -240,7 +240,7 @@ export async function listWebhooks(orgId: string, applicationId?: string): Promi
       id: webhooks.id,
       url: webhooks.url,
       events: webhooks.events,
-      flowId: webhooks.flowId,
+      packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
       active: webhooks.active,
       createdAt: webhooks.createdAt,
@@ -259,7 +259,7 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
       id: webhooks.id,
       url: webhooks.url,
       events: webhooks.events,
-      flowId: webhooks.flowId,
+      packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
       active: webhooks.active,
       createdAt: webhooks.createdAt,
@@ -279,7 +279,7 @@ export async function updateWebhook(
   params: {
     url?: string;
     events?: string[];
-    flowId?: string | null;
+    packageId?: string | null;
     payloadMode?: string;
     active?: boolean;
   },
@@ -292,7 +292,7 @@ export async function updateWebhook(
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (params.url !== undefined) updates.url = params.url;
   if (params.events !== undefined) updates.events = params.events;
-  if (params.flowId !== undefined) updates.flowId = params.flowId;
+  if (params.packageId !== undefined) updates.packageId = params.packageId;
   if (params.payloadMode !== undefined) updates.payloadMode = params.payloadMode;
   if (params.active !== undefined) updates.active = params.active;
 
@@ -457,7 +457,7 @@ export async function dispatchWebhookEvents(
     .select({
       id: webhooks.id,
       events: webhooks.events,
-      flowId: webhooks.flowId,
+      packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
     })
     .from(webhooks)
@@ -467,7 +467,7 @@ export async function dispatchWebhookEvents(
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
-    if (wh.flowId && wh.flowId !== execution.packageId) continue;
+    if (wh.packageId && wh.packageId !== execution.packageId) continue;
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,

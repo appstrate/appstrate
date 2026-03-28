@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
 import { validateConfig, validateInput, validateOutput, validateFlowContent } from "../../src/services/schema.ts";
 

@@ -1,4 +1,4 @@
-import type { JSONSchemaObject } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import {
   useConnectApiKey,
