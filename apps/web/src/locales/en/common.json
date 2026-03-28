@@ -43,6 +43,7 @@
   "btn.connect": "Connect",
   "btn.disconnect": "Disconnect",
   "btn.reconnect": "Reconnect",
+  "btn.copy": "Copy",
   "btn.copyLink": "Copy link",
   "btn.copied": "Copied!",
   "btn.done": "Done",
