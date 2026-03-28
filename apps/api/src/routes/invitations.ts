@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "../lib/auth.ts";
+import { auth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, gone } from "../lib/errors.ts";
 import {

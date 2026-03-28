@@ -9,7 +9,7 @@
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { auth } from "../../src/lib/auth.ts";
+import { auth } from "@appstrate/db/auth";
 import { validateApiKey } from "../../src/services/api-keys.ts";
 import { ensureDefaultProfile } from "../../src/services/connection-profiles.ts";
 import { requireOrgContext } from "../../src/middleware/org-context.ts";

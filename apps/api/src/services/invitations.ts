@@ -4,7 +4,7 @@ import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { auth } from "../lib/auth.ts";
+import { auth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 
 function generateToken(): string {
