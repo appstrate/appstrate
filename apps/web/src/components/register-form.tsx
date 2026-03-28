@@ -110,99 +110,97 @@ export function RegisterForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
+  const hasSocialAuth = features.googleAuth || features.githubAuth;
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="flex flex-col gap-6">
-          {resolvedHeader}
-          {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
-          <div className="mx-auto w-full max-w-sm flex flex-col gap-6">
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="displayName">{t("login.name")}</Label>
-                <Input
-                  id="displayName"
-                  type="text"
-                  placeholder={t("login.namePlaceholder")}
-                  autoComplete="name"
-                  aria-invalid={showError("displayName") ? true : undefined}
-                  className={cn(showError("displayName") && "border-destructive")}
-                  {...register("displayName", {
-                    required: t("validation.required", { ns: "common" }),
-                  })}
-                />
-                {showError("displayName") && (
-                  <div className="text-sm text-destructive">{errors.displayName?.message}</div>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="email">{t("login.email")}</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="email@example.com"
-                  autoComplete="email"
-                  readOnly={!!fixedEmail}
-                  aria-invalid={showError("email") ? true : undefined}
-                  className={cn(
-                    showError("email") && "border-destructive",
-                    fixedEmail && "opacity-60 cursor-not-allowed",
-                  )}
-                  {...(fixedEmail
-                    ? { value: fixedEmail }
-                    : register("email", {
-                        required: t("validation.required", { ns: "common" }),
-                        pattern: {
-                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                          message: t("validation.emailFormat", { ns: "common" }),
-                        },
-                      }))}
-                />
-                {showError("email") && (
-                  <div className="text-sm text-destructive">{errors.email?.message}</div>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="password">{t("login.password")}</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  autoComplete="new-password"
-                  aria-invalid={showError("password") ? true : undefined}
-                  className={cn(showError("password") && "border-destructive")}
-                  {...register("password", {
-                    required: t("validation.required", { ns: "common" }),
-                    minLength: {
-                      value: 6,
-                      message: t("validation.minLength", { ns: "common", min: 6 }),
-                    },
-                  })}
-                />
-                {showError("password") && (
-                  <div className="text-sm text-destructive">{errors.password?.message}</div>
-                )}
-              </div>
-              {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
-            </div>
-            <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? t("loading") : t("login.signup")}
-            </Button>
-            {(features.googleAuth || features.githubAuth) && (
-              <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
-                <span className="relative z-10 bg-background px-2 text-muted-foreground">
-                  {t("login.or")}
-                </span>
-              </div>
+      {resolvedHeader}
+      {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="displayName">{t("login.name")}</Label>
+            <Input
+              id="displayName"
+              type="text"
+              placeholder={t("login.namePlaceholder")}
+              autoComplete="name"
+              aria-invalid={showError("displayName") ? true : undefined}
+              className={cn(showError("displayName") && "border-destructive")}
+              {...register("displayName", {
+                required: t("validation.required", { ns: "common" }),
+              })}
+            />
+            {showError("displayName") && (
+              <div className="text-sm text-destructive">{errors.displayName?.message}</div>
             )}
           </div>
-          {(features.googleAuth || features.githubAuth) && (
-            <div className="mx-auto w-full max-w-sm flex flex-col gap-2">
+          <div className="grid gap-2">
+            <Label htmlFor="email">{t("login.email")}</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="email@example.com"
+              autoComplete="email"
+              readOnly={!!fixedEmail}
+              aria-invalid={showError("email") ? true : undefined}
+              className={cn(
+                showError("email") && "border-destructive",
+                fixedEmail && "opacity-60 cursor-not-allowed",
+              )}
+              {...(fixedEmail
+                ? { value: fixedEmail }
+                : register("email", {
+                    required: t("validation.required", { ns: "common" }),
+                    pattern: {
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                      message: t("validation.emailFormat", { ns: "common" }),
+                    },
+                  }))}
+            />
+            {showError("email") && (
+              <div className="text-sm text-destructive">{errors.email?.message}</div>
+            )}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">{t("login.password")}</Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              autoComplete="new-password"
+              aria-invalid={showError("password") ? true : undefined}
+              className={cn(showError("password") && "border-destructive")}
+              {...register("password", {
+                required: t("validation.required", { ns: "common" }),
+                minLength: {
+                  value: 6,
+                  message: t("validation.minLength", { ns: "common", min: 6 }),
+                },
+              })}
+            />
+            {showError("password") && (
+              <div className="text-sm text-destructive">{errors.password?.message}</div>
+            )}
+          </div>
+          {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        </div>
+        <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? t("loading") : t("login.signup")}
+        </Button>
+        {hasSocialAuth && (
+          <>
+            <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+              <span className="relative z-10 bg-background px-2 text-muted-foreground">
+                {t("login.or")}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
               {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
               {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </form>
       {resolvedFooter}
     </div>

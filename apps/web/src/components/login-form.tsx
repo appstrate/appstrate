@@ -95,87 +95,85 @@ export function LoginForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
+  const hasSocialAuth = features.googleAuth || features.githubAuth || features.smtp;
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="flex flex-col gap-6">
-          {resolvedHeader}
-          {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
-          <div className="mx-auto w-full max-w-sm flex flex-col gap-6">
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="email">{t("login.email")}</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="email@example.com"
-                  autoComplete="email"
-                  readOnly={!!fixedEmail}
-                  aria-invalid={showError("email") ? true : undefined}
-                  className={cn(
-                    showError("email") && "border-destructive",
-                    fixedEmail && "opacity-60 cursor-not-allowed",
-                  )}
-                  {...(fixedEmail
-                    ? { value: fixedEmail }
-                    : register("email", {
-                        required: t("validation.required", { ns: "common" }),
-                        pattern: {
-                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                          message: t("validation.emailFormat", { ns: "common" }),
-                        },
-                      }))}
-                />
-                {showError("email") && (
-                  <div className="text-sm text-destructive">{errors.email?.message}</div>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">{t("login.password")}</Label>
-                  {features.smtp && (
-                    <Link
-                      to="/forgot-password"
-                      className="text-xs text-muted-foreground underline-offset-4 hover:underline hover:text-primary"
-                    >
-                      {t("login.forgotPassword")}
-                    </Link>
-                  )}
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  aria-invalid={showError("password") ? true : undefined}
-                  className={cn(showError("password") && "border-destructive")}
-                  {...register("password", {
+      {resolvedHeader}
+      {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="email">{t("login.email")}</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="email@example.com"
+              autoComplete="email"
+              readOnly={!!fixedEmail}
+              aria-invalid={showError("email") ? true : undefined}
+              className={cn(
+                showError("email") && "border-destructive",
+                fixedEmail && "opacity-60 cursor-not-allowed",
+              )}
+              {...(fixedEmail
+                ? { value: fixedEmail }
+                : register("email", {
                     required: t("validation.required", { ns: "common" }),
-                    minLength: {
-                      value: 6,
-                      message: t("validation.minLength", { ns: "common", min: 6 }),
+                    pattern: {
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                      message: t("validation.emailFormat", { ns: "common" }),
                     },
-                  })}
-                />
-                {showError("password") && (
-                  <div className="text-sm text-destructive">{errors.password?.message}</div>
-                )}
-              </div>
-              {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
-            </div>
-            <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? t("loading") : t("login.login")}
-            </Button>
-            {(features.googleAuth || features.githubAuth || features.smtp) && (
-              <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
-                <span className="relative z-10 bg-background px-2 text-muted-foreground">
-                  {t("login.or")}
-                </span>
-              </div>
+                  }))}
+            />
+            {showError("email") && (
+              <div className="text-sm text-destructive">{errors.email?.message}</div>
             )}
           </div>
-          {(features.googleAuth || features.githubAuth || features.smtp) && (
-            <div className="mx-auto w-full max-w-sm flex flex-col gap-2">
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">{t("login.password")}</Label>
+              {features.smtp && (
+                <Link
+                  to="/forgot-password"
+                  className="text-xs text-muted-foreground underline-offset-4 hover:underline hover:text-primary"
+                >
+                  {t("login.forgotPassword")}
+                </Link>
+              )}
+            </div>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              autoComplete="current-password"
+              aria-invalid={showError("password") ? true : undefined}
+              className={cn(showError("password") && "border-destructive")}
+              {...register("password", {
+                required: t("validation.required", { ns: "common" }),
+                minLength: {
+                  value: 6,
+                  message: t("validation.minLength", { ns: "common", min: 6 }),
+                },
+              })}
+            />
+            {showError("password") && (
+              <div className="text-sm text-destructive">{errors.password?.message}</div>
+            )}
+          </div>
+          {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        </div>
+        <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? t("loading") : t("login.login")}
+        </Button>
+        {hasSocialAuth && (
+          <>
+            <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+              <span className="relative z-10 bg-background px-2 text-muted-foreground">
+                {t("login.or")}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
               {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
               {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
               {features.smtp && (
@@ -190,8 +188,8 @@ export function LoginForm({
                 </Button>
               )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </form>
       {resolvedFooter}
     </div>
