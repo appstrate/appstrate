@@ -1,8 +1,10 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
+import { ImportModal } from "../components/import-modal";
 import { type CardItem, PackageTab } from "./package-list";
 import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";
@@ -31,6 +33,7 @@ export function ItemTab({
   const { t } = useTranslation(["settings", "flows", "common"]);
   const { isOrgAdmin } = useOrg();
   const { data: rawItems, isLoading } = config.useData();
+  const [importOpen, setImportOpen] = useState(false);
 
   const typeLabel = t(`packages.type.${config.type}`);
   const title = externalTitle ?? t(`packages.type.${config.type}s`);
@@ -49,6 +52,7 @@ export function ItemTab({
   }));
 
   return (
+    <>
     <PackageTab
       items={items}
       isLoading={isLoading}
@@ -59,6 +63,9 @@ export function ItemTab({
         isOrgAdmin ? (
           <>
             {externalActions}
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              {t("nav.import", { ns: "common" })}
+            </Button>
             <Link to={packageNewPath(config.type)}>
               <Button>{t("list.createItem", { ns: "flows" })}</Button>
             </Link>
@@ -69,5 +76,7 @@ export function ItemTab({
       headerContent={headerContent}
       title={title}
     />
+    <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+    </>
   );
 }
