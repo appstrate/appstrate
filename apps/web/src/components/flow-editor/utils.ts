@@ -159,6 +159,26 @@ export function toResourceEntry(r: {
   return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
 }
 
+// ─── Manifest → SchemaFields (used by FlowEditorInner) ─────
+
+/** Convert manifest input/output/config wrappers into SchemaField arrays for the form. */
+export function manifestToSchemaFields(
+  manifest: Record<string, unknown>,
+): Record<string, SchemaField[]> {
+  type ManifestWrapper = {
+    schema?: JSONSchemaObject;
+    fileConstraints?: Record<string, { accept?: string; maxSize?: number }>;
+    uiHints?: Record<string, { placeholder?: string }>;
+    propertyOrder?: string[];
+  };
+  const wrapperFor = (key: string) => manifest[key] as ManifestWrapper | undefined;
+  return {
+    input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
+    output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
+    config: schemaToFields(wrapperFor("config")?.schema, "config", wrapperFor("config")),
+  };
+}
+
 // ─── Schema field conversion (used by SchemaSection) ────────
 
 function convertDefaultValue(value: string, type: string): unknown {

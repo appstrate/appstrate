@@ -31,18 +31,17 @@ import { useProviders } from "../hooks/use-providers";
 
 import type { FlowEditorState } from "../components/flow-editor/types";
 import type { MetadataState } from "../components/flow-editor/metadata-section";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import {
   defaultEditorState,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
+  manifestToSchemaFields,
   getProviderEntries,
   setProviderEntries,
   getResourceEntries,
   setResourceEntries,
   toResourceEntry,
-  schemaToFields,
   fieldsToSchema,
 } from "../components/flow-editor/utils";
 import type { SchemaField } from "../components/flow-editor/schema-section";
@@ -89,6 +88,7 @@ function FlowEditorInner({
   const [state, setState] = useState<FlowEditorState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
   const updateManifest = (patch: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
@@ -98,20 +98,9 @@ function FlowEditorInner({
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
-  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(() => {
-    type ManifestWrapper = {
-      schema?: JSONSchemaObject;
-      fileConstraints?: Record<string, { accept?: string; maxSize?: number }>;
-      uiHints?: Record<string, { placeholder?: string }>;
-      propertyOrder?: string[];
-    };
-    const wrapperFor = (key: string) => state.manifest[key] as ManifestWrapper | undefined;
-    return {
-      input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
-      output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
-      config: schemaToFields(wrapperFor("config")?.schema, "config", wrapperFor("config")),
-    };
-  });
+  const [schemaFields, setSchemaFields] = useState<Record<string, SchemaField[]>>(
+    () => manifestToSchemaFields(state.manifest),
+  );
 
   const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];
 
@@ -221,7 +210,10 @@ function FlowEditorInner({
       displayName={(state.manifest.displayName as string) || packageId}
       tabs={flowTabs}
       activeTab={activeTab}
-      onTabChange={(v) => setActiveTab(v as GenericEditorTab)}
+      onTabChange={(v) => {
+        if (v === "json") setJsonEditorKey((k) => k + 1);
+        setActiveTab(v as GenericEditorTab);
+      }}
       error={error}
       isPending={isPending}
       onSubmit={handleSubmit}
@@ -312,9 +304,11 @@ function FlowEditorInner({
       )}
       {activeTab === "json" && (
         <JsonEditor
+          key={jsonEditorKey}
           value={state.manifest}
           onApply={(manifest) => {
             setState((s) => ({ ...s, manifest }));
+            setSchemaFields(manifestToSchemaFields(manifest));
             setActiveTab("general");
           }}
           schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow }}
@@ -348,6 +342,7 @@ function PackageEditorInner({
   const [form, setForm] = useState(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
   // --- Unsaved changes detection ---
   const isDirty = useMemo(
@@ -416,7 +411,10 @@ function PackageEditorInner({
       displayName={form.metadata.displayName || packageId}
       tabs={pkgTabs}
       activeTab={activeTab}
-      onTabChange={(v) => setActiveTab(v as GenericEditorTab)}
+      onTabChange={(v) => {
+        if (v === "json") setJsonEditorKey((k) => k + 1);
+        setActiveTab(v as GenericEditorTab);
+      }}
       error={error}
       isPending={isPending}
       onSubmit={handleSubmit}
@@ -443,6 +441,7 @@ function PackageEditorInner({
 
       {activeTab === "json" && (
         <JsonEditor
+          key={jsonEditorKey}
           value={
             (
               getPackageTypeModule(type).assemblePayload(form) as {
