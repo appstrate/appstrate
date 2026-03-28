@@ -5,6 +5,7 @@ import { KeyRound, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
 import { PageHeader } from "../components/page-header";
@@ -28,9 +29,12 @@ function isExpired(expiresAt: string | null): boolean {
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isOrgAdmin } = useOrg();
+  const appId = useCurrentApplicationId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const revokeApiKeyMutation = useRevokeApiKey();
   const [createOpen, setCreateOpen] = useState(false);
+
+  if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
   if (!isOrgAdmin) {
     return (

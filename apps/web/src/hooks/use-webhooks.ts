@@ -37,6 +37,7 @@ export function useWebhook(webhookId: string) {
 
 export function useCreateWebhook() {
   const qc = useQueryClient();
+  const appId = useCurrentApplicationId();
   return useMutation({
     mutationFn: async (data: {
       url: string;
@@ -47,7 +48,7 @@ export function useCreateWebhook() {
     }) => {
       return api<WebhookCreateResponse>("/webhooks", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, applicationId: appId }),
       });
     },
     onSuccess: () => {

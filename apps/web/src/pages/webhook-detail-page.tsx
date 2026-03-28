@@ -296,7 +296,7 @@ function SettingsTab({ webhookId }: { webhookId: string }) {
               className="text-xs text-primary hover:underline shrink-0"
               onClick={handleRotatedCopy}
             >
-              {rotatedCopied ? t("common:btn.copied") : t("common:btn.copyLink")}
+              {rotatedCopied ? t("common:btn.copied") : t("common:btn.copy")}
             </Button>
           </div>
           <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">

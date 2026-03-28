@@ -102,7 +102,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
             className="text-xs text-primary hover:underline shrink-0"
             onClick={handleCopy}
           >
-            {copied ? t("common:btn.copied") : t("common:btn.copyLink")}
+            {copied ? t("common:btn.copied") : t("common:btn.copy")}
           </Button>
         </div>
         <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">

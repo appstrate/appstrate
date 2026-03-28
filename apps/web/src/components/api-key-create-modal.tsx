@@ -92,7 +92,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             className="text-xs text-primary hover:underline shrink-0"
             onClick={handleCopy}
           >
-            {copied ? t("btn.copied") : t("btn.copyLink")}
+            {copied ? t("btn.copied") : t("btn.copy")}
           </Button>
         </div>
         <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
