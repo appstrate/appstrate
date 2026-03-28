@@ -20,7 +20,7 @@ function getTransport(): Transporter {
   return transport;
 }
 
-async function sendMail(to: string, subject: string, html: string): Promise<void> {
+export async function sendMail(to: string, subject: string, html: string): Promise<void> {
   try {
     await getTransport().sendMail({ from: env.SMTP_FROM, to, subject, html });
   } catch (err) {

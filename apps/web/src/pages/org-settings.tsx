@@ -1039,7 +1039,7 @@ const STATUS_I18N: Record<string, string> = {
 };
 
 function BillingTab() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t, i18n } = useTranslation(["settings", "common"]);
   const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
   const portalMutation = usePortal();
@@ -1050,14 +1050,22 @@ function BillingTab() {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }
 
+  const dateLocale = i18n.language === "fr" ? "fr-FR" : "en-US";
+  const formatBillingDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(dateLocale, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
   const statusLabel =
     billing.status === "canceling" && billing.periodEnd
       ? t("billing.statusCanceling", {
-          date: new Date(billing.periodEnd).toLocaleDateString(),
+          date: formatBillingDate(billing.periodEnd),
         })
       : billing.status === "active" && billing.periodEnd
         ? t("billing.cycleReset", {
-            date: new Date(billing.periodEnd).toLocaleDateString(),
+            date: formatBillingDate(billing.periodEnd),
           })
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
@@ -1160,7 +1168,7 @@ function BillingTab() {
         <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 mb-4 text-sm">
           <p className="font-medium text-yellow-600 dark:text-yellow-400">
             {t("billing.cancelingWarning", {
-              date: new Date(billing.periodEnd).toLocaleDateString(),
+              date: formatBillingDate(billing.periodEnd),
             })}
           </p>
         </div>
