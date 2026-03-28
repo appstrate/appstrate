@@ -66,7 +66,7 @@ export function ExecutionsPage() {
         </EmptyState>
       ) : (
         <>
-          <div className="space-y-1">
+          <div className="rounded-md border border-border">
             {executions.map((exec: Execution, index: number) => (
               <ExecutionRow
                 key={exec.id}
