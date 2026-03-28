@@ -1,5 +1,6 @@
 import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "../hooks/use-auth";
 import { useFlows } from "../hooks/use-packages";
 import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -9,6 +10,7 @@ import type { Execution } from "@appstrate/shared-types";
 
 export function DashboardPage() {
   const { t } = useTranslation(["flows", "common"]);
+  const { profile, user } = useAuth();
   const { data: execData, isLoading: execLoading, error: execError } = useAllExecutions(0, 20);
   const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
   const { data: unreadCounts } = useUnreadCountsByFlow();
@@ -70,8 +72,13 @@ export function DashboardPage() {
     return <Navigate to="/flows" replace />;
   }
 
+  const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
+
   return (
     <div className="space-y-8">
+      <h1 className="text-3xl font-bold">
+        {t("dashboard.welcome", { name: firstName, ns: "common" })}
+      </h1>
       {/* Recent flows (horizontal scroll) */}
       {recentFlowIds.length > 0 && (
         <section>

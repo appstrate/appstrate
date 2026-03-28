@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { useOrg } from "../hooks/use-org";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -50,13 +52,16 @@ export function EndUsersPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-6">
-        <h2>{t("endUsers.pageTitle")}</h2>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={16} className="mr-1.5" />
-          {t("applications.newEndUser")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("endUsers.pageTitle")}
+        breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("endUsers.pageTitle") }]}
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus size={16} className="mr-1.5" />
+            {t("applications.newEndUser")}
+          </Button>
+        }
+      />
 
       <div className="relative mb-4">
         <Search

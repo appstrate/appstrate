@@ -69,6 +69,7 @@
   "validation.slugFormat": "Lowercase letters, numbers and hyphens only",
   "validation.emailFormat": "Invalid email address",
   "viewDefinition": "View definition",
+  "dashboard.welcome": "Welcome, {{name}} \ud83d\udc4b",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "No notifications",

@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { useWebhooks } from "../hooks/use-webhooks";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 
@@ -33,13 +35,16 @@ export function WebhooksPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold">{t("settings:webhooks.pageTitle")}</h2>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus size={16} className="mr-1.5" />
-          {t("settings:webhooks.createTitle")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("settings:webhooks.pageTitle")}
+        breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("settings:webhooks.pageTitle") }]}
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus size={16} className="mr-1.5" />
+            {t("settings:webhooks.createTitle")}
+          </Button>
+        }
+      />
 
       {!webhooks || webhooks.length === 0 ? (
         <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>

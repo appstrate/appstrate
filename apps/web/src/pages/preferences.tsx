@@ -34,6 +34,7 @@ import { ProfileSelector } from "../components/profile-selector";
 import { GoogleIcon, GitHubIcon } from "../components/icons";
 import { formatDateField } from "../lib/markdown";
 import { Unplug, Mail, CheckCircle2, AlertCircle } from "lucide-react";
+import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
@@ -48,9 +49,7 @@ export function PreferencesPage() {
 
   return (
     <>
-      <div className="mb-6">
-        <h2>{t("preferences.title")}</h2>
-      </div>
+      <PageHeader title={t("preferences.title")} breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("preferences.title") }]} />
       <Tabs
         value={tab}
         onValueChange={(v) =>

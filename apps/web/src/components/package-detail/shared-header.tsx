@@ -1,10 +1,10 @@
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/shared-types";
 import { VersionSelector } from "../version-selector";
 import { packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
+import { PageHeader } from "../page-header";
 
 interface SharedHeaderDetail {
   id: string;
@@ -47,18 +47,15 @@ export function SharedHeader({
 
   return (
     <>
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to={breadcrumbPath} className="text-muted-foreground hover:text-foreground">
-          {breadcrumbLabel}
-        </Link>
-        <span className="opacity-50">/</span>
-        <span>{detail.displayName}</span>
-      </nav>
-
-      <div className="mb-4">
-        <div className="flex items-center flex-wrap gap-2">
-          <h2 className="text-xl font-semibold">{detail.displayName}</h2>
-          <div className="flex items-center gap-1.5">
+      <PageHeader
+        title={detail.displayName}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: breadcrumbLabel, href: breadcrumbPath },
+          { label: detail.displayName },
+        ]}
+        actions={
+          <>
             {detail.source === "system" && (
               <span title={t("packages.sourceBuiltIn", { ns: "settings" })}>
                 <ShieldCheck className="h-4 w-4 text-muted-foreground" />
@@ -69,8 +66,9 @@ export function SharedHeader({
                 {t("version.readOnly")}
               </span>
             )}
-          </div>
-        </div>
+          </>
+        }
+      >
         <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
         {detail.description && (
           <p className="text-sm text-muted-foreground mt-1">
@@ -94,7 +92,7 @@ export function SharedHeader({
             </div>
           </div>
         )}
-      </div>
+      </PageHeader>
 
       <div className="w-full h-px border-b border-border border-dashed my-6"></div>
     </>

@@ -69,6 +69,7 @@
   "validation.slugFormat": "Lettres minuscules, chiffres et tirets uniquement",
   "validation.emailFormat": "Adresse email invalide",
   "viewDefinition": "Voir la définition",
+  "dashboard.welcome": "Bienvenue, {{name}} \ud83d\udc4b",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "Aucune notification",

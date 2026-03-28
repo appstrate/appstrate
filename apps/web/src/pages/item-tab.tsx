@@ -75,6 +75,7 @@ export function ItemTab({
       emptyExtraActions={emptyExtraActions}
       headerContent={headerContent}
       title={title}
+      breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: title }]}
     />
     <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
     </>

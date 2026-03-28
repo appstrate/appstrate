@@ -8,6 +8,7 @@ import { useFlows } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
+import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
@@ -29,6 +30,7 @@ export interface CardItem {
 
 interface PackageTabProps {
   title?: string;
+  breadcrumbs?: BreadcrumbEntry[];
   items: CardItem[] | undefined;
   isLoading: boolean;
   error?: Error | null;
@@ -42,6 +44,7 @@ interface PackageTabProps {
 
 export function PackageTab({
   title,
+  breadcrumbs,
   items,
   isLoading,
   error,
@@ -57,15 +60,15 @@ export function PackageTab({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const header = (
-    <div className="flex items-center justify-between gap-2 mb-4">
-      <div className="flex items-center gap-3">
-        {title && <h2 className="text-lg font-semibold">{title}</h2>}
-        {headerContent}
-      </div>
-      <div className="flex items-center gap-2">{isOrgAdmin && extraActions}</div>
-    </div>
-  );
+  const header = title ? (
+    <PageHeader
+      title={title}
+      breadcrumbs={breadcrumbs}
+      actions={isOrgAdmin ? extraActions : undefined}
+    >
+      {headerContent}
+    </PageHeader>
+  ) : null;
 
   const emptyActions = emptyExtraActions !== undefined ? emptyExtraActions : extraActions;
 
@@ -114,6 +117,7 @@ export function PackageList() {
     <>
       <PackageTab
         title={t("list.tabFlows")}
+        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("list.tabFlows") }]}
         items={items}
         isLoading={isLoading}
         error={error}

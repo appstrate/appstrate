@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "./spinner";
+import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import type { PackageType } from "@appstrate/shared-types";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
@@ -38,7 +38,6 @@ interface EditorShellProps {
   isPending: boolean;
   onSubmit: () => void;
   onCancel: () => void;
-  /** Hide submit bar for certain tabs (e.g. JSON preview). Defaults to showing. */
   hideSubmitBar?: boolean;
   children: ReactNode;
 }
@@ -62,28 +61,28 @@ export function EditorShell({
   const listLabel = listLabelKeys[type];
   const listPath = packageListPath(type);
 
+  const breadcrumbs: BreadcrumbEntry[] = [
+    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+    { label: t(listLabel.key, { ns: listLabel.ns }), href: listPath },
+  ];
+
+  if (isEdit && packageId) {
+    breadcrumbs.push({
+      label: displayName || packageId,
+      href: packageDetailPath(type, packageId),
+    });
+    breadcrumbs.push({ label: t("editor.breadcrumbEdit") });
+  } else {
+    breadcrumbs.push({ label: t(breadcrumbNewKeys[type]) });
+  }
+
+  const title = isEdit
+    ? displayName || packageId || t("editor.breadcrumbEdit")
+    : t(breadcrumbNewKeys[type]);
+
   return (
     <div className="space-y-4">
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground mb-4">
-        <Link to={listPath} className="text-muted-foreground hover:text-foreground">
-          {t(listLabel.key, { ns: listLabel.ns })}
-        </Link>
-        <span className="opacity-50">/</span>
-        {isEdit && packageId ? (
-          <>
-            <Link
-              to={packageDetailPath(type, packageId)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {displayName || packageId}
-            </Link>
-            <span className="opacity-50">/</span>
-            <span>{t("editor.breadcrumbEdit")}</span>
-          </>
-        ) : (
-          <span>{t(breadcrumbNewKeys[type])}</span>
-        )}
-      </nav>
+      <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       {error && (
         <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
