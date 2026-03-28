@@ -6,6 +6,13 @@ import { packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
 
+const emojiMap: Record<PackageType, string> = {
+  flow: "⚡",
+  skill: "🧠",
+  tool: "🔧",
+  provider: "🔌",
+};
+
 interface SharedHeaderDetail {
   id: string;
   displayName: string;
@@ -42,13 +49,13 @@ export function SharedHeader({
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 
-  const hasActions = actionsLeft || actionsRight;
   const hasVersionSelector = detail.versionCount != null && detail.versionCount > 0;
 
   return (
     <>
       <PageHeader
         title={detail.displayName}
+        emoji={emojiMap[detail.type]}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: breadcrumbLabel, href: breadcrumbPath },
@@ -66,6 +73,17 @@ export function SharedHeader({
                 {t("version.readOnly")}
               </span>
             )}
+            {actionsLeft}
+            {hasVersionSelector && (
+              <VersionSelector
+                packageId={packageId}
+                currentVersion={versionParam}
+                type={detail.type}
+                hasDraftChanges={hasDraftChanges}
+                currentIsDraft={!versionParam && hasDraftChanges}
+              />
+            )}
+            {actionsRight}
           </>
         }
       >
@@ -75,26 +93,7 @@ export function SharedHeader({
             <InlineMarkdown>{detail.description}</InlineMarkdown>
           </p>
         )}
-        {(hasActions || hasVersionSelector) && (
-          <div className="flex items-center gap-2 mt-3">
-            {actionsLeft}
-            <div className="ml-auto flex items-center gap-2">
-              {hasVersionSelector && (
-                <VersionSelector
-                  packageId={packageId}
-                  currentVersion={versionParam}
-                  type={detail.type}
-                  hasDraftChanges={hasDraftChanges}
-                  currentIsDraft={!versionParam && hasDraftChanges}
-                />
-              )}
-              {actionsRight}
-            </div>
-          </div>
-        )}
       </PageHeader>
-
-      <div className="w-full h-px border-b border-border border-dashed my-6"></div>
     </>
   );
 }

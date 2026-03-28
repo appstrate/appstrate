@@ -41,6 +41,7 @@ export function ApplicationsPage() {
     <>
       <PageHeader
         title={t("applications.pageTitle")}
+        emoji="📱"
         breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("applications.pageTitle") }]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>

@@ -17,12 +17,13 @@ export interface BreadcrumbEntry {
 
 interface PageHeaderProps {
   title: string;
+  emoji?: string;
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function PageHeader({ title, breadcrumbs, actions, children }: PageHeaderProps) {
+export function PageHeader({ title, emoji, breadcrumbs, actions, children }: PageHeaderProps) {
   return (
     <div className="mb-6">
       {breadcrumbs && breadcrumbs.length > 0 && (
@@ -46,7 +47,7 @@ export function PageHeader({ title, breadcrumbs, actions, children }: PageHeader
         </Breadcrumb>
       )}
       <div className="flex min-h-9 items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">{title}</h2>
+        <h2 className="text-lg font-semibold">{emoji && <span className="mr-2">{emoji}</span>}{title}</h2>
         {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
       </div>
       {children}

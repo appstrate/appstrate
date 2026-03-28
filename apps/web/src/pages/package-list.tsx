@@ -30,6 +30,7 @@ export interface CardItem {
 
 interface PackageTabProps {
   title?: string;
+  emoji?: string;
   breadcrumbs?: BreadcrumbEntry[];
   items: CardItem[] | undefined;
   isLoading: boolean;
@@ -44,6 +45,7 @@ interface PackageTabProps {
 
 export function PackageTab({
   title,
+  emoji,
   breadcrumbs,
   items,
   isLoading,
@@ -63,6 +65,7 @@ export function PackageTab({
   const header = title ? (
     <PageHeader
       title={title}
+      emoji={emoji}
       breadcrumbs={breadcrumbs}
       actions={isOrgAdmin ? extraActions : undefined}
     >
@@ -117,6 +120,7 @@ export function PackageList() {
     <>
       <PackageTab
         title={t("list.tabFlows")}
+        emoji="⚡"
         breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("list.tabFlows") }]}
         items={items}
         isLoading={isLoading}

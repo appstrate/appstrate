@@ -63,6 +63,7 @@ export function SchedulesListPage() {
     <>
       <PageHeader
         title={t("schedules.title")}
+        emoji="📅"
         breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("schedules.title") }]}
         actions={
           <Button onClick={openCreate} disabled={!flows || flows.length === 0}>

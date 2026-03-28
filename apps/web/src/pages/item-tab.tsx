@@ -5,9 +5,17 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
+import type { PackageType } from "@appstrate/shared-types";
 import { type CardItem, PackageTab } from "./package-list";
 import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";
+
+const emojiMap: Record<PackageType, string> = {
+  flow: "⚡",
+  skill: "🧠",
+  tool: "🔧",
+  provider: "🔌",
+};
 
 export function ItemTab({
   config,
@@ -56,6 +64,7 @@ export function ItemTab({
     <PackageTab
       items={items}
       isLoading={isLoading}
+      emoji={emojiMap[config.type]}
       emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
       emptyHint={t(config.emptyHintKey, { type: typeLabel })}
       emptyIcon={config.emptyIcon}

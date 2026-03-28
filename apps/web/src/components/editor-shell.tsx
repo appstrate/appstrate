@@ -7,6 +7,13 @@ import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import type { PackageType } from "@appstrate/shared-types";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
+const emojiMap: Record<PackageType, string> = {
+  flow: "⚡",
+  skill: "🧠",
+  tool: "🔧",
+  provider: "🔌",
+};
+
 const breadcrumbNewKeys: Record<PackageType, string> = {
   flow: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
@@ -82,7 +89,7 @@ export function EditorShell({
 
   return (
     <div className="space-y-4">
-      <PageHeader title={title} breadcrumbs={breadcrumbs} />
+      <PageHeader title={title} emoji={emojiMap[type]} breadcrumbs={breadcrumbs} />
 
       {error && (
         <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">

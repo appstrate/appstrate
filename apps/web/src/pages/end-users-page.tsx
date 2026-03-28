@@ -54,6 +54,7 @@ export function EndUsersPage() {
     <>
       <PageHeader
         title={t("endUsers.pageTitle")}
+        emoji="👥"
         breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("endUsers.pageTitle") }]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>

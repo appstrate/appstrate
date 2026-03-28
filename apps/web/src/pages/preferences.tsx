@@ -49,7 +49,7 @@ export function PreferencesPage() {
 
   return (
     <>
-      <PageHeader title={t("preferences.title")} breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("preferences.title") }]} />
+      <PageHeader title={t("preferences.title")} emoji="👤" breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("preferences.title") }]} />
       <Tabs
         value={tab}
         onValueChange={(v) =>

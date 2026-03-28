@@ -37,6 +37,7 @@ export function WebhooksPage() {
     <div>
       <PageHeader
         title={t("settings:webhooks.pageTitle")}
+        emoji="🪝"
         breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("settings:webhooks.pageTitle") }]}
         actions={
           <Button size="sm" onClick={() => setCreateOpen(true)}>
