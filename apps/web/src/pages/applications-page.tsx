@@ -42,7 +42,10 @@ export function ApplicationsPage() {
       <PageHeader
         title={t("applications.pageTitle")}
         emoji="📱"
-        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("applications.pageTitle") }]}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("applications.pageTitle") },
+        ]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus size={16} className="mr-1.5" />
@@ -65,10 +68,7 @@ export function ApplicationsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {applications.map((app) => (
-            <div
-              key={app.id}
-              className="rounded-lg border border-border bg-card p-5"
-            >
+            <div key={app.id} className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>

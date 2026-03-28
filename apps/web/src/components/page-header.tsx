@@ -47,7 +47,10 @@ export function PageHeader({ title, emoji, breadcrumbs, actions, children }: Pag
         </Breadcrumb>
       )}
       <div className="flex min-h-9 items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">{emoji && <span className="mr-2">{emoji}</span>}{title}</h2>
+        <h2 className="text-lg font-semibold">
+          {emoji && <span className="mr-2">{emoji}</span>}
+          {title}
+        </h2>
         {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
       </div>
       {children}

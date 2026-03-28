@@ -309,16 +309,23 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      <PageHeader title={t("orgSettings.pageTitle")} emoji="⚙️" breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("orgSettings.pageTitle") }]}>
+      <PageHeader
+        title={t("orgSettings.pageTitle")}
+        emoji="⚙️"
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("orgSettings.pageTitle") },
+        ]}
+      >
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mt-2">
           <TabsList>
-          <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>
-          <TabsTrigger value="members">
-            {t("orgSettings.tabMembers", { count: members.length })}
-          </TabsTrigger>
-          {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
-          <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
-          {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
+            <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>
+            <TabsTrigger value="members">
+              {t("orgSettings.tabMembers", { count: members.length })}
+            </TabsTrigger>
+            {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
+            <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
+            {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
           </TabsList>
         </Tabs>
       </PageHeader>

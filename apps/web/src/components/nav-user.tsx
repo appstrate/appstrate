@@ -121,7 +121,13 @@ export function NavUser() {
                   >
                     <Icon size={14} />
                     {t(labelKey)}
-                    {theme === value && <Check size={14} strokeWidth={2.5} className="ml-auto text-primary shrink-0" />}
+                    {theme === value && (
+                      <Check
+                        size={14}
+                        strokeWidth={2.5}
+                        className="ml-auto text-primary shrink-0"
+                      />
+                    )}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
