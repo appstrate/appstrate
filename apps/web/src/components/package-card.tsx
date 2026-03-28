@@ -8,6 +8,12 @@ import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 
+interface ProviderPill {
+  id: string;
+  displayName: string;
+  iconUrl?: string;
+}
+
 interface PackageCardProps {
   id: string;
   displayName: string;
@@ -16,6 +22,7 @@ interface PackageCardProps {
   source?: "system" | "local";
   runningExecutions?: number;
   keywords?: string[];
+  providers?: ProviderPill[];
   usedByFlows?: number;
   unreadCount?: number;
   statusBadge?: React.ReactNode;
@@ -32,6 +39,7 @@ export function PackageCard({
   source,
   runningExecutions,
   keywords,
+  providers,
   usedByFlows,
   unreadCount,
   statusBadge,
@@ -92,6 +100,15 @@ export function PackageCard({
       <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
       <ScrollArea className="mt-2 w-full">
         <div className="flex gap-1">
+          {providers?.map((p) => (
+            <span
+              key={p.id}
+              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0 inline-flex items-center gap-1"
+            >
+              {p.iconUrl && <ProviderIcon src={p.iconUrl} className="h-3 w-3 !p-0 !bg-transparent" />}
+              {p.displayName}
+            </span>
+          ))}
           {keywords?.map((kw) => (
             <span
               key={kw}

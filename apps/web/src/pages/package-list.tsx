@@ -5,6 +5,7 @@ import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/shared-types";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
+import { useProviders } from "../hooks/use-providers";
 import { useOrg } from "../hooks/use-org";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
@@ -20,6 +21,7 @@ export interface CardItem {
   source?: "system" | "local";
   runningExecutions?: number;
   keywords?: string[];
+  providers?: { id: string; displayName: string; iconUrl?: string }[];
   usedByFlows?: number;
   unreadCount?: number;
   statusBadge?: ReactNode;
@@ -103,7 +105,15 @@ export function PackageList() {
   const { data: flows, isLoading, error } = useFlows();
   const { isOrgAdmin } = useOrg();
   const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { data: providersData } = useProviders();
   const [importOpen, setImportOpen] = useState(false);
+
+  const providerMap = new Map<string, { id: string; displayName: string; iconUrl?: string }>();
+  if (providersData?.providers) {
+    for (const p of providersData.providers) {
+      providerMap.set(p.id, { id: p.id, displayName: p.displayName, iconUrl: p.iconUrl });
+    }
+  }
 
   const items: CardItem[] | undefined = flows?.map((f) => ({
     id: f.id,
@@ -113,6 +123,9 @@ export function PackageList() {
     source: f.source,
     runningExecutions: f.runningExecutions,
     keywords: f.keywords,
+    providers: f.dependencies.providers
+      .map((pid) => providerMap.get(pid))
+      .filter((p): p is NonNullable<typeof p> => p != null),
     unreadCount: unreadCounts?.[f.id],
   }));
 
