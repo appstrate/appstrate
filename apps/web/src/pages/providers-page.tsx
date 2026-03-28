@@ -59,7 +59,7 @@ export function ProvidersPage() {
   const allProviders = providersData?.providers ?? [];
 
   const filterToggle = (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 mt-2">
       <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
         <TabsList>
           <TabsTrigger value="enabled">{t("providers.filterEnabled")}</TabsTrigger>

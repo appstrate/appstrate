@@ -49,21 +49,23 @@ export function PreferencesPage() {
 
   return (
     <>
-      <PageHeader title={t("preferences.title")} emoji="👤" breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("preferences.title") }]} />
-      <Tabs
-        value={tab}
-        onValueChange={(v) =>
-          setTab(v as "general" | "appearance" | "security" | "connectors" | "profiles")
-        }
-      >
-        <TabsList className="mb-4">
+      <PageHeader title={t("preferences.title")} emoji="👤" breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("preferences.title") }]}>
+        <Tabs
+          value={tab}
+          onValueChange={(v) =>
+            setTab(v as "general" | "appearance" | "security" | "connectors" | "profiles")
+          }
+          className="mt-2"
+        >
+          <TabsList>
           <TabsTrigger value="general">{t("preferences.tabGeneral")}</TabsTrigger>
           <TabsTrigger value="appearance">{t("preferences.tabAppearance")}</TabsTrigger>
           <TabsTrigger value="security">{t("preferences.tabSecurity")}</TabsTrigger>
           <TabsTrigger value="connectors">{t("preferences.tabConnectors")}</TabsTrigger>
           <TabsTrigger value="profiles">{t("preferences.tabProfiles")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+          </TabsList>
+        </Tabs>
+      </PageHeader>
 
       {tab === "general" && <GeneralTab />}
 
