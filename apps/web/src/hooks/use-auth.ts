@@ -127,9 +127,23 @@ export function useAuth() {
     });
   }, []);
 
+  const signInWithGithub = useCallback(async (callbackURL?: string) => {
+    await authClient.signIn.social({
+      provider: "github",
+      callbackURL: callbackURL ?? "/",
+    });
+  }, []);
+
   const linkGoogle = useCallback(async () => {
     await authClient.linkSocial({
       provider: "google",
+      callbackURL: "/preferences",
+    });
+  }, []);
+
+  const linkGithub = useCallback(async () => {
+    await authClient.linkSocial({
+      provider: "github",
       callbackURL: "/preferences",
     });
   }, []);
@@ -153,7 +167,9 @@ export function useAuth() {
     logout,
     updatePassword,
     signInWithGoogle,
+    signInWithGithub,
     linkGoogle,
+    linkGithub,
     unlinkAccount,
     resendVerificationEmail,
   };

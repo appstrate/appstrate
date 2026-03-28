@@ -62,9 +62,11 @@ const envSchema = z.object({
   // Execution token signing (optional — if unset, execution tokens are unsigned)
   EXECUTION_TOKEN_SECRET: z.string().optional(),
 
-  // Social auth (optional — enables Google sign-in when both are set)
+  // Social auth (optional — enables Google/GitHub sign-in when both are set)
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
 
   // SMTP (optional — enables email verification when all are set)
   SMTP_HOST: z.string().optional(),

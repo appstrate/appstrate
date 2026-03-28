@@ -13,6 +13,7 @@ const DEFAULT_CONFIG: AppConfig = {
     models: true,
     providerKeys: true,
     googleAuth: false,
+    githubAuth: false,
     smtp: false,
   },
   trustedOrigins: [],

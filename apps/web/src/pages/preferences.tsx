@@ -30,7 +30,7 @@ import {
   useDeleteConnectionProfile,
 } from "../hooks/use-connection-profiles";
 import { ProfileSelector } from "../components/profile-selector";
-import { GoogleIcon } from "../components/icons";
+import { GoogleIcon, GitHubIcon } from "../components/icons";
 import { formatDateField } from "../lib/markdown";
 import { Unplug, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -155,9 +155,9 @@ function AppearanceTab({
 function LinkedAccountsSection() {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
-  const { linkGoogle, unlinkAccount } = useAuth();
-  const [unlinking, setUnlinking] = useState(false);
-  const [linking, setLinking] = useState(false);
+  const { linkGoogle, linkGithub, unlinkAccount } = useAuth();
+  const [unlinking, setUnlinking] = useState<string | false>(false);
+  const [linking, setLinking] = useState<string | false>(false);
 
   const { data: accounts, refetch } = useQuery({
     queryKey: ["linked-accounts"],
@@ -168,12 +168,42 @@ function LinkedAccountsSection() {
     },
   });
 
-  if (!features.googleAuth) return null;
+  if (!features.googleAuth && !features.githubAuth) return null;
 
   const googleAccount = accounts?.find((a) => a.providerId === "google");
+  const githubAccount = accounts?.find((a) => a.providerId === "github");
   const credentialAccount = accounts?.find((a) => a.providerId === "credential");
   const totalAccounts = accounts?.length ?? 0;
   const canUnlink = totalAccounts > 1;
+
+  const socialProviders = [
+    ...(features.googleAuth
+      ? [
+          {
+            id: "google",
+            name: "Google",
+            icon: GoogleIcon,
+            account: googleAccount,
+            link: linkGoogle,
+            linkingKey: "preferences.linkingGoogle" as const,
+            linkKey: "preferences.linkGoogle" as const,
+          },
+        ]
+      : []),
+    ...(features.githubAuth
+      ? [
+          {
+            id: "github",
+            name: "GitHub",
+            icon: GitHubIcon,
+            account: githubAccount,
+            link: linkGithub,
+            linkingKey: "preferences.linkingGithub" as const,
+            linkKey: "preferences.linkGithub" as const,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="mb-6">
@@ -197,56 +227,67 @@ function LinkedAccountsSection() {
             </span>
           </div>
         )}
-        {googleAccount ? (
-          <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-3">
-              <GoogleIcon className="h-5 w-5" />
-              <div>
-                <span className="text-sm font-medium">Google</span>
-                <div className="text-xs text-muted-foreground">{googleAccount.accountId}</div>
+        {socialProviders.map((provider) => {
+          const Icon = provider.icon;
+          return provider.account ? (
+            <div
+              key={provider.id}
+              className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+            >
+              <div className="flex items-center gap-3">
+                <Icon className="h-5 w-5" />
+                <div>
+                  <span className="text-sm font-medium">{provider.name}</span>
+                  <div className="text-xs text-muted-foreground">{provider.account.accountId}</div>
+                </div>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!canUnlink || unlinking === provider.id}
+                title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
+                onClick={async () => {
+                  setUnlinking(provider.id);
+                  try {
+                    await unlinkAccount(provider.id);
+                    await refetch();
+                  } finally {
+                    setUnlinking(false);
+                  }
+                }}
+              >
+                {unlinking === provider.id
+                  ? t("preferences.unlinking")
+                  : t("preferences.unlinkGoogle")}
+              </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!canUnlink || unlinking}
-              title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
-              onClick={async () => {
-                setUnlinking(true);
-                try {
-                  await unlinkAccount("google");
-                  await refetch();
-                } finally {
-                  setUnlinking(false);
-                }
-              }}
+          ) : (
+            <div
+              key={provider.id}
+              className="flex items-center justify-between rounded-lg border border-border border-dashed bg-card p-4"
             >
-              {unlinking ? t("preferences.unlinking") : t("preferences.unlinkGoogle")}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between rounded-lg border border-border border-dashed bg-card p-4">
-            <div className="flex items-center gap-3">
-              <GoogleIcon className="h-5 w-5" />
-              <span className="text-sm font-medium text-muted-foreground">Google</span>
+              <div className="flex items-center gap-3">
+                <Icon className="h-5 w-5" />
+                <span className="text-sm font-medium text-muted-foreground">{provider.name}</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={linking === provider.id}
+                onClick={async () => {
+                  setLinking(provider.id);
+                  try {
+                    await provider.link();
+                  } finally {
+                    setLinking(false);
+                  }
+                }}
+              >
+                {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
+              </Button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={linking}
-              onClick={async () => {
-                setLinking(true);
-                try {
-                  await linkGoogle();
-                } finally {
-                  setLinking(false);
-                }
-              }}
-            >
-              {linking ? t("preferences.linkingGoogle") : t("preferences.linkGoogle")}
-            </Button>
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );
