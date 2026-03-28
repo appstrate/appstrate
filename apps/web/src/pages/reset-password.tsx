@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { AuthLayout } from "../components/auth-layout";
+import { AuthSuccessState } from "../components/auth-success-state";
 import { authClient } from "../lib/auth-client";
 
 export function ResetPasswordPage() {
@@ -23,8 +24,8 @@ export function ResetPasswordPage() {
     return (
       <AuthLayout>
         <div className="flex flex-col items-center gap-6 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-            <AlertCircle className="h-6 w-6 text-destructive" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+            <AlertCircle className="h-8 w-8 text-destructive" />
           </div>
           <p className="text-sm text-muted-foreground">{t("resetPassword.invalidToken")}</p>
           <Link
@@ -69,21 +70,13 @@ export function ResetPasswordPage() {
   if (state === "success") {
     return (
       <AuthLayout>
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <CheckCircle className="h-8 w-8 text-primary" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold">{t("resetPassword.successTitle")}</h1>
-            <p className="text-sm text-muted-foreground">{t("resetPassword.successDescription")}</p>
-          </div>
-          <Link
-            to="/login"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
-          >
-            {t("resetPassword.backToLogin")}
-          </Link>
-        </div>
+        <AuthSuccessState
+          icon={CheckCircle}
+          title={t("resetPassword.successTitle")}
+          description={t("resetPassword.successDescription")}
+          backTo="/login"
+          backLabel={t("resetPassword.backToLogin")}
+        />
       </AuthLayout>
     );
   }

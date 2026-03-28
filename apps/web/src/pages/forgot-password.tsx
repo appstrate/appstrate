@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthLayout } from "../components/auth-layout";
+import { AuthSuccessState } from "../components/auth-success-state";
 import { authClient } from "../lib/auth-client";
 
 export function ForgotPasswordPage() {
@@ -34,21 +35,13 @@ export function ForgotPasswordPage() {
   if (state === "sent") {
     return (
       <AuthLayout>
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <Mail className="h-8 w-8 text-primary" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold">{t("forgotPassword.sentTitle")}</h1>
-            <p className="text-sm text-muted-foreground">{t("forgotPassword.sentDescription")}</p>
-          </div>
-          <Link
-            to="/login"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
-          >
-            {t("forgotPassword.backToLogin")}
-          </Link>
-        </div>
+        <AuthSuccessState
+          icon={Mail}
+          title={t("forgotPassword.sentTitle")}
+          description={t("forgotPassword.sentDescription")}
+          backTo="/login"
+          backLabel={t("forgotPassword.backToLogin")}
+        />
       </AuthLayout>
     );
   }
