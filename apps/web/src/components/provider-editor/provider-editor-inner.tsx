@@ -241,6 +241,7 @@ export function ProviderEditorInner({
   );
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProviderEditorTab>("general");
+  const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
   // --- Unsaved changes detection ---
   const initialSnapshot = useMemo(
@@ -323,7 +324,10 @@ export function ProviderEditorInner({
       displayName={metadata.displayName || packageId}
       tabs={tabs}
       activeTab={activeTab}
-      onTabChange={(v) => setActiveTab(v as ProviderEditorTab)}
+      onTabChange={(v) => {
+        if (v === "json") setJsonEditorKey((k) => k + 1);
+        setActiveTab(v as ProviderEditorTab);
+      }}
       error={error}
       isPending={isPending}
       onSubmit={handleSubmit}
@@ -753,6 +757,7 @@ export function ProviderEditorInner({
       {/* ── JSON Tab ── */}
       {activeTab === "json" && (
         <JsonEditor
+          key={jsonEditorKey}
           value={buildPayload(metadata, fields, isEdit, availableScopes, credentialFields)}
           onApply={(parsed) => {
             const parsedName = getManifestName({ name: parsed.id as string });
