@@ -1,9 +1,9 @@
 /**
  * SSRF protection — blocks requests targeting private/internal networks.
  *
- * ⚠️  MIRROR of @appstrate/core/ssrf (core/src/ssrf.ts).
- *     The sidecar cannot depend on @appstrate/core (Docker image size).
- *     Keep in sync manually — run `diff core/src/ssrf.ts runtime-pi/sidecar/ssrf.ts`.
+ * MIRROR of @appstrate/core/ssrf (core/src/ssrf.ts).
+ * The sidecar cannot depend on @appstrate/core (Docker image size).
+ * Keep in sync manually — run: diff core/src/ssrf.ts appstrate/runtime-pi/sidecar/ssrf.ts
  *
  * Normalizes hostnames through the WHATWG URL parser to defeat bypass techniques:
  * - Numeric IPs: 2130706433, 0x7f000001, 0177.0.0.1 → 127.0.0.1
@@ -24,7 +24,9 @@ export function isBlockedHost(hostname: string): boolean {
   }
 
   // --- Direct hostname matches ---
-  if (h === "localhost" || h === "sidecar" || h === "agent" || h === "host.docker.internal") return true;
+  if (h === "localhost" || h === "sidecar" || h === "agent" || h === "host.docker.internal") {
+    return true;
+  }
   if (h === "metadata.google.internal") return true;
 
   // --- IPv4 checks (URL parser normalizes all numeric formats to dotted-decimal) ---
@@ -32,12 +34,12 @@ export function isBlockedHost(hostname: string): boolean {
   if (ipv4Match) {
     const a = parseInt(ipv4Match[1]!, 10);
     const b = parseInt(ipv4Match[2]!, 10);
-    if (a === 0) return true;                             // 0.0.0.0/8
-    if (a === 10) return true;                            // 10.0.0.0/8
-    if (a === 127) return true;                           // 127.0.0.0/8 (full loopback range)
-    if (a === 172 && b >= 16 && b <= 31) return true;     // 172.16.0.0/12
-    if (a === 192 && b === 168) return true;              // 192.168.0.0/16
-    if (a === 169 && b === 254) return true;              // 169.254.0.0/16 (link-local)
+    if (a === 0) return true; // 0.0.0.0/8
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 127) return true; // 127.0.0.0/8 (full loopback range)
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local)
     return false;
   }
 

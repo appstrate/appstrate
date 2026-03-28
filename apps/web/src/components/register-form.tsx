@@ -11,6 +11,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { GoogleSignInButton } from "./google-sign-in-button";
 import { GitHubSignInButton } from "./github-sign-in-button";
+import { LegalFooter } from "./legal-footer";
 
 type RegisterFormData = {
   displayName: string;
@@ -104,12 +105,7 @@ export function RegisterForm({
     </div>
   );
 
-  const defaultFooter = (
-    <div className="text-balance text-center text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-4 hover:[&_a]:text-primary">
-      {t("login.termsNotice")} <a href="#">{t("login.termsOfService")}</a> {t("login.and")}{" "}
-      <a href="#">{t("login.privacyPolicy")}</a>.
-    </div>
-  );
+  const defaultFooter = <LegalFooter />;
 
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
