@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useForm, useWatch } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { useQuery } from "@tanstack/react-query";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Button } from "@/components/ui/button";
@@ -503,10 +504,10 @@ function PasswordChangeForm() {
     setError,
     reset,
     control,
+    showError,
     formState: { errors, isSubmitting },
-  } = useForm<PasswordFormData>({
+  } = useAppForm<PasswordFormData>({
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
-    mode: "onBlur",
   });
 
   const newPasswordValue = useWatch({ control, name: "newPassword" });
@@ -535,11 +536,11 @@ function PasswordChangeForm() {
               required: t("validation.required", { ns: "common" }),
             })}
             autoComplete="current-password"
-            aria-invalid={errors.currentPassword ? true : undefined}
-            className={cn(errors.currentPassword && "border-destructive")}
+            aria-invalid={showError("currentPassword") ? true : undefined}
+            className={cn(showError("currentPassword") && "border-destructive")}
           />
-          {errors.currentPassword && (
-            <div className="text-sm text-destructive">{errors.currentPassword.message}</div>
+          {showError("currentPassword") && (
+            <div className="text-sm text-destructive">{errors.currentPassword?.message}</div>
           )}
         </div>
         <div className="space-y-2">
@@ -555,11 +556,11 @@ function PasswordChangeForm() {
             })}
             minLength={6}
             autoComplete="new-password"
-            aria-invalid={errors.newPassword ? true : undefined}
-            className={cn(errors.newPassword && "border-destructive")}
+            aria-invalid={showError("newPassword") ? true : undefined}
+            className={cn(showError("newPassword") && "border-destructive")}
           />
-          {errors.newPassword && (
-            <div className="text-sm text-destructive">{errors.newPassword.message}</div>
+          {showError("newPassword") && (
+            <div className="text-sm text-destructive">{errors.newPassword?.message}</div>
           )}
         </div>
         <div className="space-y-2">
@@ -572,11 +573,11 @@ function PasswordChangeForm() {
                 v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
             })}
             autoComplete="new-password"
-            aria-invalid={errors.confirmPassword ? true : undefined}
-            className={cn(errors.confirmPassword && "border-destructive")}
+            aria-invalid={showError("confirmPassword") ? true : undefined}
+            className={cn(showError("confirmPassword") && "border-destructive")}
           />
-          {errors.confirmPassword && (
-            <div className="text-sm text-destructive">{errors.confirmPassword.message}</div>
+          {showError("confirmPassword") && (
+            <div className="text-sm text-destructive">{errors.confirmPassword?.message}</div>
           )}
         </div>
         {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}

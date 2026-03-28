@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { useWatch } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -74,15 +75,15 @@ function ProviderKeyFormBody({
     control,
     setValue,
     clearErrors,
+    showError,
     formState: { errors },
-  } = useForm<ProviderKeyFormFields>({
+  } = useAppForm<ProviderKeyFormFields>({
     defaultValues: {
       label: providerKey?.label ?? "",
       api: providerKey?.api ?? "",
       baseUrl: providerKey?.baseUrl ?? "",
       apiKey: "",
     },
-    mode: "onBlur",
   });
 
   const [api, baseUrl, apiKey, label] = useWatch({
@@ -212,10 +213,10 @@ function ProviderKeyFormBody({
               validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
             })}
             placeholder="ex: My Anthropic Key"
-            aria-invalid={errors.label ? true : undefined}
-            className={cn(errors.label && "border-destructive")}
+            aria-invalid={showError("label") ? true : undefined}
+            className={cn(showError("label") && "border-destructive")}
           />
-          {errors.label?.message && (
+          {showError("label") && errors.label?.message && (
             <div className="text-sm text-destructive">{errors.label.message}</div>
           )}
         </div>
@@ -232,7 +233,7 @@ function ProviderKeyFormBody({
                   clearErrors("api");
                 }}
               >
-                <SelectTrigger id="pk-api" className={cn(errors.api && "border-destructive")}>
+                <SelectTrigger id="pk-api" className={cn(showError("api") && "border-destructive")}>
                   <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -243,7 +244,7 @@ function ProviderKeyFormBody({
                   ))}
                 </SelectContent>
               </Select>
-              {errors.api?.message && (
+              {showError("api") && errors.api?.message && (
                 <div className="text-sm text-destructive">{errors.api.message}</div>
               )}
             </div>
@@ -265,10 +266,10 @@ function ProviderKeyFormBody({
                   },
                 })}
                 placeholder="https://api.openai.com/v1"
-                aria-invalid={errors.baseUrl ? true : undefined}
-                className={cn(errors.baseUrl && "border-destructive")}
+                aria-invalid={showError("baseUrl") ? true : undefined}
+                className={cn(showError("baseUrl") && "border-destructive")}
               />
-              {errors.baseUrl?.message && (
+              {showError("baseUrl") && errors.baseUrl?.message && (
                 <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
               )}
             </div>
@@ -289,15 +290,15 @@ function ProviderKeyFormBody({
                     : undefined,
               })}
               placeholder="sk-..."
-              aria-invalid={errors.apiKey ? true : undefined}
-              className={cn(errors.apiKey && "border-destructive")}
+              aria-invalid={showError("apiKey") ? true : undefined}
+              className={cn(showError("apiKey") && "border-destructive")}
             />
             {providerKey && (
               <div className="text-sm text-muted-foreground">
                 {t("providerKeys.form.apiKeyHint")}
               </div>
             )}
-            {errors.apiKey?.message && (
+            {showError("apiKey") && errors.apiKey?.message && (
               <div className="text-sm text-destructive">{errors.apiKey.message}</div>
             )}
           </div>
