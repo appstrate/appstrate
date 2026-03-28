@@ -7,6 +7,7 @@ import {
   matchesAuthorizedUri,
   PROVIDER_ID_RE,
   MAX_RESPONSE_SIZE,
+  ABSOLUTE_MAX_RESPONSE_SIZE,
   OUTBOUND_TIMEOUT_MS,
 } from "../helpers.ts";
 
@@ -15,6 +16,10 @@ import {
 describe("constants", () => {
   it("MAX_RESPONSE_SIZE is 50_000", () => {
     expect(MAX_RESPONSE_SIZE).toBe(50_000);
+  });
+
+  it("ABSOLUTE_MAX_RESPONSE_SIZE is 1_000_000", () => {
+    expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(1_000_000);
   });
 
   it("OUTBOUND_TIMEOUT_MS is 30_000", () => {

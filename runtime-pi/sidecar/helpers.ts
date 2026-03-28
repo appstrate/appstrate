@@ -6,6 +6,7 @@ export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 export const MAX_RESPONSE_SIZE = 50_000;
+export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000; // 1MB
 export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
