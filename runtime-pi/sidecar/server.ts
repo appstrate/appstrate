@@ -24,7 +24,14 @@ async function fetchCredentials(providerId: string): Promise<CredentialsResponse
     headers: { Authorization: `Bearer ${config.executionToken}` },
   });
   if (!res.ok) {
-    throw new Error(`Failed to fetch credentials for ${providerId}: ${res.status}`);
+    let detail = "";
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // ignore parse failures
+    }
+    throw new Error(detail || `Failed to fetch credentials for ${providerId}: ${res.status}`);
   }
   return res.json() as Promise<CredentialsResponse>;
 }
