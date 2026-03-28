@@ -173,7 +173,9 @@ export function ResourceSection({
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-medium truncate flex items-center gap-1.5">
                     {item.name || item.id}
-                    {isBuiltIn && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {isBuiltIn && (
+                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    )}
                   </span>
                   {item.description && (
                     <span className="text-xs text-muted-foreground truncate">
