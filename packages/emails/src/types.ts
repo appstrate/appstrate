@@ -1,6 +1,6 @@
 export type SupportedLocale = "fr" | "en";
 
-export type EmailType = "verification" | "invitation";
+export type EmailType = "verification" | "invitation" | "magic-link";
 
 export interface EmailPropsMap {
   verification: {
@@ -14,6 +14,11 @@ export interface EmailPropsMap {
     orgName: string;
     inviterName: string;
     role: string;
+    locale: SupportedLocale;
+  };
+  "magic-link": {
+    email: string;
+    url: string;
     locale: SupportedLocale;
   };
 }
