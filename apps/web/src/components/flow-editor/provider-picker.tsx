@@ -244,7 +244,9 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                   <div className="flex flex-col min-w-0 flex-1">
                     <strong className="text-sm flex items-center gap-1.5">
                       {providerDef?.displayName ?? svc.id}
-                      {providerDef?.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                      {providerDef?.source === "built-in" && (
+                        <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
                     </strong>
                     <span className="text-xs text-muted-foreground">{svc.id}</span>
                   </div>
@@ -342,7 +344,9 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-medium truncate flex items-center gap-1.5">
                     {p.displayName}
-                    {p.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {p.source === "built-in" && (
+                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    )}
                   </span>
                   <span className="text-xs text-muted-foreground">{p.id}</span>
                 </div>
@@ -402,7 +406,9 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium flex items-center gap-1.5">
                     {p.displayName}
-                    {p.source === "built-in" && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    {p.source === "built-in" && (
+                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    )}
                   </span>
                 </div>
                 <ProviderConfigBadge enabled={p.enabled} />
