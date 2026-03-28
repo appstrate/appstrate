@@ -1,3 +1,4 @@
+import { type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
@@ -17,7 +18,25 @@ type RegisterFormData = {
   password: string;
 };
 
-export function RegisterForm({ className, ...props }: React.ComponentPropsWithoutRef<"div">) {
+interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
+  fixedEmail?: string;
+  onSubmitOverride?: (data: { email: string; password: string; displayName: string }) => Promise<void>;
+  header?: ReactNode | null;
+  footer?: ReactNode | null;
+  switchAuthSlot?: ReactNode;
+  socialCallbackURL?: string;
+}
+
+export function RegisterForm({
+  className,
+  fixedEmail,
+  onSubmitOverride,
+  header,
+  footer,
+  switchAuthSlot,
+  socialCallbackURL,
+  ...props
+}: RegisterFormProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { resolvedTheme } = useTheme();
   const { signup } = useAuth();
@@ -31,14 +50,22 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
     showError,
     formState: { errors, isSubmitting },
   } = useAppForm<RegisterFormData>({
-    defaultValues: { displayName: "", email: "", password: "" },
+    defaultValues: { displayName: "", email: fixedEmail ?? "", password: "" },
   });
 
   const onSubmit = async (data: RegisterFormData) => {
     try {
-      const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
-      if (result.emailVerificationRequired) {
-        navigate("/verify-email", { state: { email: data.email } });
+      if (onSubmitOverride) {
+        await onSubmitOverride({
+          email: fixedEmail ?? data.email,
+          password: data.password,
+          displayName: data.displayName.trim() || "",
+        });
+      } else {
+        const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
+        if (result.emailVerificationRequired) {
+          navigate("/verify-email", { state: { email: data.email } });
+        }
       }
     } catch (err) {
       setError("root", {
@@ -47,25 +74,46 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
     }
   };
 
+  const defaultHeader = (
+    <div className="flex flex-col items-center gap-2">
+      <Link to="/" className="flex flex-col items-center gap-2 font-medium">
+        <img
+          src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+          alt="Appstrate"
+          className="h-11"
+        />
+      </Link>
+      <div className="text-center text-sm text-muted-foreground">
+        {switchAuthSlot ?? (
+          <>
+            {t("login.hasAccount")}{" "}
+            <Link to="/login" className="underline underline-offset-4 hover:text-primary">
+              {t("login.login")}
+            </Link>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const defaultFooter = (
+    <div className="text-balance text-center text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-4 hover:[&_a]:text-primary">
+      {t("login.termsNotice")} <a href="#">{t("login.termsOfService")}</a> {t("login.and")}{" "}
+      <a href="#">{t("login.privacyPolicy")}</a>.
+    </div>
+  );
+
+  const resolvedHeader = header === undefined ? defaultHeader : header;
+  const resolvedFooter = footer === undefined ? defaultFooter : footer;
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-6">
-          <div className="flex flex-col items-center gap-2">
-            <Link to="/" className="flex flex-col items-center gap-2 font-medium">
-              <img
-                src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-                alt="Appstrate"
-                className="h-11"
-              />
-            </Link>
-            <div className="text-center text-sm text-muted-foreground">
-              {t("login.hasAccount")}{" "}
-              <Link to="/login" className="underline underline-offset-4 hover:text-primary">
-                {t("login.login")}
-              </Link>
-            </div>
-          </div>
+          {resolvedHeader}
+          {header === null && switchAuthSlot && (
+            <div className="text-center">{switchAuthSlot}</div>
+          )}
           <div className="mx-auto w-full max-w-sm flex flex-col gap-6">
             <div className="grid gap-4">
               <div className="grid gap-2">
@@ -92,15 +140,21 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
                   type="email"
                   placeholder="email@example.com"
                   autoComplete="email"
+                  readOnly={!!fixedEmail}
                   aria-invalid={showError("email") ? true : undefined}
-                  className={cn(showError("email") && "border-destructive")}
-                  {...register("email", {
-                    required: t("validation.required", { ns: "common" }),
-                    pattern: {
-                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                      message: t("validation.emailFormat", { ns: "common" }),
-                    },
-                  })}
+                  className={cn(
+                    showError("email") && "border-destructive",
+                    fixedEmail && "opacity-60 cursor-not-allowed",
+                  )}
+                  {...(fixedEmail
+                    ? { value: fixedEmail }
+                    : register("email", {
+                        required: t("validation.required", { ns: "common" }),
+                        pattern: {
+                          value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                          message: t("validation.emailFormat", { ns: "common" }),
+                        },
+                      }))}
                 />
                 {showError("email") && (
                   <div className="text-sm text-destructive">{errors.email?.message}</div>
@@ -142,16 +196,13 @@ export function RegisterForm({ className, ...props }: React.ComponentPropsWithou
           </div>
           {(features.googleAuth || features.githubAuth) && (
             <div className="mx-auto w-full max-w-sm flex flex-col gap-2">
-              {features.googleAuth && <GoogleSignInButton />}
-              {features.githubAuth && <GitHubSignInButton />}
+              {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
+              {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
             </div>
           )}
         </div>
       </form>
-      <div className="text-balance text-center text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-4 hover:[&_a]:text-primary">
-        {t("login.termsNotice")} <a href="#">{t("login.termsOfService")}</a> {t("login.and")}{" "}
-        <a href="#">{t("login.privacyPolicy")}</a>.
-      </div>
+      {resolvedFooter}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "../hooks/use-auth";
 import { GoogleIcon } from "./icons";
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({ callbackURL: callbackURLProp }: { callbackURL?: string } = {}) {
   const { t } = useTranslation("settings");
   const { signInWithGoogle } = useAuth();
   const [searchParams] = useSearchParams();
@@ -20,9 +20,8 @@ export function GoogleSignInButton() {
       onClick={async () => {
         setLoading(true);
         try {
-          // Preserve ?redirect param through Google OAuth flow
           const redirect = searchParams.get("redirect");
-          const callbackURL = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/";
+          const callbackURL = callbackURLProp ?? (redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/");
           await signInWithGoogle(callbackURL);
         } finally {
           setLoading(false);

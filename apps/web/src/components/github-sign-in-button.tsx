@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "../hooks/use-auth";
 import { GitHubIcon } from "./icons";
 
-export function GitHubSignInButton() {
+export function GitHubSignInButton({ callbackURL: callbackURLProp }: { callbackURL?: string } = {}) {
   const { t } = useTranslation("settings");
   const { signInWithGithub } = useAuth();
   const [searchParams] = useSearchParams();
@@ -20,9 +20,8 @@ export function GitHubSignInButton() {
       onClick={async () => {
         setLoading(true);
         try {
-          // Preserve ?redirect param through GitHub OAuth flow
           const redirect = searchParams.get("redirect");
-          const callbackURL = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/";
+          const callbackURL = callbackURLProp ?? (redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/");
           await signInWithGithub(callbackURL);
         } finally {
           setLoading(false);

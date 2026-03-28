@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedInvitation } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -95,6 +95,34 @@ describe("Invitations API", () => {
       });
 
       expect(res.status).toBe(410);
+    });
+
+    it("rejects accept when authenticated user email does not match invitation email", async () => {
+      // Create the invited user so the backend takes the "existing user" path
+      await createTestUser({ email: "invited@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "invited@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      // Create a second user with a different email and get their session cookie
+      const otherUser = await createTestUser({ email: "other@test.com" });
+
+      // Try to accept the invitation while authenticated as the wrong user
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: otherUser.cookie,
+        },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("email_mismatch");
     });
   });
 });
