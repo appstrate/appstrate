@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
@@ -7,12 +8,7 @@ import { RunFlowButton } from "./run-flow-button";
 import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
-
-interface ProviderPill {
-  id: string;
-  displayName: string;
-  iconUrl?: string;
-}
+import { useProviders } from "../hooks/use-providers";
 
 interface PackageCardProps {
   id: string;
@@ -22,7 +18,7 @@ interface PackageCardProps {
   source?: "system" | "local";
   runningExecutions?: number;
   keywords?: string[];
-  providers?: ProviderPill[];
+  providerIds?: string[];
   usedByFlows?: number;
   unreadCount?: number;
   statusBadge?: React.ReactNode;
@@ -39,7 +35,7 @@ export function PackageCard({
   source,
   runningExecutions,
   keywords,
-  providers,
+  providerIds,
   usedByFlows,
   unreadCount,
   statusBadge,
@@ -49,6 +45,15 @@ export function PackageCard({
 }: PackageCardProps) {
   const { t } = useTranslation(["flows", "settings", "common"]);
   const href = packageDetailPath(type, id);
+  const { data: providersData } = useProviders();
+
+  const resolvedProviders = useMemo(() => {
+    if (!providerIds?.length || !providersData?.providers) return [];
+    const map = new Map(providersData.providers.map((p) => [p.id, p]));
+    return providerIds
+      .map((pid) => map.get(pid))
+      .filter((p): p is NonNullable<typeof p> => p != null);
+  }, [providerIds, providersData]);
 
   return (
     <Link
@@ -100,12 +105,14 @@ export function PackageCard({
       <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
       <ScrollArea className="mt-2 w-full">
         <div className="flex gap-1">
-          {providers?.map((p) => (
+          {resolvedProviders.map((p) => (
             <span
               key={p.id}
               className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0 inline-flex items-center gap-1"
             >
-              {p.iconUrl && <ProviderIcon src={p.iconUrl} className="h-3 w-3 !p-0 !bg-transparent" />}
+              {p.iconUrl && (
+                <ProviderIcon src={p.iconUrl} className="h-3 w-3 !p-0 !bg-transparent" />
+              )}
               {p.displayName}
             </span>
           ))}

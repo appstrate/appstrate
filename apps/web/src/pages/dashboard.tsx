@@ -31,6 +31,7 @@ export function DashboardPage() {
       description?: string | null;
       source?: string;
       keywords?: string[];
+      providerIds?: string[];
       runningExecutions?: number;
     }
   >();
@@ -41,6 +42,7 @@ export function DashboardPage() {
         description: f.description,
         source: f.source,
         keywords: f.keywords,
+        providerIds: f.dependencies.providers,
         runningExecutions: f.runningExecutions,
       });
     }
@@ -105,6 +107,7 @@ export function DashboardPage() {
                     source={flow?.source as "system" | "local" | undefined}
                     runningExecutions={flow?.runningExecutions}
                     keywords={flow?.keywords}
+                    providerIds={flow?.providerIds}
                     unreadCount={unreadCounts?.[flowId]}
                   />
                 </div>
