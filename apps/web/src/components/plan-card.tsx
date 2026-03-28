@@ -41,32 +41,18 @@ export function PlanCard({
         </div>
       )}
 
-      <div
-        className={cn(
-          "rounded-lg p-2 mb-3",
-          isCurrent ? "bg-primary/10" : "bg-muted",
-        )}
-      >
-        <Icon
-          size={18}
-          className={isCurrent ? "text-primary" : "text-muted-foreground"}
-        />
+      <div className={cn("rounded-lg p-2 mb-3", isCurrent ? "bg-primary/10" : "bg-muted")}>
+        <Icon size={18} className={isCurrent ? "text-primary" : "text-muted-foreground"} />
       </div>
 
       <div className="font-semibold">{plan.name}</div>
-      {descKey && (
-        <p className="text-xs text-muted-foreground mt-0.5">{t(descKey)}</p>
-      )}
+      {descKey && <p className="text-xs text-muted-foreground mt-0.5">{t(descKey)}</p>}
 
       <div className="mt-auto pt-3 flex flex-col gap-0.5">
         <span className="text-xl font-bold">
-          {plan.price === 0
-            ? t("onboarding.planFreePrice")
-            : `$${plan.price}`}
+          {plan.price === 0 ? t("onboarding.planFreePrice") : `$${plan.price}`}
           {plan.price > 0 && (
-            <span className="text-sm font-normal text-muted-foreground">
-              /{t("billing.month")}
-            </span>
+            <span className="text-sm font-normal text-muted-foreground">/{t("billing.month")}</span>
           )}
         </span>
         <span className="text-xs text-muted-foreground">
