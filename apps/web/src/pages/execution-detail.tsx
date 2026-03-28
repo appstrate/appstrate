@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { usePackageDetail } from "../hooks/use-packages";
-import { useExecution, useExecutions, useExecutionLogs } from "../hooks/use-executions";
+import { useExecution, useExecutionLogs } from "../hooks/use-executions";
 import { useRunFlow, useCancelExecution } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
@@ -35,15 +35,7 @@ export function ExecutionDetailPage() {
   const orgId = useCurrentOrgId();
   const { data: flow } = usePackageDetail("flow", packageId);
   const { data: execution, isLoading, error } = useExecution(execId);
-  const { data: flowExecutions } = useExecutions(packageId);
-  // Compute execution number from flow executions list (fallback if not passed via navigation state)
-  const computedNumber = useMemo(() => {
-    if (!flowExecutions || !execId) return undefined;
-    const index = flowExecutions.findIndex((e) => e.id === execId);
-    if (index === -1) return undefined;
-    return flowExecutions.length - index;
-  }, [flowExecutions, execId]);
-  const executionNumber = stateNumber ?? computedNumber;
+  const executionNumber = execution?.executionNumber ?? stateNumber;
   const profileMap = useProfiles(execution?.userId ? [execution.userId] : []);
   const [liveStatus, setLiveStatus] = useState<ExecutionStatus | null>(null);
   const [trackedExecId, setTrackedExecId] = useState(execId);

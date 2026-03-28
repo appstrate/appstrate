@@ -53,6 +53,7 @@ export const executions = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     cost: doublePrecision("cost"),
+    executionNumber: integer("execution_number"),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),

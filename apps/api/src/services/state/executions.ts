@@ -1,4 +1,4 @@
-import { eq, and, ne, desc, isNotNull, inArray, count } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, inArray, count, max } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { executions, executionLogs, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
@@ -19,6 +19,12 @@ export async function createExecution(
   modelLabel?: string,
   applicationId?: string | null,
 ): Promise<void> {
+  const [maxRow] = await db
+    .select({ maxNum: max(executions.executionNumber) })
+    .from(executions)
+    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
+  const executionNumber = (maxRow?.maxNum ?? 0) + 1;
+
   await db.insert(executions).values({
     id,
     packageId,
@@ -33,6 +39,7 @@ export async function createExecution(
     proxyLabel: proxyLabel ?? null,
     modelLabel: modelLabel ?? null,
     applicationId: applicationId ?? null,
+    executionNumber,
   });
 }
 

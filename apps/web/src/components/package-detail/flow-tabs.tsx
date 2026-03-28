@@ -71,11 +71,10 @@ export function FlowExecutionsTab({
         </EmptyState>
       ) : (
         <div className="rounded-md border border-border">
-          {executions.map((exec, index) => (
+          {executions.map((exec) => (
             <ExecutionRow
               key={exec.id}
               execution={exec}
-              executionNumber={executions.length - index}
               userName={exec.userId ? profileMap.get(exec.userId) : undefined}
             />
           ))}

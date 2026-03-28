@@ -67,11 +67,10 @@ export function ExecutionsPage() {
       ) : (
         <>
           <div className="rounded-md border border-border">
-            {executions.map((exec: Execution, index: number) => (
+            {executions.map((exec: Execution) => (
               <ExecutionRow
                 key={exec.id}
                 execution={exec}
-                executionNumber={total - page * limit - index}
                 flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
               />
             ))}
