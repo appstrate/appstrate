@@ -20,7 +20,11 @@ type RegisterFormData = {
 
 interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
   fixedEmail?: string;
-  onSubmitOverride?: (data: { email: string; password: string; displayName: string }) => Promise<void>;
+  onSubmitOverride?: (data: {
+    email: string;
+    password: string;
+    displayName: string;
+  }) => Promise<void>;
   header?: ReactNode | null;
   footer?: ReactNode | null;
   switchAuthSlot?: ReactNode;
@@ -62,7 +66,11 @@ export function RegisterForm({
           displayName: data.displayName.trim() || "",
         });
       } else {
-        const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
+        const result = await signup(
+          data.email,
+          data.password,
+          data.displayName.trim() || undefined,
+        );
         if (result.emailVerificationRequired) {
           navigate("/verify-email", { state: { email: data.email } });
         }
@@ -111,9 +119,7 @@ export function RegisterForm({
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-6">
           {resolvedHeader}
-          {header === null && switchAuthSlot && (
-            <div className="text-center">{switchAuthSlot}</div>
-          )}
+          {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
           <div className="mx-auto w-full max-w-sm flex flex-col gap-6">
             <div className="grid gap-4">
               <div className="grid gap-2">

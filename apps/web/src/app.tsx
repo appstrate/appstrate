@@ -43,7 +43,8 @@ import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
 import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useApplicationResolver } from "./hooks/use-current-application";
 import { Spinner } from "./components/spinner";
-import { User, Settings, FileText, LogOut, Sun, Moon, Monitor, Palette } from "lucide-react";
+import { User, Settings, FileText, LogOut, Palette } from "lucide-react";
+import { themeOptions } from "./lib/theme";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -69,12 +70,6 @@ function UserMenu({
 }) {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
-
-  const themeOptions = [
-    { value: "light" as const, label: t("userMenu.themeLight"), icon: Sun },
-    { value: "dark" as const, label: t("userMenu.themeDark"), icon: Moon },
-    { value: "system" as const, label: t("userMenu.themeSystem"), icon: Monitor },
-  ];
 
   return (
     <DropdownMenu>
@@ -110,15 +105,15 @@ function UserMenu({
             {t("userMenu.theme")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            {themeOptions.map((opt) => (
+            {themeOptions.map(({ value, labelKey, icon: Icon }) => (
               <DropdownMenuItem
-                key={opt.value}
-                onSelect={() => setTheme(opt.value)}
+                key={value}
+                onSelect={() => setTheme(value)}
                 className="flex items-center gap-2"
               >
-                <opt.icon size={14} />
-                {opt.label}
-                {theme === opt.value && <span className="ml-auto text-primary">✓</span>}
+                <Icon size={14} />
+                {t(labelKey)}
+                {theme === value && <span className="ml-auto text-primary">✓</span>}
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>

@@ -101,9 +101,7 @@ export function LoginForm({
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="flex flex-col gap-6">
           {resolvedHeader}
-          {header === null && switchAuthSlot && (
-            <div className="text-center">{switchAuthSlot}</div>
-          )}
+          {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
           <div className="mx-auto w-full max-w-sm flex flex-col gap-6">
             <div className="grid gap-4">
               <div className="grid gap-2">
