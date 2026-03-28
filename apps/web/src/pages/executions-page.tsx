@@ -38,7 +38,10 @@ export function ExecutionsPage() {
       <PageHeader
         title={t("executions.title")}
         emoji="▶️"
-        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("executions.title") }]}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("executions.title") },
+        ]}
         actions={
           <Button
             variant="outline"

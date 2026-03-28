@@ -100,10 +100,7 @@ export function NotificationBell() {
                 onClick={() => handleClick(execution.id)}
                 className="flex gap-3 px-4 py-3 hover:bg-muted/50 transition-colors group"
               >
-                <Circle
-                  size={8}
-                  className="mt-1.5 shrink-0 fill-destructive text-destructive"
-                />
+                <Circle size={8} className="mt-1.5 shrink-0 fill-destructive text-destructive" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2 mb-0.5">
                     <span className="text-sm font-medium truncate">

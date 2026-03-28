@@ -74,7 +74,9 @@ export function AppSettingsPage() {
           { label: application.name },
         ]}
         actions={
-          application.isDefault ? <Badge variant="running">{t("applications.default")}</Badge> : undefined
+          application.isDefault ? (
+            <Badge variant="running">{t("applications.default")}</Badge>
+          ) : undefined
         }
       />
 

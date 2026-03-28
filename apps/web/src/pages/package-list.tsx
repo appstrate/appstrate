@@ -121,7 +121,10 @@ export function PackageList() {
       <PackageTab
         title={t("list.tabFlows")}
         emoji="⚡"
-        breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: t("list.tabFlows") }]}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("list.tabFlows") },
+        ]}
         items={items}
         isLoading={isLoading}
         error={error}

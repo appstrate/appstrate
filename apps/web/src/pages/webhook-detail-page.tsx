@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { Send, Webhook } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";

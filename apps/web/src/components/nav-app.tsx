@@ -3,10 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Users, KeyRound, Webhook, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
-import {
-  useCurrentApplicationId,
-  setCurrentApplicationId,
-} from "../hooks/use-current-application";
+import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
 import {
   DropdownMenu,
   DropdownMenuContent,

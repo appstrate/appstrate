@@ -61,32 +61,35 @@ export function ItemTab({
 
   return (
     <>
-    <PackageTab
-      items={items}
-      isLoading={isLoading}
-      emoji={emojiMap[config.type]}
-      emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
-      emptyHint={t(config.emptyHintKey, { type: typeLabel })}
-      emptyIcon={config.emptyIcon}
-      extraActions={
-        isOrgAdmin ? (
-          <>
-            {externalActions}
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              {t("nav.import", { ns: "common" })}
-            </Button>
-            <Link to={packageNewPath(config.type)}>
-              <Button>{t("list.createItem", { ns: "flows" })}</Button>
-            </Link>
-          </>
-        ) : undefined
-      }
-      emptyExtraActions={emptyExtraActions}
-      headerContent={headerContent}
-      title={title}
-      breadcrumbs={[{ label: t("nav.orgSection", { ns: "common" }), href: "/" }, { label: title }]}
-    />
-    <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <PackageTab
+        items={items}
+        isLoading={isLoading}
+        emoji={emojiMap[config.type]}
+        emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
+        emptyHint={t(config.emptyHintKey, { type: typeLabel })}
+        emptyIcon={config.emptyIcon}
+        extraActions={
+          isOrgAdmin ? (
+            <>
+              {externalActions}
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                {t("nav.import", { ns: "common" })}
+              </Button>
+              <Link to={packageNewPath(config.type)}>
+                <Button>{t("list.createItem", { ns: "flows" })}</Button>
+              </Link>
+            </>
+          ) : undefined
+        }
+        emptyExtraActions={emptyExtraActions}
+        headerContent={headerContent}
+        title={title}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: title },
+        ]}
+      />
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }

@@ -1,10 +1,7 @@
 import { Check, ChevronsUpDown, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useApplications } from "../hooks/use-applications";
-import {
-  useCurrentApplicationId,
-  setCurrentApplicationId,
-} from "../hooks/use-current-application";
+import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
 import {
   DropdownMenu,
   DropdownMenuContent,

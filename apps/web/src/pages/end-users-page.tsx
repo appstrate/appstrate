@@ -55,7 +55,11 @@ export function EndUsersPage() {
       <PageHeader
         title={t("endUsers.pageTitle")}
         emoji="👥"
-        breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("endUsers.pageTitle") }]}
+        breadcrumbs={[
+          { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
+          { label: "", node: <AppBreadcrumbSwitcher /> },
+          { label: t("endUsers.pageTitle") },
+        ]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus size={16} className="mr-1.5" />

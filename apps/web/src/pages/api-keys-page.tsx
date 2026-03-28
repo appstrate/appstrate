@@ -55,7 +55,11 @@ export function ApiKeysPage() {
       <PageHeader
         title={t("settings:apiKeys.pageTitle")}
         emoji="🔑"
-        breadcrumbs={[{ label: t("nav.appSection", { ns: "common" }), href: "/applications" }, { label: "", node: <AppBreadcrumbSwitcher /> }, { label: t("settings:apiKeys.pageTitle") }]}
+        breadcrumbs={[
+          { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
+          { label: "", node: <AppBreadcrumbSwitcher /> },
+          { label: t("settings:apiKeys.pageTitle") },
+        ]}
         actions={
           <>
             <a
