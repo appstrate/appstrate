@@ -2,119 +2,114 @@
 
 Base URL: `https://api.trello.com/1`
 
-## Quick Reference
+Project management boards API. Manage boards, lists, cards, and members. Hierarchy: Member -> Board -> List -> Card.
 
-Project management boards API. Manage boards, lists, cards, and members.
-Hierarchy: Member -> Board -> List -> Card.
-
-Authentication: Trello uses OAuth1. The sidecar provides `consumer_key` and `access_token` as credential fields. Pass them as query parameters `key` and `token`.
-
-## Key Endpoints
+## Endpoints
 
 ### Get Boards
-GET /members/me/boards
+`GET /1/members/me/boards`
+
 List all boards for the authenticated user.
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/members/me/boards?key={{consumer_key}}&token={{access_token}}&fields=name,url,dateLastActivity"
-```
+**Query parameters:**
+- `fields` — comma-separated fields (e.g. `name,url,dateLastActivity`)
+- `filter` — `all`, `open`, `closed`, `members`, `organization`, `public`, `starred`
 
 ### Get Board
-GET /boards/{id}
-Get a specific board with details.
+`GET /1/boards/{BOARD_ID}`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/boards/{BOARD_ID}?key={{consumer_key}}&token={{access_token}}&fields=name,desc,url"
-```
+**Query parameters:**
+- `fields` — e.g. `name,desc,url`
 
 ### Get Lists on Board
-GET /boards/{id}/lists
-Get all lists on a board.
+`GET /1/boards/{BOARD_ID}/lists`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/boards/{BOARD_ID}/lists?key={{consumer_key}}&token={{access_token}}&fields=name,pos"
-```
+**Query parameters:**
+- `fields` — e.g. `name,pos`
+- `filter` — `all`, `open`, `closed`
 
 ### Get Cards on Board
-GET /boards/{id}/cards
-Get all cards on a board.
+`GET /1/boards/{BOARD_ID}/cards`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/boards/{BOARD_ID}/cards?key={{consumer_key}}&token={{access_token}}&fields=name,desc,idList,due,labels"
-```
+**Query parameters:**
+- `fields` — e.g. `name,desc,idList,due,labels`
+- `filter` — `all`, `open`, `closed`, `visible`
 
 ### Get Cards on List
-GET /lists/{id}/cards
-Get all cards in a specific list.
+`GET /1/lists/{LIST_ID}/cards`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/lists/{LIST_ID}/cards?key={{consumer_key}}&token={{access_token}}&fields=name,desc,due,labels"
-```
+**Query parameters:**
+- `fields` — e.g. `name,desc,due,labels`
 
 ### Create Card
-POST /cards
-Create a new card on a list.
+`POST /1/cards`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" -X POST \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/cards?key={{consumer_key}}&token={{access_token}}" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "New Card", "desc": "Description", "idList": "{LIST_ID}", "due": "2024-12-31T00:00:00.000Z"}'
+**Request body:**
+```json
+{
+  "name": "New Card",
+  "desc": "Description",
+  "idList": "{LIST_ID}",
+  "due": "2024-12-31T00:00:00.000Z",
+  "idLabels": ["label-id-1", "label-id-2"],
+  "pos": "bottom"
+}
 ```
 
 ### Update Card
-PUT /cards/{id}
+`PUT /1/cards/{CARD_ID}`
+
 Update card properties (name, description, list, due date, etc.).
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" -X PUT \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/cards/{CARD_ID}?key={{consumer_key}}&token={{access_token}}" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Updated Card", "idList": "{NEW_LIST_ID}"}'
+**Request body:**
+```json
+{
+  "name": "Updated Card",
+  "idList": "{NEW_LIST_ID}"
+}
 ```
 
 ### Add Comment to Card
-POST /cards/{id}/actions/comments
-Add a comment to a card.
+`POST /1/cards/{CARD_ID}/actions/comments`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" -X POST \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/cards/{CARD_ID}/actions/comments?key={{consumer_key}}&token={{access_token}}" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Comment from Appstrate"}'
+**Request body:**
+```json
+{
+  "text": "This is a comment"
+}
 ```
 
 ### Get Card Actions
-GET /cards/{id}/actions
+`GET /1/cards/{CARD_ID}/actions`
+
 Get activity log for a card (comments, moves, etc.).
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: trello" \
-  -H "X-Target: https://api.trello.com/1/cards/{CARD_ID}/actions?key={{consumer_key}}&token={{access_token}}&filter=commentCard"
+**Query parameters:**
+- `filter` — e.g. `commentCard`, `updateCard`
+- `limit` — max results (default 50, max 1000)
+
+### Get Board Labels
+`GET /1/boards/{BOARD_ID}/labels`
+
+### Add Label to Card
+`POST /1/cards/{CARD_ID}/idLabels`
+
+**Request body:**
+```json
+{
+  "value": "{LABEL_ID}"
+}
 ```
+
+### Search
+`GET /1/search`
+
+Search across boards and cards.
+
+**Query parameters:**
+- `query` — search text
+- `modelTypes` — comma-separated: `cards`, `boards`, `organizations`, `members`
+- `cards_limit`, `boards_limit` — max results per type
 
 ## Common Patterns
 
@@ -125,25 +120,18 @@ Use `fields` to limit returned properties:
 - Lists: `name,pos,closed`
 
 ### Pagination
-Some endpoints support `limit` (max 1000) and `before`/`since` (date or action ID).
-Cards default to max 50 per request on list endpoints.
+Some endpoints support `limit` (max 1000) and `before`/`since` (date or action ID). Use `limit` parameter to control result count (max 1000).
 
 ### Moving Cards
-Update a card's `idList` to move it between lists:
-`PUT /cards/{id}?idList={newListId}`
+Update a card's `idList` to move it between lists.
 
-### Labels
-Labels are board-scoped. Get with `GET /boards/{id}/labels`.
-Add to card: `POST /cards/{id}/idLabels?value={labelId}`.
-
-### Search
-GET /search?query={text}&modelTypes=cards,boards
-Search across boards and cards.
+### Date Format
+ISO 8601: `2024-12-31T00:00:00.000Z`
 
 ## Important Notes
 
-- Auth uses query params `key` (consumer_key) and `token` (access_token), not headers.
 - Rate limit: 100 requests per 10 seconds per token, 300 per 10 seconds per API key.
-- Card positions (`pos`) are floats. To move between cards, use a value between their positions.
+- Card positions (`pos`) are floats. To insert between cards, use a value between their positions. Use `"top"` or `"bottom"` for simple placement.
 - Archived (closed) items are hidden by default. Use `filter=all` to include them.
-- Webhooks: POST /webhooks to register, requires `callbackURL` and `idModel`.
+- `/1/search` has a stricter rate limit: 100 requests per 900 seconds.
+- Webhooks: `POST /1/webhooks` to register, requires `callbackURL` and `idModel`.

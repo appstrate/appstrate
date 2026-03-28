@@ -2,120 +2,124 @@
 
 Base URL: `https://api.github.com`
 
-## Quick Reference
+GitHub REST API v3. Manage repositories, issues, pull requests, and users. All responses are JSON. Always include `Accept: application/vnd.github+json` header.
 
-GitHub REST API v3. Manage repositories, issues, pull requests, and users. All responses are JSON.
-Always include `Accept: application/vnd.github+json` header.
-
-## Key Endpoints
+## Endpoints
 
 ### Get Authenticated User
-GET /user
+`GET /user`
+
 Returns the authenticated user's profile.
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/user" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
-```
-
 ### List Repositories
-GET /user/repos
+`GET /user/repos`
+
 List repositories for the authenticated user.
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/user/repos?sort=updated&per_page=10" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
-```
+**Query parameters:**
+- `sort` — `created`, `updated`, `pushed`, `full_name`
+- `direction` — `asc`, `desc`
+- `per_page` — results per page (max 100, default 30)
+- `page` — page number (1-based)
 
 ### List Issues
-GET /repos/{owner}/{repo}/issues
-List issues for a repository. Also returns pull requests (filter with `pull_request` field).
+`GET /repos/{OWNER}/{REPO}/issues`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/repos/{OWNER}/{REPO}/issues?state=open&per_page=10" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
-```
+List issues for a repository. Also returns pull requests (filter by checking for `pull_request` key).
+
+**Query parameters:**
+- `state` — `open`, `closed`, `all`
+- `labels` — comma-separated label names
+- `sort` — `created`, `updated`, `comments`
+- `direction` — `asc`, `desc`
+- `since` — ISO 8601 timestamp (only issues updated after this date)
+- `per_page`, `page`
 
 ### Create Issue
-POST /repos/{owner}/{repo}/issues
-Create a new issue.
+`POST /repos/{OWNER}/{REPO}/issues`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" -X POST \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/repos/{OWNER}/{REPO}/issues" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Bug report", "body": "Description here", "labels": ["bug"]}'
+**Request body:**
+```json
+{
+  "title": "Bug report",
+  "body": "Description here",
+  "labels": ["bug"],
+  "assignees": ["username"]
+}
+```
+
+### Update Issue
+`PATCH /repos/{OWNER}/{REPO}/issues/{ISSUE_NUMBER}`
+
+**Request body:**
+```json
+{
+  "title": "Updated title",
+  "state": "closed",
+  "labels": ["bug", "wontfix"]
+}
 ```
 
 ### List Pull Requests
-GET /repos/{owner}/{repo}/pulls
-List pull requests for a repository.
+`GET /repos/{OWNER}/{REPO}/pulls`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/repos/{OWNER}/{REPO}/pulls?state=open&per_page=10" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
-```
+**Query parameters:**
+- `state` — `open`, `closed`, `all`
+- `sort` — `created`, `updated`, `popularity`, `long-running`
+- `direction` — `asc`, `desc`
+- `per_page`, `page`
 
 ### Get Repository Content
-GET /repos/{owner}/{repo}/contents/{path}
-Get file or directory contents. File content is base64-encoded.
+`GET /repos/{OWNER}/{REPO}/contents/{PATH}`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/repos/{OWNER}/{REPO}/contents/README.md" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
+Get file or directory contents. File content is base64-encoded in the response.
+
+**Query parameters:**
+- `ref` — Branch, tag, or commit SHA (defaults to default branch)
+
+**Response (file):**
+```json
+{
+  "name": "README.md",
+  "path": "README.md",
+  "sha": "abc123",
+  "size": 1024,
+  "type": "file",
+  "content": "base64-encoded-content",
+  "encoding": "base64"
+}
 ```
 
 ### Create or Update File
-PUT /repos/{owner}/{repo}/contents/{path}
-Create or update a file. Requires base64-encoded content and SHA of existing file (for updates).
+`PUT /repos/{OWNER}/{REPO}/contents/{PATH}`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" -X PUT \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/repos/{OWNER}/{REPO}/contents/path/to/file.txt" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Create file", "content": "SGVsbG8gV29ybGQ=", "branch": "main"}'
+Requires base64-encoded content. For updates, include the `sha` of the existing file.
+
+**Request body:**
+```json
+{
+  "message": "Create file",
+  "content": "SGVsbG8gV29ybGQ=",
+  "branch": "main",
+  "sha": "existing-file-sha (required for updates)"
+}
 ```
 
 ### Search Code
-GET /search/code
-Search for code across repositories.
+`GET /search/code`
 
-**Example:**
-```bash
-curl -s "$SIDECAR_URL/proxy" \
-  -H "X-Provider: github" \
-  -H "X-Target: https://api.github.com/search/code?q=filename:package.json+org:{ORG}" \
-  -H "Authorization: Bearer {{token}}" \
-  -H "Accept: application/vnd.github+json"
-```
+**Query parameters:**
+- `q` — search query (e.g. `filename:package.json org:myorg`, `language:typescript path:src`)
+- `sort` — Only valid value: `indexed` (sorts by last indexed time)
+- `per_page`, `page`
+
+### Search Repositories
+`GET /search/repositories`
+
+**Query parameters:**
+- `q` — search query (e.g. `language:python stars:>100`)
+- `sort` — `stars`, `forks`, `help-wanted-issues`, `updated`
+- `per_page`, `page`
 
 ## Common Patterns
 
@@ -126,21 +130,20 @@ GitHub uses Link headers for pagination. Query params:
 
 Response includes `Link` header with `rel="next"` and `rel="last"`.
 
-### Rate Limits
+### Date Format
+ISO 8601: `2024-01-15T09:30:00Z`
+
+## Rate Limits
+
 - Authenticated: 5,000 requests/hour
 - Search: 30 requests/minute
-- Check with: `X-RateLimit-Remaining` response header
-
-### Common Query Parameters
-- `sort`: `created`, `updated`, `pushed`, `full_name`
-- `direction`: `asc`, `desc`
-- `state`: `open`, `closed`, `all`
-- `since`: ISO 8601 timestamp for filtering updates
+- Code search: 9 requests/minute (stricter than general search limit)
+- Check remaining quota via `X-RateLimit-Remaining` response header
 
 ## Important Notes
 
 - Always include `Accept: application/vnd.github+json` header.
-- File content in responses is base64-encoded -- decode before use.
-- The Issues API also returns PRs. Filter with: items lacking `pull_request` key are pure issues.
+- File content in responses is base64-encoded — decode before use.
+- The Issues API also returns PRs. Items without a `pull_request` key are pure issues.
 - For large repositories, use the Git Trees API instead of Contents API for recursive listing.
 - `per_page` max is 100. Use pagination for larger result sets.
