@@ -85,11 +85,6 @@ export function ExecutionDetailPage() {
   const runFlow = useRunFlow(packageId!);
   const cancelExecution = useCancelExecution();
   const [inputOpen, setInputOpen] = useState(false);
-  const [activeTab, setActiveTab] = useTabWithHash(
-    ["logs", "result", "report", "state", "usage"] as const,
-    "logs",
-  );
-
   const { historicalLogs, structuredOutput, reportContent } = useMemo(() => {
     if (!logs) return { historicalLogs: [], structuredOutput: null, reportContent: null };
     const { entries, output, report } = buildLogEntries(logs as RawLog[]);
@@ -103,8 +98,27 @@ export function ExecutionDetailPage() {
   const finalOutput = structuredOutput || execResult?.output || null;
   const hasOutput = finalOutput && Object.keys(finalOutput).length > 0;
   const finalReport = reportContent || execResult?.report || null;
+  const hasResult = hasOutput || !!finalReport;
   const stateData = (execution?.state as Record<string, unknown> | null) ?? null;
   const allLogs = historicalLogs;
+
+  // Default tab: "result" if results exist, otherwise "logs".
+  // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
+  const defaultTab = hasResult ? "result" : "logs";
+  const [activeTab, setActiveTab] = useTabWithHash(
+    ["result", "logs", "state", "usage"] as const,
+    defaultTab,
+  );
+
+  // Sub-tab state: report by default if available, otherwise data.
+  const [resultSubTab, setResultSubTab] = useState<"report" | "data">("data");
+  const [subTabInitialized, setSubTabInitialized] = useState(false);
+  useEffect(() => {
+    if (!subTabInitialized && (finalReport || hasOutput)) {
+      setSubTabInitialized(true);
+      setResultSubTab(finalReport ? "report" : "data");
+    }
+  }, [finalReport, hasOutput, subTabInitialized]);
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -217,9 +231,12 @@ export function ExecutionDetailPage() {
       <div className="flex items-center justify-between gap-4 mb-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "report" | "state" | "usage")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
         >
           <TabsList>
+            {hasResult && (
+              <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>
+            )}
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
               {allLogs.length > 0 && (
@@ -228,8 +245,6 @@ export function ExecutionDetailPage() {
                 </span>
               )}
             </TabsTrigger>
-            {hasOutput && <TabsTrigger value="result">{t("exec.tabResult")}</TabsTrigger>}
-            {finalReport && <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>}
             {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
             <TabsTrigger value="usage">{t("exec.tabUsage")}</TabsTrigger>
           </TabsList>
@@ -262,15 +277,33 @@ export function ExecutionDetailPage() {
         </div>
       </div>
 
-      {activeTab === "logs" && <LogViewer entries={allLogs} />}
+      {activeTab === "result" && hasResult && (
+        <div className="space-y-4">
+          {finalReport && hasOutput && (
+            <Tabs
+              value={resultSubTab}
+              onValueChange={(v) => setResultSubTab(v as "report" | "data")}
+            >
+              <TabsList>
+                <TabsTrigger value="report">{t("exec.tabReport")}</TabsTrigger>
+                <TabsTrigger value="data">{t("exec.tabResult")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
-      {activeTab === "result" && hasOutput && <JsonView data={finalOutput!} />}
+          {(resultSubTab === "report" || !hasOutput) && finalReport && (
+            <div className="rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
+              <Markdown>{finalReport}</Markdown>
+            </div>
+          )}
 
-      {activeTab === "report" && finalReport && (
-        <div className="rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
-          <Markdown>{finalReport}</Markdown>
+          {(resultSubTab === "data" || !finalReport) && hasOutput && (
+            <JsonView data={finalOutput!} />
+          )}
         </div>
       )}
+
+      {activeTab === "logs" && <LogViewer entries={allLogs} />}
 
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
