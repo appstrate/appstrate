@@ -1,6 +1,20 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+
+export const PLAN_ICONS: Record<string, LucideIcon> = {
+  free: Sparkles,
+  starter: Zap,
+  pro: Crown,
+};
+
+/** i18n key suffix for each plan description */
+export const PLAN_DESCRIPTION_KEYS: Record<string, string> = {
+  free: "onboarding.planFreeDescription",
+  starter: "onboarding.planStarterDescription",
+  pro: "onboarding.planProDescription",
+};
 
 export interface BillingPlan {
   id: string;
@@ -11,6 +25,7 @@ export interface BillingPlanDetail {
   id: string;
   name: string;
   price: number;
+  creditQuota: number;
 }
 
 export interface BillingInfo {
