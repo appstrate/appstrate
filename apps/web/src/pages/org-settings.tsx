@@ -9,6 +9,7 @@ import {
   Globe,
   KeyRound,
   ShieldAlert,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,7 @@ import { CopyLinkButton } from "../components/copy-link-button";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
-import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
+import { useBilling, useCheckout, usePortal, getUsageBarColor, PLAN_ICONS } from "../hooks/use-billing";
 import { toast } from "../hooks/use-toast";
 import type {
   OrganizationMember,
@@ -1186,19 +1187,25 @@ function BillingTab() {
         <div className="rounded-lg border border-border bg-card p-5 mb-4">
           <h3 className="text-[0.95rem] font-semibold mb-3">{t("billing.upgradePlans")}</h3>
           <div className="flex gap-3">
-            {billing.upgrades.map((plan) => (
-              <button
-                key={plan.id}
-                className="flex-1 rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
-                onClick={() => handleUpgrade(plan.id)}
-                disabled={checkoutMutation.isPending}
-              >
-                <div className="font-semibold">{plan.name}</div>
-                <div className="text-sm font-medium mt-1">
-                  ${plan.price}/{t("billing.month")}
-                </div>
-              </button>
-            ))}
+            {billing.upgrades.map((plan) => {
+              const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
+              return (
+                <button
+                  key={plan.id}
+                  className="flex-1 rounded-lg border border-border p-4 text-left hover:border-primary transition-colors"
+                  onClick={() => handleUpgrade(plan.id)}
+                  disabled={checkoutMutation.isPending}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={16} className="text-muted-foreground" />
+                    <span className="font-semibold">{plan.name}</span>
+                  </div>
+                  <div className="text-sm font-medium">
+                    ${plan.price}/{t("billing.month")}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
