@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { useWatch } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -155,15 +156,15 @@ function ScheduleForm({
     control,
     setValue,
     clearErrors,
+    showError,
     formState: { errors },
-  } = useForm<ScheduleFormFields>({
+  } = useAppForm<ScheduleFormFields>({
     defaultValues: {
       name: schedule?.name ?? "",
       cronExpression: schedule?.cronExpression ?? "0 9 * * *",
       timezone: schedule?.timezone ?? "UTC",
       enabled: schedule?.enabled ?? true,
     },
-    mode: "onBlur",
   });
 
   const [cronExpression, timezone, enabled] = useWatch({
@@ -234,11 +235,11 @@ function ScheduleForm({
             },
           })}
           placeholder="*/30 * * * *"
-          aria-invalid={errors.cronExpression ? true : undefined}
-          className={cn(errors.cronExpression && "border-destructive")}
+          aria-invalid={showError("cronExpression") ? true : undefined}
+          className={cn(showError("cronExpression") && "border-destructive")}
         />
         <div className="text-sm text-muted-foreground">{t("schedule.cronHint")}</div>
-        {errors.cronExpression?.message && (
+        {showError("cronExpression") && errors.cronExpression?.message && (
           <div className="text-sm text-destructive">{errors.cronExpression.message}</div>
         )}
       </div>

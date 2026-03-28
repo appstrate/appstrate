@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,10 +26,10 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
     register,
     handleSubmit,
     setError,
+    showError,
     formState: { errors, isSubmitting },
-  } = useForm<LoginFormData>({
+  } = useAppForm<LoginFormData>({
     defaultValues: { email: "", password: "" },
-    mode: "onBlur",
   });
 
   const onSubmit = async (data: LoginFormData) => {
@@ -70,8 +70,8 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
                   type="email"
                   placeholder="email@example.com"
                   autoComplete="email"
-                  aria-invalid={errors.email ? true : undefined}
-                  className={cn(errors.email && "border-destructive")}
+                  aria-invalid={showError("email") ? true : undefined}
+                  className={cn(showError("email") && "border-destructive")}
                   {...register("email", {
                     required: t("validation.required", { ns: "common" }),
                     pattern: {
@@ -80,8 +80,8 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
                     },
                   })}
                 />
-                {errors.email && (
-                  <div className="text-sm text-destructive">{errors.email.message}</div>
+                {showError("email") && (
+                  <div className="text-sm text-destructive">{errors.email?.message}</div>
                 )}
               </div>
               <div className="grid gap-2">
@@ -91,8 +91,8 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
                   type="password"
                   placeholder="••••••••"
                   autoComplete="current-password"
-                  aria-invalid={errors.password ? true : undefined}
-                  className={cn(errors.password && "border-destructive")}
+                  aria-invalid={showError("password") ? true : undefined}
+                  className={cn(showError("password") && "border-destructive")}
                   {...register("password", {
                     required: t("validation.required", { ns: "common" }),
                     minLength: {
@@ -101,8 +101,8 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
                     },
                   })}
                 />
-                {errors.password && (
-                  <div className="text-sm text-destructive">{errors.password.message}</div>
+                {showError("password") && (
+                  <div className="text-sm text-destructive">{errors.password?.message}</div>
                 )}
               </div>
               {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}

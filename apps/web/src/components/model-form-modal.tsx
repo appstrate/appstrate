@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { useWatch } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
@@ -221,8 +222,9 @@ function ModelFormBody({
     control,
     setValue,
     clearErrors,
+    showError,
     formState: { errors },
-  } = useForm<ModelFormFields>({
+  } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
       api: model?.api ?? "",
@@ -236,7 +238,6 @@ function ModelFormBody({
       maxTokens: model?.maxTokens?.toString() ?? "",
       reasoning: model?.reasoning ?? false,
     },
-    mode: "onBlur",
   });
 
   const [api, baseUrl, modelId, providerKeyId, inlineApiKey, inputText, inputImage, reasoning] =
@@ -471,10 +472,10 @@ function ModelFormBody({
               })}
               placeholder="ex: Claude Sonnet"
               autoFocus
-              aria-invalid={errors.label ? true : undefined}
-              className={cn(errors.label && "border-destructive")}
+              aria-invalid={showError("label") ? true : undefined}
+              className={cn(showError("label") && "border-destructive")}
             />
-            {errors.label?.message && (
+            {showError("label") && errors.label?.message && (
               <div className="text-sm text-destructive">{errors.label.message}</div>
             )}
           </div>
@@ -510,8 +511,8 @@ function ModelFormBody({
                   type="password"
                   {...register("inlineApiKey")}
                   placeholder="sk-..."
-                  className={cn("flex-1", errors.providerKeyId && "border-destructive")}
-                  aria-invalid={errors.providerKeyId ? true : undefined}
+                  className={cn("flex-1", showError("providerKeyId") && "border-destructive")}
+                  aria-invalid={showError("providerKeyId") ? true : undefined}
                 />
                 {availableProviderKeys.length > 0 && (
                   <Select
@@ -540,7 +541,7 @@ function ModelFormBody({
                 {t("models.form.createProviderKeyHint")}
               </div>
             )}
-            {errors.providerKeyId?.message && (
+            {showError("providerKeyId") && errors.providerKeyId?.message && (
               <div className="text-sm text-destructive">{errors.providerKeyId.message}</div>
             )}
           </div>
@@ -559,7 +560,10 @@ function ModelFormBody({
                     clearErrors("api");
                   }}
                 >
-                  <SelectTrigger id="mdl-api" className={cn(errors.api && "border-destructive")}>
+                  <SelectTrigger
+                    id="mdl-api"
+                    className={cn(showError("api") && "border-destructive")}
+                  >
                     <SelectValue placeholder={t("models.form.apiPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -570,7 +574,7 @@ function ModelFormBody({
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.api?.message && (
+                {showError("api") && errors.api?.message && (
                   <div className="text-sm text-destructive">{errors.api.message}</div>
                 )}
               </div>
@@ -594,11 +598,11 @@ function ModelFormBody({
                   },
                 })}
                 placeholder="https://api.openai.com/v1"
-                aria-invalid={errors.baseUrl ? true : undefined}
-                className={cn(errors.baseUrl && "border-destructive")}
+                aria-invalid={showError("baseUrl") ? true : undefined}
+                className={cn(showError("baseUrl") && "border-destructive")}
               />
               <div className="text-sm text-muted-foreground">{t("models.form.baseUrlHint")}</div>
-              {errors.baseUrl?.message && (
+              {showError("baseUrl") && errors.baseUrl?.message && (
                 <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
               )}
             </div>
@@ -616,10 +620,10 @@ function ModelFormBody({
                   },
                 })}
                 placeholder="ex: claude-sonnet-4-5-20250929"
-                aria-invalid={errors.modelId ? true : undefined}
-                className={cn(errors.modelId && "border-destructive")}
+                aria-invalid={showError("modelId") ? true : undefined}
+                className={cn(showError("modelId") && "border-destructive")}
               />
-              {errors.modelId?.message && (
+              {showError("modelId") && errors.modelId?.message && (
                 <div className="text-sm text-destructive">{errors.modelId.message}</div>
               )}
             </div>

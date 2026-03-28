@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm, useWatch } from "react-hook-form";
+import { useWatch } from "react-hook-form";
+import { useAppForm } from "../../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,10 +56,10 @@ export function OnboardingCreateStep() {
     setValue,
     reset,
     setError,
+    showError,
     formState: { errors },
-  } = useForm<CreateOrgFormData>({
+  } = useAppForm<CreateOrgFormData>({
     defaultValues: { name: "", slug: "" },
-    mode: "onBlur",
   });
 
   const [slugEdited, setSlugEdited] = useState(false);
@@ -132,10 +133,12 @@ export function OnboardingCreateStep() {
               placeholder={t("createOrg.namePlaceholder")}
               autoFocus
               autoComplete="organization"
-              aria-invalid={errors.name ? true : undefined}
-              className={cn(errors.name && "border-destructive")}
+              aria-invalid={showError("name") ? true : undefined}
+              className={cn(showError("name") && "border-destructive")}
             />
-            {errors.name && <div className="text-sm text-destructive">{errors.name.message}</div>}
+            {showError("name") && (
+              <div className="text-sm text-destructive">{errors.name?.message}</div>
+            )}
           </div>
 
           <div className="grid gap-2">
@@ -159,11 +162,13 @@ export function OnboardingCreateStep() {
                 },
               })}
               placeholder={t("createOrg.slugPlaceholder")}
-              aria-invalid={errors.slug ? true : undefined}
-              className={cn(errors.slug && "border-destructive")}
+              aria-invalid={showError("slug") ? true : undefined}
+              className={cn(showError("slug") && "border-destructive")}
             />
             <div className="text-sm text-muted-foreground">{t("createOrg.slugHint")}</div>
-            {errors.slug && <div className="text-sm text-destructive">{errors.slug.message}</div>}
+            {showError("slug") && (
+              <div className="text-sm text-destructive">{errors.slug?.message}</div>
+            )}
           </div>
 
           {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}

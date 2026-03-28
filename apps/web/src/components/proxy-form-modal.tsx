@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -37,10 +37,10 @@ function ProxyFormBody({
   const {
     register,
     handleSubmit,
+    showError,
     formState: { errors },
-  } = useForm<ProxyFormData>({
+  } = useAppForm<ProxyFormData>({
     defaultValues: { label: proxy?.label ?? "", url: "" },
-    mode: "onBlur",
   });
 
   const onFormSubmit = (data: ProxyFormData) => {
@@ -76,13 +76,15 @@ function ProxyFormBody({
             type="text"
             placeholder={t("proxies.modal.labelPlaceholder")}
             autoFocus
-            aria-invalid={errors.label ? true : undefined}
-            className={cn(errors.label && "border-destructive")}
+            aria-invalid={showError("label") ? true : undefined}
+            className={cn(showError("label") && "border-destructive")}
             {...register("label", {
               required: t("validation.required", { ns: "common" }),
             })}
           />
-          {errors.label && <div className="text-sm text-destructive">{errors.label.message}</div>}
+          {showError("label") && (
+            <div className="text-sm text-destructive">{errors.label?.message}</div>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="px-url">{t("proxies.modal.url")}</Label>
@@ -90,8 +92,8 @@ function ProxyFormBody({
             id="px-url"
             type="text"
             placeholder={t("proxies.modal.urlPlaceholder")}
-            aria-invalid={errors.url ? true : undefined}
-            className={cn(errors.url && "border-destructive")}
+            aria-invalid={showError("url") ? true : undefined}
+            className={cn(showError("url") && "border-destructive")}
             {...register("url", {
               validate: (v) => {
                 if (!proxy && !v.trim()) return t("validation.required", { ns: "common" });
@@ -102,7 +104,9 @@ function ProxyFormBody({
           {proxy && (
             <div className="text-sm text-muted-foreground">{t("proxies.modal.urlHint")}</div>
           )}
-          {errors.url && <div className="text-sm text-destructive">{errors.url.message}</div>}
+          {showError("url") && (
+            <div className="text-sm text-destructive">{errors.url?.message}</div>
+          )}
         </div>
       </form>
     </Modal>

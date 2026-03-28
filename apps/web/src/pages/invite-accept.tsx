@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
+import { useWatch } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,10 +42,10 @@ export function InviteAcceptPage() {
     trigger,
     getValues,
     control,
+    showError,
     formState: { errors },
-  } = useForm<InviteFormData>({
+  } = useAppForm<InviteFormData>({
     defaultValues: { displayName: "", password: "", confirmPassword: "" },
-    mode: "onBlur",
   });
 
   const passwordValue = useWatch({ control, name: "password" });
@@ -212,11 +213,11 @@ export function InviteAcceptPage() {
                 placeholder="••••••••"
                 minLength={6}
                 autoComplete="new-password"
-                aria-invalid={errors.password ? true : undefined}
-                className={cn(errors.password && "border-destructive")}
+                aria-invalid={showError("password") ? true : undefined}
+                className={cn(showError("password") && "border-destructive")}
               />
-              {errors.password && (
-                <div className="text-sm text-destructive">{errors.password.message}</div>
+              {showError("password") && (
+                <div className="text-sm text-destructive">{errors.password?.message}</div>
               )}
             </div>
 
@@ -232,11 +233,11 @@ export function InviteAcceptPage() {
                 placeholder="••••••••"
                 minLength={6}
                 autoComplete="new-password"
-                aria-invalid={errors.confirmPassword ? true : undefined}
-                className={cn(errors.confirmPassword && "border-destructive")}
+                aria-invalid={showError("confirmPassword") ? true : undefined}
+                className={cn(showError("confirmPassword") && "border-destructive")}
               />
-              {errors.confirmPassword && (
-                <div className="text-sm text-destructive">{errors.confirmPassword.message}</div>
+              {showError("confirmPassword") && (
+                <div className="text-sm text-destructive">{errors.confirmPassword?.message}</div>
               )}
             </div>
           </div>

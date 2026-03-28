@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@/lib/utils";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,9 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
     handleSubmit,
     reset,
     setError,
+    showError,
     formState: { errors },
-  } = useForm<FormData>({ defaultValues: { name: "" } });
+  } = useAppForm<FormData>({ defaultValues: { name: "" } });
 
   const handleClose = () => {
     reset({ name: "" });
@@ -75,13 +76,15 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
             type="text"
             placeholder={t("applications.namePlaceholder")}
             autoFocus
-            aria-invalid={errors.name ? true : undefined}
-            className={cn(errors.name && "border-destructive")}
+            aria-invalid={showError("name") ? true : undefined}
+            className={cn(showError("name") && "border-destructive")}
             {...register("name", {
               required: t("validation.required", { ns: "common" }),
             })}
           />
-          {errors.name && <div className="text-sm text-destructive">{errors.name.message}</div>}
+          {showError("name") && (
+            <div className="text-sm text-destructive">{errors.name?.message}</div>
+          )}
         </div>
         {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
       </form>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useForm } from "react-hook-form";
+import { useAppForm } from "../hooks/use-app-form";
 import { AppWindow, Plus, ShieldAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,11 +35,7 @@ export function AppSettingsPage() {
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
   const activeDomains = editedDomains ?? domains;
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<SettingsFormData>({
+  const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
     values: { name: application?.name ?? "" },
   });
 
@@ -82,7 +78,7 @@ export function AppSettingsPage() {
             {...register("name", { required: true })}
             placeholder={t("applications.namePlaceholder")}
           />
-          {errors.name && (
+          {showError("name") && (
             <p className="text-sm text-destructive">{t("validation.required", { ns: "common" })}</p>
           )}
         </div>
