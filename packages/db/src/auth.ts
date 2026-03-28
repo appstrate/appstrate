@@ -11,6 +11,14 @@ import { getEnv } from "@appstrate/env";
 
 const env = getEnv();
 
+// ─── Before-signup hook (injected at boot by cloud module) ───
+
+let _beforeSignupHook: ((email: string) => void) | null = null;
+
+export function setBeforeSignupHook(hook: (email: string) => void): void {
+  _beforeSignupHook = hook;
+}
+
 // ─── SMTP transport (lazy, only if configured) ─────────────
 
 const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
@@ -251,6 +259,11 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
+        before: async (user) => {
+          if (_beforeSignupHook) {
+            _beforeSignupHook(user.email);
+          }
+        },
         after: async (user) => {
           await db.insert(profiles).values({
             id: user.id,
