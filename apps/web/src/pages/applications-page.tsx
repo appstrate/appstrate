@@ -41,7 +41,7 @@ export function ApplicationsPage() {
     <>
       <PageHeader
         title={t("applications.pageTitle")}
-        emoji="📱"
+        emoji="♻️"
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("applications.pageTitle") },
