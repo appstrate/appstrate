@@ -24,6 +24,14 @@ async function dockerFetch(
 }
 
 /**
+ * Check if an image exists locally.
+ */
+export async function imageExists(image: string): Promise<boolean> {
+  const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`);
+  return res.ok;
+}
+
+/**
  * Pull an image from registry. Waits for the pull to complete.
  * Docker pull API streams JSON progress — we consume it fully before resolving.
  */
@@ -64,6 +72,15 @@ export async function pullImage(image: string): Promise<void> {
   }
 
   logger.info("Docker image pulled", { image });
+}
+
+/**
+ * Ensure an image is available locally. Pulls from registry only if missing.
+ * Safe for locally-built images (skips pull if already present).
+ */
+export async function ensureImage(image: string): Promise<void> {
+  if (await imageExists(image)) return;
+  await pullImage(image);
 }
 
 export interface CreateContainerOptions {
