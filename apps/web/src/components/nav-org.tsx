@@ -9,12 +9,16 @@ import {
   Puzzle,
   Plug,
   Settings,
+  Loader2,
 } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
+import { useUnreadCount } from "../hooks/use-notifications";
+import { useFlows } from "../hooks/use-packages";
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -23,11 +27,15 @@ export function NavOrg() {
   const { t } = useTranslation();
   const { isOrgAdmin } = useOrg();
   const location = useLocation();
+  const { data: unreadCount } = useUnreadCount();
+  const { data: flows } = useFlows();
+
+  const hasRunning = flows?.some((f) => f.runningExecutions > 0) ?? false;
+  const unread = unreadCount ?? 0;
 
   const items = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     { path: "/flows", label: t("nav.flows"), icon: Layers },
-    { path: "/executions", label: t("nav.executions"), icon: Activity },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/tools", label: t("nav.tools"), icon: Puzzle },
@@ -56,6 +64,32 @@ export function NavOrg() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         ))}
+        {/* Executions — with unread badge + running indicator */}
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            asChild
+            isActive={location.pathname.startsWith("/executions")}
+            tooltip={t("nav.executions")}
+          >
+            <Link to="/executions">
+              <span className="flex size-4 items-center justify-center shrink-0">
+                {hasRunning ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Activity size={16} />
+                )}
+              </span>
+              <span>{t("nav.executions")}</span>
+            </Link>
+          </SidebarMenuButton>
+          {unread > 0 && (
+            <SidebarMenuBadge>
+              <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            </SidebarMenuBadge>
+          )}
+        </SidebarMenuItem>
         {isOrgAdmin && (
           <SidebarMenuItem>
             <SidebarMenuButton
