@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
+import { Mail } from "lucide-react";
 import { GoogleSignInButton } from "./google-sign-in-button";
 import { GitHubSignInButton } from "./github-sign-in-button";
 
@@ -37,6 +38,7 @@ export function LoginForm({
   ...props
 }: LoginFormProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
   const { login } = useAuth();
   const { features } = useAppConfig();
@@ -46,6 +48,7 @@ export function LoginForm({
     handleSubmit,
     setError,
     showError,
+    getValues,
     formState: { errors, isSubmitting },
   } = useAppForm<LoginFormData>({
     defaultValues: { email: fixedEmail ?? "", password: "" },
@@ -132,7 +135,17 @@ export function LoginForm({
                 )}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="password">{t("login.password")}</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">{t("login.password")}</Label>
+                  {features.smtp && (
+                    <Link
+                      to="/forgot-password"
+                      className="text-xs text-muted-foreground underline-offset-4 hover:underline hover:text-primary"
+                    >
+                      {t("login.forgotPassword")}
+                    </Link>
+                  )}
+                </div>
                 <Input
                   id="password"
                   type="password"
@@ -157,7 +170,7 @@ export function LoginForm({
             <Button size="lg" className="w-full mt-2" type="submit" disabled={isSubmitting}>
               {isSubmitting ? t("loading") : t("login.login")}
             </Button>
-            {(features.googleAuth || features.githubAuth) && (
+            {(features.googleAuth || features.githubAuth || features.smtp) && (
               <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
                 <span className="relative z-10 bg-background px-2 text-muted-foreground">
                   {t("login.or")}
@@ -165,10 +178,21 @@ export function LoginForm({
               </div>
             )}
           </div>
-          {(features.googleAuth || features.githubAuth) && (
+          {(features.googleAuth || features.githubAuth || features.smtp) && (
             <div className="mx-auto w-full max-w-sm flex flex-col gap-2">
               {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
               {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
+              {features.smtp && (
+                <Button
+                  variant="outline"
+                  className="w-full text-foreground"
+                  type="button"
+                  onClick={() => navigate("/magic-link", { state: { email: getValues("email") } })}
+                >
+                  <Mail className="h-4 w-4" />
+                  {t("login.magicLink")}
+                </Button>
+              )}
             </div>
           )}
         </div>
