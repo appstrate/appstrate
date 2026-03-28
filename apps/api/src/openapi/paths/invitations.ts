@@ -83,7 +83,8 @@ export const invitationsPaths = {
         },
         "400": { description: "Validation error (password required for new users, min 8 chars)" },
         "403": {
-          description: "Email mismatch — authenticated user's email does not match the invitation email",
+          description:
+            "Email mismatch — authenticated user's email does not match the invitation email",
         },
         "404": { description: "Invitation not found" },
         "410": { description: "Invitation already accepted, cancelled, or expired" },

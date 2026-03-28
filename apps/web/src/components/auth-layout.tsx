@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./theme-toggle";
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -7,7 +8,10 @@ interface AuthLayoutProps {
 
 export function AuthLayout({ children, className }: AuthLayoutProps) {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
+    <div className="relative flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className={cn("w-full max-w-md", className)}>{children}</div>
     </div>
   );
