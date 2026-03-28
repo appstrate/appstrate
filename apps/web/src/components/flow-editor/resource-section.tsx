@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ShieldCheck } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
 
@@ -170,7 +171,10 @@ export function ResourceSection({
                   className="w-3.5 h-3.5 rounded"
                 />
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-sm font-medium truncate">{item.name || item.id}</span>
+                  <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {item.name || item.id}
+                    {isBuiltIn && <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </span>
                   {item.description && (
                     <span className="text-xs text-muted-foreground truncate">
                       {item.description}

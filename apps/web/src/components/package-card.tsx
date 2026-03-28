@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
+import { ShieldCheck } from "lucide-react";
 import { Spinner } from "./spinner";
 import { RunFlowButton } from "./run-flow-button";
 import { ProviderIcon } from "./provider-icon";
@@ -52,8 +53,8 @@ export function PackageCard({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {source === "system" && (
-            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
-              {t("list.badgeBuiltIn")}
+            <span title={t("list.badgeBuiltIn")}>
+              <ShieldCheck className="h-4 w-4 text-muted-foreground" />
             </span>
           )}
           {autoInstalled && (
