@@ -6,6 +6,7 @@ import { Badge } from "./badge";
 import { RunFlowButton } from "./run-flow-button";
 import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
+import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 
 interface PackageCardProps {
   id: string;
@@ -46,7 +47,7 @@ export function PackageCard({
       className="flex flex-col w-full rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50 h-full"
       to={href}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {iconUrl && <ProviderIcon src={iconUrl} className="h-5 w-5" />}
           <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
@@ -89,21 +90,24 @@ export function PackageCard({
         </div>
       </div>
       <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {keywords?.map((kw) => (
-          <span
-            key={kw}
-            className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border"
-          >
-            {kw}
-          </span>
-        ))}
-        {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
-          <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border">
-            {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
-          </span>
-        )}
-      </div>
+      <ScrollArea className="mt-2 w-full">
+        <div className="flex gap-1">
+          {keywords?.map((kw) => (
+            <span
+              key={kw}
+              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0"
+            >
+              {kw}
+            </span>
+          ))}
+          {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
+            <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0">
+              {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
+            </span>
+          )}
+        </div>
+        <ScrollBar orientation="horizontal" className="h-0 opacity-0" />
+      </ScrollArea>
       {actions && (
         <div
           className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2"
