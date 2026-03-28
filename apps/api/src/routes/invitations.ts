@@ -160,6 +160,18 @@ router.post("/:token/accept", async (c) => {
     }
   } else {
     // --- EXISTING USER ---
+    // Check session and enforce email match before modifying org membership
+    const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
+
+    if (session?.user && session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+      throw new ApiError({
+        status: 403,
+        code: "email_mismatch",
+        title: "Email mismatch",
+        detail: `This invitation is for ${invitation.email}`,
+      });
+    }
+
     try {
       await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
     } catch (err) {
@@ -171,9 +183,6 @@ router.post("/:token/accept", async (c) => {
     }
 
     await markInvitationAccepted(invitation.id, existingUser.id);
-
-    // Check if request already has a session
-    const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
 
     return c.json({
       success: true,

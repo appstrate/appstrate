@@ -271,6 +271,7 @@ export function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </ErrorBoundary>
@@ -295,6 +296,7 @@ export function App() {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
+          <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
           <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
