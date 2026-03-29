@@ -2,7 +2,7 @@
  * Connection Profiles — manages actor and org connection profiles and profile resolution.
  */
 
-import { eq, and, count } from "drizzle-orm";
+import { eq, and, count, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
@@ -160,28 +160,37 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
 
 export async function listOrgProfiles(
   orgId: string,
-): Promise<(ConnectionProfile & { bindingCount: number })[]> {
-  const rows = await db
-    .select({
-      id: connectionProfiles.id,
-      userId: connectionProfiles.userId,
-      endUserId: connectionProfiles.endUserId,
-      orgId: connectionProfiles.orgId,
-      name: connectionProfiles.name,
-      isDefault: connectionProfiles.isDefault,
-      createdAt: connectionProfiles.createdAt,
-      updatedAt: connectionProfiles.updatedAt,
-      bindingCount: count(orgProfileProviderBindings.providerId),
-    })
+): Promise<(ConnectionProfile & { bindingCount: number; boundProviderIds: string[] })[]> {
+  // Fetch profiles
+  const profileRows = await db
+    .select()
     .from(connectionProfiles)
-    .leftJoin(
-      orgProfileProviderBindings,
-      eq(orgProfileProviderBindings.orgProfileId, connectionProfiles.id),
-    )
-    .where(eq(connectionProfiles.orgId, orgId))
-    .groupBy(connectionProfiles.id);
+    .where(eq(connectionProfiles.orgId, orgId));
 
-  return rows;
+  if (profileRows.length === 0) return [];
+
+  // Fetch all bindings for these profiles in a single query
+  const profileIds = profileRows.map((p) => p.id);
+  const bindingRows = await db
+    .select({
+      orgProfileId: orgProfileProviderBindings.orgProfileId,
+      providerId: orgProfileProviderBindings.providerId,
+    })
+    .from(orgProfileProviderBindings)
+    .where(inArray(orgProfileProviderBindings.orgProfileId, profileIds));
+
+  // Group bindings by profile
+  const bindingsByProfile = new Map<string, string[]>();
+  for (const row of bindingRows) {
+    const list = bindingsByProfile.get(row.orgProfileId) ?? [];
+    list.push(row.providerId);
+    bindingsByProfile.set(row.orgProfileId, list);
+  }
+
+  return profileRows.map((p) => {
+    const providerIds = bindingsByProfile.get(p.id) ?? [];
+    return { ...p, bindingCount: providerIds.length, boundProviderIds: providerIds };
+  });
 }
 
 export async function createOrgProfile(orgId: string, name: string): Promise<ConnectionProfile> {
@@ -372,45 +381,33 @@ export async function getProfileById(profileId: string): Promise<ConnectionProfi
 /**
  * Resolve profile IDs for each provider in a package.
  *
- * - Org profile: each provider resolves via org_profile_provider_bindings → source user profile.
- *   Unbound providers fall back to the actor's personal profile (if available).
- * - User/end-user profile: all providers use the profile directly.
+ * Two-layer resolution:
+ * - orgProfileId (optional overlay): bound providers use their org binding source profile.
+ * - userProfileId: all other providers use this profile directly.
+ *
+ * For schedules (single profile): pass the schedule's connectionProfileId as userProfileId
+ * with no orgProfileId — or pass it as orgProfileId with no userProfileId (all providers
+ * must be bound).
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
-  actor: Actor | null,
-  packageId: string,
-  orgId: string,
-  profileIdOverride?: string,
+  userProfileId: string,
+  orgProfileId?: string | null,
 ): Promise<ProviderProfileMap> {
-  if (!profileIdOverride && !actor) {
-    throw new Error("Either profileIdOverride or actor must be provided");
-  }
-  const effectiveProfileId = profileIdOverride ?? (await getEffectiveProfileId(actor!, packageId));
-  const profile = await getProfileById(effectiveProfileId);
-  if (!profile) throw new Error("Profile not found");
-
   const map: ProviderProfileMap = {};
 
-  if (profile.orgId) {
-    // Org profile: resolve each provider via bindings → source user profile
-    const bindings = await getOrgProfileBindings(effectiveProfileId);
+  // Load org bindings if an org profile is provided
+  let bindings: Record<string, string> = {};
+  if (orgProfileId) {
+    bindings = await getOrgProfileBindings(orgProfileId);
+  }
 
-    // Fallback: actor's personal profile for providers not bound in the org profile
-    const fallbackProfileId = actor ? await getEffectiveProfileId(actor, packageId) : null;
-
-    for (const svc of providers) {
-      const sourceProfileId = bindings[svc.id];
-      if (sourceProfileId) {
-        map[svc.id] = { profileId: sourceProfileId, source: "org_binding" };
-      } else if (fallbackProfileId) {
-        map[svc.id] = { profileId: fallbackProfileId, source: "user_profile" };
-      }
-    }
-  } else {
-    // User/end-user profile: all providers use this profile directly
-    for (const svc of providers) {
-      map[svc.id] = { profileId: effectiveProfileId, source: "user_profile" };
+  for (const svc of providers) {
+    const orgBinding = orgProfileId ? bindings[svc.id] : undefined;
+    if (orgBinding) {
+      map[svc.id] = { profileId: orgBinding, source: "org_binding" };
+    } else {
+      map[svc.id] = { profileId: userProfileId, source: "user_profile" };
     }
   }
 

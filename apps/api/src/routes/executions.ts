@@ -395,6 +395,7 @@ export function createExecutionsRouter() {
       const actor = getActor(c);
       const packageId = flow.id;
       const profileIdOverride = c.req.query("profileId");
+      const orgProfileIdOverride = c.req.query("orgProfileId");
 
       // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
       const versionOverride = c.req.query("version");
@@ -418,17 +419,16 @@ export function createExecutionsRouter() {
       }
 
       // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
-      const [preflightResult, userProfileId, inputResult] = await Promise.all([
+      const resolvedUserProfileId =
+        profileIdOverride ?? (await getEffectiveProfileId(actor, packageId));
+      const [preflightResult, inputResult] = await Promise.all([
         resolvePreflightContext({
           flow: effectiveFlow,
-          actor,
           packageId,
           orgId,
-          profileIdOverride,
+          userProfileId: resolvedUserProfileId,
+          orgProfileId: orgProfileIdOverride,
         }),
-        profileIdOverride
-          ? Promise.resolve(profileIdOverride)
-          : getEffectiveProfileId(actor, packageId),
         parseRequestInput(
           c,
           effectiveFlow.manifest.input?.schema
@@ -517,7 +517,7 @@ export function createExecutionsRouter() {
         parsedInput ?? null,
         undefined,
         packageVersionId ?? undefined,
-        userProfileId,
+        resolvedUserProfileId,
         proxyLabel ?? undefined,
         modelLabel ?? undefined,
         c.get("applicationId") ?? null,

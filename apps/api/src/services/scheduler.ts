@@ -225,15 +225,16 @@ async function triggerScheduledExecution(
         : null;
 
     // Resolve provider profiles, config, and validate readiness
+    const isOrgProfile = !!profile.orgId;
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     try {
       ({ providerProfiles, config } = await resolvePreflightContext({
         flow,
-        actor,
         packageId,
         orgId,
-        profileIdOverride: connectionProfileId,
+        userProfileId: connectionProfileId,
+        orgProfileId: isOrgProfile ? connectionProfileId : null,
       }));
     } catch (err) {
       if (err instanceof ApiError) {
@@ -412,12 +413,13 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
+  // Schedule profile: if org profile, all providers must be bound (no fallback).
+  // If user profile, all providers use it directly.
+  const isOrgProfile = !!profile.orgId;
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    null,
-    schedule.packageId,
-    orgId,
-    schedule.connectionProfileId,
+    isOrgProfile ? schedule.connectionProfileId : schedule.connectionProfileId,
+    isOrgProfile ? schedule.connectionProfileId : null,
   );
 
   const results = await Promise.all(

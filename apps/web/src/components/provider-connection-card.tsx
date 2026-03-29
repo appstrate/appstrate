@@ -228,9 +228,7 @@ export function ProviderConnectionCard({
               onClick={bindOnConnect ? handleConnectAndBind : handleConnect}
               disabled={isPending || !provider?.enabled || !effectiveProfileId}
             >
-              {bindOnConnect
-                ? t("providerCard.connectAndBind")
-                : t("providerCard.connect")}
+              {bindOnConnect ? t("providerCard.connectAndBind") : t("providerCard.connect")}
             </Button>
           )}
 

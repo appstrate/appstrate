@@ -10,7 +10,11 @@ import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentExecutions } from "../services/state/index.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
-import { resolveProviderProfiles } from "../services/connection-profiles.ts";
+import {
+  resolveProviderProfiles,
+  getProfileById,
+  getEffectiveProfileId,
+} from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -164,19 +168,26 @@ export function createInternalRouter() {
     }
 
     try {
-      // Resolve the credential-holding profile for this provider via resolveProviderProfiles
+      // Resolve the credential-holding profile for this provider.
+      // If execution used an org profile, detect it and resolve with fallback to user profile.
+      const storedProfileId = execution.connectionProfileId;
+      const storedProfile = storedProfileId ? await getProfileById(storedProfileId) : null;
+      const isOrgProfile = !!storedProfile?.orgId;
+
+      // Derive user profile: actor's effective profile for the package
       const actor: Actor | null = execution.endUserId
         ? { type: "end_user", id: execution.endUserId }
         : execution.userId
           ? { type: "member", id: execution.userId }
           : null;
+      const userProfileId = actor
+        ? await getEffectiveProfileId(actor, execution.packageId)
+        : storedProfileId!;
 
       const profileMap = await resolveProviderProfiles(
         [provider],
-        actor,
-        execution.packageId,
-        execution.orgId,
-        execution.connectionProfileId ?? undefined,
+        userProfileId,
+        isOrgProfile ? storedProfileId : null,
       );
 
       const entry = profileMap[providerId];

@@ -32,8 +32,9 @@ export function useProfileConnections(profileId: string | null | undefined) {
   });
 }
 
-interface OrgProfileWithBindings extends ConnectionProfile {
+export interface OrgProfileWithBindings extends ConnectionProfile {
   bindingCount: number;
+  boundProviderIds: string[];
 }
 
 export function useConnectionProfiles() {
