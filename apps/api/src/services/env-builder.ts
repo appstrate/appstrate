@@ -37,16 +37,16 @@ export class ModelNotConfiguredError extends Error {
  */
 export async function resolvePreflightContext(params: {
   flow: LoadedPackage;
-  actor: Actor | null;
   packageId: string;
   orgId: string;
-  profileIdOverride?: string;
+  userProfileId: string;
+  orgProfileId?: string | null;
 }): Promise<{ providerProfiles: ProviderProfileMap; config: Record<string, unknown> }> {
-  const { flow, actor, packageId, orgId, profileIdOverride } = params;
+  const { flow, packageId, orgId, userProfileId, orgProfileId } = params;
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
   const [providerProfiles, config] = await Promise.all([
-    resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
+    resolveProviderProfiles(manifestProviders, userProfileId, orgProfileId),
     getPackageConfig(orgId, packageId),
   ]);
 

@@ -11,7 +11,7 @@ import {
   getLastExecution,
   getRunningExecutionsForPackage,
 } from "../services/state/index.ts";
-import { resolveProviderProfiles } from "../services/connection-profiles.ts";
+import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -41,15 +41,17 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const m = flow.manifest;
   const queryProfileId = c.req.query("profileId");
+  const queryOrgProfileId = c.req.query("orgProfileId");
 
-  // Build providerProfiles map via shared resolution (org → bindings, user → direct)
+  // Resolve user profile: explicit override or actor's effective profile
+  const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
+
+  // Build providerProfiles map: org bindings overlay + user profile fallback
   const manifestProviders = resolveManifestProviders(m);
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
-    actor,
-    flow.id,
-    orgId,
-    queryProfileId,
+    userProfileId,
+    queryOrgProfileId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
