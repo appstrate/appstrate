@@ -187,16 +187,32 @@ export function ProviderCredentialsForm({
             })}
           </div>
         )}
+
       </div>
 
-      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
-        {footer}
-        <Button
-          type="submit"
-          disabled={mutation.isPending || (hasSchemaFields && !allRequiredFilled)}
-        >
-          {mutation.isPending ? <Spinner /> : t("common:btn.save")}
-        </Button>
+      <div className="flex items-center mt-4 pt-4 border-t border-border">
+        <div className="flex-1">{footer}</div>
+        {hasSchemaFields ? (
+          <Button type="submit" disabled={mutation.isPending || !allRequiredFilled}>
+            {mutation.isPending ? <Spinner /> : t("common:btn.save")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            disabled={provider.enabled || mutation.isPending}
+            onClick={() => {
+              mutation.mutate({ providerId: provider.id, enabled: true }, { onSuccess });
+            }}
+          >
+            {mutation.isPending ? (
+              <Spinner />
+            ) : provider.enabled ? (
+              t("providers.form.activated")
+            ) : (
+              t("providers.form.activate")
+            )}
+          </Button>
+        )}
       </div>
     </form>
   );

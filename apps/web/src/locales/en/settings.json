@@ -251,6 +251,8 @@
   "providers.form.configure": "Configure {{name}}",
   "providers.form.setupGuide": "Setup guide",
   "providers.form.callbackUrl": "Redirect URI",
+  "providers.form.activate": "Activate",
+  "providers.form.activated": "Activated",
   "providers.form.submit": "Add provider",
   "providers.form.noCredsNeeded": "No credentials needed at this step. After creation, go to the Connectors page to add your API key.",
   "orgSettings.pendingInvitations": "Pending invitations",
