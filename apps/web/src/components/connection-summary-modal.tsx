@@ -53,7 +53,7 @@ export function ConnectionSummaryModal({
       <div className="space-y-1.5">
         {providers.map((svc) => {
           const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
-          const displayName = providerMeta?.displayName ?? svc.name ?? svc.id;
+          const displayName = providerMeta?.displayName ?? svc.id;
           const iconUrl = providerMeta?.iconUrl;
           const isOrg = svc.source === "org_binding";
           const isConnected = svc.status === "connected";

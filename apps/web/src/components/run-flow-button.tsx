@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
@@ -20,6 +21,8 @@ interface RunFlowButtonProps {
   size?: "default" | "sm" | "icon";
   className?: string;
   showLabel?: boolean;
+  /** Called when user clicks "Configure connections" in the summary modal. */
+  onConfigureConnections?: () => void;
 }
 
 export function RunFlowButton({
@@ -32,8 +35,10 @@ export function RunFlowButton({
   size = "default",
   className,
   showLabel = false,
+  onConfigureConnections: onConfigureConnectionsProp,
 }: RunFlowButtonProps) {
   const { t } = useTranslation(["flows"]);
+  const navigate = useNavigate();
   const runFlow = useRunFlow(packageId);
   const [fetchedDetail, setFetchedDetail] = useState<FlowDetail | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -146,7 +151,11 @@ export function RunFlowButton({
           onConfirm={proceedAfterSummary}
           onConfigureConnections={() => {
             setSummaryOpen(false);
-            window.location.hash = "connectors";
+            if (onConfigureConnectionsProp) {
+              onConfigureConnectionsProp();
+            } else {
+              navigate({ hash: "connectors" }, { replace: true });
+            }
           }}
           providers={detail.dependencies?.providers ?? []}
           orgProfileName={detail.flowOrgProfileName}
