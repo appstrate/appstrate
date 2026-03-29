@@ -13,6 +13,7 @@ import {
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
+import { getPackageConfig } from "./state/package-config.ts";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
 
@@ -174,6 +175,20 @@ export async function getOrgProfile(
     .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Load the org profile configured on a flow, returning null if none configured
+ * or if the referenced profile was deleted.
+ */
+export async function getFlowOrgProfile(
+  orgId: string,
+  packageId: string,
+): Promise<{ id: string; name: string } | null> {
+  const { orgProfileId } = await getPackageConfig(orgId, packageId);
+  if (!orgProfileId) return null;
+  const profile = await getOrgProfile(orgProfileId, orgId);
+  return profile ? { id: orgProfileId, name: profile.name } : null;
 }
 
 export async function renameOrgProfile(

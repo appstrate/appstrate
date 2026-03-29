@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "./modal";
 import { ProviderIcon } from "./provider-icon";
 import { useProviders } from "../hooks/use-providers";
+import { isProviderStatusConnected } from "../lib/provider-status";
 import type { ProviderStatus } from "@appstrate/shared-types";
 
 interface ConnectionSummaryModalProps {
@@ -28,7 +29,7 @@ export function ConnectionSummaryModal({
   const { t } = useTranslation(["flows", "settings", "common"]);
   const { data: providersData } = useProviders();
 
-  const allReady = providers.every((p) => p.status === "connected");
+  const allReady = providers.every((p) => isProviderStatusConnected(p.status));
 
   return (
     <Modal
@@ -56,7 +57,7 @@ export function ConnectionSummaryModal({
           const displayName = providerMeta?.displayName ?? svc.id;
           const iconUrl = providerMeta?.iconUrl;
           const isOrg = svc.source === "org_binding";
-          const isConnected = svc.status === "connected";
+          const isConnected = isProviderStatusConnected(svc.status);
 
           return (
             <div

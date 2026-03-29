@@ -16,8 +16,7 @@ import {
   listExecutionLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import { resolveActorProfileContext } from "../services/connection-profiles.ts";
-import { getPackageConfig } from "../services/state/package-config.ts";
+import { resolveActorProfileContext, getFlowOrgProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
@@ -416,14 +415,12 @@ export function createExecutionsRouter() {
         };
       }
 
-      // Load admin-configured org profile
-      const { orgProfileId: flowOrgProfileId } = await getPackageConfig(orgId, packageId);
-
-      // Resolve per-provider overrides and default profile
-      const { defaultUserProfileId, userProviderOverrides } = await resolveActorProfileContext(
-        actor,
-        packageId,
-      );
+      // Resolve org profile and actor profile context in parallel
+      const [flowOrgProfile, { defaultUserProfileId, userProviderOverrides }] = await Promise.all([
+        getFlowOrgProfile(orgId, packageId),
+        resolveActorProfileContext(actor, packageId),
+      ]);
+      const flowOrgProfileId = flowOrgProfile?.id ?? null;
 
       // Run independent pre-flight operations in parallel
       const [preflightResult, inputResult] = await Promise.all([

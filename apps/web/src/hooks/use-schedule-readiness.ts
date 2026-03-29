@@ -1,5 +1,6 @@
 import { usePackageDetail } from "./use-packages";
 import { useProfileConnections, useOrgProfileBindings } from "./use-connection-profiles";
+import { isProviderConnectedInProfile } from "../lib/provider-status";
 
 interface ScheduleReadinessInput {
   packageId: string;
@@ -31,7 +32,7 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
     if (isOrgProfile) {
       if (bindings?.find((b) => b.providerId === pid && b.connected)) connectedCount++;
     } else {
-      if (profileConnections?.some((c) => c.providerId === pid)) connectedCount++;
+      if (isProviderConnectedInProfile(pid, profileConnections ?? undefined)) connectedCount++;
     }
   }
 

@@ -216,6 +216,7 @@ export function useSetFlowOrgProfile(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
     },
     onError: onMutationError,
   });

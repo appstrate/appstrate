@@ -8,8 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
-
-const ALL_VALUE = "__all__";
+import { PROFILE_ALL_VALUE, encodeProfileValue, decodeProfileValue } from "@/lib/profile-selection";
 
 interface CombinedProfileSelectProps {
   /** Current value */
@@ -42,10 +41,10 @@ export function CombinedProfileSelect({
   if (!hasUserProfiles && !hasOrgProfiles) return null;
   if (!showAllOption && !hasOrgProfiles && (userProfiles?.length ?? 0) <= 1) return null;
 
-  const selectValue = value === null ? ALL_VALUE : value;
+  const selectValue = encodeProfileValue(value);
 
   const handleChange = (val: string) => {
-    onChange(val === ALL_VALUE ? null : val);
+    onChange(decodeProfileValue(val));
   };
 
   return (
@@ -54,7 +53,7 @@ export function CombinedProfileSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {showAllOption && <SelectItem value={ALL_VALUE}>{t("profiles.all")}</SelectItem>}
+        {showAllOption && <SelectItem value={PROFILE_ALL_VALUE}>{t("profiles.all")}</SelectItem>}
         {userProfiles?.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             {p.name}
