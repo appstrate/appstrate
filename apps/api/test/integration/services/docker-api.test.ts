@@ -133,7 +133,7 @@ describe("pullImage", () => {
     "throws on non-existent image",
     async () => {
       await expect(pullImage("nonexistent-image-xxx:99.99.99")).rejects.toThrow(
-        "Failed to pull image",
+        /pull image/,
       );
     },
     TIMEOUT,
@@ -206,7 +206,7 @@ describe("createContainer", () => {
       const executionId = `test-${uid()}`;
       await expect(
         createContainer(executionId, {}, { image: "", adapterName: "test" }),
-      ).rejects.toThrow("Failed to create test container");
+      ).rejects.toThrow("Docker create test container failed");
     },
     TIMEOUT,
   );

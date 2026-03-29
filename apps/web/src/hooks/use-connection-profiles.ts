@@ -60,47 +60,58 @@ export function useAllUserConnections() {
   });
 }
 
-export function useCreateConnectionProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) =>
-      api<ConnectionProfile>("/connection-profiles", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
-    },
-    onError: onMutationError,
-  });
+// ─── Shared Profile CRUD Factory ─────────────────────────
+
+function createProfileMutations(basePath: string, queryKey: string) {
+  const useCreate = () => {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: (name: string) =>
+        api<ConnectionProfile>(basePath, {
+          method: "POST",
+          body: JSON.stringify({ name }),
+        }),
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: [queryKey] });
+      },
+      onError: onMutationError,
+    });
+  };
+
+  const useRename = () => {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: ({ id, name }: { id: string; name: string }) =>
+        api(`${basePath}/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name }),
+        }),
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: [queryKey] });
+      },
+      onError: onMutationError,
+    });
+  };
+
+  const useDelete = () => {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: (id: string) => api(`${basePath}/${id}`, { method: "DELETE" }),
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: [queryKey] });
+        qc.invalidateQueries({ queryKey: ["available-providers"] });
+      },
+      onError: onMutationError,
+    });
+  };
+
+  return { useCreate, useRename, useDelete };
 }
 
-export function useRenameConnectionProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      api(`/connection-profiles/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ name }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteConnectionProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api(`/connection-profiles/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
-      qc.invalidateQueries({ queryKey: ["available-providers"] });
-    },
-    onError: onMutationError,
-  });
-}
+const userProfileMutations = createProfileMutations("/connection-profiles", "connection-profiles");
+export const useCreateConnectionProfile = userProfileMutations.useCreate;
+export const useRenameConnectionProfile = userProfileMutations.useRename;
+export const useDeleteConnectionProfile = userProfileMutations.useDelete;
 
 // ─── Org Profiles ────────────────────────────────────────
 
@@ -115,47 +126,13 @@ export function useOrgProfiles() {
   });
 }
 
-export function useCreateOrgProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) =>
-      api<ConnectionProfile>("/connection-profiles/org", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useRenameOrgProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      api(`/connection-profiles/org/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ name }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteOrgProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api(`/connection-profiles/org/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-      qc.invalidateQueries({ queryKey: ["available-providers"] });
-    },
-    onError: onMutationError,
-  });
-}
+const orgProfileMutations = createProfileMutations(
+  "/connection-profiles/org",
+  "org-connection-profiles",
+);
+export const useCreateOrgProfile = orgProfileMutations.useCreate;
+export const useRenameOrgProfile = orgProfileMutations.useRename;
+export const useDeleteOrgProfile = orgProfileMutations.useDelete;
 
 export function useOrgProfileBindings(profileId: string | undefined) {
   const orgId = useCurrentOrgId();

@@ -10,6 +10,16 @@ import type { EnrichedBinding } from "@appstrate/shared-types";
 import { notFound } from "../../lib/errors.ts";
 export type { EnrichedBinding };
 
+/** Verify that the org profile exists and belongs to the org. Throws 404 if not found. */
+async function assertOrgProfileOwnership(orgProfileId: string, orgId: string): Promise<void> {
+  const [owner] = await db
+    .select({ id: connectionProfiles.id })
+    .from(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
+    .limit(1);
+  if (!owner) throw notFound("Profile not found");
+}
+
 /**
  * Get all bindings for an org profile: { providerId → sourceProfileId }.
  *
@@ -22,12 +32,7 @@ export async function getOrgProfileBindings(
   orgProfileId: string,
   orgId: string,
 ): Promise<Record<string, string>> {
-  const [owner] = await db
-    .select({ id: connectionProfiles.id })
-    .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
-    .limit(1);
-  if (!owner) throw notFound("Profile not found");
+  await assertOrgProfileOwnership(orgProfileId, orgId);
 
   const rows = await db
     .select({
@@ -53,12 +58,7 @@ export async function getOrgProfileBindingsEnriched(
   orgProfileId: string,
   orgId: string,
 ): Promise<EnrichedBinding[]> {
-  const [owner] = await db
-    .select({ id: connectionProfiles.id })
-    .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
-    .limit(1);
-  if (!owner) throw notFound("Profile not found");
+  await assertOrgProfileOwnership(orgProfileId, orgId);
 
   const rows = await db
     .select({

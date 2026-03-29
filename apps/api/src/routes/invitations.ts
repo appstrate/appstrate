@@ -13,6 +13,20 @@ import {
 } from "../services/invitations.ts";
 import { addMember } from "../services/organizations.ts";
 
+async function addMemberIgnoreDuplicate(
+  orgId: string,
+  userId: string,
+  role: "member" | "admin",
+): Promise<void> {
+  try {
+    await addMember(orgId, userId, role);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("duplicate key") && !msg.includes("unique constraint")) throw err;
+    // Already a member — skip
+  }
+}
+
 const router = new Hono();
 
 function assertInvitationExists(
@@ -113,15 +127,11 @@ router.post("/:token/accept", async (c) => {
       });
 
       // Add member to org
-      try {
-        await addMember(invitation.orgId, newUserId, invitation.role as "member" | "admin");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes("duplicate key") && !msg.includes("unique constraint")) {
-          throw err;
-        }
-        // Already a member — skip
-      }
+      await addMemberIgnoreDuplicate(
+        invitation.orgId,
+        newUserId,
+        invitation.role as "member" | "admin",
+      );
 
       await markInvitationAccepted(invitation.id, newUserId);
 
@@ -163,15 +173,11 @@ router.post("/:token/accept", async (c) => {
       });
     }
 
-    try {
-      await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes("duplicate key") && !msg.includes("unique constraint")) {
-        throw err;
-      }
-      // Already a member — skip
-    }
+    await addMemberIgnoreDuplicate(
+      invitation.orgId,
+      existingUser.id,
+      invitation.role as "member" | "admin",
+    );
 
     await markInvitationAccepted(invitation.id, existingUser.id);
 

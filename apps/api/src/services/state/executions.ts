@@ -1,8 +1,9 @@
-import { eq, and, ne, desc, isNotNull, inArray, count, max } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { executions, executionLogs, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
+import { asRecordOrNull } from "../../lib/safe-json.ts";
 
 // --- Executions ---
 
@@ -34,13 +35,13 @@ export async function createExecution(
     status: "pending",
     input,
     startedAt: new Date(),
-    connectionProfileId: connectionProfileId ?? null,
-    scheduleId: scheduleId ?? null,
-    packageVersionId: packageVersionId ?? null,
-    proxyLabel: proxyLabel ?? null,
-    modelLabel: modelLabel ?? null,
-    applicationId: applicationId ?? null,
-    providerProfileIds: providerProfileIds ?? null,
+    connectionProfileId,
+    scheduleId,
+    packageVersionId,
+    proxyLabel,
+    modelLabel,
+    applicationId,
+    providerProfileIds,
     executionNumber,
   });
 }
@@ -105,7 +106,7 @@ export async function getLastExecutionState(
     .where(and(...conditions))
     .orderBy(desc(executions.startedAt))
     .limit(1);
-  return (row?.state as Record<string, unknown>) ?? null;
+  return asRecordOrNull(row?.state);
 }
 
 export async function getRecentExecutions(
@@ -285,6 +286,20 @@ export async function deletePackageExecutions(packageId: string, orgId: string):
   return deleted.length;
 }
 
+async function listExecutionsWithFilter(filter: SQL, limit: number) {
+  const rows = await db
+    .select({
+      execution: executions,
+      packageVersion: packageVersions.version,
+    })
+    .from(executions)
+    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
+    .where(filter)
+    .orderBy(desc(executions.startedAt))
+    .limit(limit);
+  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+}
+
 export async function listPackageExecutions(
   packageId: string,
   orgId: string,
@@ -295,32 +310,14 @@ export async function listPackageExecutions(
   if (applicationId) {
     conditions.push(eq(executions.applicationId, applicationId));
   }
-
-  const rows = await db
-    .select({
-      execution: executions,
-      packageVersion: packageVersions.version,
-    })
-    .from(executions)
-    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(...conditions))
-    .orderBy(desc(executions.startedAt))
-    .limit(limit);
-  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+  return listExecutionsWithFilter(and(...conditions)!, limit);
 }
 
 export async function listScheduleExecutions(scheduleId: string, orgId: string, limit = 20) {
-  const rows = await db
-    .select({
-      execution: executions,
-      packageVersion: packageVersions.version,
-    })
-    .from(executions)
-    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(eq(executions.scheduleId, scheduleId), eq(executions.orgId, orgId)))
-    .orderBy(desc(executions.startedAt))
-    .limit(limit);
-  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+  return listExecutionsWithFilter(
+    and(eq(executions.scheduleId, scheduleId), eq(executions.orgId, orgId))!,
+    limit,
+  );
 }
 
 export async function getExecutionFull(id: string) {

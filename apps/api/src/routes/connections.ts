@@ -49,15 +49,11 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   }
 
   try {
-    let scopes: string[] | undefined;
-    let profileId: string | undefined;
-    try {
-      const body = await c.req.json<{ scopes?: string[]; profileId?: string }>();
-      scopes = body.scopes;
-      profileId = body.profileId;
-    } catch {
-      // No body or invalid JSON — OK, scopes and profileId are optional
-    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      scopes?: string[];
+      profileId?: string;
+    };
+    const { scopes, profileId } = body;
 
     const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
 

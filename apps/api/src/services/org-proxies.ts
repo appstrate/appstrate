@@ -55,22 +55,16 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
   // DB proxies (skip if ID conflicts with system proxy)
   for (const row of rows) {
     if (system.has(row.id)) continue;
-    let urlPrefix: string;
-    try {
-      urlPrefix = maskProxyUrl(decrypt(row.urlEncrypted));
-    } catch {
-      urlPrefix = "***";
-    }
     result.push({
       id: row.id,
       label: row.label,
-      urlPrefix,
+      urlPrefix: maskProxyUrl(decrypt(row.urlEncrypted)),
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
+      source: row.source as "custom" | "built-in",
       createdBy: row.createdBy,
-      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
-      updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
     });
   }
 

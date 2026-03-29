@@ -31,17 +31,6 @@ const exists = (p: string) =>
     () => false,
   );
 
-/** Unwrap the default export from a dynamically imported module.
- *  Some bundlers double-wrap: mod.default may be a module namespace
- *  whose own .default holds the actual function. Walk up to 2 levels. */
-function resolveDefaultExport(mod: Record<string, unknown>): unknown {
-  let value = mod.default;
-  if (typeof value !== "function" && value && typeof (value as any).default !== "undefined") {
-    value = (value as any).default;
-  }
-  return value;
-}
-
 // --- 1. Init workspace ---
 
 const WORKSPACE = "/workspace";
@@ -71,7 +60,7 @@ const loadedExtensionIds = new Set<string>();
 async function loadExtensionFromFile(filePath: string, id: string, label: string) {
   if (loadedExtensionIds.has(id)) return;
   const mod = await import(filePath);
-  const factory = resolveDefaultExport(mod);
+  const factory = mod.default;
   if (typeof factory !== "function") {
     emit({
       type: "error",
@@ -245,8 +234,8 @@ const model: Model<Api> = {
   reasoning: process.env.MODEL_REASONING === "true",
   input: safeJsonParse<string[]>(process.env.MODEL_INPUT, ["text"]),
   cost: safeJsonParse(process.env.MODEL_COST, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
-  contextWindow: parseInt(process.env.MODEL_CONTEXT_WINDOW || "128000", 10) || 128000,
-  maxTokens: parseInt(process.env.MODEL_MAX_TOKENS || "16384", 10) || 16384,
+  contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW) || 128000,
+  maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
 };
 
 // --- 4. Build resource loader ---
@@ -304,7 +293,7 @@ try {
       case "message_end": {
         // Capture the full assistant message text
         const entries = session.state.messages;
-        if (entries.length > 0) {
+        if (entries.length) {
           const last = entries[entries.length - 1];
           if (last && (last as any).role === "assistant") {
             // Accumulate token usage from assistant message
@@ -365,9 +354,7 @@ try {
         break;
       }
 
-      default:
-        break;
-    }
+}
   });
 
   // --- 7. Run the prompt ---

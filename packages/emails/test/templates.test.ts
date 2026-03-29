@@ -32,8 +32,10 @@ describe("verification email", () => {
       url: urlWithAmp,
       locale: "fr",
     });
-    expect(result.html).toContain(`href="${urlWithAmp}"`);
     expect(result.html).toContain("token=abc&amp;callbackURL=");
+    expect(result.html).toContain('href="');
+    // href attribute also contains escaped ampersands (valid HTML)
+    expect(result.html).not.toContain(`href="${urlWithAmp}"`);
   });
 });
 

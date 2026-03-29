@@ -5,8 +5,6 @@ import type { ProviderDefinition } from "./types.ts";
 import { decryptCredentials } from "./encryption.ts";
 import { buildProviderDefinitionFromManifest } from "@appstrate/core/validation";
 
-export type { Db };
-
 /** Drizzle filter: packages owned by org OR system packages (orgId: null). */
 function orgOrSystemFilter(orgId: string) {
   return or(eq(packages.orgId, orgId), isNull(packages.orgId))!;
@@ -92,20 +90,6 @@ async function getProviderAdminCredentials(
   return decryptCredentials<Record<string, string>>(row.credentialsEncrypted);
 }
 
-export async function getProviderOAuthCredentials(
-  db: Db,
-  orgId: string,
-  providerId: string,
-): Promise<{ clientId: string; clientSecret: string } | null> {
-  const creds = await getProviderAdminCredentials(db, orgId, providerId);
-  if (!creds?.clientId || !creds?.clientSecret) return null;
-
-  return {
-    clientId: creds.clientId,
-    clientSecret: creds.clientSecret,
-  };
-}
-
 /**
  * Get OAuth client credentials for a provider or throw if not configured.
  */
@@ -114,13 +98,13 @@ export async function getProviderOAuthCredentialsOrThrow(
   orgId: string,
   providerId: string,
 ): Promise<{ clientId: string; clientSecret: string }> {
-  const creds = await getProviderOAuthCredentials(db, orgId, providerId);
-  if (!creds) {
+  const creds = await getProviderAdminCredentials(db, orgId, providerId);
+  if (!creds?.clientId || !creds?.clientSecret) {
     throw new Error(
       `No OAuth credentials configured for provider '${providerId}'. Configure via admin settings.`,
     );
   }
-  return creds;
+  return { clientId: creds.clientId, clientSecret: creds.clientSecret };
 }
 
 /**

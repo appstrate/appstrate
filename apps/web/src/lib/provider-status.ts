@@ -54,16 +54,3 @@ export function computeProvidersSummary(
 
   return { text: parts.join(" \u2014 "), connectedCount, actionCount };
 }
-
-/**
- * Append the profile name to a "Connected" label when the user has multiple profiles.
- */
-export function connectedLabelWithProfile(
-  baseLabel: string,
-  profiles: Array<{ id: string; name: string }> | undefined,
-  profileId: string | null,
-): string {
-  if (!profiles || profiles.length <= 1 || !profileId) return baseLabel;
-  const profile = profiles.find((p) => p.id === profileId);
-  return profile ? `${baseLabel} (${profile.name})` : baseLabel;
-}
