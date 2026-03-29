@@ -88,7 +88,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Start OAuth connection flow",
       description:
-        "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user.",
+        "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -139,6 +139,7 @@ export const connectionsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -147,7 +148,8 @@ export const connectionsPaths = {
       operationId: "connectApiKey",
       tags: ["Connections"],
       summary: "Save API key credential",
-      description: "Save an API key credential for a provider that uses api_key auth mode.",
+      description:
+        "Save an API key credential for a provider that uses api_key auth mode. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -202,6 +204,7 @@ export const connectionsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -211,7 +214,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Save custom credentials",
       description:
-        "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema.",
+        "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -270,6 +273,7 @@ export const connectionsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -335,7 +339,7 @@ export const connectionsPaths = {
       tags: ["Connections"],
       summary: "Disconnect a provider",
       description:
-        "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile.",
+        "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile. The resolved profile must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -385,6 +389,7 @@ export const connectionsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },

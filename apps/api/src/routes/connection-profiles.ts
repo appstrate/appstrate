@@ -18,6 +18,7 @@ import {
   renameOrgProfile,
   deleteOrgProfile,
   listOrgProfilesWithUserBindings,
+  getOrgMemberProfile,
 } from "../services/connection-profiles.ts";
 import {
   listAllActorConnections,
@@ -236,10 +237,12 @@ export function createConnectionProfilesRouter() {
   router.get("/:id/connections", async (c) => {
     const actor = getActor(c);
     const profileId = c.req.param("id")!;
-    // Verify the profile belongs to the authenticated actor or the org
     const orgId = c.get("orgId");
+    // Allow access if: own profile, org profile, or profile of another org member (read-only view)
     const profile =
-      (await getProfileForActor(profileId, actor)) ?? (await getOrgProfile(profileId, orgId));
+      (await getProfileForActor(profileId, actor)) ??
+      (await getOrgProfile(profileId, orgId)) ??
+      (await getOrgMemberProfile(profileId, orgId));
     if (!profile) {
       throw notFound("Profile not found");
     }

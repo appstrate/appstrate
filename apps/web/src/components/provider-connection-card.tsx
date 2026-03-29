@@ -26,6 +26,8 @@ interface ProviderConnectionCardProps {
   orgProfileName?: string;
   /** When true, hide all action buttons — card becomes purely informational. */
   readOnly?: boolean;
+  /** Profile ID to check connection status for (e.g. schedule owner's profile). */
+  viewProfileId?: string;
 }
 
 export function ProviderConnectionCard({
@@ -34,6 +36,7 @@ export function ProviderConnectionCard({
   orgProfileId,
   orgProfileName,
   readOnly: readOnlyProp,
+  viewProfileId,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
 
@@ -56,7 +59,13 @@ export function ProviderConnectionCard({
     doBind,
     handleUnbind,
     readOnly,
-  } = useProviderConnection({ providerId, packageId, orgProfileId, readOnly: readOnlyProp });
+  } = useProviderConnection({
+    providerId,
+    packageId,
+    orgProfileId,
+    readOnly: readOnlyProp,
+    viewProfileId,
+  });
 
   // Provider metadata
   const { data: providersData } = useProviders();

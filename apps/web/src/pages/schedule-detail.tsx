@@ -296,6 +296,7 @@ function ScheduleProviders({
             key={providerId}
             providerId={providerId}
             readOnly={!isProfileOwner}
+            viewProfileId={schedule.connectionProfileId}
           />
         ))}
       </div>

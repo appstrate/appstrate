@@ -607,7 +607,7 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "List connections for a profile",
       description:
-        "List all provider connections associated with a specific connection profile in the current organization.",
+        "List all provider connections associated with a connection profile. Accessible for own profiles, org-level profiles, and other org members' profiles (read-only).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
