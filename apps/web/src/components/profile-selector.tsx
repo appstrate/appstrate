@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { useCurrentProfileId, setCurrentProfileId } from "../hooks/use-current-profile";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { Label } from "@/components/ui/label";
 import {
@@ -14,31 +13,23 @@ import { PROFILE_ALL_VALUE, decodeProfileValue } from "@/lib/profile-selection";
 interface ProfileSelectorProps {
   /** Show "All" as first option */
   showAllOption?: boolean;
-  /** Controlled mode: current value */
-  value?: string | null;
-  /** Controlled mode: callback */
-  onChange?: (profileId: string | null) => void;
+  /** Current value (null = "all" when showAllOption is true) */
+  value: string | null;
+  /** Callback when profile changes */
+  onChange: (profileId: string | null) => void;
   label?: string;
 }
 
 export function ProfileSelector({ showAllOption, value, onChange, label }: ProfileSelectorProps) {
   const { t } = useTranslation("settings");
   const { data: profiles } = useConnectionProfiles();
-  const globalProfileId = useCurrentProfileId();
-
-  const isControlled = value !== undefined && onChange !== undefined;
 
   if (!profiles || profiles.length <= 1) return null;
 
-  const currentValue = isControlled
-    ? value === null && showAllOption
-      ? PROFILE_ALL_VALUE
-      : (value ?? "")
-    : (globalProfileId ?? "");
+  const currentValue = value === null && showAllOption ? PROFILE_ALL_VALUE : (value ?? "");
+
   const handleChange = (val: string) => {
-    const resolved = decodeProfileValue(val);
-    if (isControlled) onChange(resolved);
-    else setCurrentProfileId(resolved);
+    onChange(decodeProfileValue(val));
   };
 
   return (

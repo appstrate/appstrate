@@ -4,7 +4,10 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedFlow, seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
 import { providerCredentials } from "@appstrate/db/schema";
-import { resolvePreflightContext } from "../../../src/services/env-builder.ts";
+import { resolveProviderProfiles } from "../../../src/services/connection-profiles.ts";
+import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
+import { getPackageConfig } from "../../../src/services/state/index.ts";
+import { validateFlowReadiness } from "../../../src/services/flow-readiness.ts";
 import { getPackage } from "../../../src/services/flow-service.ts";
 import {
   setUserFlowProviderOverride,
@@ -12,6 +15,7 @@ import {
 } from "../../../src/services/connection-profiles.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("execution preflight — provider profile resolution", () => {
   let userId: string;
@@ -83,11 +87,49 @@ describe("execution preflight — provider profile resolution", () => {
     return (await getPackage(flowId, orgId))!;
   }
 
+  /** Inline preflight: resolve profiles, config, and validate readiness. */
+  async function runPreflight(params: {
+    flow: LoadedPackage;
+    packageId: string;
+    orgId: string;
+    defaultUserProfileId: string | null;
+    userProviderOverrides?: Record<string, string>;
+    orgProfileId?: string | null;
+  }): Promise<{
+    providerProfiles: ProviderProfileMap;
+    config: Record<string, unknown>;
+    modelId: string | null;
+    proxyId: string | null;
+  }> {
+    const { flow, packageId, orgId: oid, defaultUserProfileId, userProviderOverrides, orgProfileId } = params;
+    const manifestProviders = resolveManifestProviders(flow.manifest);
+
+    const [providerProfiles, packageConfig] = await Promise.all([
+      resolveProviderProfiles(
+        manifestProviders,
+        defaultUserProfileId,
+        userProviderOverrides,
+        orgProfileId,
+        oid,
+      ),
+      getPackageConfig(oid, packageId),
+    ]);
+
+    await validateFlowReadiness({ flow, providerProfiles, orgId: oid, config: packageConfig.config });
+
+    return {
+      providerProfiles,
+      config: packageConfig.config,
+      modelId: packageConfig.modelId,
+      proxyId: packageConfig.proxyId,
+    };
+  }
+
   it("uses default profile for all providers when no overrides", async () => {
     const flowId = "@testorg/preflight-default";
     const flow = await seedFlowWithProviders(flowId);
 
-    const { providerProfiles } = await resolvePreflightContext({
+    const { providerProfiles } = await runPreflight({
       flow,
       packageId: flowId,
       orgId,
@@ -104,7 +146,7 @@ describe("execution preflight — provider profile resolution", () => {
     const flowId = "@testorg/preflight-override";
     const flow = await seedFlowWithProviders(flowId);
 
-    const { providerProfiles } = await resolvePreflightContext({
+    const { providerProfiles } = await runPreflight({
       flow,
       packageId: flowId,
       orgId,
@@ -125,7 +167,7 @@ describe("execution preflight — provider profile resolution", () => {
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org" });
     await bindOrgProfileProvider(orgProfile.id, "@system/gmail", altProfileId, userId);
 
-    const { providerProfiles } = await resolvePreflightContext({
+    const { providerProfiles } = await runPreflight({
       flow,
       packageId: flowId,
       orgId,
@@ -152,7 +194,7 @@ describe("execution preflight — provider profile resolution", () => {
     // Provide override for clickup
     await saveConnection(db, altProfileId, "@system/clickup", orgId, { api_key: "alt-cu" });
 
-    const { providerProfiles } = await resolvePreflightContext({
+    const { providerProfiles } = await runPreflight({
       flow,
       packageId: flowId,
       orgId,

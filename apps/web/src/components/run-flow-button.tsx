@@ -22,8 +22,6 @@ interface RunFlowButtonProps {
   size?: "default" | "sm" | "icon";
   className?: string;
   showLabel?: boolean;
-  /** Called when user clicks "Configure connections" in the summary modal. */
-  onConfigureConnections?: () => void;
 }
 
 export function RunFlowButton({
@@ -36,7 +34,6 @@ export function RunFlowButton({
   size = "default",
   className,
   showLabel = false,
-  onConfigureConnections: onConfigureConnectionsProp,
 }: RunFlowButtonProps) {
   const { t } = useTranslation(["flows"]);
   const navigate = useNavigate();
@@ -152,11 +149,7 @@ export function RunFlowButton({
           onConfirm={proceedAfterSummary}
           onConfigureConnections={() => {
             setSummaryOpen(false);
-            if (onConfigureConnectionsProp) {
-              onConfigureConnectionsProp();
-            } else {
-              navigate({ hash: "connectors" }, { replace: true });
-            }
+            navigate({ hash: "connectors" }, { replace: true });
           }}
           providers={detail.dependencies?.providers ?? []}
           orgProfileName={detail.flowOrgProfileName}

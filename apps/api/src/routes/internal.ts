@@ -10,11 +10,6 @@ import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentExecutions } from "../services/state/index.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
-import {
-  resolveProviderProfiles,
-  resolveActorProfileContext,
-  getFlowOrgProfile,
-} from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
@@ -32,6 +27,7 @@ async function verifyExecutionToken(c: Context): Promise<{
     orgId: string;
     status: string;
     connectionProfileId: string | null;
+    providerProfileIds: Record<string, string> | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -58,6 +54,7 @@ async function verifyExecutionToken(c: Context): Promise<{
       orgId: executions.orgId,
       status: executions.status,
       connectionProfileId: executions.connectionProfileId,
+      providerProfileIds: executions.providerProfileIds,
     })
     .from(executions)
     .where(eq(executions.id, executionId))
@@ -81,6 +78,7 @@ async function verifyExecutionToken(c: Context): Promise<{
       orgId: execution.orgId,
       status: execution.status,
       connectionProfileId: execution.connectionProfileId,
+      providerProfileIds: execution.providerProfileIds ?? null,
     },
   };
 }
@@ -163,56 +161,26 @@ export function createInternalRouter() {
       throw notFound(`Provider '${providerId}' is not required by this flow`);
     }
 
-    try {
-      // Derive actor and resolve profiles
-      const actor: Actor | null = actorFromIds(execution.userId, execution.endUserId);
-
-      const [{ defaultUserProfileId, userProviderOverrides }, flowOrgProfile] = await Promise.all([
-        resolveActorProfileContext(actor, execution.packageId, execution.connectionProfileId!),
-        getFlowOrgProfile(execution.orgId, execution.packageId),
-      ]);
-      const flowOrgProfileId = flowOrgProfile?.id ?? null;
-
-      const profileMap = await resolveProviderProfiles(
-        [provider],
-        defaultUserProfileId,
-        userProviderOverrides,
-        flowOrgProfileId,
-      );
-
-      const entry = profileMap[providerId];
-      if (!entry) {
-        throw notFound(`No binding for provider '${providerId}'`);
-      }
-
-      // Unified credential resolution
-      const result = await resolveCredentialsForProxy(
-        db,
-        entry.profileId,
-        provider.id,
-        execution.orgId,
-      );
-
-      if (!result) {
-        throw notFound(`No credentials for provider '${providerId}'`);
-      }
-
-      logger.info("Credential access", {
-        executionId,
-        providerId,
-        packageId: execution.packageId,
-        profileId: entry.profileId,
-      });
-
-      return c.json(result);
-    } catch (err) {
-      logger.error("Failed to resolve credentials", {
-        executionId,
-        providerId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw internalError("Failed to resolve credentials");
+    // Look up the stored profileId from the execution record
+    const profileId = execution.providerProfileIds?.[providerId];
+    if (!profileId) {
+      throw notFound(`No profile resolved for provider '${providerId}'`);
     }
+
+    const result = await resolveCredentialsForProxy(db, profileId, provider.id, execution.orgId);
+
+    if (!result) {
+      throw notFound(`No credentials for provider '${providerId}'`);
+    }
+
+    logger.info("Credential access", {
+      executionId,
+      providerId,
+      packageId: execution.packageId,
+      profileId,
+    });
+
+    return c.json(result);
   });
 
   return router;

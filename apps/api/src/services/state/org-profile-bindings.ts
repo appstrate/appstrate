@@ -7,6 +7,7 @@ import {
 } from "@appstrate/db/schema";
 import { user } from "@appstrate/db/schema";
 import type { EnrichedBinding } from "@appstrate/shared-types";
+import { notFound } from "../../lib/errors.ts";
 export type { EnrichedBinding };
 
 /**
@@ -19,16 +20,14 @@ export type { EnrichedBinding };
  */
 export async function getOrgProfileBindings(
   orgProfileId: string,
-  orgId?: string,
+  orgId: string,
 ): Promise<Record<string, string>> {
-  if (orgId) {
-    const [owner] = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
-      .limit(1);
-    if (!owner) return {};
-  }
+  const [owner] = await db
+    .select({ id: connectionProfiles.id })
+    .from(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
+    .limit(1);
+  if (!owner) throw notFound("Profile not found");
 
   const rows = await db
     .select({
@@ -52,16 +51,14 @@ export async function getOrgProfileBindings(
  */
 export async function getOrgProfileBindingsEnriched(
   orgProfileId: string,
-  orgId?: string,
+  orgId: string,
 ): Promise<EnrichedBinding[]> {
-  if (orgId) {
-    const [owner] = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
-      .limit(1);
-    if (!owner) return [];
-  }
+  const [owner] = await db
+    .select({ id: connectionProfiles.id })
+    .from(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
+    .limit(1);
+  if (!owner) throw notFound("Profile not found");
 
   const rows = await db
     .select({

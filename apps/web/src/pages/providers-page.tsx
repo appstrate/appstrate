@@ -20,6 +20,7 @@ import type { ProviderConfig } from "@appstrate/shared-types";
 export function ProvidersPage() {
   const { t } = useTranslation(["settings", "flows"]);
   const [showAll, setShowAll] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();
   const { isOrgAdmin } = useOrg();
 
@@ -67,7 +68,7 @@ export function ProvidersPage() {
           <TabsTrigger value="all">{t("providers.filterAll")}</TabsTrigger>
         </TabsList>
       </Tabs>
-      <ProfileSelector />
+      <ProfileSelector value={profileId} onChange={setProfileId} />
     </div>
   );
 
