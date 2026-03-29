@@ -27,6 +27,7 @@ import {
 } from "../hooks/use-schedules";
 import { usePackageDetail, useFlows } from "../hooks/use-packages";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
+import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
 import {
   User,
@@ -253,9 +254,13 @@ function ScheduleProviders({
 }) {
   const { t } = useTranslation(["flows"]);
   const { flowProviders } = useScheduleProviderReadiness(schedule);
+  const { data: userProfiles } = useConnectionProfiles();
 
   const isOrgProfile = schedule.profileType === "org";
   const orgProfileId = isOrgProfile ? schedule.connectionProfileId : undefined;
+
+  // For user profile schedules, only the profile owner can connect/disconnect
+  const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
 
   if (flowProviders.length === 0) {
     return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
@@ -287,7 +292,11 @@ function ScheduleProviders({
       </div>
       <div className="p-2 space-y-2">
         {flowProviders.map((providerId) => (
-          <ProviderConnectionCard key={providerId} providerId={providerId} />
+          <ProviderConnectionCard
+            key={providerId}
+            providerId={providerId}
+            readOnly={!isProfileOwner}
+          />
         ))}
       </div>
     </div>
