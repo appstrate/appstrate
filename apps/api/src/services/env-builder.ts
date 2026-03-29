@@ -21,6 +21,7 @@ import { resolveModel } from "./org-models.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
+import type { ProviderProfileMap } from "../types/index.ts";
 import { validateFlowReadiness } from "./flow-readiness.ts";
 
 export class ModelNotConfiguredError extends Error {
@@ -40,7 +41,7 @@ export async function resolvePreflightContext(params: {
   packageId: string;
   orgId: string;
   profileIdOverride?: string;
-}): Promise<{ providerProfiles: Record<string, string>; config: Record<string, unknown> }> {
+}): Promise<{ providerProfiles: ProviderProfileMap; config: Record<string, unknown> }> {
   const { flow, actor, packageId, orgId, profileIdOverride } = params;
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
@@ -155,7 +156,7 @@ export function buildPromptContext(params: {
 export async function buildExecutionContext(params: {
   executionId: string;
   flow: LoadedPackage;
-  providerProfiles: Record<string, string>;
+  providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;

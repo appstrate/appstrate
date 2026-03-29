@@ -8,11 +8,12 @@ import { useConnect, useDisconnect } from "../../hooks/use-mutations";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { computeProvidersSummary, connectedLabelWithProfile } from "../../lib/provider-status";
-import { useConnectionProfiles } from "../../hooks/use-connection-profiles";
+import { useConnectionProfiles, useOrgProfiles } from "../../hooks/use-connection-profiles";
 import { ProfileSelector } from "../profile-selector";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderConfigureButton } from "../provider-configure-button";
 import { ProviderCard } from "../provider-card";
+import { ProviderConnectionCard } from "../provider-connection-card";
 
 export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common", "settings"]);
@@ -21,6 +22,10 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const profileId = useCurrentProfileId();
   const pParam = profileIdParam(profileId);
   const { data: profiles } = useConnectionProfiles();
+  const { data: orgProfiles } = useOrgProfiles();
+
+  // Detect if the selected profile is an org profile
+  const isOrgProfileSelected = orgProfiles?.some((p) => p.id === profileId) ?? false;
 
   const connectMutation = useConnect();
   const disconnectMutation = useDisconnect();
@@ -83,118 +88,133 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
         </div>
         <ProfileSelector />
       </div>
-      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
-        {detail.dependencies.providers.map((svc) => {
-          const isConnected = svc.status === "connected";
-          const authMode = getProviderAuthMode(svc);
-          const providerConfig = getProviderConfig(svc.provider);
-          const displayName = providerConfig?.displayName ?? svc.name ?? svc.id;
-          const iconUrl = providerConfig?.iconUrl;
-          const hasScopeIssue = isConnected && svc.scopesSufficient === false;
 
-          const handleProviderConnect = () => {
-            if (authMode === "API_KEY") {
-              setApiKeyService({ provider: svc.provider, id: svc.id });
-            } else if (isCredentialAuth(svc.provider)) {
-              setCustomCredService({ provider: svc.provider, id: svc.id, name: svc.name });
-            } else {
-              connectMutation.mutate({
-                provider: svc.provider,
-                scopes: svc.scopesRequired,
-                ...pParam,
-              });
-            }
-          };
+      {/* Org profile selected: use ProviderConnectionCard for per-provider profile selection + bind */}
+      {isOrgProfileSelected ? (
+        <div className="space-y-2 mb-4">
+          {detail.dependencies.providers.map((svc) => (
+            <ProviderConnectionCard
+              key={svc.id}
+              providerId={svc.id}
+              orgProfileId={profileId ?? undefined}
+              bindOnConnect={false}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
+          {detail.dependencies.providers.map((svc) => {
+            const isConnected = svc.status === "connected";
+            const authMode = getProviderAuthMode(svc);
+            const providerConfig = getProviderConfig(svc.provider);
+            const displayName = providerConfig?.displayName ?? svc.name ?? svc.id;
+            const iconUrl = providerConfig?.iconUrl;
+            const hasScopeIssue = isConnected && svc.scopesSufficient === false;
 
-          let actionButtons: React.ReactNode;
-          if (svc.status === "needs_reconnection") {
-            actionButtons = (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
-                onClick={handleProviderConnect}
-                disabled={connectMutation.isPending}
-              >
-                {t("detail.reconnect", { defaultValue: "Reconnect" })}
-              </Button>
-            );
-          } else if (isConnected) {
-            actionButtons = (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-emerald-500">
-                  {connectedLabelWithProfile(
-                    t("settings:providers.connected"),
-                    profiles,
-                    profileId,
+            const handleProviderConnect = () => {
+              if (authMode === "API_KEY") {
+                setApiKeyService({ provider: svc.provider, id: svc.id });
+              } else if (isCredentialAuth(svc.provider)) {
+                setCustomCredService({ provider: svc.provider, id: svc.id, name: svc.name });
+              } else {
+                connectMutation.mutate({
+                  provider: svc.provider,
+                  scopes: svc.scopesRequired,
+                  ...pParam,
+                });
+              }
+            };
+
+            let actionButtons: React.ReactNode;
+            if (svc.status === "needs_reconnection") {
+              actionButtons = (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
+                  onClick={handleProviderConnect}
+                  disabled={connectMutation.isPending}
+                >
+                  {t("detail.reconnect", { defaultValue: "Reconnect" })}
+                </Button>
+              );
+            } else if (isConnected) {
+              actionButtons = (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-emerald-500">
+                    {connectedLabelWithProfile(
+                      t("settings:providers.connected"),
+                      profiles,
+                      profileId,
+                    )}
+                  </span>
+                  {hasScopeIssue && svc.scopesMissing && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
+                      onClick={handleProviderConnect}
+                      disabled={connectMutation.isPending}
+                      title={`Missing: ${svc.scopesMissing.join(", ")}`}
+                    >
+                      {t("detail.updatePermissions", { defaultValue: "Update permissions" })}
+                    </Button>
                   )}
-                </span>
-                {hasScopeIssue && svc.scopesMissing && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 px-2 text-xs border-warning/30 text-warning hover:bg-warning/10"
-                    onClick={handleProviderConnect}
-                    disabled={connectMutation.isPending}
-                    title={`Missing: ${svc.scopesMissing.join(", ")}`}
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      if (confirm(t("detail.disconnectConfirm", { name: displayName }))) {
+                        disconnectMutation.mutate({ provider: svc.provider, ...pParam });
+                      }
+                    }}
+                    disabled={disconnectMutation.isPending}
                   >
-                    {t("detail.updatePermissions", { defaultValue: "Update permissions" })}
+                    {t("detail.disconnect")}
                   </Button>
-                )}
+                </div>
+              );
+            } else {
+              actionButtons = (
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-7 px-2 text-xs"
-                  onClick={() => {
-                    if (confirm(t("detail.disconnectConfirm", { name: displayName }))) {
-                      disconnectMutation.mutate({ provider: svc.provider, ...pParam });
-                    }
-                  }}
-                  disabled={disconnectMutation.isPending}
+                  onClick={handleProviderConnect}
                 >
-                  {t("detail.disconnect")}
+                  {t("detail.connect")}
                 </Button>
-              </div>
-            );
-          } else {
-            actionButtons = (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleProviderConnect}
-              >
-                {t("detail.connect")}
-              </Button>
-            );
-          }
+              );
+            }
 
-          return (
-            <ProviderCard
-              key={svc.id}
-              displayName={displayName}
-              description={svc.description}
-              iconUrl={iconUrl}
-              badges={
-                isOrgAdmin && providerConfig ? (
-                  <ProviderConfigBadge enabled={providerConfig.enabled} />
-                ) : undefined
-              }
-              actions={
-                <>
-                  {actionButtons}
-                  {isOrgAdmin && providerConfig && (
-                    <ProviderConfigureButton
-                      provider={providerConfig}
-                      callbackUrl={detail?.callbackUrl}
-                    />
-                  )}
-                </>
-              }
-            />
-          );
-        })}
-      </div>
+            return (
+              <ProviderCard
+                key={svc.id}
+                displayName={displayName}
+                description={svc.description}
+                iconUrl={iconUrl}
+                badges={
+                  isOrgAdmin && providerConfig ? (
+                    <ProviderConfigBadge enabled={providerConfig.enabled} />
+                  ) : undefined
+                }
+                actions={
+                  <>
+                    {actionButtons}
+                    {isOrgAdmin && providerConfig && (
+                      <ProviderConfigureButton
+                        provider={providerConfig}
+                        callbackUrl={detail?.callbackUrl}
+                      />
+                    )}
+                  </>
+                }
+              />
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }

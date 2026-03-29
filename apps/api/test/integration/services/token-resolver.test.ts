@@ -4,7 +4,16 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
 import { buildProviderTokens } from "../../../src/services/token-resolver.ts";
-import type { FlowProviderRequirement } from "../../../src/types/index.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
+
+/** Helper to build a ProviderProfileMap from simple id → profileId pairs. */
+function pm(entries: Record<string, string>): ProviderProfileMap {
+  const map: ProviderProfileMap = {};
+  for (const [id, pid] of Object.entries(entries)) {
+    map[id] = { profileId: pid, source: "user_profile" };
+  }
+  return map;
+}
 
 describe("token-resolver", () => {
   let userId: string;
@@ -81,11 +90,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("oauth-token-abc123");
     });
@@ -103,11 +108,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("key-secret-456");
     });
@@ -126,11 +127,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("preferred-token");
     });
@@ -156,11 +153,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("__connected__");
     });
@@ -179,11 +172,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("__connected__");
     });
@@ -199,11 +188,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBeUndefined();
       expect(Object.keys(tokens)).toHaveLength(0);
@@ -234,13 +219,11 @@ describe("token-resolver", () => {
         { id: providerB },
         { id: providerC },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerA]: profileId,
-        [providerB]: profileId,
-        [providerC]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(
+        providers,
+        pm({ [providerA]: profileId, [providerB]: profileId, [providerC]: profileId }),
+        orgId,
+      );
 
       expect(Object.keys(tokens)).toHaveLength(3);
       expect(tokens[providerA]).toBe("token-a");
@@ -267,11 +250,7 @@ describe("token-resolver", () => {
         { id: providerUnmapped },
       ];
       // Only providerMapped has a profile mapping
-      const providerProfiles: Record<string, string> = {
-        [providerMapped]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerMapped]: profileId }), orgId);
 
       expect(tokens[providerMapped]).toBe("mapped-key");
       expect(tokens[providerUnmapped]).toBeUndefined();
@@ -290,11 +269,7 @@ describe("token-resolver", () => {
       const providers: FlowProviderRequirement[] = [
         { id: providerId },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerId]: profileId,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       // No access_token, no api_key, and Object.keys(credentials).length === 0 → null → excluded
       expect(tokens[providerId]).toBeUndefined();
@@ -322,12 +297,11 @@ describe("token-resolver", () => {
         { id: providerA },
         { id: providerB },
       ];
-      const providerProfiles: Record<string, string> = {
-        [providerA]: profileId,
-        [providerB]: profileId2,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(
+        providers,
+        pm({ [providerA]: profileId, [providerB]: profileId2 }),
+        orgId,
+      );
 
       expect(tokens[providerA]).toBe("key-from-profile-1");
       expect(tokens[providerB]).toBe("key-from-profile-2");
@@ -350,11 +324,7 @@ describe("token-resolver", () => {
         { id: providerId },
       ];
       // Try to resolve using our org but pointing to the other profile
-      const providerProfiles: Record<string, string> = {
-        [providerId]: otherProfile.id,
-      };
-
-      const tokens = await buildProviderTokens(providers, providerProfiles, orgId);
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: otherProfile.id }), orgId);
 
       // getCredentials filters by orgId, so the other org's connection should not resolve
       expect(tokens[providerId]).toBeUndefined();

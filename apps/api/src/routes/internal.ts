@@ -179,13 +179,18 @@ export function createInternalRouter() {
         execution.connectionProfileId ?? undefined,
       );
 
-      const profileId = profileMap[providerId];
-      if (!profileId) {
+      const entry = profileMap[providerId];
+      if (!entry) {
         throw notFound(`No binding for provider '${providerId}'`);
       }
 
       // Unified credential resolution
-      const result = await resolveCredentialsForProxy(db, profileId, provider.id, execution.orgId);
+      const result = await resolveCredentialsForProxy(
+        db,
+        entry.profileId,
+        provider.id,
+        execution.orgId,
+      );
 
       if (!result) {
         throw notFound(`No credentials for provider '${providerId}'`);
@@ -195,7 +200,7 @@ export function createInternalRouter() {
         executionId,
         providerId,
         packageId: execution.packageId,
-        profileId,
+        profileId: entry.profileId,
       });
 
       return c.json(result);

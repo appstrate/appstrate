@@ -13,7 +13,7 @@ import {
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
-import type { FlowProviderRequirement } from "../types/index.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
 
@@ -372,8 +372,9 @@ export async function getProfileById(profileId: string): Promise<ConnectionProfi
 /**
  * Resolve profile IDs for each provider in a package.
  *
- * - Org profile: each provider resolves via org_profile_provider_bindings → source user profile
- * - User/end-user profile: all providers use the profile directly
+ * - Org profile: each provider resolves via org_profile_provider_bindings → source user profile.
+ *   Unbound providers fall back to the actor's personal profile (if available).
+ * - User/end-user profile: all providers use the profile directly.
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
@@ -381,7 +382,7 @@ export async function resolveProviderProfiles(
   packageId: string,
   orgId: string,
   profileIdOverride?: string,
-): Promise<Record<string, string>> {
+): Promise<ProviderProfileMap> {
   if (!profileIdOverride && !actor) {
     throw new Error("Either profileIdOverride or actor must be provided");
   }
@@ -389,21 +390,27 @@ export async function resolveProviderProfiles(
   const profile = await getProfileById(effectiveProfileId);
   if (!profile) throw new Error("Profile not found");
 
-  const map: Record<string, string> = {};
+  const map: ProviderProfileMap = {};
 
   if (profile.orgId) {
     // Org profile: resolve each provider via bindings → source user profile
     const bindings = await getOrgProfileBindings(effectiveProfileId);
+
+    // Fallback: actor's personal profile for providers not bound in the org profile
+    const fallbackProfileId = actor ? await getEffectiveProfileId(actor, packageId) : null;
+
     for (const svc of providers) {
       const sourceProfileId = bindings[svc.id];
       if (sourceProfileId) {
-        map[svc.id] = sourceProfileId;
+        map[svc.id] = { profileId: sourceProfileId, source: "org_binding" };
+      } else if (fallbackProfileId) {
+        map[svc.id] = { profileId: fallbackProfileId, source: "user_profile" };
       }
     }
   } else {
     // User/end-user profile: all providers use this profile directly
     for (const svc of providers) {
-      map[svc.id] = effectiveProfileId;
+      map[svc.id] = { profileId: effectiveProfileId, source: "user_profile" };
     }
   }
 

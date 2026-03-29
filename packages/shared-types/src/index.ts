@@ -152,6 +152,8 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
+export type ProviderProfileSource = "org_binding" | "user_profile";
+
 export interface ProviderStatus {
   id: string;
   name?: string;
@@ -164,6 +166,8 @@ export interface ProviderStatus {
   scopesGranted?: string[];
   scopesSufficient?: boolean;
   scopesMissing?: string[];
+  /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
+  source?: ProviderProfileSource;
 }
 
 export interface FlowListItem {
