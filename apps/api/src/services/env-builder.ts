@@ -36,7 +36,7 @@ export class ModelNotConfiguredError extends Error {
  */
 export async function resolvePreflightContext(params: {
   flow: LoadedPackage;
-  actor: Actor;
+  actor: Actor | null;
   packageId: string;
   orgId: string;
   profileIdOverride?: string;
@@ -157,7 +157,7 @@ export async function buildExecutionContext(params: {
   flow: LoadedPackage;
   providerProfiles: Record<string, string>;
   orgId: string;
-  actor: Actor;
+  actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
   config?: Record<string, unknown>;

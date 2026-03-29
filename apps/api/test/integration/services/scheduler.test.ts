@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import {
   createSchedule,
@@ -18,14 +18,13 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../../../src/services/scheduler.ts";
-import type { Actor } from "../../../src/lib/actor.ts";
 
 describe("scheduler service", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
   let packageId: string;
-  let actor: Actor;
+  let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -36,7 +35,8 @@ describe("scheduler service", () => {
     orgId = org.id;
     orgSlug = org.slug;
 
-    actor = { type: "member", id: userId };
+    const profile = await seedConnectionProfile({ userId, name: "Default" });
+    profileId = profile.id;
 
     // Seed a flow package that schedules will reference
     const pkg = await seedPackage({
@@ -60,7 +60,7 @@ describe("scheduler service", () => {
 
   describe("createSchedule", () => {
     it("creates a record with correct fields", async () => {
-      const schedule = await createSchedule(packageId, actor, orgId, {
+      const schedule = await createSchedule(packageId, profileId, orgId, {
         name: "Every hour",
         cronExpression: "0 * * * *",
         timezone: "UTC",
@@ -69,8 +69,7 @@ describe("scheduler service", () => {
       expect(schedule.id).toMatch(/^sched_/);
       expect(schedule.packageId).toBe(packageId);
       expect(schedule.orgId).toBe(orgId);
-      expect(schedule.userId).toBe(userId);
-      expect(schedule.endUserId).toBeNull();
+      expect(schedule.connectionProfileId).toBe(profileId);
       expect(schedule.cronExpression).toBe("0 * * * *");
       expect(schedule.timezone).toBe("UTC");
       expect(schedule.enabled).toBe(true);
@@ -82,7 +81,7 @@ describe("scheduler service", () => {
     it("stores JSON input when provided", async () => {
       const inputData = { query: "test search", limit: 10 };
 
-      const schedule = await createSchedule(packageId, actor, orgId, {
+      const schedule = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "*/5 * * * *",
         input: inputData,
       });
@@ -91,7 +90,7 @@ describe("scheduler service", () => {
     });
 
     it("defaults timezone to UTC when not specified", async () => {
-      const schedule = await createSchedule(packageId, actor, orgId, {
+      const schedule = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 9 * * *",
       });
 
@@ -99,7 +98,7 @@ describe("scheduler service", () => {
     });
 
     it("computes nextRunAt in the future", async () => {
-      const schedule = await createSchedule(packageId, actor, orgId, {
+      const schedule = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
         timezone: "UTC",
       });
@@ -113,11 +112,11 @@ describe("scheduler service", () => {
 
   describe("listSchedules", () => {
     it("returns schedules for the org", async () => {
-      await createSchedule(packageId, actor, orgId, {
+      await createSchedule(packageId, profileId, orgId, {
         name: "Schedule A",
         cronExpression: "0 * * * *",
       });
-      await createSchedule(packageId, actor, orgId, {
+      await createSchedule(packageId, profileId, orgId, {
         name: "Schedule B",
         cronExpression: "*/30 * * * *",
       });
@@ -131,7 +130,7 @@ describe("scheduler service", () => {
     });
 
     it("does not return schedules from other orgs", async () => {
-      await createSchedule(packageId, actor, orgId, {
+      await createSchedule(packageId, profileId, orgId, {
         name: "My Schedule",
         cronExpression: "0 * * * *",
       });
@@ -148,8 +147,8 @@ describe("scheduler service", () => {
           description: "Other",
         },
       });
-      const otherActor: Actor = { type: "member", id: otherUser.id };
-      await createSchedule(otherPkg.id, otherActor, otherOrg.id, {
+      const otherProfile = await seedConnectionProfile({ userId: otherUser.id, name: "Default" });
+      await createSchedule(otherPkg.id, otherProfile.id, otherOrg.id, {
         name: "Other Schedule",
         cronExpression: "0 * * * *",
       });
@@ -185,11 +184,11 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(packageId, actor, orgId, {
+      await createSchedule(packageId, profileId, orgId, {
         name: "Flow 1 Schedule",
         cronExpression: "0 * * * *",
       });
-      await createSchedule(pkg2.id, actor, orgId, {
+      await createSchedule(pkg2.id, profileId, orgId, {
         name: "Flow 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
@@ -214,7 +213,7 @@ describe("scheduler service", () => {
 
   describe("getSchedule", () => {
     it("returns an existing schedule", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         name: "Hourly Run",
         cronExpression: "0 * * * *",
         timezone: "America/New_York",
@@ -240,7 +239,7 @@ describe("scheduler service", () => {
 
   describe("updateSchedule", () => {
     it("updates cronExpression and recomputes nextRunAt", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
       });
 
@@ -255,7 +254,7 @@ describe("scheduler service", () => {
     });
 
     it("updates name", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         name: "Original Name",
         cronExpression: "0 * * * *",
       });
@@ -269,7 +268,7 @@ describe("scheduler service", () => {
     });
 
     it("sets nextRunAt to null when enabled is false", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
       });
 
@@ -286,7 +285,7 @@ describe("scheduler service", () => {
     });
 
     it("re-enables and recomputes nextRunAt", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
       });
 
@@ -301,7 +300,7 @@ describe("scheduler service", () => {
     });
 
     it("updates input data", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
         input: { key: "original" },
       });
@@ -326,7 +325,7 @@ describe("scheduler service", () => {
 
   describe("deleteSchedule", () => {
     it("removes the record and returns true", async () => {
-      const created = await createSchedule(packageId, actor, orgId, {
+      const created = await createSchedule(packageId, profileId, orgId, {
         cronExpression: "0 * * * *",
       });
 
@@ -343,11 +342,11 @@ describe("scheduler service", () => {
     });
 
     it("does not affect other schedules", async () => {
-      const schedule1 = await createSchedule(packageId, actor, orgId, {
+      const schedule1 = await createSchedule(packageId, profileId, orgId, {
         name: "Keep This",
         cronExpression: "0 * * * *",
       });
-      const schedule2 = await createSchedule(packageId, actor, orgId, {
+      const schedule2 = await createSchedule(packageId, profileId, orgId, {
         name: "Delete This",
         cronExpression: "*/30 * * * *",
       });

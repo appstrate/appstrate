@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { Shield } from "lucide-react";
+import { Shield, User, Calendar } from "lucide-react";
 import { Badge } from "./badge";
-import { Badge as UIBadge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDateField } from "../lib/markdown";
+import { useAllSchedules } from "../hooks/use-schedules";
 import type { Execution } from "@appstrate/shared-types";
 
 export function ExecutionRow({
@@ -17,10 +16,15 @@ export function ExecutionRow({
   flowName?: string;
   userName?: string;
 }) {
-  const { t } = useTranslation(["flows"]);
   const isRunning = execution.status === "running" || execution.status === "pending";
   const isUnread = execution.notifiedAt != null && execution.readAt == null;
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
+
+  // Resolve schedule name if triggered by a schedule
+  const { data: schedules } = useAllSchedules();
+  const scheduleName = execution.scheduleId
+    ? (schedules?.find((s) => s.id === execution.scheduleId)?.name ?? null)
+    : null;
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -53,13 +57,21 @@ export function ExecutionRow({
         {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
         <Badge status={execution.status} />
         {isUnread && <span className="size-2 rounded-full bg-destructive shrink-0" />}
-        {userName ? (
-          <span className="text-muted-foreground text-xs">
-            {t("exec.user", { name: userName })}
+
+        {/* Trigger: schedule or user */}
+        {execution.scheduleId ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+            <Calendar size={12} />
+            {scheduleName || execution.scheduleId}
+          </span>
+        ) : userName ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+            <User size={12} />
+            {userName}
           </span>
         ) : null}
+
         {execution.proxyLabel && <Shield size={12} className="text-muted-foreground" />}
-        {execution.scheduleId && <UIBadge variant="secondary">cron</UIBadge>}
         <div className="ml-auto flex items-center gap-2">
           {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
           <span className="text-muted-foreground text-xs">{date}</span>

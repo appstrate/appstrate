@@ -187,7 +187,6 @@ export function ProviderCredentialsForm({
             })}
           </div>
         )}
-
       </div>
 
       <div className="flex items-center mt-4 pt-4 border-t border-border">

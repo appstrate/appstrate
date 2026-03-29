@@ -14,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "./spinner";
-import { WebhookFormFields, toggleEvent } from "./webhook-form-fields";
+import { WebhookFormFields } from "./webhook-form-fields";
+import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "./secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 import { useApplications } from "../hooks/use-applications";

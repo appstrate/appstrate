@@ -12,6 +12,7 @@ import {
   getRunningExecutionCountForOrg,
   deletePackageExecutions,
   listPackageExecutions,
+  listScheduleExecutions,
   listExecutionLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
@@ -74,7 +75,7 @@ function dispatchWebhooks(
 
 export async function executeFlowInBackground(
   executionId: string,
-  _actor: Actor,
+  _actor: Actor | null,
   orgId: string,
   flow: LoadedPackage,
   promptContext: PromptContext,
@@ -561,6 +562,21 @@ export function createExecutionsRouter() {
       ? rows.filter((r: Record<string, unknown>) => r.endUserId === endUser.id)
       : rows;
     return c.json(filtered);
+  });
+
+  // GET /api/schedules/:id/executions — list executions for a schedule
+  router.get("/schedules/:id/executions", async (c) => {
+    const scheduleId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(20)
+      .parse(c.req.query("limit") ?? 20);
+    const rows = await listScheduleExecutions(scheduleId, orgId, limit);
+    return c.json(rows);
   });
 
   // GET /api/executions/:id — get a single execution

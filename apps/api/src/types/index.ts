@@ -16,7 +16,6 @@ export interface FlowProviderRequirement {
   id: string;
   description?: string;
   scopes?: string[];
-  connectionMode?: "user" | "admin";
 }
 
 // --- Loaded Package (manifest + prompt from DB) ---

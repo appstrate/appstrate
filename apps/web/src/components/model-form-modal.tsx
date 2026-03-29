@@ -688,7 +688,9 @@ function ModelFormBody({
                 checked={reasoning}
                 onCheckedChange={(checked) => setValue("reasoning", Boolean(checked))}
               />
-              <Label htmlFor="mdl-reasoning" className="font-normal cursor-pointer">{t("models.form.reasoning")}</Label>
+              <Label htmlFor="mdl-reasoning" className="font-normal cursor-pointer">
+                {t("models.form.reasoning")}
+              </Label>
             </div>
             <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
           </div>

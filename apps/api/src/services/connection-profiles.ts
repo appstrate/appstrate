@@ -1,5 +1,5 @@
 /**
- * Connection Profiles — manages actor connection profiles and profile resolution.
+ * Connection Profiles — manages actor and org connection profiles and profile resolution.
  */
 
 import { eq, and, count } from "drizzle-orm";
@@ -8,10 +8,11 @@ import {
   connectionProfiles,
   userPackageProfiles,
   userProviderConnections,
+  orgProfileProviderBindings,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
-import { getFlowProviderBindings } from "./state/index.ts";
+import { getOrgProfileBindings } from "./state/index.ts";
 import type { FlowProviderRequirement } from "../types/index.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
@@ -56,6 +57,7 @@ export async function listProfiles(
       id: connectionProfiles.id,
       userId: connectionProfiles.userId,
       endUserId: connectionProfiles.endUserId,
+      orgId: connectionProfiles.orgId,
       name: connectionProfiles.name,
       isDefault: connectionProfiles.isDefault,
       createdAt: connectionProfiles.createdAt,
@@ -154,6 +156,133 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
   );
 }
 
+// ─── Org Profile CRUD ───────────────────────────────────────
+
+export async function listOrgProfiles(
+  orgId: string,
+): Promise<(ConnectionProfile & { bindingCount: number })[]> {
+  const rows = await db
+    .select({
+      id: connectionProfiles.id,
+      userId: connectionProfiles.userId,
+      endUserId: connectionProfiles.endUserId,
+      orgId: connectionProfiles.orgId,
+      name: connectionProfiles.name,
+      isDefault: connectionProfiles.isDefault,
+      createdAt: connectionProfiles.createdAt,
+      updatedAt: connectionProfiles.updatedAt,
+      bindingCount: count(orgProfileProviderBindings.providerId),
+    })
+    .from(connectionProfiles)
+    .leftJoin(
+      orgProfileProviderBindings,
+      eq(orgProfileProviderBindings.orgProfileId, connectionProfiles.id),
+    )
+    .where(eq(connectionProfiles.orgId, orgId))
+    .groupBy(connectionProfiles.id);
+
+  return rows;
+}
+
+export async function createOrgProfile(orgId: string, name: string): Promise<ConnectionProfile> {
+  const [created] = await db
+    .insert(connectionProfiles)
+    .values({ orgId, name, isDefault: false })
+    .returning();
+  return created!;
+}
+
+export async function getOrgProfile(
+  profileId: string,
+  orgId: string,
+): Promise<ConnectionProfile | null> {
+  const [row] = await db
+    .select()
+    .from(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function renameOrgProfile(
+  profileId: string,
+  orgId: string,
+  name: string,
+): Promise<void> {
+  const [updated] = await db
+    .update(connectionProfiles)
+    .set({ name, updatedAt: new Date() })
+    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .returning({ id: connectionProfiles.id });
+
+  if (!updated) throw new Error("Profile not found");
+}
+
+export async function deleteOrgProfile(profileId: string, orgId: string): Promise<void> {
+  const [profile] = await db
+    .select()
+    .from(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .limit(1);
+
+  if (!profile) throw new Error("Profile not found");
+
+  await db
+    .delete(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)));
+}
+
+/**
+ * List org profiles where a specific user has active bindings.
+ * Used to show users which org profiles depend on their credentials.
+ */
+export async function listOrgProfilesWithUserBindings(
+  userId: string,
+  orgId: string,
+): Promise<{ profile: ConnectionProfile; providerIds: string[] }[]> {
+  const rows = await db
+    .select({
+      orgProfileId: orgProfileProviderBindings.orgProfileId,
+      providerId: orgProfileProviderBindings.providerId,
+      profileName: connectionProfiles.name,
+    })
+    .from(orgProfileProviderBindings)
+    .innerJoin(
+      connectionProfiles,
+      eq(connectionProfiles.id, orgProfileProviderBindings.orgProfileId),
+    )
+    .where(
+      and(
+        eq(orgProfileProviderBindings.boundByUserId, userId),
+        eq(connectionProfiles.orgId, orgId),
+      ),
+    );
+
+  const grouped = new Map<string, { profileName: string; providerIds: string[] }>();
+  for (const row of rows) {
+    const entry = grouped.get(row.orgProfileId) ?? {
+      profileName: row.profileName,
+      providerIds: [],
+    };
+    entry.providerIds.push(row.providerId);
+    grouped.set(row.orgProfileId, entry);
+  }
+
+  return Array.from(grouped.entries()).map(([profileId, data]) => ({
+    profile: {
+      id: profileId,
+      userId: null,
+      endUserId: null,
+      orgId,
+      name: data.profileName,
+      isDefault: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    providerIds: data.providerIds,
+  }));
+}
+
 // ─── Profile Resolution ─────────────────────────────────────
 
 /**
@@ -225,33 +354,56 @@ export async function removePackageProfileOverride(actor: Actor, packageId: stri
   );
 }
 
+/**
+ * Get a profile by ID without actor scoping. Used by scheduler to load the
+ * profile referenced by a schedule's connectionProfileId.
+ */
+export async function getProfileById(profileId: string): Promise<ConnectionProfile | null> {
+  const [row] = await db
+    .select()
+    .from(connectionProfiles)
+    .where(eq(connectionProfiles.id, profileId))
+    .limit(1);
+  return row ?? null;
+}
+
 // ─── Provider Profile Resolution ────────────────────────────
 
 /**
  * Resolve profile IDs for each provider in a package.
- * Admin providers get their profile from flow_provider_bindings.
- * User providers get the effective profile for the actor+package.
+ *
+ * - Org profile: each provider resolves via org_profile_provider_bindings → source user profile
+ * - User/end-user profile: all providers use the profile directly
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
-  actor: Actor,
+  actor: Actor | null,
   packageId: string,
   orgId: string,
   profileIdOverride?: string,
 ): Promise<Record<string, string>> {
-  const userProfileId = profileIdOverride ?? (await getEffectiveProfileId(actor, packageId));
-  const bindings = await getFlowProviderBindings(orgId, packageId);
+  if (!profileIdOverride && !actor) {
+    throw new Error("Either profileIdOverride or actor must be provided");
+  }
+  const effectiveProfileId = profileIdOverride ?? (await getEffectiveProfileId(actor!, packageId));
+  const profile = await getProfileById(effectiveProfileId);
+  if (!profile) throw new Error("Profile not found");
+
   const map: Record<string, string> = {};
 
-  for (const svc of providers) {
-    const mode = svc.connectionMode ?? "user";
-    if (mode === "admin") {
-      const adminProfileId = bindings[svc.id];
-      if (adminProfileId) {
-        map[svc.id] = adminProfileId;
+  if (profile.orgId) {
+    // Org profile: resolve each provider via bindings → source user profile
+    const bindings = await getOrgProfileBindings(effectiveProfileId);
+    for (const svc of providers) {
+      const sourceProfileId = bindings[svc.id];
+      if (sourceProfileId) {
+        map[svc.id] = sourceProfileId;
       }
-    } else {
-      map[svc.id] = userProfileId;
+    }
+  } else {
+    // User/end-user profile: all providers use this profile directly
+    for (const svc of providers) {
+      map[svc.id] = effectiveProfileId;
     }
   }
 

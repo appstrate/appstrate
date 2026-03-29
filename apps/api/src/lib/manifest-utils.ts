@@ -21,12 +21,11 @@ export function resolveManifestProviders(manifest: Partial<Manifest>): FlowProvi
   const providersRecord = asRecord(dependencies.providers) as Record<string, string>;
   const config = asRecord((manifest as Record<string, unknown>).providersConfiguration) as Record<
     string,
-    { scopes?: string[]; connectionMode?: "user" | "admin" }
+    { scopes?: string[] }
   >;
 
   return Object.entries(providersRecord).map(([providerId, _version]) => ({
     id: providerId,
     scopes: config[providerId]?.scopes,
-    connectionMode: config[providerId]?.connectionMode,
   }));
 }

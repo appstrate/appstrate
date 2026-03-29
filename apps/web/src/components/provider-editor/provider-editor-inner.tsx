@@ -519,7 +519,10 @@ export function ProviderEditorInner({
                     checked={fields.pkceEnabled}
                     onCheckedChange={(checked) => setField("pkceEnabled", Boolean(checked))}
                   />
-                  <Label htmlFor="pe-pkce" className="text-sm text-muted-foreground font-normal cursor-pointer">
+                  <Label
+                    htmlFor="pe-pkce"
+                    className="text-sm text-muted-foreground font-normal cursor-pointer"
+                  >
                     {t("providers.form.pkceEnabled")}
                   </Label>
                 </div>
@@ -727,7 +730,10 @@ export function ProviderEditorInner({
                   checked={fields.allowAllUris}
                   onCheckedChange={(checked) => setField("allowAllUris", Boolean(checked))}
                 />
-                <Label htmlFor="pe-allow-all-uris" className="text-sm text-muted-foreground font-normal cursor-pointer">
+                <Label
+                  htmlFor="pe-allow-all-uris"
+                  className="text-sm text-muted-foreground font-normal cursor-pointer"
+                >
                   {t("providers.form.allowAllUris")}
                 </Label>
               </div>

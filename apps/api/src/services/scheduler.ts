@@ -1,10 +1,10 @@
 import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageSchedules } from "@appstrate/db/schema";
+import { packageSchedules, user } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import type { Schedule } from "@appstrate/shared-types";
+import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createExecution } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import {
@@ -15,7 +15,11 @@ import {
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
-import { getEffectiveProfileId } from "./connection-profiles.ts";
+import type { ConnectionProfile } from "@appstrate/db/schema";
+import { getProfileById, resolveProviderProfiles } from "./connection-profiles.ts";
+import type { LoadedPackage } from "../types/index.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { getConnection } from "@appstrate/connect";
 import { ApiError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -23,8 +27,7 @@ import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import { type Actor, actorInsert } from "../lib/actor.ts";
-import { getEndUserApplicationId } from "./end-users.ts";
+import type { Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,8 +36,7 @@ import { getEndUserApplicationId } from "./end-users.ts";
 interface ScheduleJobData {
   scheduleId: string;
   packageId: string;
-  userId?: string;
-  endUserId?: string;
+  connectionProfileId: string;
   orgId: string;
   input?: Record<string, unknown>;
 }
@@ -76,8 +78,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
-    userId: schedule.userId ?? undefined,
-    endUserId: schedule.endUserId ?? undefined,
+    connectionProfileId: schedule.connectionProfileId,
     orgId,
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
@@ -103,13 +104,9 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job via BullMQ worker. */
 async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, userId, endUserId, orgId, input } = job.data;
+  const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
 
-  const actor: Actor = endUserId
-    ? { type: "end_user", id: endUserId }
-    : { type: "member", id: userId! };
-
-  await triggerScheduledExecution(scheduleId, packageId, actor, orgId, input);
+  await triggerScheduledExecution(scheduleId, packageId, connectionProfileId, orgId, input);
 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId);
@@ -200,7 +197,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 async function triggerScheduledExecution(
   scheduleId: string,
   packageId: string,
-  actor: Actor,
+  connectionProfileId: string,
   orgId: string,
   input: Record<string, unknown> | undefined,
 ) {
@@ -211,6 +208,22 @@ async function triggerScheduledExecution(
       return;
     }
 
+    // Resolve actor from connection profile (null for org profiles)
+    const profile = await getProfileById(connectionProfileId);
+    if (!profile) {
+      logger.warn("Connection profile not found, skipping schedule", {
+        scheduleId,
+        connectionProfileId,
+      });
+      return;
+    }
+
+    const actor: Actor | null = profile.userId
+      ? { type: "member", id: profile.userId }
+      : profile.endUserId
+        ? { type: "end_user", id: profile.endUserId }
+        : null;
+
     // Resolve provider profiles, config, and validate readiness
     let providerProfiles: Record<string, string>;
     let config: Record<string, unknown>;
@@ -220,6 +233,7 @@ async function triggerScheduledExecution(
         actor,
         packageId,
         orgId,
+        profileIdOverride: connectionProfileId,
       }));
     } catch (err) {
       if (err instanceof ApiError) {
@@ -249,7 +263,6 @@ async function triggerScheduledExecution(
     }
 
     const executionId = `exec_${crypto.randomUUID()}`;
-    const userProfileId = await getEffectiveProfileId(actor, packageId);
 
     // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
@@ -300,10 +313,6 @@ async function triggerScheduledExecution(
       }
     }
 
-    // Resolve application context for execution record and webhook dispatch
-    const applicationId =
-      actor.type === "end_user" ? await getEndUserApplicationId(actor.id) : null;
-
     // Create execution record with schedule_id and version
     await createExecution(
       executionId,
@@ -313,37 +322,28 @@ async function triggerScheduledExecution(
       input ?? null,
       scheduleId,
       packageVersionId ?? undefined,
-      userProfileId,
+      connectionProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
-      applicationId,
     );
 
     logger.info("Triggering scheduled execution", {
       executionId,
       packageId,
       scheduleId,
-      actorType: actor.type,
-      actorId: actor.id,
+      connectionProfileId,
       orgId,
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(
-      executionId,
-      actor,
-      orgId,
-      flow,
-      promptContext,
-      flowPackage,
-      undefined,
-      applicationId,
-    ).catch((err) => {
-      logger.error("Unhandled error in scheduled execution", {
-        executionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    executeFlowInBackground(executionId, actor, orgId, flow, promptContext, flowPackage).catch(
+      (err) => {
+        logger.error("Unhandled error in scheduled execution", {
+          executionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    );
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
@@ -357,33 +357,144 @@ async function triggerScheduledExecution(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
-export async function listSchedules(orgId: string): Promise<Schedule[]> {
+export async function listSchedules(orgId: string): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
     .where(eq(packageSchedules.orgId, orgId))
     .orderBy(asc(packageSchedules.createdAt));
-  return rows.map(toSchedule);
+  return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
-export async function listPackageSchedules(packageId: string, orgId: string): Promise<Schedule[]> {
+export async function listPackageSchedules(
+  packageId: string,
+  orgId: string,
+): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
     .where(and(eq(packageSchedules.packageId, packageId), eq(packageSchedules.orgId, orgId)))
     .orderBy(asc(packageSchedules.createdAt));
-  return rows.map(toSchedule);
+  return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
-export async function getSchedule(id: string): Promise<Schedule | null> {
+export async function getSchedule(id: string): Promise<EnrichedSchedule | null> {
   const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.id, id)).limit(1);
   if (!rows[0]) return null;
-  return toSchedule(rows[0]);
+  const schedule = toSchedule(rows[0]);
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId);
+  return enriched ?? null;
+}
+
+/** Compute readiness status for a single schedule based on its profile and flow. */
+async function computeScheduleReadiness(
+  schedule: Schedule,
+  profile: ConnectionProfile | null,
+  flow: LoadedPackage | null,
+  orgId: string,
+): Promise<ScheduleReadiness> {
+  if (!flow) {
+    return { status: "not_ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
+  }
+
+  const providers = resolveManifestProviders(flow.manifest);
+
+  if (!profile) {
+    return {
+      status: "not_ready",
+      totalProviders: providers.length,
+      connectedProviders: 0,
+      missingProviders: providers.map((p) => p.id),
+    };
+  }
+
+  if (providers.length === 0) {
+    return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
+  }
+
+  const providerProfiles = await resolveProviderProfiles(
+    providers,
+    null,
+    schedule.packageId,
+    orgId,
+    schedule.connectionProfileId,
+  );
+
+  const results = await Promise.all(
+    providers.map(async (p) => {
+      const sourceProfileId = providerProfiles[p.id];
+      if (!sourceProfileId) return { id: p.id, connected: false };
+      const conn = await getConnection(db, sourceProfileId, p.id, orgId);
+      return { id: p.id, connected: !!conn };
+    }),
+  );
+
+  const missing = results.filter((r) => !r.connected).map((r) => r.id);
+  const connected = results.filter((r) => r.connected).length;
+
+  return {
+    status: missing.length === 0 ? "ready" : connected > 0 ? "degraded" : "not_ready",
+    totalProviders: providers.length,
+    connectedProviders: connected,
+    missingProviders: missing,
+  };
+}
+
+/**
+ * Enrich schedules with profile info and readiness status.
+ * Batches lookups by unique profileId and packageId for efficiency.
+ */
+async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<EnrichedSchedule[]> {
+  if (schedules.length === 0) return [];
+
+  // Batch load unique profiles
+  const profileIds = [...new Set(schedules.map((s) => s.connectionProfileId))];
+  const profiles = await Promise.all(profileIds.map((id) => getProfileById(id)));
+  const profileMap = new Map(profileIds.map((id, i) => [id, profiles[i] ?? null]));
+
+  // Batch load user names for user-owned profiles
+  const userIds = [...new Set(profiles.filter((p) => p?.userId).map((p) => p!.userId!))];
+  const userNameMap = new Map<string, string>();
+  if (userIds.length > 0) {
+    const userRows = await db
+      .select({ id: user.id, name: user.name })
+      .from(user)
+      .where(inArray(user.id, userIds));
+    for (const u of userRows) {
+      if (u.name) userNameMap.set(u.id, u.name);
+    }
+  }
+
+  // Batch load unique flows
+  const packageIds = [...new Set(schedules.map((s) => s.packageId))];
+  const flows = await Promise.all(packageIds.map((id) => getPackage(id, orgId)));
+  const flowMap = new Map(packageIds.map((id, i) => [id, flows[i] ?? null]));
+
+  return Promise.all(
+    schedules.map(async (schedule) => {
+      const profile = profileMap.get(schedule.connectionProfileId);
+      const flow = flowMap.get(schedule.packageId);
+
+      let profileName: string | null = null;
+      let profileType: "user" | "org" | null = null;
+      let profileOwnerName: string | null = null;
+      if (profile) {
+        profileName = profile.name;
+        profileType = profile.orgId ? "org" : "user";
+        if (profile.userId) {
+          profileOwnerName = userNameMap.get(profile.userId) ?? null;
+        }
+      }
+
+      const readiness = await computeScheduleReadiness(schedule, profile ?? null, flow ?? null, orgId);
+      return { ...schedule, profileName, profileType, profileOwnerName, readiness };
+    }),
+  );
 }
 
 export async function createSchedule(
   packageId: string,
-  actor: Actor,
+  connectionProfileId: string,
   orgId: string,
   data: {
     name?: string;
@@ -403,7 +514,7 @@ export async function createSchedule(
     .values({
       id,
       packageId,
-      ...actorInsert(actor),
+      connectionProfileId,
       orgId,
       name: data.name ?? null,
       enabled: true,
@@ -427,6 +538,7 @@ export async function createSchedule(
 export async function updateSchedule(
   id: string,
   data: {
+    connectionProfileId?: string;
     name?: string;
     cronExpression?: string;
     timezone?: string;
@@ -451,6 +563,8 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
+  if (data.connectionProfileId !== undefined)
+    payload.connectionProfileId = data.connectionProfileId;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
 

@@ -26,13 +26,25 @@ export async function markNotificationRead(
     .where(
       and(
         eq(executions.id, executionId),
-        actorOwnershipFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
+        actorOrOrgFilter(actorId),
       ),
     )
     .returning({ id: executions.id });
   return updated.length > 0;
+}
+
+/**
+ * Filter: actor-owned OR schedule-triggered org-level executions (no actor).
+ * Org-level executions come from schedules bound to org profiles — they have
+ * no userId/endUserId but do have a scheduleId. All org members can see them.
+ */
+function actorOrOrgFilter(actorId: string): SQL {
+  return or(
+    actorOwnershipFilter(actorId),
+    and(isNull(executions.userId), isNull(executions.endUserId), isNotNull(executions.scheduleId)),
+  )!;
 }
 
 export async function markAllNotificationsRead(actorId: string, orgId: string): Promise<number> {
@@ -41,7 +53,7 @@ export async function markAllNotificationsRead(actorId: string, orgId: string): 
     .set({ readAt: new Date() })
     .where(
       and(
-        actorOwnershipFilter(actorId),
+        actorOrOrgFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -57,7 +69,7 @@ export async function getUnreadNotificationCount(actorId: string, orgId: string)
     .from(executions)
     .where(
       and(
-        actorOwnershipFilter(actorId),
+        actorOrOrgFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -78,7 +90,7 @@ export async function getUnreadCountsByFlow(
     .from(executions)
     .where(
       and(
-        actorOwnershipFilter(actorId),
+        actorOrOrgFilter(actorId),
         eq(executions.orgId, orgId),
         isNotNull(executions.notifiedAt),
         isNull(executions.readAt),
@@ -105,7 +117,7 @@ export async function listUserExecutions(
   const [countRow] = await db
     .select({ count: count() })
     .from(executions)
-    .where(and(actorOwnershipFilter(actorId), eq(executions.orgId, orgId)));
+    .where(and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId)));
 
   const rows = await db
     .select({
@@ -114,7 +126,7 @@ export async function listUserExecutions(
     })
     .from(executions)
     .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(actorOwnershipFilter(actorId), eq(executions.orgId, orgId)))
+    .where(and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit)
     .offset(offset);

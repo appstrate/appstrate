@@ -9,12 +9,25 @@ import {
   renameProfile,
   deleteProfile,
   getProfileForActor,
+  listOrgProfiles,
+  createOrgProfile,
+  getOrgProfile,
+  renameOrgProfile,
+  deleteOrgProfile,
+  listOrgProfilesWithUserBindings,
 } from "../services/connection-profiles.ts";
 import {
   listAllActorConnections,
   deleteAllActorConnections,
+  getConnectionStatus,
 } from "../services/connection-manager/index.ts";
+import {
+  getOrgProfileBindingsEnriched,
+  bindOrgProfileProvider,
+  unbindOrgProfileProvider,
+} from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
+import { requireAdmin } from "../middleware/guards.ts";
 import { listConnections } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 
@@ -53,10 +66,129 @@ export function createConnectionProfilesRouter() {
     return c.json({ ok: true });
   });
 
+  // GET /api/connection-profiles/my-org-bindings — list org profiles where current user has bindings
+  router.get("/my-org-bindings", async (c) => {
+    const userId = c.get("user").id;
+    const orgId = c.get("orgId");
+    const profiles = await listOrgProfilesWithUserBindings(userId, orgId);
+    return c.json({ profiles });
+  });
+
+  // ─── Org Profile Routes (before /:id to avoid param matching) ──
+
+  // GET /api/connection-profiles/org — list org profiles
+  router.get("/org", async (c) => {
+    const orgId = c.get("orgId");
+    const profiles = await listOrgProfiles(orgId);
+    return c.json({ profiles });
+  });
+
+  // POST /api/connection-profiles/org — create an org profile (admin only)
+  router.post("/org", requireAdmin(), async (c) => {
+    const orgId = c.get("orgId");
+    const body = await c.req.json();
+    const data = parseBody(profileNameSchema, body, "name");
+    const profile = await createOrgProfile(orgId, data.name.trim());
+    return c.json({ profile }, 201);
+  });
+
+  // PUT /api/connection-profiles/org/:id — rename an org profile (admin only)
+  router.put("/org/:id", requireAdmin(), async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    const body = await c.req.json();
+    const data = parseBody(profileNameSchema, body, "name");
+    try {
+      await renameOrgProfile(profileId, orgId, data.name.trim());
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to rename profile";
+      logger.warn("Failed to rename org profile", { profileId, orgId, error: message });
+      throw invalidRequest(message);
+    }
+  });
+
+  // DELETE /api/connection-profiles/org/:id — delete an org profile (admin only)
+  router.delete("/org/:id", requireAdmin(), async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    try {
+      await deleteOrgProfile(profileId, orgId);
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete profile";
+      logger.warn("Failed to delete org profile", { profileId, orgId, error: message });
+      throw invalidRequest(message);
+    }
+  });
+
+  // GET /api/connection-profiles/org/:id/bindings — list provider bindings for an org profile
+  router.get("/org/:id/bindings", async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    const profile = await getOrgProfile(profileId, orgId);
+    if (!profile) {
+      throw notFound("Profile not found");
+    }
+    const bindings = await getOrgProfileBindingsEnriched(profileId);
+    return c.json({ bindings });
+  });
+
+  // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
+  router.post("/org/:id/bind", async (c) => {
+    const orgId = c.get("orgId");
+    const userId = c.get("user").id;
+    const profileId = c.req.param("id")!;
+    const profile = await getOrgProfile(profileId, orgId);
+    if (!profile) {
+      throw notFound("Profile not found");
+    }
+
+    const body = await c.req.json();
+    const data = parseBody(
+      z.object({
+        providerId: z.string().min(1),
+        sourceProfileId: z.uuid(),
+      }),
+      body,
+    );
+
+    // Verify source profile belongs to the requesting user
+    const actor = getActor(c);
+    const sourceProfile = await getProfileForActor(data.sourceProfileId, actor);
+    if (!sourceProfile) {
+      throw invalidRequest("Source profile not found or does not belong to you");
+    }
+
+    // Verify the source profile has a connection for this provider
+    const conn = await getConnectionStatus(data.providerId, data.sourceProfileId, orgId);
+    if (conn.status !== "connected") {
+      throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
+    }
+
+    await bindOrgProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
+    return c.json({ bound: true });
+  });
+
+  // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
+  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
+    const profile = await getOrgProfile(profileId, orgId);
+    if (!profile) {
+      throw notFound("Profile not found");
+    }
+    await unbindOrgProfileProvider(profileId, providerId);
+    return c.json({ unbound: true });
+  });
+
+  // ─── User Profile Routes (/:id params after static routes) ──
+
   // PUT /api/connection-profiles/:id — rename a profile
   router.put("/:id", async (c) => {
     const actor = getActor(c);
-    const profileId = c.req.param("id");
+    const profileId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     try {
@@ -72,7 +204,7 @@ export function createConnectionProfilesRouter() {
   // DELETE /api/connection-profiles/:id — delete a profile
   router.delete("/:id", async (c) => {
     const actor = getActor(c);
-    const profileId = c.req.param("id");
+    const profileId = c.req.param("id")!;
     try {
       await deleteProfile(profileId, actor);
       return c.json({ ok: true });
@@ -86,13 +218,14 @@ export function createConnectionProfilesRouter() {
   // GET /api/connection-profiles/:id/connections — list connections for a profile
   router.get("/:id/connections", async (c) => {
     const actor = getActor(c);
-    const profileId = c.req.param("id");
-    // Verify the profile belongs to the authenticated actor (single query, not fetch-all)
-    const profile = await getProfileForActor(profileId, actor);
+    const profileId = c.req.param("id")!;
+    // Verify the profile belongs to the authenticated actor or the org
+    const orgId = c.get("orgId");
+    const profile =
+      (await getProfileForActor(profileId, actor)) ?? (await getOrgProfile(profileId, orgId));
     if (!profile) {
       throw notFound("Profile not found");
     }
-    const orgId = c.get("orgId");
     const connections = await listConnections(db, profileId, orgId);
     return c.json({ connections });
   });

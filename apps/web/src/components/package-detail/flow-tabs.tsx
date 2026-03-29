@@ -12,10 +12,9 @@ import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
-import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { FlowProvidersSection } from "./flow-providers-section";
 import { ExecutionRow } from "../execution-row";
-import { ScheduleRow } from "../schedule-row";
+import { ScheduleCard } from "../schedule-card";
 import { RunFlowButton } from "../run-flow-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, BrainCircuit, CalendarClock, Play } from "lucide-react";
@@ -88,8 +87,6 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = usePackageDetail("flow", packageId);
   const { data: schedules } = useSchedules(packageId);
-  const setEditingSchedule = useFlowDetailUI((s) => s.setEditingSchedule);
-  const setScheduleOpen = useFlowDetailUI((s) => s.setScheduleOpen);
 
   if (!detail) return null;
 
@@ -105,26 +102,14 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
     <>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-          <Button
-            onClick={() => {
-              setEditingSchedule(null);
-              setScheduleOpen(true);
-            }}
-          >
-            {t("btn.add")}
+          <Button asChild>
+            <Link to="/schedules/new">{t("btn.add")}</Link>
           </Button>
         </EmptyState>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-2">
           {schedules.map((sched) => (
-            <ScheduleRow
-              key={sched.id}
-              schedule={sched}
-              onClick={() => {
-                setEditingSchedule(sched);
-                setScheduleOpen(true);
-              }}
-            />
+            <ScheduleCard key={sched.id} schedule={sched} />
           ))}
         </div>
       )}
