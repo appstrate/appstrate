@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentProfileId, useCurrentOrgProfileId } from "./use-current-profile";
+import { useCurrentProfileId } from "./use-current-profile";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -45,18 +45,13 @@ function usePackageList(type: PackageType) {
 function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
   const orgId = useCurrentOrgId();
   const profileId = useCurrentProfileId();
-  const orgProfileId = useCurrentOrgProfileId();
   const cfg = PACKAGE_CONFIG[type];
 
-  // Flows support profileId + orgProfileId for provider status resolution
-  const qsParts: string[] = [];
-  if (type === "flow" && profileId) qsParts.push(`profileId=${profileId}`);
-  if (type === "flow" && orgProfileId) qsParts.push(`orgProfileId=${orgProfileId}`);
-  const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
-
-  // Include both profile IDs in key for flows (different profiles = different results)
+  // Flows support profileId for per-user provider status resolution
+  // (orgProfileId is loaded server-side from flow config, not sent by client)
+  const qs = type === "flow" && profileId ? `?profileId=${profileId}` : "";
   const queryKey: unknown[] = ["packages", cfg.detailKey, orgId, id];
-  if (type === "flow") queryKey.push(profileId, orgProfileId);
+  if (type === "flow") queryKey.push(profileId);
 
   return useQuery({
     queryKey,
