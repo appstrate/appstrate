@@ -32,9 +32,15 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 interface ProviderConnectionCardProps {
   providerId: string;
   orgProfileId?: string;
+  /** When false, connecting does NOT auto-bind — user can bind separately. Default: true. */
+  bindOnConnect?: boolean;
 }
 
-export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderConnectionCardProps) {
+export function ProviderConnectionCard({
+  providerId,
+  orgProfileId,
+  bindOnConnect = true,
+}: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
   const qc = useQueryClient();
 
@@ -219,10 +225,12 @@ export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderCon
               variant="outline"
               size="sm"
               className="h-7 px-2 text-xs"
-              onClick={handleConnectAndBind}
+              onClick={bindOnConnect ? handleConnectAndBind : handleConnect}
               disabled={isPending || !provider?.enabled || !effectiveProfileId}
             >
-              {t("providerCard.connectAndBind")}
+              {bindOnConnect
+                ? t("providerCard.connectAndBind")
+                : t("providerCard.connect")}
             </Button>
           )}
 

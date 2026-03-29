@@ -24,9 +24,7 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
 
   // While client-side readiness is loading, use the server-side readiness from EnrichedSchedule
   const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
-  const effectiveHasProviders = isLoading
-    ? schedule.readiness.totalProviders > 0
-    : hasProviders;
+  const effectiveHasProviders = isLoading ? schedule.readiness.totalProviders > 0 : hasProviders;
 
   const statusBadge = (
     <ScheduleStatusBadge

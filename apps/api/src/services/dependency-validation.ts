@@ -7,7 +7,7 @@ import { getConnectionStatus, validateScopes } from "./connection-manager/index.
 import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import type { FlowProviderRequirement } from "../types/index.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
@@ -33,7 +33,7 @@ const defaultDeps: DependencyValidationDeps = {
  */
 export async function validateFlowDependencies(
   providers: FlowProviderRequirement[],
-  providerProfiles: Record<string, string>,
+  providerProfiles: ProviderProfileMap,
   orgId: string,
   deps: DependencyValidationDeps = defaultDeps,
 ): Promise<void> {
@@ -53,8 +53,8 @@ export async function validateFlowDependencies(
 
   // Check for missing profiles first (no async needed)
   for (const provider of providers) {
-    const connectionProfileId = providerProfiles[provider.id];
-    if (!connectionProfileId) {
+    const entry = providerProfiles[provider.id];
+    if (!entry) {
       throw new ApiError({
         status: 400,
         code: "dependency_not_satisfied",
@@ -66,7 +66,7 @@ export async function validateFlowDependencies(
 
   // Fetch all connection statuses in parallel (all providers have profiles at this point)
   const statuses = await Promise.all(
-    providers.map((p) => deps.getConnectionStatus(p.id, providerProfiles[p.id]!, orgId)),
+    providers.map((p) => deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId)),
   );
 
   for (let i = 0; i < providers.length; i++) {

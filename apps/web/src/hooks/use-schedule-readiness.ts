@@ -24,8 +24,7 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
     flowDetail?.dependencies?.providers?.map((p: { id: string }) => p.id) ?? [];
 
   // Still loading if the flow detail or the relevant connection data hasn't arrived
-  const isLoading =
-    isLoadingFlow || (isOrgProfile ? isLoadingBindings : isLoadingConnections);
+  const isLoading = isLoadingFlow || (isOrgProfile ? isLoadingBindings : isLoadingConnections);
 
   let connectedCount = 0;
   for (const pid of flowProviders) {

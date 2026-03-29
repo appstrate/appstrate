@@ -22,6 +22,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
+import { CombinedProfileSelect } from "./combined-profile-select";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -186,34 +187,12 @@ export function ScheduleForm({
       {allProfiles.length > 0 && (
         <div className="space-y-3">
           <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
-          <Select
+          <CombinedProfileSelect
             value={connectionProfileId}
-            onValueChange={(v) => setValue("connectionProfileId", v)}
-          >
-            <SelectTrigger id="sched-profile">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {userProfiles?.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                  {p.isDefault ? ` (${t("schedule.profileDefault")})` : ""}
-                </SelectItem>
-              ))}
-              {orgProfiles && orgProfiles.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                    {t("schedule.orgProfiles")}
-                  </div>
-                  {orgProfiles.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-            </SelectContent>
-          </Select>
+            onChange={(v) => setValue("connectionProfileId", v ?? allProfiles[0]?.id ?? "")}
+            triggerClassName="w-full"
+            id="sched-profile"
+          />
         </div>
       )}
 
