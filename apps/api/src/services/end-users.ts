@@ -12,18 +12,7 @@ import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { getDefaultApplication } from "./applications.ts";
-
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function generateEndUserId(): string {
-  return `eu_${crypto.randomUUID()}`;
-}
+import { prefixedId } from "../lib/ids.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -62,7 +51,7 @@ export async function createEndUser(
     metadata?: Record<string, unknown>;
   },
 ): Promise<EndUserInfo> {
-  const endUserId = generateEndUserId();
+  const endUserId = prefixedId("eu");
   const now = new Date();
 
   // Resolve application: use provided or fall back to default

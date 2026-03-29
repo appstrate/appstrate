@@ -12,13 +12,13 @@ import { getEnv } from "@appstrate/env";
 import { invalidRequest } from "../lib/errors.ts";
 
 const DANGEROUS_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "file:"]);
-const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1"]);
+export const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
 /**
  * Check if the current environment is development (allow http://localhost).
  * If APP_URL contains localhost, we're in dev.
  */
-function isDevEnvironment(): boolean {
+export function isDevEnvironment(): boolean {
   try {
     return LOCALHOST_HOSTS.has(new URL(getEnv().APP_URL).hostname);
   } catch {
