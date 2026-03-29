@@ -47,7 +47,12 @@ export async function initSidecarPool(): Promise<void> {
   } catch (err) {
     // Clean up the network if it was created before replenish() failed
     if (standbyNetworkId) {
-      await removeNetwork(standbyNetworkId).catch(() => {});
+      await removeNetwork(standbyNetworkId).catch((err) =>
+        logger.warn("Failed to remove network", {
+          networkId: standbyNetworkId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
       standbyNetworkId = undefined;
     }
     logger.warn("Sidecar pool disabled — falling back to on-demand creation", {
@@ -118,7 +123,12 @@ export async function acquireSidecar(
       error: err instanceof Error ? err.message : String(err),
     });
     // Clean up the failed container
-    removeContainer(entry.containerId).catch(() => {});
+    removeContainer(entry.containerId).catch((err) =>
+      logger.warn("Failed to remove container", {
+        containerId: entry.containerId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     scheduleReplenish();
     return null;
   }
@@ -129,10 +139,20 @@ export async function shutdownSidecarPool(): Promise<void> {
   enabled = false;
   const entries = pool.splice(0);
   for (const entry of entries) {
-    await removeContainer(entry.containerId).catch(() => {});
+    await removeContainer(entry.containerId).catch((err) =>
+      logger.warn("Failed to remove container", {
+        containerId: entry.containerId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
   if (standbyNetworkId) {
-    await removeNetwork(standbyNetworkId).catch(() => {});
+    await removeNetwork(standbyNetworkId).catch((err) =>
+      logger.warn("Failed to remove network", {
+        networkId: standbyNetworkId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     standbyNetworkId = undefined;
   }
   logger.info("Sidecar pool shut down");
@@ -161,7 +181,12 @@ export async function startSidecarAndHealthCheck(containerId: string): Promise<n
   await startContainer(containerId);
   const hostPort = await getContainerHostPort(containerId, SIDECAR_INTERNAL_PORT);
   if (!hostPort) {
-    await removeContainer(containerId).catch(() => {});
+    await removeContainer(containerId).catch((err) =>
+      logger.warn("Failed to remove container", {
+        containerId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     throw new Error("No host port mapped for sidecar");
   }
   await waitForSidecarHealth(hostPort);

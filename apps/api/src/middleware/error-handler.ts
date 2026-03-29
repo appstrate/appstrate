@@ -12,7 +12,7 @@ import { logger } from "../lib/logger.ts";
  * Hono `app.onError` handler. Converts errors to `application/problem+json` responses.
  */
 export function errorHandler(err: Error, c: Context<AppEnv>): Response {
-  const requestId: string = c.get("requestId") ?? "req_unknown";
+  const requestId: string = c.get("requestId");
 
   let apiError: ApiError;
   if (err instanceof ApiError) {

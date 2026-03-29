@@ -584,7 +584,7 @@ export async function updateSchedule(
   const enabled = data.enabled ?? existing.enabled;
 
   // Compute next run (cron parsing only)
-  const nextRun = enabled ? computeNextRun(cronExpr, tz) : null;
+  const nextRun = enabled ? computeNextRun(cronExpr, tz ?? "UTC") : null;
 
   const payload: Record<string, unknown> = {
     cronExpression: cronExpr,

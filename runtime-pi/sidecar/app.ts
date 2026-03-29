@@ -7,7 +7,7 @@ import {
   MAX_SUBSTITUTE_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
   LLM_PROXY_TIMEOUT_MS,
-  HOP_BY_HOP_HEADERS,
+  filterHeaders,
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUri,
@@ -28,6 +28,8 @@ export interface AppDeps {
   configSecret?: string;         // One-time config secret (from CONFIG_SECRET env var)
   preConfigured?: boolean;       // true when credentials come via env vars (fresh sidecar)
 }
+
+const CREDENTIAL_PROXY_SKIP = new Set(["x-provider", "x-target", "x-substitute-body"]);
 
 export function createApp(deps: AppDeps): Hono {
   const { config, fetchCredentials, cookieJar } = deps;
@@ -97,8 +99,8 @@ export function createApp(deps: AppDeps): Hono {
 
   // Execution history proxy
   app.get("/execution-history", async (c) => {
-    const qs = c.req.url.split("?")[1] || "";
-    const url = `${config.platformApiUrl}/internal/execution-history${qs ? `?${qs}` : ""}`;
+    const qs = new URL(c.req.url).search;
+    const url = `${config.platformApiUrl}/internal/execution-history${qs}`;
 
     let res: Response;
     try {
@@ -135,16 +137,13 @@ export function createApp(deps: AppDeps): Hono {
 
     // Extract path after /llm (e.g. /llm/v1/messages → /v1/messages)
     const path = c.req.path.slice("/llm".length) || "/";
-    const qs = c.req.url.split("?")[1] || "";
-    const targetUrl = `${baseUrl}${path}${qs ? `?${qs}` : ""}`;
+    const qs = new URL(c.req.url).search;
+    const targetUrl = `${baseUrl}${path}${qs}`;
 
     // Forward headers — replace placeholder with real key, strip hop-by-hop
+    const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(c.req.header())) {
-      const lower = key.toLowerCase();
-      if (lower === "host" || lower === "content-length" || HOP_BY_HOP_HEADERS.has(lower)) {
-        continue;
-      }
+    for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = value.includes(config.llm.placeholder)
         ? value.replace(config.llm.placeholder, config.llm.apiKey)
         : value;
@@ -216,7 +215,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // 3b. Check for unresolved placeholders in URL
     const unresolvedInUrl = findUnresolvedPlaceholders(resolvedUrl);
-    if (unresolvedInUrl.length > 0) {
+    if (unresolvedInUrl.length) {
       return c.json(
         { error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}` },
         400,
@@ -232,7 +231,7 @@ export function createApp(deps: AppDeps): Hono {
           403,
         );
       }
-    } else if (creds.authorizedUris && creds.authorizedUris.length > 0) {
+    } else if (creds.authorizedUris && creds.authorizedUris.length) {
       if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
         return c.json(
           {
@@ -252,19 +251,9 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 5. Build forwarded headers (remove routing + hop-by-hop headers)
+    const filtered = filterHeaders(c.req.header(), CREDENTIAL_PROXY_SKIP);
     const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(c.req.header())) {
-      const lower = key.toLowerCase();
-      if (
-        lower === "x-provider" ||
-        lower === "x-target" ||
-        lower === "x-substitute-body" ||
-        lower === "host" ||
-        lower === "content-length" ||
-        HOP_BY_HOP_HEADERS.has(lower)
-      ) {
-        continue;
-      }
+    for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = substituteVars(value, creds.credentials);
     }
 
@@ -274,7 +263,7 @@ export function createApp(deps: AppDeps): Hono {
     // 5b. Check for unresolved placeholders in headers
     for (const [key, value] of Object.entries(forwardedHeaders)) {
       const unresolved = findUnresolvedPlaceholders(value);
-      if (unresolved.length > 0) {
+      if (unresolved.length) {
         return c.json(
           { error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}` },
           400,
@@ -284,7 +273,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // 5c. Inject stored cookies from cookie jar
     const storedCookies = cookieJar.get(providerId);
-    if (storedCookies && storedCookies.length > 0) {
+    if (storedCookies && storedCookies.length) {
       const existing = forwardedHeaders["cookie"] || "";
       const merged = existing
         ? `${existing}; ${storedCookies.join("; ")}`
@@ -311,7 +300,7 @@ export function createApp(deps: AppDeps): Hono {
         body = substituteVars(rawBody, creds.credentials);
         // Check for unresolved placeholders in body
         const unresolvedInBody = findUnresolvedPlaceholders(body);
-        if (unresolvedInBody.length > 0) {
+        if (unresolvedInBody.length) {
           return c.json(
             { error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}` },
             400,
@@ -348,7 +337,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // 8. Capture Set-Cookie headers into cookie jar
     const setCookieHeaders = targetRes.headers.getSetCookie();
-    if (setCookieHeaders.length > 0) {
+    if (setCookieHeaders.length) {
       // Extract cookie name=value pairs (strip attributes like Path, Expires, etc.)
       const cookieValues = setCookieHeaders.map((h) => h.split(";")[0]!.trim());
       // Merge with existing jar: update by cookie name, keep others

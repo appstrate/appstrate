@@ -2,22 +2,10 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { modelCostSchema, type ModelCost } from "./adapters/types.ts";
+import type { ModelCost } from "./adapters/types.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-
-function parseStringArray(val: unknown): string[] | null {
-  if (val === null || val === undefined) return null;
-  if (Array.isArray(val) && val.every((v) => typeof v === "string")) return val;
-  return null;
-}
-
-function parseModelCost(val: unknown): ModelCost | null {
-  if (val === null || val === undefined) return null;
-  const result = modelCostSchema.safeParse(val);
-  return result.success ? result.data : null;
-}
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
 
 // --- List (system + DB) ---
@@ -66,19 +54,19 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       api: row.api,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
-      input: parseStringArray(row.input),
+      input: row.input as string[] | null,
       contextWindow: row.contextWindow,
       maxTokens: row.maxTokens,
       reasoning: row.reasoning,
-      cost: parseModelCost(row.cost) ?? null,
+      cost: row.cost as ModelCost | null,
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
+      source: row.source as "custom" | "built-in",
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
       createdBy: row.createdBy,
-      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
-      updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
     });
   }
 
@@ -261,11 +249,11 @@ export async function resolveModel(
         modelId: dbDefault.modelId,
         apiKey: creds.apiKey,
         label: dbDefault.label,
-        input: parseStringArray(dbDefault.input),
+        input: dbDefault.input as string[] | null,
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
-        cost: parseModelCost(dbDefault.cost) ?? null,
+        cost: dbDefault.cost as ModelCost | null,
       };
     }
   }
@@ -320,11 +308,11 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     modelId: row.modelId,
     apiKey: creds.apiKey,
     label: row.label,
-    input: parseStringArray(row.input),
+    input: row.input as string[] | null,
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: parseModelCost(row.cost) ?? null,
+    cost: row.cost as ModelCost | null,
   };
 }
 
