@@ -31,12 +31,10 @@ export function OrgProfileProvidersBlock({
         <Building2 className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">{orgProfileName}</span>
         <UIBadge variant="outline" className="text-[10px] px-1 py-0">
-          org
+          {t("providerCard.orgBadge", { ns: "settings" })}
         </UIBadge>
         <span className="text-xs text-muted-foreground ml-auto">
-          {t("schedule.providersOrgHint", {
-            defaultValue: "Managed by administrators",
-          })}
+          {t("detail.orgProvidersHint")}
         </span>
       </div>
 

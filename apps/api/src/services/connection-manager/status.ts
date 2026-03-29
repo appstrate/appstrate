@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles, user } from "@appstrate/db/schema";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
@@ -56,39 +56,54 @@ function buildScopeInfo(
  * providerProfiles maps each providerId to the profile holding its credentials
  * (already resolved via org profile bindings or user profile direct).
  */
-/** Resolve profile name + owner name for a connection profile. */
-async function resolveProfileInfo(
-  profileId: string,
-): Promise<{ profileName: string | null; profileOwnerName: string | null }> {
-  const [row] = await db
-    .select({
-      name: connectionProfiles.name,
-      userId: connectionProfiles.userId,
-    })
-    .from(connectionProfiles)
-    .where(eq(connectionProfiles.id, profileId))
-    .limit(1);
-
-  if (!row) return { profileName: null, profileOwnerName: null };
-
-  let ownerName: string | null = null;
-  if (row.userId) {
-    const [u] = await db
-      .select({ name: user.name })
-      .from(user)
-      .where(eq(user.id, row.userId))
-      .limit(1);
-    ownerName = u?.name ?? null;
-  }
-
-  return { profileName: row.name, profileOwnerName: ownerName };
-}
-
 export async function resolveProviderStatuses(
   providers: FlowProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<ProviderStatus[]> {
+  // Batch-fetch all profile info in 1-2 queries instead of N
+  const profileIds = [
+    ...new Set(
+      Object.values(providerProfiles)
+        .map((e) => e.profileId)
+        .filter(Boolean),
+    ),
+  ];
+
+  let profileInfoMap = new Map<
+    string,
+    { profileName: string | null; profileOwnerName: string | null }
+  >();
+
+  if (profileIds.length > 0) {
+    const profileRows = await db
+      .select({
+        id: connectionProfiles.id,
+        name: connectionProfiles.name,
+        userId: connectionProfiles.userId,
+      })
+      .from(connectionProfiles)
+      .where(inArray(connectionProfiles.id, profileIds));
+
+    const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
+    const userRows =
+      userIds.length > 0
+        ? await db
+            .select({ id: user.id, name: user.name })
+            .from(user)
+            .where(inArray(user.id, userIds))
+        : [];
+
+    profileInfoMap = new Map(
+      profileRows.map((row) => {
+        const ownerName = row.userId
+          ? (userRows.find((u) => u.id === row.userId)?.name ?? null)
+          : null;
+        return [row.id, { profileName: row.name, profileOwnerName: ownerName }];
+      }),
+    );
+  }
+
   return Promise.all(
     providers.map(async (svc) => {
       const base = {
@@ -111,10 +126,11 @@ export async function resolveProviderStatuses(
         };
       }
 
-      const [conn, profileInfo] = await Promise.all([
-        getConnectionStatus(svc.id, entry.profileId, orgId),
-        resolveProfileInfo(entry.profileId),
-      ]);
+      const conn = await getConnectionStatus(svc.id, entry.profileId, orgId);
+      const profileInfo = profileInfoMap.get(entry.profileId) ?? {
+        profileName: null,
+        profileOwnerName: null,
+      };
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {
         ...base,

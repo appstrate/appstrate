@@ -16,6 +16,7 @@ import { sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
+import { connectionProfiles } from "./connections.ts";
 
 export const packageConfigs = pgTable(
   "package_configs",
@@ -29,7 +30,9 @@ export const packageConfigs = pgTable(
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
-    orgProfileId: uuid("org_profile_id"),
+    orgProfileId: uuid("org_profile_id").references(() => connectionProfiles.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

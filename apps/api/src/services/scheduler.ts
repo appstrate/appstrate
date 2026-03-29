@@ -22,6 +22,7 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { getConnection } from "@appstrate/connect";
 import { ApiError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
+import { getPackageConfigFull } from "./state/package-config.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
@@ -224,8 +225,10 @@ async function triggerScheduledExecution(
         ? { type: "end_user", id: profile.endUserId }
         : null;
 
+    // Load the flow's admin-configured org profile from package_configs
+    const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(orgId, packageId);
+
     // Resolve provider profiles, config, and validate readiness
-    const isOrgProfile = !!profile.orgId;
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     try {
@@ -234,7 +237,7 @@ async function triggerScheduledExecution(
         packageId,
         orgId,
         defaultUserProfileId: connectionProfileId,
-        orgProfileId: isOrgProfile ? connectionProfileId : null,
+        orgProfileId: flowOrgProfileId,
       }));
     } catch (err) {
       if (err instanceof ApiError) {

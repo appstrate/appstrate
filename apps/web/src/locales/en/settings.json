@@ -633,10 +633,13 @@
   "providerCard.connect": "Connect",
   "providerCard.connectAndBind": "Connect & bind",
   "providerCard.disconnect": "Disconnect",
-  "providerCard.bind": "Bind",
+  "providerCard.bind": "Share with org",
   "providerCard.bindTo": "Share with {{name}}",
   "providerCard.unbind": "Unbind",
   "providerCard.bound": "Bound",
   "providerCard.default": "default",
-  "providerCard.notBound": "Not bound"
+  "providerCard.notBound": "Not bound",
+  "providerCard.boundDisconnectedUser": "Org connection unavailable — contact your administrator",
+  "providerCard.boundDisconnected": "Org binding broken",
+  "providerCard.orgBadge": "org"
 }

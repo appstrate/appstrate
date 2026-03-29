@@ -633,10 +633,13 @@
   "providerCard.connect": "Connecter",
   "providerCard.connectAndBind": "Connecter et lier",
   "providerCard.disconnect": "Déconnecter",
-  "providerCard.bind": "Lier",
-  "providerCard.bindTo": "Lier à {{name}}",
+  "providerCard.bind": "Partager avec l'org",
+  "providerCard.bindTo": "Partager avec {{name}}",
   "providerCard.unbind": "Délier",
   "providerCard.bound": "Lié",
   "providerCard.default": "défaut",
-  "providerCard.notBound": "Non lié"
+  "providerCard.notBound": "Non lié",
+  "providerCard.boundDisconnectedUser": "Connexion org indisponible — contactez votre administrateur",
+  "providerCard.boundDisconnected": "Liaison org cassée",
+  "providerCard.orgBadge": "org"
 }
