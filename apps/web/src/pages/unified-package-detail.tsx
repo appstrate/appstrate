@@ -401,8 +401,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               resolvedVersion={resolvedVersion}
               configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
             />
-          ) : type === "provider" && providerConfig ? (
-            <ProviderConnectButton provider={providerConfig} />
           ) : undefined
         }
         actionsRight={
@@ -588,7 +586,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "provider" && tab === "configuration" && providerConfig && (
         <div className="rounded-lg border border-border bg-card p-4">
           {isOrgAdmin ? (
-            <ProviderCredentialsForm provider={providerConfig} callbackUrl={callbackUrl} />
+            <ProviderCredentialsForm
+              provider={providerConfig}
+              callbackUrl={callbackUrl}
+              footer={<ProviderConnectButton provider={providerConfig} />}
+            />
           ) : (
             <div className="flex items-center gap-2 py-2">
               <span className="text-sm text-muted-foreground">
