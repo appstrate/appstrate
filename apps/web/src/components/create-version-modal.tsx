@@ -80,8 +80,8 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
 
   const handleFormSubmit = () => {
     setError("root", { message: "" });
-    const versionArg = needsBump ? targetVersion : undefined;
-    createVersion.mutate(versionArg ?? undefined, {
+    const versionArg = needsBump ? (targetVersion ?? undefined) : undefined;
+    createVersion.mutate(versionArg, {
       onSuccess: () => {
         onClose();
       },

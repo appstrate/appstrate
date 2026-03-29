@@ -62,6 +62,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     defaultUserProfileId,
     userProviderOverrides,
     flowOrgProfileId,
+    orgId,
   );
 
   const providerStatuses = await resolveProviderStatuses(

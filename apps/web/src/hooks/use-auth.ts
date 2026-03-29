@@ -14,8 +14,8 @@ async function fetchProfile(): Promise<Profile | null> {
       id: data.id,
       displayName: data.displayName,
       language,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
     if (profile.language && profile.language !== i18n.language) {
       i18n.changeLanguage(profile.language);

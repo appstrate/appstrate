@@ -5,6 +5,8 @@ import {
 } from "../../src/services/connection-profiles.ts";
 import type { FlowProviderRequirement } from "../../src/types/index.ts";
 
+const TEST_ORG_ID = "test-org-id";
+
 function createMockDeps(
   bindings: Record<string, string> = {},
 ): ResolveProviderProfilesDeps {
@@ -25,6 +27,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       undefined,
       undefined,
+      TEST_ORG_ID,
       deps,
     );
 
@@ -43,6 +46,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       overrides,
       undefined,
+      TEST_ORG_ID,
       deps,
     );
 
@@ -62,6 +66,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       undefined,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 
@@ -82,6 +87,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       overrides,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 
@@ -101,6 +107,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       overrides,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 
@@ -112,7 +119,14 @@ describe("resolveProviderProfiles", () => {
 
   it("returns empty map for empty providers array", async () => {
     const deps = createMockDeps();
-    const result = await resolveProviderProfiles([], "default-profile", undefined, undefined, deps);
+    const result = await resolveProviderProfiles(
+      [],
+      "default-profile",
+      undefined,
+      undefined,
+      TEST_ORG_ID,
+      deps,
+    );
 
     expect(result).toEqual({});
   });
@@ -126,7 +140,14 @@ describe("resolveProviderProfiles", () => {
       },
     };
 
-    await resolveProviderProfiles([gmail], "default-profile", undefined, undefined, deps);
+    await resolveProviderProfiles(
+      [gmail],
+      "default-profile",
+      undefined,
+      undefined,
+      TEST_ORG_ID,
+      deps,
+    );
 
     expect(called).toBe(false);
   });
@@ -140,7 +161,7 @@ describe("resolveProviderProfiles", () => {
       },
     };
 
-    await resolveProviderProfiles([gmail], "default-profile", undefined, null, deps);
+    await resolveProviderProfiles([gmail], "default-profile", undefined, null, TEST_ORG_ID, deps);
 
     expect(called).toBe(false);
   });
@@ -154,7 +175,14 @@ describe("resolveProviderProfiles", () => {
       },
     };
 
-    await resolveProviderProfiles([gmail], "default-profile", undefined, "org-profile-42", deps);
+    await resolveProviderProfiles(
+      [gmail],
+      "default-profile",
+      undefined,
+      "org-profile-42",
+      TEST_ORG_ID,
+      deps,
+    );
 
     expect(receivedId).toBe("org-profile-42");
   });
@@ -174,6 +202,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       overrides,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 
@@ -200,6 +229,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       undefined,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 
@@ -219,6 +249,7 @@ describe("resolveProviderProfiles", () => {
       "default-profile",
       overrides,
       "org-profile-1",
+      TEST_ORG_ID,
       deps,
     );
 

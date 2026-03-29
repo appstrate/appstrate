@@ -43,7 +43,7 @@ export const executions = pgTable(
     error: text("error"),
     tokensUsed: integer("tokens_used"),
     tokenUsage: jsonb("token_usage"),
-    startedAt: timestamp("started_at").defaultNow(),
+    startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
     connectionProfileId: uuid("connection_profile_id"),
@@ -55,6 +55,7 @@ export const executions = pgTable(
     modelLabel: text("model_label"),
     cost: doublePrecision("cost"),
     executionNumber: integer("execution_number"),
+    providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
   },
   (table) => [
     index("idx_executions_package_id").on(table.packageId),
@@ -91,7 +92,7 @@ export const executionLogs = pgTable(
     event: text("event"),
     message: text("message"),
     data: jsonb("data"),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_execution_logs_execution_id").on(table.executionId),
@@ -114,7 +115,7 @@ export const packageMemories = pgTable(
     executionId: text("execution_id").references(() => executions.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_package_memories_package_org").on(table.packageId, table.orgId),
@@ -142,8 +143,8 @@ export const packageSchedules = pgTable(
     input: jsonb("input"),
     lastRunAt: timestamp("last_run_at"),
     nextRunAt: timestamp("next_run_at"),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_schedules_package_id").on(table.packageId),

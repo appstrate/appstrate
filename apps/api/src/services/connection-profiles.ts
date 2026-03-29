@@ -366,11 +366,11 @@ export async function getDefaultProfileId(actor: Actor): Promise<string> {
 export async function resolveActorProfileContext(
   actor: Actor | null,
   packageId: string,
-  fallbackProfileId?: string,
-): Promise<{ defaultUserProfileId: string; userProviderOverrides: Record<string, string> }> {
+  fallbackProfileId: string | null = null,
+): Promise<{ defaultUserProfileId: string | null; userProviderOverrides: Record<string, string> }> {
   if (!actor) {
     return {
-      defaultUserProfileId: fallbackProfileId!,
+      defaultUserProfileId: fallbackProfileId,
       userProviderOverrides: {},
     };
   }
@@ -402,7 +402,7 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
 
 /** Dependencies for resolveProviderProfiles — injectable for testing. */
 export interface ResolveProviderProfilesDeps {
-  getOrgProfileBindings: (orgProfileId: string) => Promise<Record<string, string>>;
+  getOrgProfileBindings: (orgProfileId: string, orgId: string) => Promise<Record<string, string>>;
 }
 
 const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
@@ -422,17 +422,18 @@ const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
-  defaultUserProfileId: string,
+  defaultUserProfileId: string | null,
   userProviderOverrides?: Record<string, string>,
   orgProfileId?: string | null,
+  orgId?: string,
   deps: ResolveProviderProfilesDeps = defaultResolveProviderProfilesDeps,
 ): Promise<ProviderProfileMap> {
   const map: ProviderProfileMap = {};
 
   // Load org bindings if an org profile is provided
   let bindings: Record<string, string> = {};
-  if (orgProfileId) {
-    bindings = await deps.getOrgProfileBindings(orgProfileId);
+  if (orgProfileId && orgId) {
+    bindings = await deps.getOrgProfileBindings(orgProfileId, orgId);
   }
 
   for (const svc of providers) {
@@ -440,11 +441,11 @@ export async function resolveProviderProfiles(
     if (orgBinding) {
       map[svc.id] = { profileId: orgBinding, source: "org_binding" };
     } else {
-      const overrideProfileId = userProviderOverrides?.[svc.id];
-      map[svc.id] = {
-        profileId: overrideProfileId ?? defaultUserProfileId,
-        source: "user_profile",
-      };
+      const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
+      if (fallbackId) {
+        map[svc.id] = { profileId: fallbackId, source: "user_profile" };
+      }
+      // If no fallback (org-only mode), provider simply not in map — dependency validation will catch it
     }
   }
 

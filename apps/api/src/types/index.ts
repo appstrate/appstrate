@@ -51,14 +51,14 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: { id: string; applicationId: string; name?: string | null; email?: string | null };
+    endUser?: { id: string; applicationId: string; name: string | null; email: string | null };
     flow: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
-    authMethod?: "session" | "api_key";
-    apiKeyId?: string;
-    applicationId?: string;
+    authMethod: "session" | "api_key";
+    apiKeyId: string | null;
+    applicationId: string | null;
     requestId: string;
     apiVersion: string;
   };

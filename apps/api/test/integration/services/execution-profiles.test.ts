@@ -13,10 +13,12 @@ import {
 } from "../../../src/services/connection-profiles.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import { setFlowOverride } from "../../../src/services/state/package-config.ts";
-import { resolvePreflightContext } from "../../../src/services/env-builder.ts";
+import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
+import { getPackageConfig } from "../../../src/services/state/index.ts";
+import { validateFlowReadiness } from "../../../src/services/flow-readiness.ts";
 import { getPackage } from "../../../src/services/flow-service.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
-import type { FlowProviderRequirement } from "../../../src/types/index.ts";
+import type { FlowProviderRequirement, LoadedPackage, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("Execution with provider profiles", () => {
   let userId: string;
@@ -86,6 +88,44 @@ describe("Execution with provider profiles", () => {
     return (await getPackage(flowId, orgId))!;
   }
 
+  /** Inline preflight: resolve profiles, config, and validate readiness. */
+  async function runPreflight(params: {
+    flow: LoadedPackage;
+    packageId: string;
+    orgId: string;
+    defaultUserProfileId: string | null;
+    userProviderOverrides?: Record<string, string>;
+    orgProfileId?: string | null;
+  }): Promise<{
+    providerProfiles: ProviderProfileMap;
+    config: Record<string, unknown>;
+    modelId: string | null;
+    proxyId: string | null;
+  }> {
+    const { flow, packageId, orgId: oid, defaultUserProfileId, userProviderOverrides, orgProfileId } = params;
+    const manifestProviders = resolveManifestProviders(flow.manifest);
+
+    const [providerProfiles, packageConfig] = await Promise.all([
+      resolveProviderProfiles(
+        manifestProviders,
+        defaultUserProfileId,
+        userProviderOverrides,
+        orgProfileId,
+        oid,
+      ),
+      getPackageConfig(oid, packageId),
+    ]);
+
+    await validateFlowReadiness({ flow, providerProfiles, orgId: oid, config: packageConfig.config });
+
+    return {
+      providerProfiles,
+      config: packageConfig.config,
+      modelId: packageConfig.modelId,
+      proxyId: packageConfig.proxyId,
+    };
+  }
+
   describe("resolveProviderProfiles", () => {
     it("uses per-provider overrides from user_flow_provider_profiles", async () => {
       const altProfile = await seedConnectionProfile({ userId, name: "Alt Gmail" });
@@ -97,6 +137,8 @@ describe("Execution with provider profiles", () => {
         providers,
         defaultProfileId,
         { "@system/gmail": altProfile.id },
+        undefined,
+        orgId,
       );
 
       expect(map["@system/gmail"]!.profileId).toBe(altProfile.id);
@@ -119,6 +161,7 @@ describe("Execution with provider profiles", () => {
         defaultProfileId,
         {},
         orgProfile.id,
+        orgId,
       );
 
       // gmail is bound in org profile -> uses org binding
@@ -132,7 +175,7 @@ describe("Execution with provider profiles", () => {
     it("falls back to default user profile when no overrides and no org profile", async () => {
       const providers = makeProviders(providerIds);
 
-      const map = await resolveProviderProfiles(providers, defaultProfileId);
+      const map = await resolveProviderProfiles(providers, defaultProfileId, undefined, undefined, orgId);
 
       for (const pid of providerIds) {
         expect(map[pid]!.profileId).toBe(defaultProfileId);
@@ -157,6 +200,7 @@ describe("Execution with provider profiles", () => {
         defaultProfileId,
         { "@system/gmail": userOverrideProfile.id },
         orgProfile.id,
+        orgId,
       );
 
       // Org binding wins over user override
@@ -182,6 +226,7 @@ describe("Execution with provider profiles", () => {
         defaultProfileId,
         { "@system/notion": notionOverride.id },
         orgProfile.id,
+        orgId,
       );
 
       // gmail: org binding
@@ -196,7 +241,7 @@ describe("Execution with provider profiles", () => {
     });
 
     it("returns empty map when no providers are required", async () => {
-      const map = await resolveProviderProfiles([], defaultProfileId);
+      const map = await resolveProviderProfiles([], defaultProfileId, undefined, undefined, orgId);
       expect(map).toEqual({});
     });
   });
@@ -239,7 +284,7 @@ describe("Execution with provider profiles", () => {
       // Set org profile on the flow (simulates PUT /api/flows/:id/org-profile)
       await setFlowOverride(orgId, flowId, "orgProfileId", orgProfile.id);
 
-      const { providerProfiles } = await resolvePreflightContext({
+      const { providerProfiles } = await runPreflight({
         flow,
         packageId: flowId,
         orgId,
@@ -262,7 +307,7 @@ describe("Execution with provider profiles", () => {
       const orgProfile = await seedConnectionProfile({ orgId, name: "Empty Org" });
       await setFlowOverride(orgId, flowId, "orgProfileId", orgProfile.id);
 
-      const { providerProfiles } = await resolvePreflightContext({
+      const { providerProfiles } = await runPreflight({
         flow,
         packageId: flowId,
         orgId,

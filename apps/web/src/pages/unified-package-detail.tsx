@@ -273,7 +273,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const effectiveShowConfigTab =
     type === "flow" && (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
-  const downloadVersion = isHistoricalVersion ? versionDetail?.version : version;
+  const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
   const unifiedForHeader = {
@@ -378,7 +378,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
               hasDraftChanges={hasDraftChanges}
-              downloadVersion={downloadVersion ?? undefined}
+              downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
@@ -399,7 +399,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   isBuiltIn={isBuiltIn}
                   isHistoricalVersion={isHistoricalVersion}
                   hasDraftChanges={hasDraftChanges}
-                  downloadVersion={downloadVersion ?? undefined}
+                  downloadVersion={downloadVersion}
                   onDownload={downloadPackage}
                   onCreateVersion={() => setCreateVersionOpen(true)}
                   onFork={() => setForkOpen(true)}
@@ -510,7 +510,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "flow" && tab === "connectors" && <FlowConnectorsTab packageId={packageId} />}
+      {type === "flow" && tab === "connectors" && (
+        <FlowConnectorsTab packageId={packageId} detail={flowDetail} />
+      )}
       {type === "flow" && tab === "executions" && (
         <FlowExecutionsTab
           packageId={packageId}

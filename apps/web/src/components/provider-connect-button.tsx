@@ -8,9 +8,6 @@ import {
   useDisconnect,
 } from "../hooks/use-mutations";
 import { useAvailableProviders } from "../hooks/use-available-providers";
-import { useCurrentProfileId, profileIdParam } from "../hooks/use-current-profile";
-import { useConnectionProfiles } from "../hooks/use-connection-profiles";
-import { connectedLabelWithProfile } from "../lib/provider-status";
 import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
 import type { ProviderConfig } from "@appstrate/shared-types";
@@ -18,9 +15,6 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export function ProviderConnectButton({ provider }: { provider: ProviderConfig }) {
   const { t } = useTranslation(["settings", "flows"]);
-  const profileId = useCurrentProfileId();
-  const pParam = profileIdParam(profileId);
-  const { data: profiles } = useConnectionProfiles();
   const { data: availableProviders } = useAvailableProviders();
 
   const connectMutation = useConnect();
@@ -58,21 +52,19 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
         schema: provider.credentialSchema as unknown as JSONSchemaObject,
       });
     } else {
-      connectMutation.mutate({ provider: provider.id, ...pParam });
+      connectMutation.mutate({ provider: provider.id });
     }
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate({ provider: provider.id, ...pParam });
+    disconnectMutation.mutate({ provider: provider.id });
   };
 
   return (
     <>
       {isConnected ? (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-emerald-500">
-            {connectedLabelWithProfile(t("providers.connected"), profiles, profileId)}
-          </span>
+          <span className="text-xs text-emerald-500">{t("providers.connected")}</span>
           <Button
             variant="outline"
             size="sm"
@@ -103,7 +95,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
         onSubmit={(apiKey) => {
           if (!apiKeyProvider) return;
           connectApiKeyMutation.mutate(
-            { provider: apiKeyProvider.id, apiKey, ...pParam },
+            { provider: apiKeyProvider.id, apiKey },
             { onSuccess: () => setApiKeyProvider(null) },
           );
         }}
@@ -118,7 +110,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
           isPending={connectCredentialsMutation.isPending}
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(
-              { provider: customCredProvider.id, credentials, ...pParam },
+              { provider: customCredProvider.id, credentials },
               { onSuccess: () => setCustomCredProvider(null) },
             );
           }}
