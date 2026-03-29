@@ -401,6 +401,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               resolvedVersion={resolvedVersion}
               configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
             />
+          ) : type === "provider" && providerConfig ? (
+            <ProviderConnectButton provider={providerConfig} />
           ) : undefined
         }
         actionsRight={
@@ -423,9 +425,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             />
           ) : (
             <div className="flex items-center gap-2">
-              {type === "provider" && providerConfig && (
-                <ProviderConnectButton provider={providerConfig} />
-              )}
               {isOrgAdmin && (
                 <PackageActionsDropdown
                   packageId={packageId}
