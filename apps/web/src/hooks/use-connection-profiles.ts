@@ -205,6 +205,7 @@ export function useBindOrgProvider() {
       qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
       qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
     },
     onError: onMutationError,
   });
@@ -222,6 +223,7 @@ export function useUnbindOrgProvider() {
       qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
       qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
     },
     onError: onMutationError,
   });

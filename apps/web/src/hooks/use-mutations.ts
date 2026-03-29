@@ -83,6 +83,7 @@ function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
   // Invalidate all flow detail queries (service status may have changed)
   qc.invalidateQueries({ queryKey: ["packages", "flow"] });
   qc.invalidateQueries({ queryKey: ["flows"] });
+  qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
 }
 
 export function useConnect() {

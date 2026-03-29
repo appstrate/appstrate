@@ -179,15 +179,8 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-      <h3 className="text-sm font-medium">
-        {t("detail.configSectionOrgProfile", { defaultValue: "Organization profile" })}
-      </h3>
-      <p className="text-xs text-muted-foreground">
-        {t("detail.configOrgProfileHint", {
-          defaultValue:
-            "Select an organization connection profile. Providers bound in this profile will be shared with all users.",
-        })}
-      </p>
+      <h3 className="text-sm font-medium">{t("detail.configSectionOrgProfile")}</h3>
+      <p className="text-xs text-muted-foreground">{t("detail.configOrgProfileHint")}</p>
       <Select
         value={currentOrgProfileId ?? "__none__"}
         onValueChange={(v) => setFlowOrgProfile.mutate(v === "__none__" ? null : v)}
@@ -197,17 +190,13 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">
-            {t("detail.configOrgProfileNone", {
-              defaultValue: "None — all connections managed by users",
-            })}
-          </SelectItem>
+          <SelectItem value="__none__">{t("detail.configOrgProfileNone")}</SelectItem>
           {orgProfiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
               {p.bindingCount > 0 && (
                 <span className="text-muted-foreground ml-1">
-                  ({p.bindingCount} {p.bindingCount === 1 ? "binding" : "bindings"})
+                  ({t("detail.configOrgProfileBinding", { count: p.bindingCount })})
                 </span>
               )}
             </SelectItem>

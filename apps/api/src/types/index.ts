@@ -18,13 +18,20 @@ export interface FlowProviderRequirement {
   scopes?: string[];
 }
 
-/** Resolved profile entry for a provider — carries both the profile ID and how it was resolved. */
+/**
+ * Resolved profile entry for a provider — carries both the profile ID and how it was resolved.
+ *
+ * Resolution order (highest priority first):
+ * 1. Org profile binding (`source: "org_binding"`) — admin-configured via org_profile_provider_bindings
+ * 2. Per-provider user override (`source: "user_profile"`) — user-selected via user_flow_provider_profiles
+ * 3. Default user profile (`source: "user_profile"`) — actor's default connection profile
+ */
 export interface ProviderProfileEntry {
   profileId: string;
   source: "org_binding" | "user_profile";
 }
 
-/** Map of providerId → resolved profile entry. */
+/** Map of providerId → resolved profile entry. Built by resolveProviderProfiles(). */
 export type ProviderProfileMap = Record<string, ProviderProfileEntry>;
 
 // --- Loaded Package (manifest + prompt from DB) ---

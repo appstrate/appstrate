@@ -189,7 +189,10 @@ export function ScheduleForm({
           <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
           <CombinedProfileSelect
             value={connectionProfileId}
-            onChange={(v) => setValue("connectionProfileId", v ?? allProfiles[0]?.id ?? "")}
+            onChange={(v) => {
+              if (v != null) setValue("connectionProfileId", v);
+              else if (allProfiles.length > 0) setValue("connectionProfileId", allProfiles[0]!.id);
+            }}
             triggerClassName="w-full"
             id="sched-profile"
           />
@@ -334,7 +337,7 @@ export function ScheduleForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending || allProfiles.length === 0}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>

@@ -176,12 +176,8 @@ export function ProviderConnectionCard({
               <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
                 <AlertTriangle className="size-3" />
                 {!isOrgAdmin
-                  ? t("providerCard.boundDisconnectedUser", {
-                      defaultValue: "Org connection unavailable — contact your administrator",
-                    })
-                  : t("providerCard.boundDisconnected", {
-                      defaultValue: "Org binding broken",
-                    })}
+                  ? t("providerCard.boundDisconnectedUser")
+                  : t("providerCard.boundDisconnected")}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
@@ -263,11 +259,8 @@ export function ProviderConnectionCard({
                 >
                   <Building2 className="size-3 mr-1" />
                   {orgProfileName
-                    ? t("providerCard.bindTo", {
-                        defaultValue: "Share with {{name}}",
-                        name: orgProfileName,
-                      })
-                    : t("providerCard.bind", { defaultValue: "Share with org" })}
+                    ? t("providerCard.bindTo", { name: orgProfileName })
+                    : t("providerCard.bind")}
                 </Button>
               )}
             </div>
