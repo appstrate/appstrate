@@ -11,7 +11,11 @@ import {
   getLastExecution,
   getRunningExecutionsForPackage,
 } from "../services/state/index.ts";
-import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import {
+  resolveProviderProfiles,
+  getEffectiveProfileId,
+  getOrgProfile,
+} from "../services/connection-profiles.ts";
 import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -45,6 +49,9 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   // Load admin-configured org profile from flow config
   const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
+  const forcedOrgProfileName = forcedOrgProfileId
+    ? ((await getOrgProfile(forcedOrgProfileId, orgId))?.name ?? null)
+    : null;
 
   // Resolve user profile: explicit override or actor's effective profile
   const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
@@ -191,6 +198,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       versionCount,
       hasUnpublishedChanges,
       forcedOrgProfileId,
+      forcedOrgProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(flow.source !== "system" && rawItem
         ? {
