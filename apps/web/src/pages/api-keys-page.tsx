@@ -74,7 +74,9 @@ export function ApiKeysPage() {
             >
               {t("settings:apiKeys.swaggerLink")}
             </a>
-            <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+            <Button onClick={() => setCreateOpen(true)}>
+              {t("settings:apiKeys.createBtn")}
+            </Button>
           </>
         }
       />
@@ -133,7 +135,9 @@ export function ApiKeysPage() {
           icon={KeyRound}
           compact
         >
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            {t("settings:apiKeys.createBtn")}
+          </Button>
         </EmptyState>
       )}
 

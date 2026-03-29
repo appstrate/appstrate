@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
-import { AppWindow, Plus, Settings, ShieldAlert } from "lucide-react";
+import { AppWindow, Settings, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
@@ -48,7 +48,6 @@ export function ApplicationsPage() {
         ]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
-            <Plus size={16} className="mr-1.5" />
             {t("applications.create")}
           </Button>
         }
@@ -61,7 +60,6 @@ export function ApplicationsPage() {
           icon={AppWindow}
         >
           <Button onClick={() => setCreateOpen(true)}>
-            <Plus size={16} className="mr-1.5" />
             {t("applications.create")}
           </Button>
         </EmptyState>

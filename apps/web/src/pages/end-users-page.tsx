@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Search, ShieldAlert, Users } from "lucide-react";
+import { Search, ShieldAlert, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useOrg } from "../hooks/use-org";
@@ -62,7 +62,6 @@ export function EndUsersPage() {
         ]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
-            <Plus size={16} className="mr-1.5" />
             {t("applications.newEndUser")}
           </Button>
         }
@@ -90,8 +89,7 @@ export function EndUsersPage() {
           hint={t("applications.noEndUsersHint")}
           icon={Users}
         >
-          <Button onClick={() => setCreateOpen(true)} size="sm">
-            <Plus size={14} className="mr-1.5" />
+          <Button onClick={() => setCreateOpen(true)}>
             {t("applications.newEndUser")}
           </Button>
         </EmptyState>

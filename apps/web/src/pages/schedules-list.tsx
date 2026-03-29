@@ -70,7 +70,7 @@ export function SchedulesListPage() {
         ]}
         actions={
           <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
-            {t("btn.add")}
+            {t("schedules.create")}
           </Button>
         }
       />
@@ -78,7 +78,7 @@ export function SchedulesListPage() {
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
           <Button onClick={openCreate} disabled={!flows || flows.length === 0}>
-            {t("btn.add")}
+            {t("schedules.create")}
           </Button>
         </EmptyState>
       ) : (

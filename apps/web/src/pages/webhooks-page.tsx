@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Webhook, ShieldAlert, Plus } from "lucide-react";
+import { Webhook, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -59,8 +59,7 @@ export function WebhooksPage() {
         emoji="🪝"
         breadcrumbs={[{ label: t("settings:webhooks.pageTitle") }]}
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus size={16} className="mr-1.5" />
+          <Button onClick={() => setCreateOpen(true)}>
             {t("settings:webhooks.createTitle")}
           </Button>
         }
@@ -106,8 +105,7 @@ export function WebhooksPage() {
 
       {!webhooks || webhooks.length === 0 ? (
         <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus size={16} className="mr-1.5" />
+          <Button onClick={() => setCreateOpen(true)}>
             {t("settings:webhooks.createTitle")}
           </Button>
         </EmptyState>
