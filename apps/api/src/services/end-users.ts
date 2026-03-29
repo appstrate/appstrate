@@ -5,7 +5,6 @@
  * Each end-user gets a default connection profile on creation.
  */
 
-import { z } from "zod";
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
@@ -17,13 +16,6 @@ import { getDefaultApplication } from "./applications.ts";
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
-
-export const endUserMetadataSchema = z
-  .record(
-    z.string().min(1).max(40),
-    z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
-  )
-  .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,19 +46,6 @@ function toEndUserResponse(row: {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
-}
-
-export function validateMetadata(
-  metadata: unknown,
-): { valid: true; data: Record<string, unknown> } | { valid: false; message: string } {
-  if (metadata === null || metadata === undefined) {
-    return { valid: true, data: {} };
-  }
-  const result = endUserMetadataSchema.safeParse(metadata);
-  if (!result.success) {
-    return { valid: false, message: result.error.issues[0]?.message ?? "Invalid metadata" };
-  }
-  return { valid: true, data: result.data };
 }
 
 // ---------------------------------------------------------------------------
@@ -301,19 +280,6 @@ export async function findByExternalId(
     .where(and(eq(endUsers.applicationId, applicationId), eq(endUsers.externalId, externalId)))
     .limit(1);
   return row ?? null;
-}
-
-/**
- * Resolve the applicationId for an end-user. Returns null if not found.
- * Used when we need the application context but only have an end-user ID.
- */
-export async function getEndUserApplicationId(endUserId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ applicationId: endUsers.applicationId })
-    .from(endUsers)
-    .where(eq(endUsers.id, endUserId))
-    .limit(1);
-  return row?.applicationId ?? null;
 }
 
 /**
