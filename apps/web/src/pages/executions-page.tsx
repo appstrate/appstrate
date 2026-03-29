@@ -45,7 +45,6 @@ export function ExecutionsPage() {
         actions={
           <Button
             variant="outline"
-            size="sm"
             onClick={() => markAllRead.mutate()}
             disabled={markAllRead.isPending || !unreadCount}
           >

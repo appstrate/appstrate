@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-
 import { Button } from "@/components/ui/button";
 import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
@@ -76,7 +75,7 @@ export function ItemTab({
                 {t("nav.import", { ns: "common" })}
               </Button>
               <Link to={packageNewPath(config.type)}>
-                <Button>{t("list.createItem", { ns: "flows" })}</Button>
+                <Button>{t("list.createItem", { ns: "flows", type: typeLabel })}</Button>
               </Link>
             </>
           ) : undefined
