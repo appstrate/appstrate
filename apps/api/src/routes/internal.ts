@@ -12,10 +12,9 @@ import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
 import {
   resolveProviderProfiles,
-  getDefaultProfileId,
-  getUserFlowProviderOverrides,
+  resolveActorProfileContext,
 } from "../services/connection-profiles.ts";
-import { getPackageConfigFull } from "../services/state/package-config.ts";
+import { getPackageConfig } from "../services/state/package-config.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -176,11 +175,10 @@ export function createInternalRouter() {
           ? { type: "member", id: execution.userId }
           : null;
 
-      const [defaultUserProfileId, userProviderOverrides, { orgProfileId: flowOrgProfileId }] =
+      const [{ defaultUserProfileId, userProviderOverrides }, { orgProfileId: flowOrgProfileId }] =
         await Promise.all([
-          actor ? getDefaultProfileId(actor) : Promise.resolve(execution.connectionProfileId!),
-          actor ? getUserFlowProviderOverrides(actor, execution.packageId) : Promise.resolve({}),
-          getPackageConfigFull(execution.orgId, execution.packageId),
+          resolveActorProfileContext(actor, execution.packageId, execution.connectionProfileId!),
+          getPackageConfig(execution.orgId, execution.packageId),
         ]);
 
       const profileMap = await resolveProviderProfiles(

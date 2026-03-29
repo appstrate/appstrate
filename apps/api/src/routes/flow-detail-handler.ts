@@ -13,11 +13,9 @@ import {
 } from "../services/state/index.ts";
 import {
   resolveProviderProfiles,
-  getDefaultProfileId,
-  getUserFlowProviderOverrides,
+  resolveActorProfileContext,
   getOrgProfile,
 } from "../services/connection-profiles.ts";
-import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -49,16 +47,17 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   // Load admin-configured org profile (null = none configured).
   // If the referenced profile was deleted, treat as null.
-  const { orgProfileId: configOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
+  const packageConfig = await getPackageConfig(orgId, flow.id);
+  const configOrgProfileId = packageConfig.orgProfileId;
   const orgProfile = configOrgProfileId ? await getOrgProfile(configOrgProfileId, orgId) : null;
   const flowOrgProfileId = orgProfile ? configOrgProfileId : null;
   const flowOrgProfileName = orgProfile?.name ?? null;
 
   // Resolve per-provider profile overrides and default profile
-  const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
-    getDefaultProfileId(actor),
-    getUserFlowProviderOverrides(actor, flow.id),
-  ]);
+  const { defaultUserProfileId, userProviderOverrides } = await resolveActorProfileContext(
+    actor,
+    flow.id,
+  );
 
   // Build providerProfiles map: org bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
@@ -120,14 +119,13 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     );
   }
 
-  const [currentConfig, lastExec, runningCount] = await Promise.all([
-    getPackageConfig(orgId, flow.id),
+  const [lastExec, runningCount] = await Promise.all([
     getLastExecution(flow.id, null, orgId),
     getRunningExecutionsForPackage(flow.id),
   ]);
 
   const configWithDefaults = m.config?.schema
-    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), currentConfig)
+    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), packageConfig.config)
     : {};
 
   const parsed = parseScopedName(m.name);

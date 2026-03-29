@@ -18,8 +18,14 @@ import {
 } from "../services/connection-manager/index.ts";
 import { getDefaultProfileId } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
+import type { Actor } from "../lib/actor.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
+import type { Context } from "hono";
+
+async function resolveProfileId(c: Context<AppEnv>, actor: Actor): Promise<string> {
+  return c.req.query("profileId") ?? (await getDefaultProfileId(actor));
+}
 
 const router = new Hono<AppEnv>();
 
@@ -27,7 +33,7 @@ const router = new Hono<AppEnv>();
 router.get("/", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
-  const profileId = c.req.query("profileId") ?? (await getDefaultProfileId(actor));
+  const profileId = await resolveProfileId(c, actor);
   const connections = await listActorConnections(profileId, orgId);
   return c.json({ connections });
 });
@@ -53,7 +59,7 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
       // No body or invalid JSON — OK, scopes and profileId are optional
     }
 
-    const effectiveProfileId = profileId ?? (await getDefaultProfileId(actor));
+    const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
     const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
@@ -186,7 +192,7 @@ router.get("/callback", async (c) => {
 router.get("/integrations", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
-  const profileId = c.req.query("profileId") ?? (await getDefaultProfileId(actor));
+  const profileId = await resolveProfileId(c, actor);
   const integrations = await getAvailableProvidersWithStatus(profileId, orgId);
   return c.json({ integrations });
 });
@@ -202,7 +208,7 @@ router.delete("/:scope{@[^/]+}/:name", async (c) => {
     if (connectionId) {
       await disconnectConnectionById(connectionId, actor);
     } else {
-      const profileId = c.req.query("profileId") ?? (await getDefaultProfileId(actor));
+      const profileId = await resolveProfileId(c, actor);
       const orgId = c.get("orgId");
       await disconnectProvider(provider, profileId, orgId);
     }

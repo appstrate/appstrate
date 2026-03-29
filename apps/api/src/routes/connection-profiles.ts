@@ -35,6 +35,12 @@ import { listConnections } from "@appstrate/connect";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 
+async function requireOrgProfile(profileId: string, orgId: string) {
+  const profile = await getOrgProfile(profileId, orgId);
+  if (!profile) throw notFound("Profile not found");
+  return profile;
+}
+
 export function createConnectionProfilesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -128,10 +134,7 @@ export function createConnectionProfilesRouter() {
   router.get("/org/:id/flows", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
 
     const rows = await db
       .select({
@@ -149,10 +152,7 @@ export function createConnectionProfilesRouter() {
   router.get("/org/:id/bindings", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
     const bindings = await getOrgProfileBindingsEnriched(profileId);
     return c.json({ bindings });
   });
@@ -162,10 +162,7 @@ export function createConnectionProfilesRouter() {
     const orgId = c.get("orgId");
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
 
     const body = await c.req.json();
     const data = parseBody(
@@ -198,10 +195,7 @@ export function createConnectionProfilesRouter() {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
     await unbindOrgProfileProvider(profileId, providerId);
     return c.json({ unbound: true });
   });
