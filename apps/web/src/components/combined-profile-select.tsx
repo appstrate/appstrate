@@ -65,10 +65,7 @@ export function CombinedProfileSelect({
           <>
             <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground flex items-center gap-1">
               <Building2 className="size-3" />
-              {t("orgProfiles", {
-                ns: "flows",
-                defaultValue: t("schedule.orgProfiles", { ns: "flows" }),
-              })}
+              {t("schedule.orgProfiles", { ns: "flows" })}
             </div>
             {orgProfiles!.map((p) => (
               <SelectItem key={p.id} value={p.id}>

@@ -16,6 +16,11 @@ import { getOrgProfileBindings } from "./state/index.ts";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
 
+const PROFILE_ACTOR_COLUMNS = {
+  userId: connectionProfiles.userId,
+  endUserId: connectionProfiles.endUserId,
+} as const;
+
 // ─── Profile CRUD ─────────────────────────────────────────────
 
 /**
@@ -25,15 +30,7 @@ export async function ensureDefaultProfile(actor: Actor): Promise<ConnectionProf
   const [existing] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-        eq(connectionProfiles.isDefault, true),
-      ),
-    )
+    .where(and(actorFilter(actor, PROFILE_ACTOR_COLUMNS), eq(connectionProfiles.isDefault, true)))
     .limit(1);
 
   if (existing) return existing;
@@ -67,12 +64,7 @@ export async function listProfiles(
     })
     .from(connectionProfiles)
     .leftJoin(userProviderConnections, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(
-      actorFilter(actor, {
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-      }),
-    )
+    .where(actorFilter(actor, PROFILE_ACTOR_COLUMNS))
     .groupBy(connectionProfiles.id);
 
   return rows;
@@ -88,15 +80,7 @@ export async function getProfileForActor(
   const [row] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .limit(1);
   return row ?? null;
 }
@@ -113,15 +97,7 @@ export async function renameProfile(profileId: string, actor: Actor, name: strin
   const [updated] = await db
     .update(connectionProfiles)
     .set({ name, updatedAt: new Date() })
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .returning({ id: connectionProfiles.id });
 
   if (!updated) throw notFound("Profile not found");
@@ -132,29 +108,15 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
   const [profile] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .limit(1);
 
   if (!profile) throw notFound("Profile not found");
   if (profile.isDefault) throw invalidRequest("Cannot delete the default profile");
 
-  await db.delete(connectionProfiles).where(
-    and(
-      eq(connectionProfiles.id, profileId),
-      actorFilter(actor, {
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-      }),
-    ),
-  );
+  await db
+    .delete(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)));
 }
 
 // ─── Org Profile CRUD ───────────────────────────────────────
@@ -341,6 +303,10 @@ export async function setUserFlowProviderOverride(
   const userId = actorValues.userId ?? null;
   const endUserId = actorValues.endUserId ?? null;
 
+  if (!userId && !endUserId) {
+    throw new Error("setUserFlowProviderOverride: exactly one of userId or endUserId must be set");
+  }
+
   // Atomic upsert — partial unique indexes (idx_ufpp_member / idx_ufpp_end_user)
   // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
   await db.execute(sql`
@@ -408,7 +374,7 @@ export async function resolveActorProfileContext(
  * by orgId would miss them. The caller (scheduler) already validates the schedule
  * belongs to the requesting org.
  */
-export async function getProfileById(profileId: string): Promise<ConnectionProfile | null> {
+export async function getProfileByIdUnsafe(profileId: string): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)

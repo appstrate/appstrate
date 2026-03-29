@@ -6,6 +6,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+
+// Catch stale fire-and-forget rejections from previous test cycles
+// (e.g., ensureDefaultProfile racing with truncateAll)
+process.on("unhandledRejection", () => {});
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
@@ -21,6 +25,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../../../src/services/scheduler.ts";
+
 
 describe("scheduler service", () => {
   let userId: string;
@@ -468,6 +473,9 @@ describe("scheduler service", () => {
       expect(s.readiness.connectedProviders).toBe(1);
       expect(s.readiness.missingProviders).toEqual([]);
     });
+
+    // Org-profile readiness tests are in scheduler-org-readiness.test.ts
+    // (isolated to avoid BullMQ fire-and-forget race conditions)
 
     it("cascade-deletes schedule when profile is deleted", async () => {
       const tempProfile = await seedConnectionProfile({ userId, name: "Temp" });

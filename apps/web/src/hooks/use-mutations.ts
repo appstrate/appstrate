@@ -4,6 +4,7 @@ import i18n from "../i18n";
 import { api, apiFetch, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
+import { invalidateConnectionRelated } from "./invalidation";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -75,17 +76,6 @@ export function useRunFlow(packageId: string) {
   });
 }
 
-function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["available-providers"] });
-  qc.invalidateQueries({ queryKey: ["user-connections"] });
-  qc.invalidateQueries({ queryKey: ["profile-connections"] });
-  qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
-  // Invalidate all flow detail queries (service status may have changed)
-  qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-  qc.invalidateQueries({ queryKey: ["flows"] });
-  qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-}
-
 export function useConnect() {
   const qc = useQueryClient();
   return useMutation({
@@ -122,7 +112,7 @@ export function useConnect() {
         }, 500);
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -144,7 +134,7 @@ export function useConnectApiKey() {
         body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -164,7 +154,7 @@ export function useDisconnect() {
       });
       return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -174,7 +164,7 @@ export function useDeleteAllConnections() {
   return useMutation({
     mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
     onSuccess: () => {
-      invalidateProviderRelated(qc);
+      invalidateConnectionRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
     },
     onError: onMutationError,
@@ -249,7 +239,7 @@ export function useConnectCredentials() {
         body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }

@@ -1,6 +1,8 @@
 // Only re-export types actually imported through this path (backend-only consumers).
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";
+import type { ProviderProfileSource } from "@appstrate/shared-types";
+export type { ProviderProfileSource };
 
 // --- Flow Manifest Types ---
 // Re-exported from @appstrate/validation. The FlowManifest type is Zod-inferred
@@ -28,7 +30,7 @@ export interface FlowProviderRequirement {
  */
 export interface ProviderProfileEntry {
   profileId: string;
-  source: "org_binding" | "user_profile";
+  source: ProviderProfileSource;
 }
 
 /** Map of providerId → resolved profile entry. Built by resolveProviderProfiles(). */
