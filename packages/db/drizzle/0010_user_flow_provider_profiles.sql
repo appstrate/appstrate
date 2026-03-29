@@ -14,3 +14,4 @@ CREATE TABLE "user_flow_provider_profiles" (
 CREATE UNIQUE INDEX "idx_ufpp_member" ON "user_flow_provider_profiles" ("user_id", "package_id", "provider_id") WHERE user_id IS NOT NULL;
 CREATE UNIQUE INDEX "idx_ufpp_end_user" ON "user_flow_provider_profiles" ("end_user_id", "package_id", "provider_id") WHERE end_user_id IS NOT NULL;
 CREATE INDEX "idx_ufpp_package_id" ON "user_flow_provider_profiles" ("package_id");
+CREATE INDEX "idx_ufpp_profile_id" ON "user_flow_provider_profiles" ("profile_id");

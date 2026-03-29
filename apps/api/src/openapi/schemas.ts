@@ -281,6 +281,15 @@ export const schemas = {
         type: "integer",
         description: "Number of published versions (0 for built-in flows)",
       },
+      flowOrgProfileId: {
+        type: ["string", "null"],
+        format: "uuid",
+        description: "Admin-configured org connection profile ID (null if none)",
+      },
+      flowOrgProfileName: {
+        type: ["string", "null"],
+        description: "Display name of the admin-configured org connection profile",
+      },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnpublishedChanges: {
         type: "boolean",
