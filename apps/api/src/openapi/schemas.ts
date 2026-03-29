@@ -143,6 +143,19 @@ export const schemas = {
       scopesGranted: { type: "array", items: { type: "string" } },
       scopesSufficient: { type: "boolean" },
       scopesMissing: { type: "array", items: { type: "string" } },
+      source: {
+        type: "string",
+        enum: ["org_binding", "user_profile"],
+        description: "How the connection profile was resolved",
+      },
+      profileName: {
+        type: ["string", "null"],
+        description: "Name of the connection profile used",
+      },
+      profileOwnerName: {
+        type: ["string", "null"],
+        description: "Name of the owner of the connection profile",
+      },
     },
   },
   FlowSkillRef: {

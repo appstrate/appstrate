@@ -1516,8 +1516,7 @@ export const packagesPaths = {
       operationId: "getFlowPackage",
       tags: ["Packages"],
       summary: "Get flow detail",
-      description:
-        "Returns flow detail including providers, config, state, skills, and tools. Supports profileId for per-user provider status resolution.",
+      description: "Returns flow detail including providers, config, state, skills, and tools.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1533,14 +1532,6 @@ export const packagesPaths = {
           required: true,
           schema: { type: "string" },
           description: "Package name",
-        },
-        {
-          name: "profileId",
-          in: "query",
-          required: false,
-          description:
-            "Connection profile ID to use for resolving provider statuses. Defaults to user's effective profile.",
-          schema: { type: "string" },
         },
       ],
       responses: {

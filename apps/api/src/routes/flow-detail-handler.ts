@@ -14,7 +14,7 @@ import {
 import {
   resolveProviderProfiles,
   resolveActorProfileContext,
-  getOrgProfile,
+  getFlowOrgProfile,
 } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -45,19 +45,15 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const m = flow.manifest;
 
-  // Load admin-configured org profile (null = none configured).
-  // If the referenced profile was deleted, treat as null.
-  const packageConfig = await getPackageConfig(orgId, flow.id);
-  const configOrgProfileId = packageConfig.orgProfileId;
-  const orgProfile = configOrgProfileId ? await getOrgProfile(configOrgProfileId, orgId) : null;
-  const flowOrgProfileId = orgProfile ? configOrgProfileId : null;
-  const flowOrgProfileName = orgProfile?.name ?? null;
-
-  // Resolve per-provider profile overrides and default profile
-  const { defaultUserProfileId, userProviderOverrides } = await resolveActorProfileContext(
-    actor,
-    flow.id,
-  );
+  // Load org profile, actor profile context, and package config in parallel
+  const [flowOrgProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
+    await Promise.all([
+      getFlowOrgProfile(orgId, flow.id),
+      resolveActorProfileContext(actor, flow.id),
+      getPackageConfig(orgId, flow.id),
+    ]);
+  const flowOrgProfileId = flowOrgProfile?.id ?? null;
+  const flowOrgProfileName = flowOrgProfile?.name ?? null;
 
   // Build providerProfiles map: org bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
