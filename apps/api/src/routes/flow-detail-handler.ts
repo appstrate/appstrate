@@ -12,6 +12,7 @@ import {
   getRunningExecutionsForPackage,
 } from "../services/state/index.ts";
 import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -43,6 +44,10 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const queryProfileId = c.req.query("profileId");
   const queryOrgProfileId = c.req.query("orgProfileId");
 
+  // Load admin-forced org profile (takes priority over user's query param)
+  const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
+  const effectiveOrgProfileId = forcedOrgProfileId ?? queryOrgProfileId ?? null;
+
   // Resolve user profile: explicit override or actor's effective profile
   const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
 
@@ -51,7 +56,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
     userProfileId,
-    queryOrgProfileId,
+    effectiveOrgProfileId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
@@ -187,6 +192,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnpublishedChanges,
+      forcedOrgProfileId,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(flow.source !== "system" && rawItem
         ? {

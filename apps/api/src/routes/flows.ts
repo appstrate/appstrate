@@ -25,6 +25,7 @@ import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
+const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -146,6 +147,27 @@ export function createFlowsRouter() {
     const data = parseBody(modelIdSchema, body);
 
     await setFlowOverride(orgId, flow.id, "modelId", data.modelId);
+
+    return c.json({ success: true });
+  });
+
+  // GET /api/flows/:scope/:name/org-profile — get forced org profile for this flow
+  router.get("/:scope{@[^/]+}/:name/org-profile", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const { orgProfileId } = await getPackageConfigFull(orgId, flow.id);
+
+    return c.json({ orgProfileId });
+  });
+
+  // PUT /api/flows/:scope/:name/org-profile — set forced org profile (admin-only)
+  router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const body = await c.req.json();
+    const data = parseBody(orgProfileIdSchema, body);
+
+    await setFlowOverride(orgId, flow.id, "orgProfileId", data.orgProfileId);
 
     return c.json({ success: true });
   });

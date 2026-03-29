@@ -29,6 +29,7 @@ export const packageConfigs = pgTable(
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
+    orgProfileId: uuid("org_profile_id"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

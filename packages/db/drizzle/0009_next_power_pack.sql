@@ -1,0 +1,1 @@
+ALTER TABLE "package_configs" ADD COLUMN "org_profile_id" uuid;
