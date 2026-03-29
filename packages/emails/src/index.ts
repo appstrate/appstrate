@@ -1,4 +1,4 @@
-export { renderEmail, registerEmailOverrides } from "./registry.ts";
+export { renderEmail, registerEmailOverrides, resetEmailRegistry } from "./registry.ts";
 export type {
   EmailType,
   EmailPropsMap,
