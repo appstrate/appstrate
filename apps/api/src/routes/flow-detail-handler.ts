@@ -162,32 +162,11 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
           ...(e.description ? { description: e.description } : {}),
         })),
       },
-      ...(m.input
-        ? {
-            input: {
-              schema: m.input.schema,
-              ...(m.input.propertyOrder ? { propertyOrder: m.input.propertyOrder } : {}),
-              ...(m.input.fileConstraints ? { fileConstraints: m.input.fileConstraints } : {}),
-              ...(m.input.uiHints ? { uiHints: m.input.uiHints } : {}),
-            },
-          }
-        : {}),
-      ...(m.output
-        ? {
-            output: {
-              schema: m.output.schema,
-              ...(m.output.propertyOrder ? { propertyOrder: m.output.propertyOrder } : {}),
-              ...(m.output.fileConstraints ? { fileConstraints: m.output.fileConstraints } : {}),
-              ...(m.output.uiHints ? { uiHints: m.output.uiHints } : {}),
-            },
-          }
-        : {}),
+      ...(m.input ? { input: m.input } : {}),
+      ...(m.output ? { output: m.output } : {}),
       config: {
-        schema: m.config?.schema ?? { type: "object", properties: {} },
+        ...(m.config ?? { schema: { type: "object", properties: {} } }),
         current: configWithDefaults,
-        ...(m.config?.propertyOrder ? { propertyOrder: m.config.propertyOrder } : {}),
-        ...(m.config?.fileConstraints ? { fileConstraints: m.config.fileConstraints } : {}),
-        ...(m.config?.uiHints ? { uiHints: m.config.uiHints } : {}),
       },
       runningExecutions: runningCount,
       lastExecution: lastExec
