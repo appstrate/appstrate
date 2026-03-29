@@ -16,7 +16,7 @@ import {
   disconnectConnectionById,
   getProviderAuthMode,
 } from "../services/connection-manager/index.ts";
-import { getDefaultProfileId } from "../services/connection-profiles.ts";
+import { getDefaultProfileId, getProfileForActor } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isProviderEnabled } from "@appstrate/connect";
@@ -60,6 +60,13 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
     }
 
     const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
+
+    // Validate ownership — user can only connect on their own profiles
+    const profile = await getProfileForActor(effectiveProfileId, actor);
+    if (!profile) {
+      throw forbidden("Cannot connect on a profile you do not own");
+    }
+
     const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
@@ -90,6 +97,13 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
       "apiKey",
     );
     const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+
+    // Validate ownership — user can only connect on their own profiles
+    const ownedProfile = await getProfileForActor(profileId, actor);
+    if (!ownedProfile) {
+      throw forbidden("Cannot connect on a profile you do not own");
+    }
+
     await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
@@ -125,6 +139,13 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
     const mode = authMode === "basic" ? "basic" : "custom";
 
     const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+
+    // Validate ownership — user can only connect on their own profiles
+    const ownedProfile = await getProfileForActor(profileId, actor);
+    if (!ownedProfile) {
+      throw forbidden("Cannot connect on a profile you do not own");
+    }
+
     await saveCredentialsConnection(provider, mode, data.credentials, profileId, orgId);
     return c.json({ success: true });
   } catch (err: unknown) {
@@ -209,6 +230,13 @@ router.delete("/:scope{@[^/]+}/:name", async (c) => {
       await disconnectConnectionById(connectionId, actor);
     } else {
       const profileId = await resolveProfileId(c, actor);
+
+      // Validate ownership — user can only disconnect from their own profiles
+      const profile = await getProfileForActor(profileId, actor);
+      if (!profile) {
+        throw forbidden("Cannot disconnect from a profile you do not own");
+      }
+
       const orgId = c.get("orgId");
       await disconnectProvider(provider, profileId, orgId);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -101,7 +101,10 @@ export function ScheduleForm({
 
   const { data: userProfiles } = useConnectionProfiles();
   const { data: orgProfiles } = useOrgProfiles();
-  const allProfiles = [...(userProfiles ?? []), ...(orgProfiles ?? [])];
+  const allProfiles = useMemo(
+    () => [...(userProfiles ?? []), ...(orgProfiles ?? [])],
+    [userProfiles, orgProfiles],
+  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 

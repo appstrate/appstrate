@@ -24,6 +24,8 @@ interface ProviderConnectionCardProps {
   orgProfileId?: string;
   /** Org profile display name — shown in the bind button. */
   orgProfileName?: string;
+  /** When true, hide all action buttons — card becomes purely informational. */
+  readOnly?: boolean;
 }
 
 export function ProviderConnectionCard({
@@ -31,6 +33,7 @@ export function ProviderConnectionCard({
   packageId,
   orgProfileId,
   orgProfileName,
+  readOnly: readOnlyProp,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
 
@@ -52,7 +55,8 @@ export function ProviderConnectionCard({
     handleProfileChange,
     doBind,
     handleUnbind,
-  } = useProviderConnection({ providerId, packageId, orgProfileId });
+    readOnly,
+  } = useProviderConnection({ providerId, packageId, orgProfileId, readOnly: readOnlyProp });
 
   // Provider metadata
   const { data: providersData } = useProviders();
@@ -118,7 +122,7 @@ export function ProviderConnectionCard({
                   : binding!.sourceProfileName}
               </span>
             )}
-            {isOrgAdmin && (
+            {!readOnly && isOrgAdmin && (
               <Button
                 variant="outline"
                 size="sm"
@@ -139,9 +143,14 @@ export function ProviderConnectionCard({
                 <CheckCircle2 className="size-3" />
                 {t("providers.connected")}
               </span>
+            ) : readOnly ? (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                <AlertTriangle className="size-3" />
+                {t("services.notConnected")}
+              </span>
             ) : null}
 
-            {hasMultipleProfiles && (
+            {!readOnly && hasMultipleProfiles && (
               <Select value={effectiveProfileId ?? ""} onValueChange={handleProfileChange}>
                 <SelectTrigger className="h-7 w-32 text-xs">
                   <SelectValue />
@@ -157,44 +166,46 @@ export function ProviderConnectionCard({
               </Select>
             )}
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              {!isConnected && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={handleConnect}
-                  disabled={isPending || !provider?.enabled || !effectiveProfileId}
-                >
-                  {t("providerCard.connect")}
-                </Button>
-              )}
-              {isConnected && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={handleDisconnect}
-                  disabled={isPending}
-                >
-                  {t("providerCard.disconnect")}
-                </Button>
-              )}
-              {isConnected && orgProfileId && isOrgAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={doBind}
-                  disabled={isPending || !effectiveProfileId}
-                >
-                  <Building2 className="size-3 mr-1" />
-                  {orgProfileName
-                    ? t("providerCard.bindTo", { name: orgProfileName })
-                    : t("providerCard.bind")}
-                </Button>
-              )}
-            </div>
+            {!readOnly && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {!isConnected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleConnect}
+                    disabled={isPending || !provider?.enabled || !effectiveProfileId}
+                  >
+                    {t("providerCard.connect")}
+                  </Button>
+                )}
+                {isConnected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleDisconnect}
+                    disabled={isPending}
+                  >
+                    {t("providerCard.disconnect")}
+                  </Button>
+                )}
+                {isConnected && orgProfileId && isOrgAdmin && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={doBind}
+                    disabled={isPending || !effectiveProfileId}
+                  >
+                    <Building2 className="size-3 mr-1" />
+                    {orgProfileName
+                      ? t("providerCard.bindTo", { name: orgProfileName })
+                      : t("providerCard.bind")}
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
