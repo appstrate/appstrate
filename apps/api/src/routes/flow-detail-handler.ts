@@ -13,7 +13,8 @@ import {
 } from "../services/state/index.ts";
 import {
   resolveProviderProfiles,
-  getEffectiveProfileId,
+  getDefaultProfileId,
+  getUserFlowProviderOverrides,
   getOrgProfile,
 } from "../services/connection-profiles.ts";
 import { getPackageConfigFull } from "../services/state/package-config.ts";
@@ -45,7 +46,6 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   }
 
   const m = flow.manifest;
-  const queryProfileId = c.req.query("profileId");
 
   // Load admin-configured org profile (null = none configured).
   // If the referenced profile was deleted, treat as null.
@@ -54,14 +54,18 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const flowOrgProfileId = orgProfile ? configOrgProfileId : null;
   const flowOrgProfileName = orgProfile?.name ?? null;
 
-  // Resolve user profile: explicit override or actor's effective profile
-  const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
+  // Resolve per-provider profile overrides and default profile
+  const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
+    getDefaultProfileId(actor),
+    getUserFlowProviderOverrides(actor, flow.id),
+  ]);
 
-  // Build providerProfiles map: org bindings overlay + user profile fallback
+  // Build providerProfiles map: org bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
-    userProfileId,
+    defaultUserProfileId,
+    userProviderOverrides,
     flowOrgProfileId,
   );
 

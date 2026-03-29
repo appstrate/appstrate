@@ -14,8 +14,9 @@ import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { getActor } from "../lib/actor.ts";
 import {
-  setPackageProfileOverride,
-  removePackageProfileOverride,
+  setUserFlowProviderOverride,
+  removeUserFlowProviderOverride,
+  getUserFlowProviderOverrides,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -87,25 +88,33 @@ export function createFlowsRouter() {
     });
   });
 
-  // PUT /api/flows/:scope/:name/profile — set flow profile override
-  router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/provider-profiles — get per-provider profile overrides
+  router.get("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const actor = getActor(c);
+    const overrides = await getUserFlowProviderOverrides(actor, flow.id);
+    return c.json({ overrides });
+  });
+
+  // PUT /api/flows/:scope/:name/provider-profiles — set per-provider override
+  // Provider ID passed in body (scoped IDs contain slashes, can't be in URL)
+  router.put("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const actor = getActor(c);
     const body = await c.req.json();
-    const data = parseBody(
-      z.object({ profileId: z.string().min(1, "profileId is required") }),
-      body,
-      "profileId",
-    );
-    await setPackageProfileOverride(actor, flow.id, data.profileId);
+    const data = parseBody(z.object({ providerId: z.string().min(1), profileId: z.uuid() }), body);
+    await setUserFlowProviderOverride(actor, flow.id, data.providerId, data.profileId);
     return c.json({ success: true });
   });
 
-  // DELETE /api/flows/:scope/:name/profile — remove flow profile override
-  router.delete("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
+  // DELETE /api/flows/:scope/:name/provider-profiles — remove per-provider override
+  // Provider ID passed in body
+  router.delete("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const actor = getActor(c);
-    await removePackageProfileOverride(actor, flow.id);
+    const body = await c.req.json();
+    const data = parseBody(z.object({ providerId: z.string().min(1) }), body);
+    await removeUserFlowProviderOverride(actor, flow.id, data.providerId);
     return c.json({ success: true });
   });
 

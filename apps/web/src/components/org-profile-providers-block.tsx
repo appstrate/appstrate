@@ -10,8 +10,6 @@ interface OrgProfileProvidersBlockProps {
   orgProfileName: string;
   /** Provider IDs to display */
   providerIds: string[];
-  /** When true, admins can bind/unbind providers. When false, display-only. */
-  readOnly?: boolean;
 }
 
 /**
@@ -22,7 +20,6 @@ export function OrgProfileProvidersBlock({
   orgProfileId,
   orgProfileName,
   providerIds,
-  readOnly = false,
 }: OrgProfileProvidersBlockProps) {
   const { t } = useTranslation(["flows"]);
 
@@ -30,7 +27,6 @@ export function OrgProfileProvidersBlock({
 
   return (
     <div className="rounded-lg border border-border bg-card mb-4">
-      {/* Profile header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Building2 className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">{orgProfileName}</span>
@@ -44,7 +40,6 @@ export function OrgProfileProvidersBlock({
         </span>
       </div>
 
-      {/* Provider list */}
       <div className="p-2 space-y-2">
         {providerIds.map((providerId) => (
           <ProviderConnectionCard
@@ -52,7 +47,6 @@ export function OrgProfileProvidersBlock({
             providerId={providerId}
             orgProfileId={orgProfileId}
             orgProfileName={orgProfileName}
-            readOnly={readOnly}
           />
         ))}
       </div>

@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq, and, sql } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { packages, packageConfigs } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
@@ -29,7 +32,6 @@ import {
 import { getActor } from "../lib/actor.ts";
 import { requireAdmin } from "../middleware/guards.ts";
 import { listConnections } from "@appstrate/connect";
-import { db } from "@appstrate/db/client";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 
@@ -120,6 +122,27 @@ export function createConnectionProfilesRouter() {
       logger.warn("Failed to delete org profile", { profileId, orgId, error: message });
       throw invalidRequest(message);
     }
+  });
+
+  // GET /api/connection-profiles/org/:id/flows — list flows using this org profile
+  router.get("/org/:id/flows", async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    const profile = await getOrgProfile(profileId, orgId);
+    if (!profile) {
+      throw notFound("Profile not found");
+    }
+
+    const rows = await db
+      .select({
+        id: packages.id,
+        displayName: sql<string>`${packages.draftManifest}->>'displayName'`,
+      })
+      .from(packageConfigs)
+      .innerJoin(packages, eq(packages.id, packageConfigs.packageId))
+      .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.orgProfileId, profileId)));
+
+    return c.json({ flows: rows });
   });
 
   // GET /api/connection-profiles/org/:id/bindings — list provider bindings for an org profile

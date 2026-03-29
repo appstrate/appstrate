@@ -41,11 +41,10 @@ export function useRunFlow(packageId: string) {
     mutationFn: async (params?: {
       input?: Record<string, unknown>;
       files?: Record<string, File[]>;
-      profileId?: string;
       version?: string;
     }) => {
-      const { input, files, profileId, version } = params ?? {};
-      const qs = buildQs({ profileId, version });
+      const { input, files, version } = params ?? {};
+      const qs = buildQs({ version });
 
       // If files are present, use FormData
       const hasFiles = files && Object.values(files).some((f) => f.length > 0);
@@ -79,6 +78,8 @@ export function useRunFlow(packageId: string) {
 function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["available-providers"] });
   qc.invalidateQueries({ queryKey: ["user-connections"] });
+  qc.invalidateQueries({ queryKey: ["profile-connections"] });
+  qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
   // Invalidate all flow detail queries (service status may have changed)
   qc.invalidateQueries({ queryKey: ["packages", "flow"] });
   qc.invalidateQueries({ queryKey: ["flows"] });

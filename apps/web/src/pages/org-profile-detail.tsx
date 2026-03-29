@@ -11,12 +11,15 @@ import {
   useOrgProfiles,
   useRenameOrgProfile,
   useDeleteOrgProfile,
+  useOrgProfileFlows,
 } from "../hooks/use-connection-profiles";
 import { useProviders } from "../hooks/use-providers";
+import { useFlows } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
+import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { Calendar, Pencil, Trash2, FolderOpen } from "lucide-react";
+import { Calendar, Pencil, Trash2, FolderOpen, Workflow } from "lucide-react";
 
 export function OrgProfileDetailPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -26,7 +29,9 @@ export function OrgProfileDetailPage() {
 
   const { data: orgProfiles, isLoading: profilesLoading } = useOrgProfiles();
   const { data: providers } = useProviders();
+  const { data: flows } = useFlows();
   const { data: allSchedules } = useAllSchedules();
+  const { data: linkedFlowRefs } = useOrgProfileFlows(id);
 
   const renameMutation = useRenameOrgProfile();
   const deleteMutation = useDeleteOrgProfile();
@@ -110,10 +115,42 @@ export function OrgProfileDetailPage() {
                 key={provider.id}
                 providerId={provider.id}
                 orgProfileId={id}
+                orgProfileName={profile.name}
               />
             ))}
           </div>
         )}
+      </section>
+
+      {/* ─── Flows liés ───────────────────────────────────── */}
+      <section className="space-y-3 mb-8">
+        <h3 className="text-sm font-medium text-muted-foreground">
+          {t("orgProfiles.linkedFlows")}
+        </h3>
+
+        {(() => {
+          const linkedFlowIds = new Set(linkedFlowRefs?.map((f) => f.id) ?? []);
+          const linkedFlowItems = (flows ?? []).filter((f) => linkedFlowIds.has(f.id));
+          return linkedFlowItems.length === 0 ? (
+            <EmptyState message={t("orgProfiles.noFlows")} icon={Workflow} compact />
+          ) : (
+            <div className="space-y-2">
+              {linkedFlowItems.map((flow) => (
+                <PackageCard
+                  key={flow.id}
+                  id={flow.id}
+                  displayName={flow.displayName}
+                  description={flow.description}
+                  type="flow"
+                  source={flow.source}
+                  runningExecutions={flow.runningExecutions}
+                  keywords={flow.keywords}
+                  providerIds={flow.dependencies?.providers}
+                />
+              ))}
+            </div>
+          );
+        })()}
       </section>
 
       {/* ─── Schedules liés ──────────────────────────────── */}

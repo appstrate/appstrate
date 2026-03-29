@@ -4,8 +4,8 @@ import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { InputModal } from "./input-modal";
+import { ConnectionSummaryModal } from "./connection-summary-modal";
 import { useRunFlow } from "../hooks/use-mutations";
-import { useCurrentProfileId } from "../hooks/use-current-profile";
 import { api } from "../api";
 import type { FlowDetail } from "@appstrate/shared-types";
 
@@ -34,23 +34,37 @@ export function RunFlowButton({
   showLabel = false,
 }: RunFlowButtonProps) {
   const { t } = useTranslation(["flows"]);
-  const profileId = useCurrentProfileId();
   const runFlow = useRunFlow(packageId);
   const [fetchedDetail, setFetchedDetail] = useState<FlowDetail | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
 
   const detail = providedDetail ?? fetchedDetail;
 
+  const providers = detail?.dependencies?.providers ?? [];
+  const hasProviders = providers.length > 0;
+  const hasDisconnected = providers.some((p) => p.status !== "connected");
   const hasInputSchema = !!(
     detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0
   );
 
-  const run = () => {
+  /** Called after the connection summary is confirmed (or skipped if no providers). */
+  const proceedAfterSummary = () => {
+    setSummaryOpen(false);
     if (hasInputSchema) {
       setInputOpen(true);
     } else {
-      runFlow.mutate({ profileId: profileId ?? undefined, version });
+      runFlow.mutate({ version });
+    }
+  };
+
+  /** Start the run flow: show summary if providers, otherwise proceed directly. */
+  const startRun = () => {
+    if (hasProviders) {
+      setSummaryOpen(true);
+    } else {
+      proceedAfterSummary();
     }
   };
 
@@ -59,27 +73,29 @@ export function RunFlowButton({
     e.stopPropagation();
 
     if (providedDetail) {
-      run();
+      startRun();
       return;
     }
 
     // Lazy fetch for list page
     setFetching(true);
     try {
-      const qs = profileId ? `?profileId=${profileId}` : "";
-      const data = await api<{ flow: FlowDetail }>(`/packages/flows/${packageId}${qs}`);
-      const flowDetail = data.flow;
-      setFetchedDetail(flowDetail);
+      const data = await api<{ flow: FlowDetail }>(`/packages/flows/${packageId}`);
+      setFetchedDetail(data.flow);
 
-      const needsInput = !!(
-        flowDetail.input?.schema?.properties &&
-        Object.keys(flowDetail.input.schema.properties).length > 0
-      );
-
-      if (needsInput) {
-        setInputOpen(true);
+      const flowHasProviders = (data.flow.dependencies?.providers?.length ?? 0) > 0;
+      if (flowHasProviders) {
+        setSummaryOpen(true);
       } else {
-        runFlow.mutate({ profileId: profileId ?? undefined });
+        const needsInput = !!(
+          data.flow.input?.schema?.properties &&
+          Object.keys(data.flow.input.schema.properties).length > 0
+        );
+        if (needsInput) {
+          setInputOpen(true);
+        } else {
+          runFlow.mutate({});
+        }
       }
     } catch {
       // Fetch errors are silent — user can retry
@@ -99,29 +115,52 @@ export function RunFlowButton({
           onClick={handleClick}
           disabled={isDisabled}
           title={disabled ? disabledTitle : t("detail.run")}
+          className="relative"
         >
           {isPending ? <Spinner /> : t("detail.run")}
+          {hasDisconnected && !isPending && (
+            <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-warning" />
+          )}
         </Button>
       ) : (
         <Button
           variant={variant}
           size={size}
-          className={className}
+          className={`relative ${className ?? ""}`}
           onClick={handleClick}
           disabled={isDisabled}
           title={disabled ? disabledTitle : t("detail.run")}
         >
           {isPending ? <Spinner /> : <Play size={14} />}
+          {hasDisconnected && !isPending && (
+            <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-warning" />
+          )}
         </Button>
       )}
+
+      {/* Connection summary — always shown before execution when flow has providers */}
+      {detail && (
+        <ConnectionSummaryModal
+          open={summaryOpen}
+          onClose={() => setSummaryOpen(false)}
+          onConfirm={proceedAfterSummary}
+          onConfigureConnections={() => {
+            setSummaryOpen(false);
+            window.location.hash = "connectors";
+          }}
+          providers={detail.dependencies?.providers ?? []}
+          orgProfileName={detail.flowOrgProfileName}
+          isPending={runFlow.isPending}
+        />
+      )}
+
+      {/* Input modal — shown after summary confirmation if flow has input schema */}
       {detail && (
         <InputModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           flow={detail}
-          onSubmit={(input, files) =>
-            runFlow.mutate({ input, files, profileId: profileId ?? undefined, version })
-          }
+          onSubmit={(input, files) => runFlow.mutate({ input, files, version })}
           isPending={runFlow.isPending}
         />
       )}
