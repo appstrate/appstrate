@@ -10,7 +10,6 @@ import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { computeProvidersSummary, connectedLabelWithProfile } from "../../lib/provider-status";
 import { useConnectionProfiles } from "../../hooks/use-connection-profiles";
 import { ProfileSelector } from "../profile-selector";
-import { OrgProfileSelector } from "../org-profile-selector";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderConfigureButton } from "../provider-configure-button";
 import { ProviderCard } from "../provider-card";
@@ -64,9 +63,6 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   }
 
   const summary = computeProvidersSummary(detail.dependencies.providers, t);
-  const flowProviderIds = detail.dependencies.providers.map((p) => p.id);
-  const forcedOrgProfileId = detail.forcedOrgProfileId ?? null;
-
   return (
     <>
       <div className="flex items-center justify-between mb-3">
@@ -84,13 +80,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
             </>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <OrgProfileSelector
-            flowProviderIds={flowProviderIds}
-            forcedOrgProfileId={forcedOrgProfileId}
-          />
-          <ProfileSelector />
-        </div>
+        <ProfileSelector />
       </div>
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
         {detail.dependencies.providers.map((svc) => {

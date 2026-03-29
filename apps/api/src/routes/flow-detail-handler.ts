@@ -42,11 +42,9 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const m = flow.manifest;
   const queryProfileId = c.req.query("profileId");
-  const queryOrgProfileId = c.req.query("orgProfileId");
 
-  // Load admin-forced org profile (takes priority over user's query param)
+  // Load admin-configured org profile from flow config
   const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
-  const effectiveOrgProfileId = forcedOrgProfileId ?? queryOrgProfileId ?? null;
 
   // Resolve user profile: explicit override or actor's effective profile
   const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
@@ -56,7 +54,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
     userProfileId,
-    effectiveOrgProfileId,
+    forcedOrgProfileId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
