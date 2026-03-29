@@ -94,7 +94,6 @@ export function getProviderEntries(m: Record<string, unknown>): ProviderEntry[] 
       id,
       version: version || "*",
       scopes: Array.isArray(cfg.scopes) ? (cfg.scopes as string[]) : [],
-      connectionMode: (cfg.connectionMode as "user" | "admin") || "user",
     };
   });
 }
@@ -110,7 +109,6 @@ export function setProviderEntries(m: Record<string, unknown>, entries: Provider
     const cfg: Record<string, unknown> = {};
     const scopes = e.scopes.filter(Boolean);
     if (scopes.length > 0) cfg.scopes = scopes;
-    if (e.connectionMode !== "user") cfg.connectionMode = e.connectionMode;
     if (Object.keys(cfg).length > 0) config[e.id] = cfg;
   }
   deps.providers = providers;
