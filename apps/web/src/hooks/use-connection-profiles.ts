@@ -2,7 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { onMutationError } from "./use-mutations";
-import type { ConnectionProfile, UserConnectionProviderGroup } from "@appstrate/shared-types";
+import type {
+  ConnectionProfile,
+  UserConnectionProviderGroup,
+  EnrichedBinding,
+} from "@appstrate/shared-types";
 
 interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;
@@ -32,7 +36,7 @@ export function useProfileConnections(profileId: string | null | undefined) {
   });
 }
 
-export interface OrgProfileWithBindings extends ConnectionProfile {
+interface OrgProfileWithBindings extends ConnectionProfile {
   bindingCount: number;
   boundProviderIds: string[];
 }
@@ -152,25 +156,6 @@ export function useDeleteOrgProfile() {
   });
 }
 
-export function useMyOrgBindings() {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["my-org-bindings", orgId],
-    queryFn: () =>
-      api<{
-        profiles: { profile: ConnectionProfile; providerIds: string[] }[];
-      }>("/connection-profiles/my-org-bindings").then((r) => r.profiles),
-  });
-}
-
-export interface EnrichedBinding {
-  providerId: string;
-  sourceProfileId: string;
-  sourceProfileName: string;
-  boundByUserName: string | null;
-  connected: boolean;
-}
-
 export function useOrgProfileBindings(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
@@ -182,6 +167,13 @@ export function useOrgProfileBindings(profileId: string | undefined) {
     enabled: !!profileId,
     staleTime: 30_000,
   });
+}
+
+function invalidateOrgBindingCaches(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
+  qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
+  qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+  qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
 }
 
 export function useBindOrgProvider() {
@@ -200,13 +192,7 @@ export function useBindOrgProvider() {
         method: "POST",
         body: JSON.stringify({ providerId, sourceProfileId }),
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
-      qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-      qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-    },
+    onSuccess: () => invalidateOrgBindingCaches(qc),
     onError: onMutationError,
   });
 }
@@ -218,13 +204,7 @@ export function useUnbindOrgProvider() {
       api(`/connection-profiles/org/${profileId}/bind/${providerId}`, {
         method: "DELETE",
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
-      qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-      qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-    },
+    onSuccess: () => invalidateOrgBindingCaches(qc),
     onError: onMutationError,
   });
 }
@@ -284,23 +264,6 @@ export function useSetFlowProviderProfile(packageId: string) {
       return api(`/flows/${packageId}/provider-profiles`, {
         method: "PUT",
         body: JSON.stringify({ providerId, profileId }),
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useRemoveFlowProviderProfile(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (providerId: string) => {
-      return api(`/flows/${packageId}/provider-profiles`, {
-        method: "DELETE",
-        body: JSON.stringify({ providerId }),
       });
     },
     onSuccess: () => {

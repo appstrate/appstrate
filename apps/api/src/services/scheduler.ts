@@ -1,6 +1,6 @@
 import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageSchedules } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
