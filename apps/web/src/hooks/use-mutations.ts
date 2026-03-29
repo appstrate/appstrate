@@ -14,7 +14,7 @@ function buildQs(params: Record<string, string | undefined>): string {
   return parts.length > 0 ? `?${parts.join("&")}` : "";
 }
 
-function onMutationError(err: Error) {
+export function onMutationError(err: Error) {
   alert(i18n.t("error.prefix", { message: err.message }));
 }
 
@@ -175,28 +175,6 @@ export function useDeleteAllConnections() {
       invalidateProviderRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
     },
-    onError: onMutationError,
-  });
-}
-
-export function useBindAdminProvider(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (providerId: string) => {
-      return api(`/flows/${packageId}/providers/${providerId}/bind`, { method: "POST" });
-    },
-    onSuccess: () => invalidateProviderRelated(qc),
-    // No onError — handled by the component (may open connect flow before retrying)
-  });
-}
-
-export function useUnbindAdminProvider(packageId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (providerId: string) => {
-      return api(`/flows/${packageId}/providers/${providerId}/bind`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateProviderRelated(qc),
     onError: onMutationError,
   });
 }

@@ -7,12 +7,11 @@ import { getPackage } from "../services/flow-service.ts";
 import { getPackageById } from "../services/package-items/index.ts";
 import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
 import {
-  getFlowProviderBindings,
   getPackageConfig,
   getLastExecution,
   getRunningExecutionsForPackage,
 } from "../services/state/index.ts";
-import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveProviderProfiles } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -43,18 +42,20 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const m = flow.manifest;
   const queryProfileId = c.req.query("profileId");
 
-  const [bindings, userProfileId] = await Promise.all([
-    getFlowProviderBindings(orgId, flow.id),
-    queryProfileId ? Promise.resolve(queryProfileId) : getEffectiveProfileId(actor, flow.id),
-  ]);
-
+  // Build providerProfiles map via shared resolution (org → bindings, user → direct)
   const manifestProviders = resolveManifestProviders(m);
+  const providerProfiles = await resolveProviderProfiles(
+    manifestProviders,
+    actor,
+    flow.id,
+    orgId,
+    queryProfileId,
+  );
 
   const providerStatuses = await resolveProviderStatuses(
     manifestProviders,
-    bindings,
+    providerProfiles,
     orgId,
-    userProfileId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
@@ -104,8 +105,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
 
   const [currentConfig, lastExec, runningCount] = await Promise.all([
     getPackageConfig(orgId, flow.id),
-    getLastExecution(flow.id, actor, orgId),
-    getRunningExecutionsForPackage(flow.id, actor),
+    getLastExecution(flow.id, null, orgId),
+    getRunningExecutionsForPackage(flow.id),
   ]);
 
   const configWithDefaults = m.config?.schema

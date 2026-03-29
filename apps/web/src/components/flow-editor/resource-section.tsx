@@ -165,10 +165,7 @@ export function ResourceSection({
                   isSelected && "border-primary bg-primary/5",
                 )}
               >
-                <Checkbox
-                  checked={isSelected}
-                  onCheckedChange={() => toggle(item.id)}
-                />
+                <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-sm font-medium truncate flex items-center gap-1.5">
                     {item.name || item.id}

@@ -1,8 +1,14 @@
+import type { Dispatch, SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
+
+/** Toggle an event in a state setter — shared by create and edit forms. */
+export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {
+  setter((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
+}
 
 export const WEBHOOK_EVENTS = [
   "execution.started",

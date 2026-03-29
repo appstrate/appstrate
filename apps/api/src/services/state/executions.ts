@@ -9,7 +9,7 @@ import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 export async function createExecution(
   id: string,
   packageId: string,
-  actor: Actor,
+  actor: Actor | null,
   orgId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
@@ -28,7 +28,7 @@ export async function createExecution(
   await db.insert(executions).values({
     id,
     packageId,
-    ...actorInsert(actor),
+    ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
     orgId,
     status: "pending",
     input,
@@ -83,20 +83,24 @@ export async function updateExecution(
 
 export async function getLastExecutionState(
   packageId: string,
-  actor: Actor,
+  actor: Actor | null,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
+  const conditions = [
+    eq(executions.packageId, packageId),
+    eq(executions.orgId, orgId),
+    isNotNull(executions.state),
+  ];
+  if (actor) {
+    conditions.push(
+      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
+    );
+  }
+
   const [row] = await db
     .select({ state: executions.state })
     .from(executions)
-    .where(
-      and(
-        eq(executions.packageId, packageId),
-        actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-        eq(executions.orgId, orgId),
-        isNotNull(executions.state),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(executions.startedAt))
     .limit(1);
   return (row?.state as Record<string, unknown>) ?? null;
@@ -104,7 +108,7 @@ export async function getLastExecutionState(
 
 export async function getRecentExecutions(
   packageId: string,
-  actor: Actor,
+  actor: Actor | null,
   orgId: string,
   options: {
     limit?: number;
@@ -117,10 +121,14 @@ export async function getRecentExecutions(
 
   const conditions = [
     eq(executions.packageId, packageId),
-    actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
     eq(executions.orgId, orgId),
     eq(executions.status, "success"),
   ];
+  if (actor) {
+    conditions.push(
+      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
+    );
+  }
 
   if (options.excludeExecutionId) {
     conditions.push(ne(executions.id, options.excludeExecutionId));
@@ -153,7 +161,14 @@ export async function getRecentExecutions(
   });
 }
 
-export async function getLastExecution(packageId: string, actor: Actor, orgId: string) {
+export async function getLastExecution(packageId: string, actor: Actor | null, orgId: string) {
+  const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];
+  if (actor) {
+    conditions.push(
+      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
+    );
+  }
+
   const [row] = await db
     .select({
       id: executions.id,
@@ -162,13 +177,7 @@ export async function getLastExecution(packageId: string, actor: Actor, orgId: s
       duration: executions.duration,
     })
     .from(executions)
-    .where(
-      and(
-        eq(executions.packageId, packageId),
-        actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-        eq(executions.orgId, orgId),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(executions.startedAt))
     .limit(1);
   return row ?? null;
@@ -293,6 +302,20 @@ export async function listPackageExecutions(
     .from(executions)
     .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
     .where(and(...conditions))
+    .orderBy(desc(executions.startedAt))
+    .limit(limit);
+  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+}
+
+export async function listScheduleExecutions(scheduleId: string, orgId: string, limit = 20) {
+  const rows = await db
+    .select({
+      execution: executions,
+      packageVersion: packageVersions.version,
+    })
+    .from(executions)
+    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
+    .where(and(eq(executions.scheduleId, scheduleId), eq(executions.orgId, orgId)))
     .orderBy(desc(executions.startedAt))
     .limit(limit);
   return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));

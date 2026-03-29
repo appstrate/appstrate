@@ -4,12 +4,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useOrg } from "../../hooks/use-org";
-import {
-  useConnect,
-  useBindAdminProvider,
-  useUnbindAdminProvider,
-  useDisconnect,
-} from "../../hooks/use-mutations";
+import { useConnect, useDisconnect } from "../../hooks/use-mutations";
 import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { computeProvidersSummary, connectedLabelWithProfile } from "../../lib/provider-status";
@@ -28,8 +23,6 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
   const { data: profiles } = useConnectionProfiles();
 
   const connectMutation = useConnect();
-  const bindAdmin = useBindAdminProvider(packageId);
-  const unbindAdmin = useUnbindAdminProvider(packageId);
   const disconnectMutation = useDisconnect();
 
   const populatedProviders = detail?.populatedProviders;
@@ -93,7 +86,6 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mb-4">
         {detail.dependencies.providers.map((svc) => {
           const isConnected = svc.status === "connected";
-          const isAdminMode = svc.connectionMode === "admin";
           const authMode = getProviderAuthMode(svc);
           const providerConfig = getProviderConfig(svc.provider);
           const displayName = providerConfig?.displayName ?? svc.name ?? svc.id;
@@ -114,82 +106,8 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
             }
           };
 
-          const handleBind = async () => {
-            try {
-              await bindAdmin.mutateAsync(svc.id);
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : "";
-              if (!msg.includes("connexion active")) {
-                alert(t("error.prefix", { message: msg }));
-                return;
-              }
-              try {
-                if (authMode === "API_KEY") {
-                  setApiKeyService({ provider: svc.provider, id: svc.id, bindAfter: true });
-                  return;
-                }
-                if (isCredentialAuth(svc.provider)) {
-                  setCustomCredService({
-                    provider: svc.provider,
-                    id: svc.id,
-                    name: svc.name,
-                    bindAfter: true,
-                  });
-                  return;
-                }
-                await connectMutation.mutateAsync({
-                  provider: svc.provider,
-                  scopes: svc.scopesRequired,
-                });
-                await bindAdmin.mutateAsync(svc.id);
-              } catch (retryErr) {
-                const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-                alert(t("error.prefix", { message: retryMsg }));
-              }
-            }
-          };
-
-          // --- Render action buttons based on state ---
           let actionButtons: React.ReactNode;
-          if (isAdminMode && svc.adminProvided && isConnected) {
-            actionButtons = (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-emerald-500">
-                  {t("settings:providers.connected")}
-                </span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                  {t("admin")}
-                </span>
-                {isOrgAdmin && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => unbindAdmin.mutate(svc.id)}
-                    disabled={unbindAdmin.isPending}
-                  >
-                    {t("detail.unbind")}
-                  </Button>
-                )}
-              </div>
-            );
-          } else if (isAdminMode) {
-            actionButtons = isOrgAdmin ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleBind}
-                disabled={bindAdmin.isPending || connectMutation.isPending}
-              >
-                {t("detail.bindAccount")}
-              </Button>
-            ) : (
-              <span className="rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
-                {t("detail.pending")}
-              </span>
-            );
-          } else if (svc.status === "needs_reconnection") {
+          if (svc.status === "needs_reconnection") {
             actionButtons = (
               <Button
                 variant="outline"

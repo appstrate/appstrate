@@ -54,6 +54,21 @@ export type ExecutionStatus = (typeof executionStatusEnum.enumValues)[number];
 // --- Schedule Types ---
 
 export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
+import type { PackageSchedule } from "@appstrate/db/schema";
+
+export interface ScheduleReadiness {
+  status: "ready" | "degraded" | "not_ready";
+  totalProviders: number;
+  connectedProviders: number;
+  missingProviders: string[];
+}
+
+export type EnrichedSchedule = PackageSchedule & {
+  profileName: string | null;
+  profileType: "user" | "org" | null;
+  profileOwnerName: string | null;
+  readiness: ScheduleReadiness;
+};
 
 // --- Organization Types ---
 
@@ -145,8 +160,6 @@ export interface ProviderStatus {
   status: ConnectionStatusValue;
   authMode?: string;
   connectUrl?: string;
-  connectionMode?: "user" | "admin";
-  adminProvided?: boolean;
   scopesRequired?: string[];
   scopesGranted?: string[];
   scopesSufficient?: boolean;

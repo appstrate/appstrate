@@ -18,6 +18,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'status', NEW.status,
         'user_id', NEW.user_id,
         'org_id', NEW.org_id,
+        'schedule_id', NEW.schedule_id,
         'error', NEW.error,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

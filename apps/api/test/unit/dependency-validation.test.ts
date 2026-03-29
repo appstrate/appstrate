@@ -61,7 +61,7 @@ describe("validateFlowDependencies", () => {
     }
   });
 
-  it("throws when profile is missing for admin-mode provider", async () => {
+  it("throws when profile is missing regardless of connectionMode", async () => {
     const deps = createMockDeps();
     const providers = [{ id: "@test/service", connectionMode: "admin" as const }];
     const profiles = {};
@@ -72,7 +72,7 @@ describe("validateFlowDependencies", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("dependency_not_satisfied");
-      expect((err as ApiError).message).toContain("administrator");
+      expect((err as ApiError).message).toContain("not connected");
     }
   });
 

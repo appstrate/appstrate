@@ -8,6 +8,7 @@ import {
   Wrench,
   Puzzle,
   Plug,
+  Users,
   Settings,
   Webhook,
   Loader2,
@@ -41,6 +42,7 @@ export function NavOrg() {
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/tools", label: t("nav.tools"), icon: Puzzle },
     { path: "/providers", label: t("nav.connectors"), icon: Plug },
+    { path: "/org-profiles", label: t("nav.orgProfiles"), icon: Users },
   ];
 
   return (

@@ -137,10 +137,8 @@ export const schemas = {
       id: { type: "string", description: "Provider requirement ID" },
       provider: { type: "string", description: "Provider ID" },
       description: { type: "string" },
-      connectionMode: { type: "string", enum: ["user", "admin"] },
       status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
       authMode: { type: "string" },
-      adminProvided: { type: "boolean" },
       scopesRequired: { type: "array", items: { type: "string" } },
       scopesGranted: { type: "array", items: { type: "string" } },
       scopesSufficient: { type: "boolean" },
@@ -372,7 +370,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
-      userId: { type: "string" },
+      connectionProfileId: { type: "string", format: "uuid" },
       orgId: { type: "string" },
       name: { type: ["string", "null"] },
       enabled: { type: ["boolean", "null"] },
@@ -383,6 +381,17 @@ export const schemas = {
       nextRunAt: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+      profileName: { type: ["string", "null"] },
+      profileType: { type: ["string", "null"], enum: ["user", "org", null] },
+      readiness: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["ready", "degraded", "not_ready"] },
+          totalProviders: { type: "integer" },
+          connectedProviders: { type: "integer" },
+          missingProviders: { type: "array", items: { type: "string" } },
+        },
+      },
     },
   },
   AvailableProvider: {

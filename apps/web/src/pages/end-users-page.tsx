@@ -61,9 +61,7 @@ export function EndUsersPage() {
           { label: t("endUsers.pageTitle") },
         ]}
         actions={
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("applications.newEndUser")}
-          </Button>
+          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
         }
       />
 
@@ -89,9 +87,7 @@ export function EndUsersPage() {
           hint={t("applications.noEndUsersHint")}
           icon={Users}
         >
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("applications.newEndUser")}
-          </Button>
+          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">

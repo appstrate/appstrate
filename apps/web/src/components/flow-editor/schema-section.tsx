@@ -156,7 +156,10 @@ function SortableFieldCard({
             onCheckedChange={(checked) => onUpdate(index, { required: Boolean(checked) })}
             disabled={readOnly}
           />
-          <Label htmlFor={`field-req-${index}`} className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer">
+          <Label
+            htmlFor={`field-req-${index}`}
+            className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+          >
             {t("editor.fieldReq")}
           </Label>
         </div>
@@ -196,7 +199,10 @@ function SortableFieldCard({
                   checked={field.multiple ?? false}
                   onCheckedChange={(checked) => onUpdate(index, { multiple: Boolean(checked) })}
                 />
-                <Label htmlFor={`field-multiple-${index}`} className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer">
+                <Label
+                  htmlFor={`field-multiple-${index}`}
+                  className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+                >
                   {t("editor.fieldMultiple")}
                 </Label>
               </div>

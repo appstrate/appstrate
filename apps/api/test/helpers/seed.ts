@@ -189,6 +189,7 @@ export async function seedWebhook(
 
 type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
   packageId: string;
+  connectionProfileId: string;
   orgId: string;
 };
 
@@ -298,9 +299,8 @@ export async function seedOrgModel(
 
 // ─── Connection Profiles ──────────────────────────────────
 
-type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> & {
-  userId: string;
-};
+type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> &
+  ({ userId: string } | { orgId: string });
 
 export async function seedConnectionProfile(
   overrides: ConnectionProfileInsert,

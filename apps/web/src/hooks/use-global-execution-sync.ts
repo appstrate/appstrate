@@ -11,6 +11,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     const packageId = newRow.packageId as string;
     const execId = newRow.id as string;
     const status = newRow.status as string;
+    const scheduleId = newRow.scheduleId as string | null;
 
     qc.setQueryData<Execution>(["execution", orgId, execId], (prev) => {
       if (!prev) return prev;
@@ -29,6 +30,13 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     qc.invalidateQueries({ queryKey: ["flows", orgId] });
     qc.invalidateQueries({ queryKey: ["packages", "flow", orgId, packageId] });
     qc.invalidateQueries({ queryKey: ["all-executions"] });
+
+    // Invalidate schedule-specific caches
+    if (scheduleId) {
+      qc.invalidateQueries({ queryKey: ["schedule-executions", orgId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedule", orgId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedules", orgId] });
+    }
 
     if (TERMINAL_STATUSES.has(status)) {
       qc.invalidateQueries({ queryKey: ["execution", orgId, execId] });

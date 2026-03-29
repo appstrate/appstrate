@@ -72,9 +72,15 @@ export const schedulesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["cronExpression"],
+              required: ["connectionProfileId", "cronExpression"],
               properties: {
                 name: { type: "string" },
+                connectionProfileId: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "Connection profile to use for provider credentials (user or org profile)",
+                },
                 cronExpression: {
                   type: "string",
                   description: "Cron expression (e.g. '0 9 * * 1-5')",
@@ -108,6 +114,32 @@ export const schedulesPaths = {
     },
   },
   "/api/schedules/{id}": {
+    get: {
+      operationId: "getSchedule",
+      tags: ["Schedules"],
+      summary: "Get a schedule",
+      description: "Get a single schedule by ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Schedule details",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Schedule" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
     put: {
       operationId: "updateSchedule",
       tags: ["Schedules"],
@@ -124,6 +156,7 @@ export const schedulesPaths = {
             schema: {
               type: "object",
               properties: {
+                connectionProfileId: { type: "string", format: "uuid" },
                 name: { type: "string" },
                 cronExpression: { type: "string" },
                 timezone: { type: "string" },
@@ -173,6 +206,41 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/schedules/{id}/executions": {
+    get: {
+      operationId: "listScheduleExecutions",
+      tags: ["Schedules"],
+      summary: "List executions for a schedule",
+      description: "List recent executions triggered by a specific schedule.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "limit",
+          in: "query",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Execution list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "array",
+                items: { $ref: "#/components/schemas/Execution" },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
   },
