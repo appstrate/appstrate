@@ -632,6 +632,7 @@
   "providerCard.connectAndBind": "Connecter et lier",
   "providerCard.disconnect": "Déconnecter",
   "providerCard.bind": "Lier",
+  "providerCard.bindTo": "Lier à {{name}}",
   "providerCard.unbind": "Délier",
   "providerCard.bound": "Lié",
   "providerCard.default": "défaut",

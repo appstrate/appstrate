@@ -216,9 +216,9 @@ export interface FlowDetail {
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** Admin-forced org profile ID (null = none). When set, users cannot override. */
-  forcedOrgProfileId?: string | null;
-  forcedOrgProfileName?: string | null;
+  /** Org profile ID configured for this flow. Used for per-provider org bindings. */
+  flowOrgProfileId?: string | null;
+  flowOrgProfileName?: string | null;
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
