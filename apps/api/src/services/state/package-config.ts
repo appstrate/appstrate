@@ -25,12 +25,14 @@ export async function getPackageConfigFull(
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
+  orgProfileId: string | null;
 }> {
   const [row] = await db
     .select({
       config: packageConfigs.config,
       modelId: packageConfigs.modelId,
       proxyId: packageConfigs.proxyId,
+      orgProfileId: packageConfigs.orgProfileId,
     })
     .from(packageConfigs)
     .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
@@ -39,6 +41,7 @@ export async function getPackageConfigFull(
     config: asRecord(row?.config),
     modelId: row?.modelId ?? null,
     proxyId: row?.proxyId ?? null,
+    orgProfileId: row?.orgProfileId ?? null,
   };
 }
 
@@ -67,7 +70,7 @@ export async function setPackageConfig(
 export async function setFlowOverride(
   orgId: string,
   packageId: string,
-  field: "modelId" | "proxyId",
+  field: "modelId" | "proxyId" | "orgProfileId",
   value: string | null,
 ): Promise<void> {
   await db

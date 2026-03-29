@@ -17,6 +17,7 @@ import {
   addPackageMemories,
 } from "../services/state/index.ts";
 import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
@@ -418,6 +419,10 @@ export function createExecutionsRouter() {
         };
       }
 
+      // Load admin-forced org profile (takes priority over user override)
+      const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, packageId);
+      const effectiveOrgProfileId = forcedOrgProfileId ?? orgProfileIdOverride ?? null;
+
       // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
       const resolvedUserProfileId =
         profileIdOverride ?? (await getEffectiveProfileId(actor, packageId));
@@ -427,7 +432,7 @@ export function createExecutionsRouter() {
           packageId,
           orgId,
           userProfileId: resolvedUserProfileId,
-          orgProfileId: orgProfileIdOverride,
+          orgProfileId: effectiveOrgProfileId,
         }),
         parseRequestInput(
           c,
