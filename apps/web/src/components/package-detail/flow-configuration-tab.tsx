@@ -15,11 +15,7 @@ import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
-import {
-  useOrgProfiles,
-  useFlowOrgProfile,
-  useSetFlowOrgProfile,
-} from "../../hooks/use-connection-profiles";
+import { useOrgProfiles, useSetFlowOrgProfile } from "../../hooks/use-connection-profiles";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import {
@@ -173,13 +169,13 @@ function ProxySection({ packageId }: { packageId: string }) {
 function OrgProfileSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "settings"]);
   const { data: orgProfiles } = useOrgProfiles();
-  const { data: flowOrgProfile } = useFlowOrgProfile(packageId);
+  const { data: detail } = usePackageDetail("flow", packageId);
   const setFlowOrgProfile = useSetFlowOrgProfile(packageId);
   const { isOrgAdmin } = useOrg();
 
   if (!isOrgAdmin || !orgProfiles || orgProfiles.length === 0) return null;
 
-  const flowOrgProfileId = flowOrgProfile?.orgProfileId;
+  const currentOrgProfileId = detail?.flowOrgProfileId;
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -188,11 +184,12 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
       </h3>
       <p className="text-xs text-muted-foreground">
         {t("detail.configOrgProfileHint", {
-          defaultValue: "Force an organization connection profile for all users running this flow.",
+          defaultValue:
+            "Select an organization connection profile. Providers bound in this profile will be shared with all users.",
         })}
       </p>
       <Select
-        value={flowOrgProfileId ?? "__none__"}
+        value={currentOrgProfileId ?? "__none__"}
         onValueChange={(v) => setFlowOrgProfile.mutate(v === "__none__" ? null : v)}
         disabled={setFlowOrgProfile.isPending}
       >
@@ -201,7 +198,9 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">
-            {t("detail.configOrgProfileNone", { defaultValue: "None — user chooses" })}
+            {t("detail.configOrgProfileNone", {
+              defaultValue: "None — all connections managed by users",
+            })}
           </SelectItem>
           {orgProfiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>

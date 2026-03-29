@@ -632,6 +632,7 @@
   "providerCard.connectAndBind": "Connect & bind",
   "providerCard.disconnect": "Disconnect",
   "providerCard.bind": "Bind",
+  "providerCard.bindTo": "Share with {{name}}",
   "providerCard.unbind": "Unbind",
   "providerCard.bound": "Bound",
   "providerCard.default": "default",

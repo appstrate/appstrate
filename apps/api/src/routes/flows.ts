@@ -151,16 +151,7 @@ export function createFlowsRouter() {
     return c.json({ success: true });
   });
 
-  // GET /api/flows/:scope/:name/org-profile — get forced org profile for this flow
-  router.get("/:scope{@[^/]+}/:name/org-profile", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const { orgProfileId } = await getPackageConfigFull(orgId, flow.id);
-
-    return c.json({ orgProfileId });
-  });
-
-  // PUT /api/flows/:scope/:name/org-profile — set forced org profile (admin-only)
+  // PUT /api/flows/:scope/:name/org-profile — set org profile for this flow (admin-only)
   router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), requireAdmin(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");

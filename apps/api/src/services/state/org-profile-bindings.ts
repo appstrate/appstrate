@@ -1,4 +1,4 @@
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   orgProfileProviderBindings,

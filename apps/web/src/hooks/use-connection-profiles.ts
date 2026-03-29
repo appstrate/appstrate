@@ -227,15 +227,6 @@ export function useUnbindOrgProvider() {
 
 // ─── Flow Org Profile Override ───────────────────────────
 
-export function useFlowOrgProfile(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["flow-org-profile", orgId, packageId],
-    queryFn: () => api<{ orgProfileId: string | null }>(`/flows/${packageId}/org-profile`),
-    enabled: !!orgId && !!packageId,
-  });
-}
-
 export function useSetFlowOrgProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -246,7 +237,6 @@ export function useSetFlowOrgProfile(packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-org-profile"] });
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
     onError: onMutationError,

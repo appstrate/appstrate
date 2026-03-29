@@ -47,11 +47,12 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const m = flow.manifest;
   const queryProfileId = c.req.query("profileId");
 
-  // Load admin-configured org profile from flow config
-  const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
-  const forcedOrgProfileName = forcedOrgProfileId
-    ? ((await getOrgProfile(forcedOrgProfileId, orgId))?.name ?? null)
-    : null;
+  // Load admin-configured org profile (null = none configured).
+  // If the referenced profile was deleted, treat as null.
+  const { orgProfileId: configOrgProfileId } = await getPackageConfigFull(orgId, flow.id);
+  const orgProfile = configOrgProfileId ? await getOrgProfile(configOrgProfileId, orgId) : null;
+  const flowOrgProfileId = orgProfile ? configOrgProfileId : null;
+  const flowOrgProfileName = orgProfile?.name ?? null;
 
   // Resolve user profile: explicit override or actor's effective profile
   const userProfileId = queryProfileId ?? (await getEffectiveProfileId(actor, flow.id));
@@ -61,7 +62,7 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
     userProfileId,
-    forcedOrgProfileId,
+    flowOrgProfileId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
@@ -197,8 +198,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnpublishedChanges,
-      forcedOrgProfileId,
-      forcedOrgProfileName,
+      flowOrgProfileId,
+      flowOrgProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(flow.source !== "system" && rawItem
         ? {

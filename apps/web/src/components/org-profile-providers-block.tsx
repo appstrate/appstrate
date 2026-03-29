@@ -51,6 +51,7 @@ export function OrgProfileProvidersBlock({
             key={providerId}
             providerId={providerId}
             orgProfileId={orgProfileId}
+            orgProfileName={orgProfileName}
             readOnly={readOnly}
           />
         ))}
