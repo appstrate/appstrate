@@ -186,4 +186,45 @@ describe("resolveProviderProfiles", () => {
       "@test/stripe": { profileId: "org-stripe-profile", source: "org_binding" },
     });
   });
+
+  it("org binding with deleted source profile still resolves to org_binding source", async () => {
+    // When an org binding points to a profile whose connection was deleted,
+    // resolveProviderProfiles still returns "org_binding" — the broken state
+    // is detected downstream (connection status check, UI display).
+    const deps = createMockDeps({
+      "@test/gmail": "deleted-profile-id",
+    });
+
+    const result = await resolveProviderProfiles(
+      [gmail, clickup],
+      "default-profile",
+      undefined,
+      "org-profile-1",
+      deps,
+    );
+
+    expect(result).toEqual({
+      "@test/gmail": { profileId: "deleted-profile-id", source: "org_binding" },
+      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+    });
+  });
+
+  it("empty org bindings fall back to user profiles for all providers", async () => {
+    // Org profile exists but has no bindings — all providers resolved via user path
+    const deps = createMockDeps({});
+    const overrides = { "@test/gmail": "gmail-override" };
+
+    const result = await resolveProviderProfiles(
+      [gmail, clickup],
+      "default-profile",
+      overrides,
+      "org-profile-1",
+      deps,
+    );
+
+    expect(result).toEqual({
+      "@test/gmail": { profileId: "gmail-override", source: "user_profile" },
+      "@test/clickup": { profileId: "default-profile", source: "user_profile" },
+    });
+  });
 });

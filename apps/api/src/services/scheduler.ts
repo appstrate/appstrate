@@ -228,7 +228,9 @@ async function triggerScheduledExecution(
     // Load the flow's admin-configured org profile from package_configs
     const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(orgId, packageId);
 
-    // Resolve provider profiles, config, and validate readiness
+    // Resolve provider profiles, config, and validate readiness.
+    // Schedules don't support per-provider overrides — the schedule's connectionProfileId
+    // is used as the default for all unbound providers.
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     try {

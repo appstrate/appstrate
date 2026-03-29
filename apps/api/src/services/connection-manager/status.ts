@@ -51,6 +51,42 @@ function buildScopeInfo(
   };
 }
 
+/** Batch-fetch profile name + owner name for a set of profile IDs. */
+async function buildProfileInfoMap(
+  profileIds: string[],
+): Promise<Map<string, { profileName: string | null; profileOwnerName: string | null }>> {
+  if (profileIds.length === 0) {
+    return new Map();
+  }
+
+  const profileRows = await db
+    .select({
+      id: connectionProfiles.id,
+      name: connectionProfiles.name,
+      userId: connectionProfiles.userId,
+    })
+    .from(connectionProfiles)
+    .where(inArray(connectionProfiles.id, profileIds));
+
+  const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
+  const userRows =
+    userIds.length > 0
+      ? await db
+          .select({ id: user.id, name: user.name })
+          .from(user)
+          .where(inArray(user.id, userIds))
+      : [];
+
+  return new Map(
+    profileRows.map((row) => {
+      const ownerName = row.userId
+        ? (userRows.find((u) => u.id === row.userId)?.name ?? null)
+        : null;
+      return [row.id, { profileName: row.name, profileOwnerName: ownerName }];
+    }),
+  );
+}
+
 /**
  * Resolve provider statuses for a flow's required providers.
  * providerProfiles maps each providerId to the profile holding its credentials
@@ -70,39 +106,7 @@ export async function resolveProviderStatuses(
     ),
   ];
 
-  let profileInfoMap = new Map<
-    string,
-    { profileName: string | null; profileOwnerName: string | null }
-  >();
-
-  if (profileIds.length > 0) {
-    const profileRows = await db
-      .select({
-        id: connectionProfiles.id,
-        name: connectionProfiles.name,
-        userId: connectionProfiles.userId,
-      })
-      .from(connectionProfiles)
-      .where(inArray(connectionProfiles.id, profileIds));
-
-    const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
-    const userRows =
-      userIds.length > 0
-        ? await db
-            .select({ id: user.id, name: user.name })
-            .from(user)
-            .where(inArray(user.id, userIds))
-        : [];
-
-    profileInfoMap = new Map(
-      profileRows.map((row) => {
-        const ownerName = row.userId
-          ? (userRows.find((u) => u.id === row.userId)?.name ?? null)
-          : null;
-        return [row.id, { profileName: row.name, profileOwnerName: ownerName }];
-      }),
-    );
-  }
+  const profileInfoMap = await buildProfileInfoMap(profileIds);
 
   return Promise.all(
     providers.map(async (svc) => {

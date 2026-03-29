@@ -2,7 +2,7 @@
  * Connection Profiles — manages actor and org connection profiles and profile resolution.
  */
 
-import { eq, and, count, inArray } from "drizzle-orm";
+import { eq, and, count, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
@@ -255,6 +255,8 @@ export async function listOrgProfilesWithUserBindings(
       orgProfileId: orgProfileProviderBindings.orgProfileId,
       providerId: orgProfileProviderBindings.providerId,
       profileName: connectionProfiles.name,
+      profileCreatedAt: connectionProfiles.createdAt,
+      profileUpdatedAt: connectionProfiles.updatedAt,
     })
     .from(orgProfileProviderBindings)
     .innerJoin(
@@ -268,10 +270,15 @@ export async function listOrgProfilesWithUserBindings(
       ),
     );
 
-  const grouped = new Map<string, { profileName: string; providerIds: string[] }>();
+  const grouped = new Map<
+    string,
+    { profileName: string; createdAt: Date; updatedAt: Date; providerIds: string[] }
+  >();
   for (const row of rows) {
     const entry = grouped.get(row.orgProfileId) ?? {
       profileName: row.profileName,
+      createdAt: row.profileCreatedAt,
+      updatedAt: row.profileUpdatedAt,
       providerIds: [],
     };
     entry.providerIds.push(row.providerId);
@@ -286,8 +293,8 @@ export async function listOrgProfilesWithUserBindings(
       orgId,
       name: data.profileName,
       isDefault: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
     },
     providerIds: data.providerIds,
   }));
@@ -323,53 +330,26 @@ export async function getUserFlowProviderOverrides(
   return map;
 }
 
-/** Set a per-provider profile override (upsert). */
+/** Set a per-provider profile override (atomic upsert via raw SQL). */
 export async function setUserFlowProviderOverride(
   actor: Actor,
   packageId: string,
   providerId: string,
   profileId: string,
 ): Promise<void> {
-  // Use raw SQL upsert since Drizzle partial unique indexes need manual conflict handling
   const actorValues = actorInsert(actor);
-  const existing = await db
-    .select({ rowid: userFlowProviderProfiles.packageId })
-    .from(userFlowProviderProfiles)
-    .where(
-      and(
-        actorFilter(actor, {
-          userId: userFlowProviderProfiles.userId,
-          endUserId: userFlowProviderProfiles.endUserId,
-        }),
-        eq(userFlowProviderProfiles.packageId, packageId),
-        eq(userFlowProviderProfiles.providerId, providerId),
-      ),
-    )
-    .limit(1);
+  const userId = actorValues.userId ?? null;
+  const endUserId = actorValues.endUserId ?? null;
 
-  if (existing.length > 0) {
-    await db
-      .update(userFlowProviderProfiles)
-      .set({ profileId, updatedAt: new Date() })
-      .where(
-        and(
-          actorFilter(actor, {
-            userId: userFlowProviderProfiles.userId,
-            endUserId: userFlowProviderProfiles.endUserId,
-          }),
-          eq(userFlowProviderProfiles.packageId, packageId),
-          eq(userFlowProviderProfiles.providerId, providerId),
-        ),
-      );
-  } else {
-    await db.insert(userFlowProviderProfiles).values({
-      ...actorValues,
-      packageId,
-      providerId,
-      profileId,
-      updatedAt: new Date(),
-    });
-  }
+  // Atomic upsert — partial unique indexes (idx_ufpp_member / idx_ufpp_end_user)
+  // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
+  await db.execute(sql`
+    INSERT INTO user_flow_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
+    VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${profileId}, NOW())
+    ON CONFLICT (${userId !== null ? sql`user_id` : sql`end_user_id`}, package_id, provider_id)
+      WHERE ${userId !== null ? sql`user_id IS NOT NULL` : sql`end_user_id IS NOT NULL`}
+    DO UPDATE SET profile_id = EXCLUDED.profile_id, updated_at = NOW()
+  `);
 }
 
 /** Remove a per-provider profile override (revert to default). */

@@ -110,7 +110,6 @@
   "schedule.cronLabel": "Cron expression",
   "schedule.cronHint": "Format: minute hour day month weekday",
   "schedule.timezone": "Timezone",
-  "schedule.enabled": "Enabled",
   "schedule.inputTitle": "Input parameters",
   "schedule.preset30min": "Every 30 min",
   "schedule.presetHourly": "Every hour",
