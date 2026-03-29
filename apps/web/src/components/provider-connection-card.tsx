@@ -34,12 +34,15 @@ interface ProviderConnectionCardProps {
   orgProfileId?: string;
   /** When false, connecting does NOT auto-bind — user can bind separately. Default: true. */
   bindOnConnect?: boolean;
+  /** When true, hide all action buttons — display-only mode for non-admin users. */
+  readOnly?: boolean;
 }
 
 export function ProviderConnectionCard({
   providerId,
   orgProfileId,
   bindOnConnect = true,
+  readOnly = false,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
   const qc = useQueryClient();
@@ -190,7 +193,7 @@ export function ProviderConnectionCard({
         <div className="flex-1" />
 
         {/* Profile selector — shown when multiple profiles and not yet bound */}
-        {hasMultipleProfiles && !isBound && (
+        {!readOnly && hasMultipleProfiles && !isBound && (
           <Select value={effectiveProfileId ?? ""} onValueChange={setSelectedProfileId}>
             <SelectTrigger className="h-7 w-32 text-xs">
               <SelectValue />
@@ -206,112 +209,118 @@ export function ProviderConnectionCard({
           </Select>
         )}
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {!isConnected && !orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleConnect}
-              disabled={isPending || !provider?.enabled || !effectiveProfileId}
-            >
-              {t("providerCard.connect")}
-            </Button>
-          )}
+        {/* Action buttons (hidden in read-only mode) */}
+        {!readOnly && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {!isConnected && !orgProfileId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleConnect}
+                disabled={isPending || !provider?.enabled || !effectiveProfileId}
+              >
+                {t("providerCard.connect")}
+              </Button>
+            )}
 
-          {!isConnected && orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={bindOnConnect ? handleConnectAndBind : handleConnect}
-              disabled={isPending || !provider?.enabled || !effectiveProfileId}
-            >
-              {bindOnConnect ? t("providerCard.connectAndBind") : t("providerCard.connect")}
-            </Button>
-          )}
+            {!isConnected && orgProfileId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={bindOnConnect ? handleConnectAndBind : handleConnect}
+                disabled={isPending || !provider?.enabled || !effectiveProfileId}
+              >
+                {bindOnConnect ? t("providerCard.connectAndBind") : t("providerCard.connect")}
+              </Button>
+            )}
 
-          {isConnected && !orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleDisconnect}
-              disabled={isPending}
-            >
-              {t("providerCard.disconnect")}
-            </Button>
-          )}
+            {isConnected && !orgProfileId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleDisconnect}
+                disabled={isPending}
+              >
+                {t("providerCard.disconnect")}
+              </Button>
+            )}
 
-          {isConnected && orgProfileId && !isBound && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={doBind}
-              disabled={isPending || !effectiveProfileId}
-            >
-              <Link2 className="size-3 mr-1" />
-              {t("providerCard.bind")}
-            </Button>
-          )}
+            {isConnected && orgProfileId && !isBound && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={doBind}
+                disabled={isPending || !effectiveProfileId}
+              >
+                <Link2 className="size-3 mr-1" />
+                {t("providerCard.bind")}
+              </Button>
+            )}
 
-          {isConnected && orgProfileId && isBound && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleUnbind}
-              disabled={isPending}
-            >
-              <Unlink className="size-3 mr-1" />
-              {t("providerCard.unbind")}
-            </Button>
-          )}
-        </div>
+            {isConnected && orgProfileId && isBound && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleUnbind}
+                disabled={isPending}
+              >
+                <Unlink className="size-3 mr-1" />
+                {t("providerCard.unbind")}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      <ApiKeyModal
-        open={apiKeyOpen}
-        onClose={() => setApiKeyOpen(false)}
-        providerName={displayName}
-        isPending={connectApiKeyMutation.isPending}
-        onSubmit={(apiKey) => {
-          connectApiKeyMutation.mutate(
-            { provider: providerId, apiKey, ...profileParam },
-            {
-              onSuccess: () => {
-                setApiKeyOpen(false);
-                invalidateConnections();
-                if (orgProfileId) doBind();
-              },
-            },
-          );
-        }}
-      />
-
-      {credentialSchema && (
-        <CustomCredentialsModal
-          open={customCredOpen}
-          onClose={() => setCustomCredOpen(false)}
-          schema={credentialSchema}
-          providerId={providerId}
-          providerName={displayName}
-          isPending={connectCredentialsMutation.isPending}
-          onSubmit={(credentials) => {
-            connectCredentialsMutation.mutate(
-              { provider: providerId, credentials, ...profileParam },
-              {
-                onSuccess: () => {
-                  setCustomCredOpen(false);
-                  invalidateConnections();
-                  if (orgProfileId) doBind();
+      {!readOnly && (
+        <>
+          <ApiKeyModal
+            open={apiKeyOpen}
+            onClose={() => setApiKeyOpen(false)}
+            providerName={displayName}
+            isPending={connectApiKeyMutation.isPending}
+            onSubmit={(apiKey) => {
+              connectApiKeyMutation.mutate(
+                { provider: providerId, apiKey, ...profileParam },
+                {
+                  onSuccess: () => {
+                    setApiKeyOpen(false);
+                    invalidateConnections();
+                    if (orgProfileId) doBind();
+                  },
                 },
-              },
-            );
-          }}
-        />
+              );
+            }}
+          />
+
+          {credentialSchema && (
+            <CustomCredentialsModal
+              open={customCredOpen}
+              onClose={() => setCustomCredOpen(false)}
+              schema={credentialSchema}
+              providerId={providerId}
+              providerName={displayName}
+              isPending={connectCredentialsMutation.isPending}
+              onSubmit={(credentials) => {
+                connectCredentialsMutation.mutate(
+                  { provider: providerId, credentials, ...profileParam },
+                  {
+                    onSuccess: () => {
+                      setCustomCredOpen(false);
+                      invalidateConnections();
+                      if (orgProfileId) doBind();
+                    },
+                  },
+                );
+              }}
+            />
+          )}
+        </>
       )}
     </>
   );
