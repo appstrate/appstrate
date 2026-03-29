@@ -7,12 +7,7 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import {
-  getPackageConfig,
-  getPackageConfigFull,
-  getLastExecutionState,
-  getPackageMemories,
-} from "./state/index.ts";
+import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildFlowPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
@@ -47,7 +42,7 @@ export async function resolvePreflightContext(params: {
     params;
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
-  const [providerProfiles, config] = await Promise.all([
+  const [providerProfiles, packageConfig] = await Promise.all([
     resolveProviderProfiles(
       manifestProviders,
       defaultUserProfileId,
@@ -57,9 +52,9 @@ export async function resolvePreflightContext(params: {
     getPackageConfig(orgId, packageId),
   ]);
 
-  await validateFlowReadiness({ flow, providerProfiles, orgId, config });
+  await validateFlowReadiness({ flow, providerProfiles, orgId, config: packageConfig.config });
 
-  return { providerProfiles, config };
+  return { providerProfiles, config: packageConfig.config };
 }
 
 /**
@@ -194,7 +189,7 @@ export async function buildExecutionContext(params: {
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    getPackageConfigFull(orgId, flow.id),
+    getPackageConfig(orgId, flow.id),
     getLastExecutionState(flow.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
     buildFlowPackage(flow, orgId),

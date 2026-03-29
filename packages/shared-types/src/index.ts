@@ -129,6 +129,16 @@ export function findMissingDependencies(
 
 export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
 
+// --- Org Profile Binding Types ---
+
+export interface EnrichedBinding {
+  providerId: string;
+  sourceProfileId: string;
+  sourceProfileName: string;
+  boundByUserName: string | null;
+  connected: boolean;
+}
+
 // --- User Connection Types ---
 
 export interface UserConnectionEntry {
