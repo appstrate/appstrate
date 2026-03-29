@@ -2,7 +2,8 @@ import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageSchedules, user } from "@appstrate/db/schema";
+import { packageSchedules } from "@appstrate/db/schema";
+import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createExecution } from "./state/index.ts";
@@ -20,9 +21,9 @@ import { getProfileById, resolveProviderProfiles } from "./connection-profiles.t
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { getConnection } from "@appstrate/connect";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
-import { getPackageConfigFull } from "./state/package-config.ts";
+import { getPackageConfig } from "./state/package-config.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
@@ -226,7 +227,7 @@ async function triggerScheduledExecution(
         : null;
 
     // Load the flow's admin-configured org profile from package_configs
-    const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(orgId, packageId);
+    const { orgProfileId: flowOrgProfileId } = await getPackageConfig(orgId, packageId);
 
     // Resolve provider profiles, config, and validate readiness.
     // Schedules don't support per-provider overrides — the schedule's connectionProfileId
@@ -462,16 +463,7 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
 
   // Batch load user names for user-owned profiles
   const userIds = [...new Set(profiles.filter((p) => p?.userId).map((p) => p!.userId!))];
-  const userNameMap = new Map<string, string>();
-  if (userIds.length > 0) {
-    const userRows = await db
-      .select({ id: user.id, name: user.name })
-      .from(user)
-      .where(inArray(user.id, userIds));
-    for (const u of userRows) {
-      if (u.name) userNameMap.set(u.id, u.name);
-    }
-  }
+  const userNameMap = await batchLoadUserNames(userIds);
 
   // Batch load unique flows
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
@@ -539,7 +531,7 @@ export async function createSchedule(
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create schedule: no row returned");
+    throw internalError("Failed to create schedule: no row returned");
   }
   const schedule = toSchedule(row);
 
@@ -588,7 +580,7 @@ export async function updateSchedule(
     .returning();
 
   if (!row) {
-    throw new Error(`Failed to update schedule ${id}: no row returned`);
+    throw internalError(`Failed to update schedule ${id}: no row returned`);
   }
   const schedule = toSchedule(row);
 

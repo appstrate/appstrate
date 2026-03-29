@@ -39,6 +39,7 @@ export const packageConfigs = pgTable(
   (table) => [
     primaryKey({ columns: [table.orgId, table.packageId] }),
     index("idx_package_configs_org_id").on(table.orgId),
+    index("idx_package_configs_org_profile_id").on(table.orgProfileId),
   ],
 );
 
