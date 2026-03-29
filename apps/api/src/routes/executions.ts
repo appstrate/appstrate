@@ -443,7 +443,12 @@ export function createExecutionsRouter() {
           effectiveFlow.manifest.input?.fileConstraints,
         ),
       ]);
-      const { providerProfiles, config } = preflightResult;
+      const {
+        providerProfiles,
+        config,
+        modelId: preflightModelId,
+        proxyId: preflightProxyId,
+      } = preflightResult;
 
       const {
         input: parsedInput,
@@ -479,8 +484,8 @@ export function createExecutionsRouter() {
             input: parsedInput,
             files: fileRefs,
             config,
-            modelId: modelIdOverride,
-            proxyId: proxyIdOverride,
+            modelId: modelIdOverride ?? preflightModelId,
+            proxyId: proxyIdOverride ?? preflightProxyId,
             overrideVersionId,
           }));
       } catch (err) {

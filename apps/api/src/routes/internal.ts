@@ -17,7 +17,7 @@ import {
 import { getPackageConfig } from "../services/state/package-config.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 /**
  * Verify the execution token from the Authorization header.
@@ -118,11 +118,7 @@ export function createInternalRouter() {
     const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
 
     try {
-      const actor: Actor | null = execution.endUserId
-        ? { type: "end_user", id: execution.endUserId }
-        : execution.userId
-          ? { type: "member", id: execution.userId }
-          : null;
+      const actor: Actor | null = actorFromIds(execution.userId, execution.endUserId);
       const recentExecutions = await getRecentExecutions(
         execution.packageId,
         actor,
@@ -169,11 +165,7 @@ export function createInternalRouter() {
 
     try {
       // Derive actor and resolve profiles
-      const actor: Actor | null = execution.endUserId
-        ? { type: "end_user", id: execution.endUserId }
-        : execution.userId
-          ? { type: "member", id: execution.userId }
-          : null;
+      const actor: Actor | null = actorFromIds(execution.userId, execution.endUserId);
 
       const [{ defaultUserProfileId, userProviderOverrides }, { orgProfileId: flowOrgProfileId }] =
         await Promise.all([

@@ -17,7 +17,19 @@ export type { EnrichedBinding };
  * This function does not filter by orgId for performance — the orgProfileId
  * foreign key implicitly scopes to a single org.
  */
-export async function getOrgProfileBindings(orgProfileId: string): Promise<Record<string, string>> {
+export async function getOrgProfileBindings(
+  orgProfileId: string,
+  orgId?: string,
+): Promise<Record<string, string>> {
+  if (orgId) {
+    const [owner] = await db
+      .select({ id: connectionProfiles.id })
+      .from(connectionProfiles)
+      .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
+      .limit(1);
+    if (!owner) return {};
+  }
+
   const rows = await db
     .select({
       providerId: orgProfileProviderBindings.providerId,
@@ -40,7 +52,17 @@ export async function getOrgProfileBindings(orgProfileId: string): Promise<Recor
  */
 export async function getOrgProfileBindingsEnriched(
   orgProfileId: string,
+  orgId?: string,
 ): Promise<EnrichedBinding[]> {
+  if (orgId) {
+    const [owner] = await db
+      .select({ id: connectionProfiles.id })
+      .from(connectionProfiles)
+      .where(and(eq(connectionProfiles.id, orgProfileId), eq(connectionProfiles.orgId, orgId)))
+      .limit(1);
+    if (!owner) return [];
+  }
+
   const rows = await db
     .select({
       providerId: orgProfileProviderBindings.providerId,

@@ -17,7 +17,7 @@ import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
-import { getProfileById, resolveProviderProfiles } from "./connection-profiles.ts";
+import { getProfileByIdUnsafe, resolveProviderProfiles } from "./connection-profiles.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { getConnection } from "@appstrate/connect";
@@ -29,7 +29,7 @@ import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -211,7 +211,7 @@ async function triggerScheduledExecution(
     }
 
     // Resolve actor from connection profile (null for org profiles)
-    const profile = await getProfileById(connectionProfileId);
+    const profile = await getProfileByIdUnsafe(connectionProfileId);
     if (!profile) {
       logger.warn("Connection profile not found, skipping schedule", {
         scheduleId,
@@ -220,11 +220,7 @@ async function triggerScheduledExecution(
       return;
     }
 
-    const actor: Actor | null = profile.userId
-      ? { type: "member", id: profile.userId }
-      : profile.endUserId
-        ? { type: "end_user", id: profile.endUserId }
-        : null;
+    const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
     // Load the flow's admin-configured org profile from package_configs
     const { orgProfileId: flowOrgProfileId } = await getPackageConfig(orgId, packageId);
@@ -234,8 +230,15 @@ async function triggerScheduledExecution(
     // is used as the default for all unbound providers.
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
+    let preflightModelId: string | null;
+    let preflightProxyId: string | null;
     try {
-      ({ providerProfiles, config } = await resolvePreflightContext({
+      ({
+        providerProfiles,
+        config,
+        modelId: preflightModelId,
+        proxyId: preflightProxyId,
+      } = await resolvePreflightContext({
         flow,
         packageId,
         orgId,
@@ -287,6 +290,8 @@ async function triggerScheduledExecution(
           actor,
           input,
           config,
+          modelId: preflightModelId,
+          proxyId: preflightProxyId,
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {
@@ -419,12 +424,12 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  // Schedule profile: if org profile, all providers must be bound (no fallback).
+  // Schedule profile: if org profile, all providers must be bound (no user fallback).
   // If user profile, all providers use it directly.
   const isOrgProfile = !!profile.orgId;
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    schedule.connectionProfileId,
+    isOrgProfile ? "" : schedule.connectionProfileId, // org profiles have no user fallback
     undefined, // no per-provider overrides for schedules
     isOrgProfile ? schedule.connectionProfileId : null,
   );
@@ -458,7 +463,7 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
 
   // Batch load unique profiles
   const profileIds = [...new Set(schedules.map((s) => s.connectionProfileId))];
-  const profiles = await Promise.all(profileIds.map((id) => getProfileById(id)));
+  const profiles = await Promise.all(profileIds.map((id) => getProfileByIdUnsafe(id)));
   const profileMap = new Map(profileIds.map((id, i) => [id, profiles[i] ?? null]));
 
   // Batch load user names for user-owned profiles
