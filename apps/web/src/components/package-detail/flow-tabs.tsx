@@ -40,21 +40,10 @@ export function FlowExecutionsTab({
 
   if (!detail) return null;
 
-  const {
-    allConnected,
-    hasReconnectionNeeded,
-    hasRequiredConfig,
-    hasPrompt,
-    hasRequiredSkills,
-    hasRequiredTools,
-  } = readiness;
-  const runDisabled =
-    !hasPrompt ||
-    !hasRequiredSkills ||
-    !hasRequiredTools ||
-    !allConnected ||
-    hasReconnectionNeeded ||
-    !hasRequiredConfig;
+  const { hasRequiredConfig, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
+  // Provider connection checks are handled by the ConnectionSummaryModal,
+  // so only non-connection readiness gates disable the button.
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig;
 
   return (
     <>

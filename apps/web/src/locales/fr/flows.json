@@ -327,5 +327,10 @@
   "api.responseTitle": "Réponse",
   "api.responseHint": "L'exécution est asynchrone. L'API retourne un ID d'exécution immédiatement.",
   "api.manageKeys": "Gérer les clés API",
-  "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation."
+  "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation.",
+  "run.confirmTitle": "Confirmer l'exécution",
+  "run.confirm": "Lancer",
+  "run.notConnected": "Non connecté",
+  "run.notAllConnected": "Tous les providers doivent être connectés avant de lancer ce flow.",
+  "run.configureConnections": "Configurer les connexions"
 }

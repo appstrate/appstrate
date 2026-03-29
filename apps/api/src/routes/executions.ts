@@ -16,7 +16,10 @@ import {
   listExecutionLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import {
+  getDefaultProfileId,
+  getUserFlowProviderOverrides,
+} from "../services/connection-profiles.ts";
 import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
@@ -395,8 +398,6 @@ export function createExecutionsRouter() {
       const orgId = c.get("orgId");
       const actor = getActor(c);
       const packageId = flow.id;
-      const profileIdOverride = c.req.query("profileId");
-
       // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
       const versionOverride = c.req.query("version");
 
@@ -421,15 +422,20 @@ export function createExecutionsRouter() {
       // Load admin-configured org profile
       const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(orgId, packageId);
 
-      // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
-      const resolvedUserProfileId =
-        profileIdOverride ?? (await getEffectiveProfileId(actor, packageId));
+      // Resolve per-provider overrides and default profile
+      const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
+        getDefaultProfileId(actor),
+        getUserFlowProviderOverrides(actor, packageId),
+      ]);
+
+      // Run independent pre-flight operations in parallel
       const [preflightResult, inputResult] = await Promise.all([
         resolvePreflightContext({
           flow: effectiveFlow,
           packageId,
           orgId,
-          userProfileId: resolvedUserProfileId,
+          defaultUserProfileId,
+          userProviderOverrides,
           orgProfileId: flowOrgProfileId,
         }),
         parseRequestInput(
@@ -520,7 +526,7 @@ export function createExecutionsRouter() {
         parsedInput ?? null,
         undefined,
         packageVersionId ?? undefined,
-        resolvedUserProfileId,
+        defaultUserProfileId,
         proxyLabel ?? undefined,
         modelLabel ?? undefined,
         c.get("applicationId") ?? null,
