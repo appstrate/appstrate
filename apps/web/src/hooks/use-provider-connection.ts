@@ -21,6 +21,8 @@ interface UseProviderConnectionParams {
   packageId?: string;
   orgProfileId?: string;
   readOnly?: boolean;
+  /** Override the profile used to check connection status (e.g. schedule owner's profile) */
+  viewProfileId?: string;
 }
 
 export function useProviderConnection({
@@ -28,6 +30,7 @@ export function useProviderConnection({
   packageId,
   orgProfileId,
   readOnly: readOnlyParam,
+  viewProfileId,
 }: UseProviderConnectionParams) {
   const { isOrgAdmin } = useOrg();
 
@@ -42,8 +45,9 @@ export function useProviderConnection({
   const overrideProfileId = providerOverrides?.[providerId];
   const effectiveProfileId = overrideProfileId ?? defaultProfile?.id ?? null;
 
-  // Connection status — scoped to the user's profile
-  const { data: profileConnections } = useProfileConnections(effectiveProfileId);
+  // Connection status — use viewProfileId when viewing another user's profile (read-only)
+  const statusProfileId = viewProfileId ?? effectiveProfileId;
+  const { data: profileConnections } = useProfileConnections(statusProfileId);
   const isConnected = isProviderConnectedInProfile(providerId, profileConnections ?? undefined);
 
   // Binding status (only when orgProfileId is provided)
