@@ -1,11 +1,10 @@
-import { inArray, and, eq } from "drizzle-orm";
+import { inArray, and, eq, or, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles, userProviderConnections } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../../lib/user-helpers.ts";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
 import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
-import { getConnection, validateScopes } from "@appstrate/connect";
-import { getProviderAuthMode } from "./providers.ts";
+import { getConnection, validateScopes, listProviders } from "@appstrate/connect";
 import { authModeLabel } from "./helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 
@@ -56,12 +55,13 @@ function buildScopeInfo(
 /**
  * Batch-fetch profile name + owner name for a set of profile IDs.
  *
- * No orgId filter: profileIds come from resolveProviderProfiles() which resolves
- * them from org-scoped queries (org bindings, actor profiles). User-owned profiles
- * have orgId=null on the row, so filtering by orgId would miss them.
+ * Defense-in-depth: filters by orgId to ensure only profiles belonging to the
+ * org (or user-owned profiles with orgId=null) are returned, even though
+ * profileIds already come from org-scoped queries via resolveProviderProfiles().
  */
 async function buildProfileInfoMap(
   profileIds: string[],
+  orgId: string,
 ): Promise<Map<string, { profileName: string | null; profileOwnerName: string | null }>> {
   if (profileIds.length === 0) {
     return new Map();
@@ -74,7 +74,12 @@ async function buildProfileInfoMap(
       userId: connectionProfiles.userId,
     })
     .from(connectionProfiles)
-    .where(inArray(connectionProfiles.id, profileIds));
+    .where(
+      and(
+        inArray(connectionProfiles.id, profileIds),
+        or(eq(connectionProfiles.orgId, orgId), isNull(connectionProfiles.orgId)),
+      ),
+    );
 
   const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
   const userNameMap = await batchLoadUserNames(userIds);
@@ -143,22 +148,28 @@ export async function resolveProviderStatuses(
     ),
   ];
 
-  // Batch-fetch profile info + connection statuses in parallel (2-3 queries total instead of N+2)
-  const [profileInfoMap, connectionMap] = await Promise.all([
-    buildProfileInfoMap(profileIds),
+  // Batch-fetch profile info, connection statuses, and auth modes in parallel
+  const [profileInfoMap, connectionMap, allProviders] = await Promise.all([
+    buildProfileInfoMap(profileIds, orgId),
     batchGetConnectionStatuses(profileIds, orgId),
+    listProviders(db, orgId),
   ]);
 
-  return Promise.all(
-    providers.map(async (svc) => {
-      const base = {
-        id: svc.id,
-        provider: svc.id,
-        description: svc.description ?? "",
-      };
+  // Build auth mode lookup from batch-fetched providers
+  const authModeMap = new Map<string, string | undefined>();
+  for (const p of allProviders) {
+    authModeMap.set(p.id, p.authMode);
+  }
 
-      const authMode = await getProviderAuthMode(svc.id, orgId);
-      const label = authModeLabel(authMode);
+  return providers.map((svc) => {
+    const base = {
+      id: svc.id,
+      provider: svc.id,
+      description: svc.description ?? "",
+    };
+
+    const authMode = authModeMap.get(svc.id);
+    const label = authModeLabel(authMode);
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
       const entry = providerProfiles[svc.id];
 
@@ -193,6 +204,5 @@ export async function resolveProviderStatuses(
         profileOwnerName: profileInfo.profileOwnerName,
         ...buildScopeInfo(connScopesGranted, scopesRequired, connStatus === "connected"),
       };
-    }),
-  );
+    });
 }
