@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
-import { useOrg } from "../hooks/use-org";
 import {
   useOrgProfiles,
   useRenameOrgProfile,
@@ -25,7 +24,6 @@ export function OrgProfileDetailPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isOrgAdmin } = useOrg();
 
   const { data: orgProfiles, isLoading: profilesLoading } = useOrgProfiles();
   const { data: providers } = useProviders();
@@ -66,7 +64,7 @@ export function OrgProfileDetailPage() {
 
   const handleDelete = () => {
     deleteMutation.mutate(profile.id, {
-      onSuccess: () => navigate("/org-profiles"),
+      onSuccess: () => navigate("/org-settings#profiles"),
     });
   };
 
@@ -76,28 +74,26 @@ export function OrgProfileDetailPage() {
         title={profile.name}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("common:nav.orgProfiles"), href: "/org-profiles" },
+          { label: t("orgSettings.pageTitle"), href: "/org-settings#profiles" },
           { label: profile.name },
         ]}
         actions={
-          isOrgAdmin ? (
-            <>
-              <Button variant="outline" size="sm" onClick={openRename}>
-                <Pencil className="size-3.5 mr-1.5" />
-                {t("orgProfiles.rename")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setDeleteOpen(true)}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 className="size-3.5 mr-1.5" />
-                {t("orgProfiles.deleteBtn")}
-              </Button>
-            </>
-          ) : undefined
+          <>
+            <Button variant="outline" size="sm" onClick={openRename}>
+              <Pencil className="size-3.5 mr-1.5" />
+              {t("orgProfiles.rename")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 className="size-3.5 mr-1.5" />
+              {t("orgProfiles.deleteBtn")}
+            </Button>
+          </>
         }
       />
 

@@ -8,12 +8,10 @@ import {
   Wrench,
   Puzzle,
   Plug,
-  Users,
   Settings,
   Webhook,
   Loader2,
 } from "lucide-react";
-import { useOrg } from "../hooks/use-org";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useFlows } from "../hooks/use-packages";
 import {
@@ -27,7 +25,6 @@ import {
 
 export function NavOrg() {
   const { t } = useTranslation();
-  const { isOrgAdmin } = useOrg();
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: flows } = useFlows();
@@ -42,7 +39,6 @@ export function NavOrg() {
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/tools", label: t("nav.tools"), icon: Puzzle },
     { path: "/providers", label: t("nav.connectors"), icon: Plug },
-    { path: "/org-profiles", label: t("nav.orgProfiles"), icon: Users },
   ];
 
   return (
@@ -96,34 +92,30 @@ export function NavOrg() {
             </>
           )}
         </SidebarMenuItem>
-        {isOrgAdmin && (
-          <>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.pathname.startsWith("/webhooks")}
-                tooltip={t("nav.webhooks")}
-              >
-                <Link to="/webhooks">
-                  <Webhook />
-                  <span>{t("nav.webhooks")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.pathname.startsWith("/org-settings")}
-                tooltip={t("nav.settings")}
-              >
-                <Link to="/org-settings">
-                  <Settings />
-                  <span>{t("nav.settings")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </>
-        )}
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            asChild
+            isActive={location.pathname.startsWith("/webhooks")}
+            tooltip={t("nav.webhooks")}
+          >
+            <Link to="/webhooks">
+              <Webhook />
+              <span>{t("nav.webhooks")}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            asChild
+            isActive={location.pathname.startsWith("/org-settings")}
+            tooltip={t("nav.settings")}
+          >
+            <Link to="/org-settings">
+              <Settings />
+              <span>{t("nav.settings")}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
       </SidebarMenu>
     </SidebarGroup>
   );

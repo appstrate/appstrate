@@ -25,7 +25,6 @@ import { AppSettingsPage } from "./pages/app-settings-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
-import { OrgProfilesPage } from "./pages/org-profiles-page";
 import { OrgProfileDetailPage } from "./pages/org-profile-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
@@ -99,7 +98,9 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
 
-  if (ORG_GATE_BYPASS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
+  if (
+    ORG_GATE_BYPASS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
+  ) {
     return <>{children}</>;
   }
 
@@ -234,7 +235,10 @@ export function App() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
-            <Route path="/org-profiles" element={<OrgProfilesPage />} />
+            <Route
+              path="/org-profiles"
+              element={<Navigate to="/org-settings#profiles" replace />}
+            />
             <Route path="/org-profiles/:id" element={<OrgProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
