@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,6 +26,7 @@ import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
+import { ConfirmModal } from "../components/confirm-modal";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
@@ -194,6 +196,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
   const [forkOpen, setForkOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: "deleteCredentials" | "deletePackage";
+    description: string;
+  } | null>(null);
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
@@ -405,32 +411,23 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   onFork={() => setForkOpen(true)}
                   hasCredentials={providerConfig?.hasCredentials}
                   onDeleteCredentials={() => {
-                    if (!confirm(t("providers.deleteCredentialsConfirm", { ns: "settings" })))
-                      return;
-                    deleteCredentialsMutation.mutate(packageId);
+                    setConfirmAction({
+                      type: "deleteCredentials",
+                      description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
+                    });
                   }}
                   canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
                   onDeletePackage={() => {
                     if (!pkgDetail) return;
                     const nameStr = pkgDetail.name || pkgDetail.id;
                     const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                    if (
-                      !confirm(
-                        t("packages.deleteConfirm", {
-                          type: typeLabel,
-                          name: nameStr,
-                          ns: "settings",
-                        }),
-                      )
-                    )
-                      return;
-                    deletePkgMutation.mutate(packageId, {
-                      onError: (err) =>
-                        alert(
-                          err instanceof Error
-                            ? err.message
-                            : t("packages.deleteDependedOn", { ns: "settings" }),
-                        ),
+                    setConfirmAction({
+                      type: "deletePackage",
+                      description: t("packages.deleteConfirm", {
+                        type: typeLabel,
+                        name: nameStr,
+                        ns: "settings",
+                      }),
                     });
                   }}
                 />
@@ -650,6 +647,31 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {/* Flow modals */}
       {type === "flow" && <FlowModals packageId={packageId} />}
+
+      <ConfirmModal
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={confirmAction?.description ?? ""}
+        isPending={deleteCredentialsMutation.isPending || deletePkgMutation.isPending}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          const close = () => setConfirmAction(null);
+          if (confirmAction.type === "deleteCredentials") {
+            deleteCredentialsMutation.mutate(packageId, { onSuccess: close });
+          } else {
+            deletePkgMutation.mutate(packageId, {
+              onSuccess: close,
+              onError: (err) =>
+                toast.error(
+                  err instanceof Error
+                    ? err.message
+                    : t("packages.deleteDependedOn", { ns: "settings" }),
+                ),
+            });
+          }
+        }}
+      />
     </>
   );
 }

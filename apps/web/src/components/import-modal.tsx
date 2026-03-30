@@ -5,6 +5,7 @@ import { Modal } from "./modal";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
+import { toast } from "sonner";
 import { ApiError } from "../api";
 import i18n from "../i18n";
 
@@ -120,7 +121,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               });
               return;
             }
-            alert(i18n.t("error.prefix", { message: err.message }));
+            toast.error(i18n.t("error.prefix", { message: err.message }));
           },
         },
       );

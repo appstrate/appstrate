@@ -1,4 +1,5 @@
 import { type ChangeEvent, useMemo, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -117,7 +118,7 @@ export function ResourceSection({
         onChange([...selectedEntries, { id: newId, version: "*" }]);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : t("error.unknown"));
+      toast.error(err instanceof Error ? err.message : t("error.unknown"));
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";

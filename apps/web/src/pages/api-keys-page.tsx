@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { KeyRound, ShieldAlert } from "lucide-react";
+import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOrg } from "../hooks/use-org";
@@ -33,6 +34,7 @@ export function ApiKeysPage() {
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const revokeApiKeyMutation = useRevokeApiKey();
   const [createOpen, setCreateOpen] = useState(false);
+  const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
@@ -50,8 +52,7 @@ export function ApiKeysPage() {
   if (error) return <ErrorState message={error.message} />;
 
   const handleRevoke = (key: ApiKeyInfo) => {
-    if (!confirm(t("settings:apiKeys.revokeConfirm", { name: key.name }))) return;
-    revokeApiKeyMutation.mutate(key.id);
+    setConfirmState({ id: key.id, label: key.name });
   };
 
   return (
@@ -138,6 +139,20 @@ export function ApiKeysPage() {
       )}
 
       <ApiKeyCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      <ConfirmModal
+        open={!!confirmState}
+        onClose={() => setConfirmState(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
+        isPending={revokeApiKeyMutation.isPending}
+        onConfirm={() => {
+          if (!confirmState) return;
+          revokeApiKeyMutation.mutate(confirmState.id, {
+            onSuccess: () => setConfirmState(null),
+          });
+        }}
+      />
     </>
   );
 }

@@ -9,7 +9,7 @@ import { Spinner } from "./spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "./secret-reveal-modal";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import {
   useUpdateWebhook,
   useDeleteWebhook,
@@ -45,7 +45,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       },
       {
         onSuccess: () => {
-          toast({ title: t("common:btn.save") });
+          toast.success(t("common:btn.save"));
         },
       },
     );
@@ -54,10 +54,10 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   function handleTest() {
     testMutation.mutate(webhook.id, {
       onSuccess: () => {
-        toast({ title: t("settings:webhooks.testSuccess") });
+        toast.success(t("settings:webhooks.testSuccess"));
       },
       onError: () => {
-        toast({ title: t("settings:webhooks.testFailed"), variant: "destructive" });
+        toast.error(t("settings:webhooks.testFailed"));
       },
     });
   }

@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 // Profile resolution is now per-provider (server-side), no global profileId needed
@@ -112,6 +114,7 @@ export function useFlows() {
 // --- Package download ---
 
 export function usePackageDownload(scope: string | undefined, name: string | undefined) {
+  const { t } = useTranslation("common");
   return useCallback(
     async (version: string) => {
       if (!scope || !name) return;
@@ -126,10 +129,10 @@ export function usePackageDownload(scope: string | undefined, name: string | und
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } catch {
-        // silent fail
+        toast.error(t("error.downloadFailed"));
       }
     },
-    [scope, name],
+    [scope, name, t],
   );
 }
 

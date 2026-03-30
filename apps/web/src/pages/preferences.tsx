@@ -37,6 +37,7 @@ import { Unplug, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
+import { ConfirmModal } from "../components/confirm-modal";
 import type { UserConnectionProviderGroup } from "@appstrate/shared-types";
 
 export function PreferencesPage() {
@@ -626,6 +627,17 @@ function ConnectorsTab() {
 
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [filterProfileId, setFilterProfileId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<
+    | { type: "deleteAll" }
+    | {
+        type: "disconnect";
+        provider: string;
+        profile: string;
+        connectionId: string;
+        providerId: string;
+      }
+    | null
+  >(null);
 
   const providers = useMemo(
     () => filterProviders(userConns?.providers, filterProfileId),
@@ -665,11 +677,7 @@ function ConnectorsTab() {
           {totalConnections > 0 && (
             <Button
               variant="destructive"
-              onClick={() => {
-                if (confirm(t("connectors.deleteAllConfirm"))) {
-                  deleteAllMutation.mutate();
-                }
-              }}
+              onClick={() => setConfirmState({ type: "deleteAll" })}
               disabled={deleteAllMutation.isPending}
             >
               {deleteAllMutation.isPending
@@ -757,21 +765,15 @@ function ConnectorsTab() {
                               <Button
                                 variant="destructive"
                                 size="sm"
-                                onClick={() => {
-                                  if (
-                                    confirm(
-                                      t("connectors.deleteConfirm", {
-                                        provider: pg.displayName,
-                                        profile: conn.profile.name,
-                                      }),
-                                    )
-                                  ) {
-                                    disconnectMutation.mutate({
-                                      provider: pg.providerId,
-                                      connectionId: conn.connectionId,
-                                    });
-                                  }
-                                }}
+                                onClick={() =>
+                                  setConfirmState({
+                                    type: "disconnect",
+                                    provider: pg.displayName,
+                                    profile: conn.profile.name,
+                                    connectionId: conn.connectionId,
+                                    providerId: pg.providerId,
+                                  })
+                                }
                                 disabled={disconnectMutation.isPending}
                               >
                                 {t("btn.disconnect")}
@@ -788,6 +790,39 @@ function ConnectorsTab() {
           })}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirmState}
+        onClose={() => setConfirmState(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={
+          confirmState?.type === "deleteAll"
+            ? t("connectors.deleteAllConfirm")
+            : confirmState?.type === "disconnect"
+              ? t("connectors.deleteConfirm", {
+                  provider: confirmState.provider,
+                  profile: confirmState.profile,
+                })
+              : ""
+        }
+        isPending={
+          confirmState?.type === "deleteAll"
+            ? deleteAllMutation.isPending
+            : disconnectMutation.isPending
+        }
+        onConfirm={() => {
+          if (confirmState?.type === "deleteAll") {
+            deleteAllMutation.mutate(undefined, {
+              onSuccess: () => setConfirmState(null),
+            });
+          } else if (confirmState?.type === "disconnect") {
+            disconnectMutation.mutate(
+              { provider: confirmState.providerId, connectionId: confirmState.connectionId },
+              { onSuccess: () => setConfirmState(null) },
+            );
+          }
+        }}
+      />
     </>
   );
 }
@@ -802,6 +837,7 @@ function ProfilesTab() {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -909,11 +945,7 @@ function ProfilesTab() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => {
-                        if (confirm(t("profiles.deleteConfirm", { name: profile.name }))) {
-                          deleteProfile.mutate(profile.id);
-                        }
-                      }}
+                      onClick={() => setConfirmState({ label: profile.name, id: profile.id })}
                       disabled={deleteProfile.isPending}
                     >
                       {t("profiles.delete")}
@@ -925,6 +957,21 @@ function ProfilesTab() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirmState}
+        onClose={() => setConfirmState(null)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={confirmState ? t("profiles.deleteConfirm", { name: confirmState.label }) : ""}
+        isPending={deleteProfile.isPending}
+        onConfirm={() => {
+          if (confirmState) {
+            deleteProfile.mutate(confirmState.id, {
+              onSuccess: () => setConfirmState(null),
+            });
+          }
+        }}
+      />
     </>
   );
 }
