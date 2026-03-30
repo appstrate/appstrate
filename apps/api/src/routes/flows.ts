@@ -17,7 +17,7 @@ import {
   setUserFlowProviderOverride,
   removeUserFlowProviderOverride,
   getUserFlowProviderOverrides,
-  getProfileForActor,
+  getAccessibleProfile,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -106,7 +106,7 @@ export function createFlowsRouter() {
     const data = parseBody(z.object({ providerId: z.string().min(1), profileId: z.uuid() }), body);
 
     // Validate ownership — user can only set overrides to their own profiles
-    const profile = await getProfileForActor(data.profileId, actor);
+    const profile = await getAccessibleProfile(data.profileId, actor, c.get("orgId"));
     if (!profile) {
       throw forbidden("Cannot use a profile you do not own");
     }
