@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Modal } from "./modal";
 import { Spinner } from "./spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
@@ -96,9 +96,15 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       />
 
       {/* Active toggle */}
-      <div className="flex items-center justify-between">
-        <Label>{t("settings:webhooks.active")}</Label>
-        <Switch checked={active} onCheckedChange={setActive} />
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="webhook-active"
+          checked={active}
+          onCheckedChange={(checked) => setActive(checked === true)}
+        />
+        <Label htmlFor="webhook-active" className="cursor-pointer">
+          {t("settings:webhooks.active")}
+        </Label>
       </div>
 
       {/* Save */}
