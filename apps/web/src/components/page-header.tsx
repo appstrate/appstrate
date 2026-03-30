@@ -25,7 +25,7 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, emoji, breadcrumbs, actions, children }: PageHeaderProps) {
   return (
-    <div className="mb-6">
+    <div className="mb-4">
       {breadcrumbs && breadcrumbs.length > 0 && (
         <Breadcrumb className="mb-2">
           <BreadcrumbList>
