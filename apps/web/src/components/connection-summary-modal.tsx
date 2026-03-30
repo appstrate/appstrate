@@ -42,12 +42,13 @@ export function ConnectionSummaryModal({
           <Button variant="outline" onClick={onClose}>
             {t("btn.cancel", { ns: "common" })}
           </Button>
-          {allReady ? (
+          <Button variant="outline" onClick={onConfigureConnections}>
+            {t("run.configureConnections")}
+          </Button>
+          {allReady && (
             <Button onClick={onConfirm} disabled={isPending}>
               {isPending ? <Spinner /> : t("run.confirm")}
             </Button>
-          ) : (
-            <Button onClick={onConfigureConnections}>{t("run.configureConnections")}</Button>
           )}
         </>
       }
