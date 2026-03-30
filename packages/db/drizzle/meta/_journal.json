@@ -92,6 +92,13 @@
       "when": 1774910000000,
       "tag": "0012_execution_provider_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1774920000000,
+      "tag": "0013_add_user_image",
+      "breakpoints": true
     }
   ]
 }

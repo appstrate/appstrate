@@ -70,6 +70,7 @@ export function useRunFlow(packageId: string) {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["executions"] });
+      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
       navigate(`/flows/${packageId}/executions/${data.executionId}`);
     },
     onError: onMutationError,
@@ -217,6 +218,7 @@ export function useCancelExecution() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["execution"] });
       qc.invalidateQueries({ queryKey: ["executions"] });
+      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
     },
     onError: onMutationError,
   });
@@ -252,6 +254,7 @@ export function useDeleteFlowExecutions(packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["executions"] });
+      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
       qc.invalidateQueries({ queryKey: ["flows"] });
     },

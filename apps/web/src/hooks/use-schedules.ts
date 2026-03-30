@@ -9,7 +9,10 @@ export function useScheduleExecutions(scheduleId: string | undefined) {
   return useQuery({
     queryKey: ["schedule-executions", orgId, scheduleId],
     queryFn: async () => {
-      return api<Execution[]>(`/schedules/${scheduleId}/executions`);
+      const result = await api<{ executions: Execution[]; total: number }>(
+        `/schedules/${scheduleId}/executions`,
+      );
+      return result.executions;
     },
     enabled: !!scheduleId,
   });

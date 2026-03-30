@@ -52,6 +52,7 @@ export function useMarkRead() {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
       qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
       qc.invalidateQueries({ queryKey: ["all-executions"] });
+      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
       qc.invalidateQueries({ queryKey: ["executions"] });
       qc.invalidateQueries({ queryKey: ["execution"] });
     },
@@ -68,6 +69,7 @@ export function useMarkAllRead() {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
       qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
       qc.invalidateQueries({ queryKey: ["all-executions"] });
+      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
       qc.invalidateQueries({ queryKey: ["executions"] });
       qc.invalidateQueries({ queryKey: ["execution"] });
     },

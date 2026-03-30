@@ -80,5 +80,8 @@
   "unsaved.title": "Modifications non enregistrées",
   "unsaved.message": "Vous avez des modifications non enregistrées. Que souhaitez-vous faire ?",
   "unsaved.saveDraft": "Enregistrer le brouillon",
-  "unsaved.discard": "Quitter sans enregistrer"
+  "unsaved.discard": "Quitter sans enregistrer",
+  "pagination.previous": "Précédent",
+  "pagination.next": "Suivant",
+  "pagination.pageOf": "Page {{page}} sur {{total}}"
 }
