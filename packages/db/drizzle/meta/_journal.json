@@ -99,6 +99,13 @@
       "when": 1774920000000,
       "tag": "0013_add_user_image",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1774930000000,
+      "tag": "0014_execution_version_on_delete",
+      "breakpoints": true
     }
   ]
 }

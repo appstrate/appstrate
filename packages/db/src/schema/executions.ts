@@ -48,7 +48,9 @@ export const executions = pgTable(
     duration: integer("duration"),
     connectionProfileId: uuid("connection_profile_id"),
     scheduleId: text("schedule_id"),
-    packageVersionId: integer("package_version_id").references(() => packageVersions.id),
+    packageVersionId: integer("package_version_id").references(() => packageVersions.id, {
+      onDelete: "set null",
+    }),
     notifiedAt: timestamp("notified_at"),
     readAt: timestamp("read_at"),
     proxyLabel: text("proxy_label"),
