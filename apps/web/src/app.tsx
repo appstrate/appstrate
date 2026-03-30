@@ -92,12 +92,14 @@ function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Routes that don't require an org to be selected. */
+const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite"];
+
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
   const location = useLocation();
 
-  // Allow welcome and onboarding routes through without org context
-  if (location.pathname === "/welcome" || location.pathname.startsWith("/onboarding")) {
+  if (ORG_GATE_BYPASS.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))) {
     return <>{children}</>;
   }
 
