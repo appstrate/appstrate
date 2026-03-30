@@ -16,6 +16,7 @@ import {
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { authModeLabel } from "./helpers.ts";
 import { asRecord } from "../../lib/safe-json.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
 import { getPackageDisplayName } from "../../lib/package-helpers.ts";
 
 export async function getProviderAuthMode(
@@ -157,7 +158,7 @@ export async function listAllActorConnections(
         r.scopesGranted.every((v: unknown) => typeof v === "string")
           ? r.scopesGranted
           : []) as string[],
-        connectedAt: r.connectedAt?.toISOString() ?? "",
+        connectedAt: toISORequired(r.connectedAt),
         profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
       })),
     }));

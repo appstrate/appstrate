@@ -65,7 +65,7 @@ export function createProxiesRouter() {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
       logger.error("Proxy create failed", { error: msg });
-      throw internalError("Failed to create proxy");
+      throw internalError();
     }
   });
 
@@ -83,7 +83,7 @@ export function createProxiesRouter() {
       logger.error("Set default proxy failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to set default proxy");
+      throw internalError();
     }
   });
 
@@ -102,7 +102,7 @@ export function createProxiesRouter() {
         proxyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Test failed");
+      throw internalError();
     }
   });
 
@@ -126,7 +126,7 @@ export function createProxiesRouter() {
         throw new ApiError({ status: 400, code: "blocked_url", title: "Bad Request", detail: msg });
       }
       logger.error("Proxy update failed", { proxyId, error: msg });
-      throw internalError("Failed to update proxy");
+      throw internalError();
     }
   });
 
@@ -147,7 +147,7 @@ export function createProxiesRouter() {
         proxyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete proxy");
+      throw internalError();
     }
   });
 

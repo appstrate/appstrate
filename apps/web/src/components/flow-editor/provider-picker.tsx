@@ -7,13 +7,6 @@ import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ProviderIcon } from "../provider-icon";
 import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderCredentialsModal } from "../provider-credentials-modal";
@@ -211,7 +204,6 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
         id: providerId,
         version: provider?.version ?? "*",
         scopes: [],
-        connectionMode: "user",
       },
     ]);
   };
@@ -236,7 +228,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
               | ProviderConfig
               | undefined;
             return (
-              <div key={i} className="border border-border rounded-lg p-3 mb-2 bg-card">
+              <div key={svc.id} className="border border-border rounded-lg p-3 mb-2 bg-card">
                 <div className="flex items-center gap-2.5 mb-2">
                   {providerDef?.iconUrl && (
                     <ProviderIcon src={providerDef.iconUrl} className="h-6 w-6" />
@@ -279,23 +271,6 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
                       />
                     </div>
                   )}
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">
-                      {t("editor.connectionModeLabel")}
-                    </Label>
-                    <Select
-                      value={svc.connectionMode}
-                      onValueChange={(v) => update(i, { connectionMode: v as "user" | "admin" })}
-                    >
-                      <SelectTrigger className="h-7 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">{t("editor.modeUser")}</SelectItem>
-                        <SelectItem value="admin">{t("editor.modeAdmin")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               </div>
             );

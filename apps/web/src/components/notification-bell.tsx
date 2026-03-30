@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "./badge";
+import { Badge } from "./status-badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -43,11 +43,10 @@ export function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <div
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           className={cn(
-            "relative inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer",
+            "relative inline-flex items-center justify-center size-8 shrink-0 rounded-md bg-transparent border-none p-0 cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent transition-colors",
             hasRunning && unread === 0 && "text-primary animate-pulse",
           )}
           aria-label={t("notifications.ariaLabel")}
@@ -58,7 +57,7 @@ export function NotificationBell() {
               {unread > 99 ? "99+" : unread}
             </span>
           )}
-        </div>
+        </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
         {/* Header */}

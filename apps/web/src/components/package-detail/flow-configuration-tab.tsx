@@ -15,6 +15,7 @@ import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
+import { useOrgProfiles, useSetFlowOrgProfile } from "../../hooks/use-connection-profiles";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import {
@@ -163,6 +164,49 @@ function ProxySection({ packageId }: { packageId: string }) {
   );
 }
 
+// ─── Org Profile Section ───────────────────────────────────────────
+
+function OrgProfileSection({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["flows", "settings"]);
+  const { data: orgProfiles } = useOrgProfiles();
+  const { data: detail } = usePackageDetail("flow", packageId);
+  const setFlowOrgProfile = useSetFlowOrgProfile(packageId);
+  const { isOrgAdmin } = useOrg();
+
+  if (!isOrgAdmin || !orgProfiles || orgProfiles.length === 0) return null;
+
+  const currentOrgProfileId = detail?.flowOrgProfileId;
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <h3 className="text-sm font-medium">{t("detail.configSectionOrgProfile")}</h3>
+      <p className="text-xs text-muted-foreground">{t("detail.configOrgProfileHint")}</p>
+      <Select
+        value={currentOrgProfileId ?? "__none__"}
+        onValueChange={(v) => setFlowOrgProfile.mutate(v === "__none__" ? null : v)}
+        disabled={setFlowOrgProfile.isPending}
+      >
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">{t("detail.configOrgProfileNone")}</SelectItem>
+          {orgProfiles.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.name}
+              {p.bindingCount > 0 && (
+                <span className="text-muted-foreground ml-1">
+                  ({t("detail.configOrgProfileBinding", { count: p.bindingCount })})
+                </span>
+              )}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 // ─── Main Tab ───────────────────────────────────────────────────────
 
 export function FlowConfigurationTab({
@@ -186,6 +230,7 @@ export function FlowConfigurationTab({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
+        <OrgProfileSection packageId={packageId} />
       </div>
       {hasConfigSchema && schema && (
         <ConfigSection packageId={packageId} schema={schema} isHistorical={isHistorical} />

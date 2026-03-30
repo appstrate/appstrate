@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentProfileId } from "./use-current-profile";
+// Profile resolution is now per-provider (server-side), no global profileId needed
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -44,19 +44,12 @@ function usePackageList(type: PackageType) {
 
 function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
   const orgId = useCurrentOrgId();
-  const profileId = useCurrentProfileId();
   const cfg = PACKAGE_CONFIG[type];
 
-  // Flows support profileId for per-user provider status resolution
-  const qs = type === "flow" && profileId ? `?profileId=${profileId}` : "";
-  // Include profileId in key for flows (different profiles = different results)
-  const queryKey: unknown[] = ["packages", cfg.detailKey, orgId, id];
-  if (type === "flow") queryKey.push(profileId);
-
   return useQuery({
-    queryKey,
+    queryKey: ["packages", cfg.detailKey, orgId, id],
     queryFn: async () => {
-      const data = await api<Record<string, unknown>>(`/packages/${cfg.path}/${id}${qs}`);
+      const data = await api<Record<string, unknown>>(`/packages/${cfg.path}/${id}`);
       return data[cfg.detailKey] as PackageDetailMap[T];
     },
     enabled: !!id,

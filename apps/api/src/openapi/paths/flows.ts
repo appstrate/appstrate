@@ -81,75 +81,6 @@ export const flowsPaths = {
       },
     },
   },
-  "/api/flows/{scope}/{name}/profile": {
-    put: {
-      operationId: "setFlowProfile",
-      tags: ["Flows"],
-      summary: "Set flow profile override",
-      description:
-        "Override the connection profile used for this flow. The specified profile must belong to the authenticated user.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["profileId"],
-              properties: {
-                profileId: { type: "string", format: "uuid" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Profile override set",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-    delete: {
-      operationId: "clearFlowProfile",
-      tags: ["Flows"],
-      summary: "Clear flow profile override",
-      description: "Remove the per-flow profile override, reverting to the user's default profile.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Profile override cleared",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
   "/api/flows/{scope}/{name}/proxy": {
     get: {
       operationId: "getFlowProxy",
@@ -528,6 +459,180 @@ export const flowsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/flows/{scope}/{name}/provider-profiles": {
+    get: {
+      operationId: "getFlowProviderProfiles",
+      tags: ["Flows"],
+      summary: "Get per-provider profile overrides",
+      description:
+        "Returns the per-provider connection profile overrides for a flow. Each key is a provider ID mapped to a profile ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Provider profile overrides",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  overrides: {
+                    type: "object",
+                    additionalProperties: { type: "string" },
+                    description: "Map of provider ID to profile ID",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "setFlowProviderProfile",
+      tags: ["Flows"],
+      summary: "Set a per-provider profile override",
+      description: "Override the connection profile used for a specific provider in this flow.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["providerId", "profileId"],
+              properties: {
+                providerId: { type: "string", minLength: 1 },
+                profileId: { type: "string", format: "uuid" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Provider profile override set",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "removeFlowProviderProfile",
+      tags: ["Flows"],
+      summary: "Remove a per-provider profile override",
+      description:
+        "Remove the connection profile override for a specific provider, reverting to the default profile.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["providerId"],
+              properties: {
+                providerId: { type: "string", minLength: 1 },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Provider profile override removed",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/flows/{scope}/{name}/org-profile": {
+    put: {
+      operationId: "setFlowOrgProfile",
+      tags: ["Flows"],
+      summary: "Set org profile for a flow",
+      description:
+        "Set or clear the org-level connection profile for this flow. Pass a profile ID to set, or null to clear. Admin only.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["orgProfileId"],
+              properties: {
+                orgProfileId: {
+                  type: ["string", "null"],
+                  format: "uuid",
+                  description: "Org profile ID or null to clear",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Org profile updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { success: { type: "boolean" } } },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

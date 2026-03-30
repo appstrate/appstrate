@@ -50,7 +50,6 @@ import { RunFlowButton } from "../components/run-flow-button";
 import { useFlowReadiness } from "../hooks/use-flow-readiness";
 import { useModels, useFlowModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
-import { computeProvidersSummary } from "../lib/provider-status";
 
 type DetailTab =
   | "connectors"
@@ -85,38 +84,21 @@ function FlowRunButtonInline({
 
   if (!detail) return null;
 
-  const {
-    allConnected,
-    hasReconnectionNeeded,
-    hasRequiredConfig,
-    hasModel,
-    hasPrompt,
-    hasRequiredSkills,
-    hasRequiredTools,
-  } = readiness;
+  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
+  // Provider connection checks are handled by the ConnectionSummaryModal
   const runDisabled =
-    !hasPrompt ||
-    !hasRequiredSkills ||
-    !hasRequiredTools ||
-    !allConnected ||
-    hasReconnectionNeeded ||
-    !hasRequiredConfig ||
-    !hasModel;
+    !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")
     : !hasRequiredSkills
       ? t("detail.titleMissingSkill")
       : !hasRequiredTools
         ? t("detail.titleMissingTool")
-        : hasReconnectionNeeded
-          ? t("detail.titleReconnect", { defaultValue: "Reconnect services first" })
-          : !allConnected
-            ? t("detail.titleConnect")
-            : !hasRequiredConfig
-              ? t("detail.titleConfig")
-              : !hasModel
-                ? t("detail.titleModel")
-                : undefined;
+        : !hasRequiredConfig
+          ? t("detail.titleConfig")
+          : !hasModel
+            ? t("detail.titleModel")
+            : undefined;
 
   return (
     <RunFlowButton
@@ -233,14 +215,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   );
   const hasModelsAvailable = isOrgAdmin && !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = isOrgAdmin && !!orgProxies && orgProxies.length > 0;
-  const showConfigTab =
-    type === "flow" && (hasDraftConfigSchema || hasModelsAvailable || hasProxiesAvailable);
-
-  const hasDisconnectedServices =
-    type === "flow" &&
-    flowDetail?.dependencies.providers.some(
-      (s) => s.status !== "connected" || s.scopesSufficient === false,
-    );
   const hasMissingRequiredConfig =
     type === "flow" &&
     hasDraftConfigSchema &&
@@ -249,15 +223,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       return val === undefined || val === null || val === "";
     });
   const defaultTab: DetailTab =
-    type === "flow"
-      ? hasDisconnectedServices
-        ? "connectors"
-        : hasMissingRequiredConfig && showConfigTab
-          ? "configuration"
-          : "executions"
-      : type === "provider"
-        ? "configuration"
-        : "content";
+    type === "flow" ? "executions" : type === "provider" ? "configuration" : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
@@ -307,7 +273,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const effectiveShowConfigTab =
     type === "flow" && (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
-  const downloadVersion = isHistoricalVersion ? versionDetail?.version : version;
+  const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
   const unifiedForHeader = {
@@ -344,10 +310,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const isBuiltIn = source === "system";
 
   // Determine available tabs based on type
-  const providersSummary =
-    type === "flow" && flowDetail
-      ? computeProvidersSummary(flowDetail.dependencies.providers, t)
-      : null;
 
   const flowTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "executions", label: t("detail.tabExecutions") },
@@ -416,7 +378,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
               hasDraftChanges={hasDraftChanges}
-              downloadVersion={downloadVersion ?? undefined}
+              downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
@@ -437,7 +399,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   isBuiltIn={isBuiltIn}
                   isHistoricalVersion={isHistoricalVersion}
                   hasDraftChanges={hasDraftChanges}
-                  downloadVersion={downloadVersion ?? undefined}
+                  downloadVersion={downloadVersion}
                   onDownload={downloadPackage}
                   onCreateVersion={() => setCreateVersionOpen(true)}
                   onFork={() => setForkOpen(true)}
@@ -518,15 +480,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "flow" && providersSummary && providersSummary.actionCount > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
-          <span className="text-warning text-base leading-none">⚠</span>
-          <span className="text-warning">
-            {t("detail.providersAlert", { count: providersSummary.actionCount })}
-          </span>
-        </div>
-      )}
-
       {type === "flow" && hasMissingRequiredConfig && (
         <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
           <span className="text-warning text-base leading-none">⚠</span>
@@ -557,7 +510,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "flow" && tab === "connectors" && <FlowConnectorsTab packageId={packageId} />}
+      {type === "flow" && tab === "connectors" && (
+        <FlowConnectorsTab packageId={packageId} detail={flowDetail} />
+      )}
       {type === "flow" && tab === "executions" && (
         <FlowExecutionsTab
           packageId={packageId}

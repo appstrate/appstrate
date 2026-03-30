@@ -56,7 +56,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
       "tool",
       (manifest.dependencies?.tools ?? {}) as Record<string, string>,
     ),
-    source: row.source === "system" || row.source === "local" ? row.source : "local",
+    source: (row.source as "system" | "local") ?? "local",
   };
 }
 

@@ -3,7 +3,7 @@
  * before execution. Called from all execution paths (manual, scheduled).
  */
 
-import type { LoadedPackage } from "../types/index.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { validateFlowDependencies } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -25,7 +25,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
  */
 export async function validateFlowReadiness(params: {
   flow: LoadedPackage;
-  providerProfiles: Record<string, string>;
+  providerProfiles: ProviderProfileMap;
   orgId: string;
   config?: Record<string, unknown>;
 }): Promise<void> {

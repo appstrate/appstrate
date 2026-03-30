@@ -9,7 +9,7 @@ import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuth1CredentialsOrThrow } from "./registry.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { extractErrorMessage, actorFromRow, actorToColumns } from "./utils.ts";
 
 // ─── RFC 5849 Signing Internals ──────────────────────────────
 
@@ -141,14 +141,10 @@ export async function initiateOAuth1(
 
   // Store in oauth_states — use oauth_token as the state key (lookup key in callback)
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  const actorCols =
-    actor.type === "end_user"
-      ? { userId: null as string | null, endUserId: actor.id }
-      : { userId: actor.id, endUserId: null as string | null };
   await db.insert(oauthStates).values({
     state: oauthToken,
     orgId,
-    ...actorCols,
+    ...actorToColumns(actor),
     profileId,
     providerId,
     codeVerifier: "", // Not used for OAuth1, column is NOT NULL
@@ -275,9 +271,7 @@ export async function handleOAuth1Callback(
   await db.delete(oauthStates).where(eq(oauthStates.state, oauthToken));
 
   // Reconstruct actor from the stored columns
-  const actor: Actor = stateRow.endUserId
-    ? { type: "end_user", id: stateRow.endUserId }
-    : { type: "member", id: stateRow.userId! }; // userId is guaranteed non-null when endUserId is null (DB check constraint)
+  const actor = actorFromRow(stateRow);
 
   return {
     providerId: stateRow.providerId,

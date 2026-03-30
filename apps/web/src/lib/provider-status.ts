@@ -1,6 +1,30 @@
 import type { TFunction } from "i18next";
 
 /**
+ * Check whether a provider status string represents a connected state.
+ */
+export function isProviderStatusConnected(status: string): boolean {
+  return status === "connected" || status === "needs_reconnection";
+}
+
+/**
+ * Check whether a provider is connected within a given connection profile.
+ */
+export function isProviderConnectedInProfile(
+  providerId: string,
+  profileConnections?: Array<{ providerId: string }>,
+): boolean {
+  return profileConnections?.some((c) => c.providerId === providerId) ?? false;
+}
+
+/**
+ * Check whether any provider in the list is not connected.
+ */
+export function hasDisconnectedProviders(providers: Array<{ status: string }>): boolean {
+  return providers.some((p) => !isProviderStatusConnected(p.status));
+}
+
+/**
  * Compute a summary string for the providers section.
  */
 export function computeProvidersSummary(
@@ -13,7 +37,7 @@ export function computeProvidersSummary(
   let actionCount = 0;
 
   for (const svc of providers) {
-    if (svc.status === "connected" && svc.scopesSufficient !== false) {
+    if (isProviderStatusConnected(svc.status) && svc.scopesSufficient !== false) {
       connectedCount++;
     } else {
       actionCount++;
@@ -29,17 +53,4 @@ export function computeProvidersSummary(
   }
 
   return { text: parts.join(" \u2014 "), connectedCount, actionCount };
-}
-
-/**
- * Append the profile name to a "Connected" label when the user has multiple profiles.
- */
-export function connectedLabelWithProfile(
-  baseLabel: string,
-  profiles: Array<{ id: string; name: string }> | undefined,
-  profileId: string | null,
-): string {
-  if (!profiles || profiles.length <= 1 || !profileId) return baseLabel;
-  const profile = profiles.find((p) => p.id === profileId);
-  return profile ? `${baseLabel} (${profile.name})` : baseLabel;
 }

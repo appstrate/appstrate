@@ -2,18 +2,27 @@
  * Connection Profiles — manages actor and org connection profiles and profile resolution.
  */
 
-import { eq, and, count } from "drizzle-orm";
+import { eq, and, count, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
-  userPackageProfiles,
+  userFlowProviderProfiles,
   userProviderConnections,
   orgProfileProviderBindings,
+  organizationMembers,
+  packageConfigs,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
-import type { FlowProviderRequirement } from "../types/index.ts";
+import { getPackageConfig } from "./state/package-config.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import { notFound, invalidRequest } from "../lib/errors.ts";
+
+const PROFILE_ACTOR_COLUMNS = {
+  userId: connectionProfiles.userId,
+  endUserId: connectionProfiles.endUserId,
+} as const;
 
 // ─── Profile CRUD ─────────────────────────────────────────────
 
@@ -24,29 +33,36 @@ export async function ensureDefaultProfile(actor: Actor): Promise<ConnectionProf
   const [existing] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-        eq(connectionProfiles.isDefault, true),
-      ),
-    )
+    .where(and(actorFilter(actor, PROFILE_ACTOR_COLUMNS), eq(connectionProfiles.isDefault, true)))
     .limit(1);
 
   if (existing) return existing;
 
-  const [created] = await db
-    .insert(connectionProfiles)
-    .values({
-      ...actorInsert(actor),
-      name: "Default",
-      isDefault: true,
-    })
-    .returning();
+  try {
+    const [created] = await db
+      .insert(connectionProfiles)
+      .values({
+        ...actorInsert(actor),
+        name: "Default",
+        isDefault: true,
+      })
+      .returning();
 
-  return created!;
+    return created!;
+  } catch (err: unknown) {
+    // Handle race condition: unique index violation means another request created the profile
+    if (err instanceof Error && err.message.includes("idx_connection_profiles_default")) {
+      const [existing] = await db
+        .select()
+        .from(connectionProfiles)
+        .where(
+          and(actorFilter(actor, PROFILE_ACTOR_COLUMNS), eq(connectionProfiles.isDefault, true)),
+        )
+        .limit(1);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 export async function listProfiles(
@@ -66,12 +82,7 @@ export async function listProfiles(
     })
     .from(connectionProfiles)
     .leftJoin(userProviderConnections, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(
-      actorFilter(actor, {
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-      }),
-    )
+    .where(actorFilter(actor, PROFILE_ACTOR_COLUMNS))
     .groupBy(connectionProfiles.id);
 
   return rows;
@@ -87,17 +98,32 @@ export async function getProfileForActor(
   const [row] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Get a user profile whose owner is a member of the given org.
+ * Used for read-only access (e.g. viewing schedule provider status).
+ */
+export async function getOrgMemberProfile(
+  profileId: string,
+  orgId: string,
+): Promise<ConnectionProfile | null> {
+  const [row] = await db
+    .select({ profile: connectionProfiles })
+    .from(connectionProfiles)
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.userId, connectionProfiles.userId),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .where(eq(connectionProfiles.id, profileId))
+    .limit(1);
+  return row?.profile ?? null;
 }
 
 export async function createProfile(actor: Actor, name: string): Promise<ConnectionProfile> {
@@ -112,18 +138,10 @@ export async function renameProfile(profileId: string, actor: Actor, name: strin
   const [updated] = await db
     .update(connectionProfiles)
     .set({ name, updatedAt: new Date() })
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .returning({ id: connectionProfiles.id });
 
-  if (!updated) throw new Error("Profile not found");
+  if (!updated) throw notFound("Profile not found");
 }
 
 export async function deleteProfile(profileId: string, actor: Actor): Promise<void> {
@@ -131,57 +149,52 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
   const [profile] = await db
     .select()
     .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.id, profileId),
-        actorFilter(actor, {
-          userId: connectionProfiles.userId,
-          endUserId: connectionProfiles.endUserId,
-        }),
-      ),
-    )
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .limit(1);
 
-  if (!profile) throw new Error("Profile not found");
-  if (profile.isDefault) throw new Error("Cannot delete the default profile");
+  if (!profile) throw notFound("Profile not found");
+  if (profile.isDefault) throw invalidRequest("Cannot delete the default profile");
 
-  await db.delete(connectionProfiles).where(
-    and(
-      eq(connectionProfiles.id, profileId),
-      actorFilter(actor, {
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-      }),
-    ),
-  );
+  await db
+    .delete(connectionProfiles)
+    .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)));
 }
 
 // ─── Org Profile CRUD ───────────────────────────────────────
 
 export async function listOrgProfiles(
   orgId: string,
-): Promise<(ConnectionProfile & { bindingCount: number })[]> {
-  const rows = await db
-    .select({
-      id: connectionProfiles.id,
-      userId: connectionProfiles.userId,
-      endUserId: connectionProfiles.endUserId,
-      orgId: connectionProfiles.orgId,
-      name: connectionProfiles.name,
-      isDefault: connectionProfiles.isDefault,
-      createdAt: connectionProfiles.createdAt,
-      updatedAt: connectionProfiles.updatedAt,
-      bindingCount: count(orgProfileProviderBindings.providerId),
-    })
+): Promise<(ConnectionProfile & { bindingCount: number; boundProviderIds: string[] })[]> {
+  // Fetch profiles
+  const profileRows = await db
+    .select()
     .from(connectionProfiles)
-    .leftJoin(
-      orgProfileProviderBindings,
-      eq(orgProfileProviderBindings.orgProfileId, connectionProfiles.id),
-    )
-    .where(eq(connectionProfiles.orgId, orgId))
-    .groupBy(connectionProfiles.id);
+    .where(eq(connectionProfiles.orgId, orgId));
 
-  return rows;
+  if (profileRows.length === 0) return [];
+
+  // Fetch all bindings for these profiles in a single query
+  const profileIds = profileRows.map((p) => p.id);
+  const bindingRows = await db
+    .select({
+      orgProfileId: orgProfileProviderBindings.orgProfileId,
+      providerId: orgProfileProviderBindings.providerId,
+    })
+    .from(orgProfileProviderBindings)
+    .where(inArray(orgProfileProviderBindings.orgProfileId, profileIds));
+
+  // Group bindings by profile
+  const bindingsByProfile = new Map<string, string[]>();
+  for (const row of bindingRows) {
+    const list = bindingsByProfile.get(row.orgProfileId) ?? [];
+    list.push(row.providerId);
+    bindingsByProfile.set(row.orgProfileId, list);
+  }
+
+  return profileRows.map((p) => {
+    const providerIds = bindingsByProfile.get(p.id) ?? [];
+    return { ...p, bindingCount: providerIds.length, boundProviderIds: providerIds };
+  });
 }
 
 export async function createOrgProfile(orgId: string, name: string): Promise<ConnectionProfile> {
@@ -204,6 +217,20 @@ export async function getOrgProfile(
   return row ?? null;
 }
 
+/**
+ * Load the org profile configured on a flow, returning null if none configured
+ * or if the referenced profile was deleted.
+ */
+export async function getFlowOrgProfile(
+  orgId: string,
+  packageId: string,
+): Promise<{ id: string; name: string } | null> {
+  const { orgProfileId } = await getPackageConfig(orgId, packageId);
+  if (!orgProfileId) return null;
+  const profile = await getOrgProfile(orgProfileId, orgId);
+  return profile ? { id: orgProfileId, name: profile.name } : null;
+}
+
 export async function renameOrgProfile(
   profileId: string,
   orgId: string,
@@ -215,7 +242,7 @@ export async function renameOrgProfile(
     .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
     .returning({ id: connectionProfiles.id });
 
-  if (!updated) throw new Error("Profile not found");
+  if (!updated) throw notFound("Profile not found");
 }
 
 export async function deleteOrgProfile(profileId: string, orgId: string): Promise<void> {
@@ -225,7 +252,14 @@ export async function deleteOrgProfile(profileId: string, orgId: string): Promis
     .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
     .limit(1);
 
-  if (!profile) throw new Error("Profile not found");
+  if (!profile) throw notFound("Profile not found");
+
+  // Clear stale orgProfileId references in package_configs before deleting the profile.
+  // The FK has onDelete: "set null", but we clear explicitly as defense-in-depth.
+  await db
+    .update(packageConfigs)
+    .set({ orgProfileId: null, updatedAt: new Date() })
+    .where(eq(packageConfigs.orgProfileId, profileId));
 
   await db
     .delete(connectionProfiles)
@@ -245,6 +279,8 @@ export async function listOrgProfilesWithUserBindings(
       orgProfileId: orgProfileProviderBindings.orgProfileId,
       providerId: orgProfileProviderBindings.providerId,
       profileName: connectionProfiles.name,
+      profileCreatedAt: connectionProfiles.createdAt,
+      profileUpdatedAt: connectionProfiles.updatedAt,
     })
     .from(orgProfileProviderBindings)
     .innerJoin(
@@ -258,10 +294,15 @@ export async function listOrgProfilesWithUserBindings(
       ),
     );
 
-  const grouped = new Map<string, { profileName: string; providerIds: string[] }>();
+  const grouped = new Map<
+    string,
+    { profileName: string; createdAt: Date; updatedAt: Date; providerIds: string[] }
+  >();
   for (const row of rows) {
     const entry = grouped.get(row.orgProfileId) ?? {
       profileName: row.profileName,
+      createdAt: row.profileCreatedAt,
+      updatedAt: row.profileUpdatedAt,
       providerIds: [],
     };
     entry.providerIds.push(row.providerId);
@@ -276,89 +317,126 @@ export async function listOrgProfilesWithUserBindings(
       orgId,
       name: data.profileName,
       isDefault: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
     },
     providerIds: data.providerIds,
   }));
 }
 
-// ─── Profile Resolution ─────────────────────────────────────
+// ─── Per-Provider Profile Overrides ──────────────────────────
 
-/**
- * Get the effective profile ID for an actor+package combination.
- * Returns the override if one exists, otherwise the default.
- */
-export async function getEffectiveProfileId(actor: Actor, packageId?: string): Promise<string> {
-  if (packageId) {
-    const [override] = await db
-      .select({ profileId: userPackageProfiles.profileId })
-      .from(userPackageProfiles)
-      .where(
-        and(
-          actorFilter(actor, {
-            userId: userPackageProfiles.userId,
-            endUserId: userPackageProfiles.endUserId,
-          }),
-          eq(userPackageProfiles.packageId, packageId),
-        ),
-      )
-      .limit(1);
-
-    if (override) return override.profileId;
-  }
-
-  return (await ensureDefaultProfile(actor)).id;
-}
-
-export async function setPackageProfileOverride(
+/** Get all per-provider profile overrides for an actor+flow combination. */
+export async function getUserFlowProviderOverrides(
   actor: Actor,
   packageId: string,
-  profileId: string,
-): Promise<void> {
-  const [existing] = await db
-    .select({ id: userPackageProfiles.id })
-    .from(userPackageProfiles)
+): Promise<Record<string, string>> {
+  const rows = await db
+    .select({
+      providerId: userFlowProviderProfiles.providerId,
+      profileId: userFlowProviderProfiles.profileId,
+    })
+    .from(userFlowProviderProfiles)
     .where(
       and(
         actorFilter(actor, {
-          userId: userPackageProfiles.userId,
-          endUserId: userPackageProfiles.endUserId,
+          userId: userFlowProviderProfiles.userId,
+          endUserId: userFlowProviderProfiles.endUserId,
         }),
-        eq(userPackageProfiles.packageId, packageId),
+        eq(userFlowProviderProfiles.packageId, packageId),
       ),
-    )
-    .limit(1);
+    );
 
-  if (existing) {
-    await db
-      .update(userPackageProfiles)
-      .set({ profileId, updatedAt: new Date() })
-      .where(eq(userPackageProfiles.id, existing.id));
-  } else {
-    await db
-      .insert(userPackageProfiles)
-      .values({ ...actorInsert(actor), packageId, profileId, updatedAt: new Date() });
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    map[row.providerId] = row.profileId;
   }
+  return map;
 }
 
-export async function removePackageProfileOverride(actor: Actor, packageId: string): Promise<void> {
-  await db.delete(userPackageProfiles).where(
+/** Set a per-provider profile override (atomic upsert via raw SQL). */
+export async function setUserFlowProviderOverride(
+  actor: Actor,
+  packageId: string,
+  providerId: string,
+  profileId: string,
+): Promise<void> {
+  const actorValues = actorInsert(actor);
+  const userId = actorValues.userId ?? null;
+  const endUserId = actorValues.endUserId ?? null;
+
+  if (!userId && !endUserId) {
+    throw new Error("setUserFlowProviderOverride: exactly one of userId or endUserId must be set");
+  }
+
+  // Atomic upsert — partial unique indexes (idx_ufpp_member / idx_ufpp_end_user)
+  // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
+  await db.execute(sql`
+    INSERT INTO user_flow_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
+    VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${profileId}, NOW())
+    ON CONFLICT (${userId !== null ? sql`user_id` : sql`end_user_id`}, package_id, provider_id)
+      WHERE ${userId !== null ? sql`user_id IS NOT NULL` : sql`end_user_id IS NOT NULL`}
+    DO UPDATE SET profile_id = EXCLUDED.profile_id, updated_at = NOW()
+  `);
+}
+
+/** Remove a per-provider profile override (revert to default). */
+export async function removeUserFlowProviderOverride(
+  actor: Actor,
+  packageId: string,
+  providerId: string,
+): Promise<void> {
+  await db.delete(userFlowProviderProfiles).where(
     and(
       actorFilter(actor, {
-        userId: userPackageProfiles.userId,
-        endUserId: userPackageProfiles.endUserId,
+        userId: userFlowProviderProfiles.userId,
+        endUserId: userFlowProviderProfiles.endUserId,
       }),
-      eq(userPackageProfiles.packageId, packageId),
+      eq(userFlowProviderProfiles.packageId, packageId),
+      eq(userFlowProviderProfiles.providerId, providerId),
     ),
   );
 }
 
+/** Get the default profile ID for an actor. */
+export async function getDefaultProfileId(actor: Actor): Promise<string> {
+  return (await ensureDefaultProfile(actor)).id;
+}
+
 /**
- * Get a profile by ID without actor scoping. Used by scheduler to load the
- * profile referenced by a schedule's connectionProfileId.
+ * Resolve actor profile context for a flow: default profile + per-provider overrides.
+ * Used by execution, flow-detail, and internal (sidecar credential proxy) routes.
+ *
+ * When actor is null (e.g. sidecar with no user), pass fallbackProfileId to skip
+ * ensureDefaultProfile and per-provider overrides.
  */
-export async function getProfileById(profileId: string): Promise<ConnectionProfile | null> {
+export async function resolveActorProfileContext(
+  actor: Actor | null,
+  packageId: string,
+  fallbackProfileId: string | null = null,
+): Promise<{ defaultUserProfileId: string | null; userProviderOverrides: Record<string, string> }> {
+  if (!actor) {
+    return {
+      defaultUserProfileId: fallbackProfileId,
+      userProviderOverrides: {},
+    };
+  }
+  const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
+    getDefaultProfileId(actor),
+    getUserFlowProviderOverrides(actor, packageId),
+  ]);
+  return { defaultUserProfileId, userProviderOverrides };
+}
+
+/**
+ * Get a profile by ID without actor/org scoping. Used by scheduler to load the
+ * profile referenced by a schedule's connectionProfileId.
+ *
+ * No orgId filter: user/end-user profiles have orgId=null on the row, so filtering
+ * by orgId would miss them. The caller (scheduler) already validates the schedule
+ * belongs to the requesting org.
+ */
+export async function getProfileByIdUnsafe(profileId: string): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)
@@ -369,41 +447,52 @@ export async function getProfileById(profileId: string): Promise<ConnectionProfi
 
 // ─── Provider Profile Resolution ────────────────────────────
 
+/** Dependencies for resolveProviderProfiles — injectable for testing. */
+export interface ResolveProviderProfilesDeps {
+  getOrgProfileBindings: (orgProfileId: string, orgId: string) => Promise<Record<string, string>>;
+}
+
+const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
+  getOrgProfileBindings,
+};
+
 /**
  * Resolve profile IDs for each provider in a package.
  *
- * - Org profile: each provider resolves via org_profile_provider_bindings → source user profile
- * - User/end-user profile: all providers use the profile directly
+ * Three-layer resolution (highest priority first):
+ * 1. orgProfileId binding → source: "org_binding"
+ * 2. Per-provider user override → source: "user_profile"
+ * 3. Default user profile → source: "user_profile"
+ *
+ * For schedules: pass the schedule's connectionProfileId as defaultUserProfileId
+ * with orgProfileId if the schedule uses an org profile. No per-provider overrides.
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
-  actor: Actor | null,
-  packageId: string,
-  orgId: string,
-  profileIdOverride?: string,
-): Promise<Record<string, string>> {
-  if (!profileIdOverride && !actor) {
-    throw new Error("Either profileIdOverride or actor must be provided");
+  defaultUserProfileId: string | null,
+  userProviderOverrides?: Record<string, string>,
+  orgProfileId?: string | null,
+  orgId?: string,
+  deps: ResolveProviderProfilesDeps = defaultResolveProviderProfilesDeps,
+): Promise<ProviderProfileMap> {
+  const map: ProviderProfileMap = {};
+
+  // Load org bindings if an org profile is provided
+  let bindings: Record<string, string> = {};
+  if (orgProfileId && orgId) {
+    bindings = await deps.getOrgProfileBindings(orgProfileId, orgId);
   }
-  const effectiveProfileId = profileIdOverride ?? (await getEffectiveProfileId(actor!, packageId));
-  const profile = await getProfileById(effectiveProfileId);
-  if (!profile) throw new Error("Profile not found");
 
-  const map: Record<string, string> = {};
-
-  if (profile.orgId) {
-    // Org profile: resolve each provider via bindings → source user profile
-    const bindings = await getOrgProfileBindings(effectiveProfileId);
-    for (const svc of providers) {
-      const sourceProfileId = bindings[svc.id];
-      if (sourceProfileId) {
-        map[svc.id] = sourceProfileId;
+  for (const svc of providers) {
+    const orgBinding = orgProfileId ? bindings[svc.id] : undefined;
+    if (orgBinding) {
+      map[svc.id] = { profileId: orgBinding, source: "org_binding" };
+    } else {
+      const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
+      if (fallbackId) {
+        map[svc.id] = { profileId: fallbackId, source: "user_profile" };
       }
-    }
-  } else {
-    // User/end-user profile: all providers use this profile directly
-    for (const svc of providers) {
-      map[svc.id] = effectiveProfileId;
+      // If no fallback (org-only mode), provider simply not in map — dependency validation will catch it
     }
   }
 

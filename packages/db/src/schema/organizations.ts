@@ -21,12 +21,12 @@ export const organizations = pgTable("organizations", {
   slug: text("slug").unique().notNull(),
   settings: jsonb("settings").notNull().default({}),
   createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const organizationMembers = pgTable(
-  "organization_members",
+  "org_members",
   {
     orgId: uuid("org_id")
       .notNull()
@@ -34,12 +34,12 @@ export const organizationMembers = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: orgRoleEnum("role").notNull().default("member"),
-    joinedAt: timestamp("joined_at").defaultNow(),
+    role: orgRoleEnum("role").notNull(),
+    joinedAt: timestamp("joined_at").defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.userId] }),
-    index("idx_organization_members_user_id").on(table.userId),
+    index("idx_org_members_user_id").on(table.userId),
   ],
 );
 
@@ -54,13 +54,13 @@ export const orgInvitations = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    role: orgRoleEnum("role").notNull().default("member"),
+    role: orgRoleEnum("role").notNull(),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id),
     acceptedBy: text("accepted_by").references(() => user.id),
     expiresAt: timestamp("expires_at").notNull(),
     acceptedAt: timestamp("accepted_at"),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_invitations_token").on(table.token),
@@ -91,7 +91,7 @@ export const apiKeys = pgTable(
     expiresAt: timestamp("expires_at"),
     lastUsedAt: timestamp("last_used_at"),
     revokedAt: timestamp("revoked_at"),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_api_keys_org_id").on(table.orgId),
@@ -114,8 +114,8 @@ export const orgProxies = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_proxies_org_id").on(table.orgId),
@@ -137,8 +137,8 @@ export const orgProviderKeys = pgTable(
     baseUrl: text("base_url").notNull(),
     apiKeyEncrypted: text("api_key_encrypted").notNull(),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => [index("idx_org_provider_keys_org_id").on(t.orgId)],
 );
@@ -168,8 +168,8 @@ export const orgModels = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_models_org_id").on(table.orgId),

@@ -52,10 +52,10 @@ export const connectionProfiles = pgTable(
   ],
 );
 
-export const userPackageProfiles = pgTable(
-  "user_package_profiles",
+// Per-provider profile overrides: (actor, flow, provider) → profile
+export const userFlowProviderProfiles = pgTable(
+  "user_flow_provider_profiles",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",
@@ -63,21 +63,23 @@ export const userPackageProfiles = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
     profileId: uuid("profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("idx_user_package_profiles_member")
-      .on(table.userId, table.packageId)
+    uniqueIndex("idx_ufpp_member")
+      .on(table.userId, table.packageId, table.providerId)
       .where(sql`${table.userId} IS NOT NULL`),
-    uniqueIndex("idx_user_package_profiles_end_user")
-      .on(table.endUserId, table.packageId)
+    uniqueIndex("idx_ufpp_end_user")
+      .on(table.endUserId, table.packageId, table.providerId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    index("idx_user_package_profiles_package_id").on(table.packageId),
+    index("idx_ufpp_package_id").on(table.packageId),
+    index("idx_ufpp_profile_id").on(table.profileId),
     check(
-      "user_package_profiles_exactly_one_actor",
+      "ufpp_exactly_one_actor",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
     ),
   ],

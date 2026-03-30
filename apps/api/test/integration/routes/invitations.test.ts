@@ -164,25 +164,21 @@ describe("Invitations API", () => {
       expect(body.email).toBe("known@test.com");
     });
 
-    it("rejects accept when authenticated user email does not match invitation email", async () => {
-      // Create the invited user so the backend takes the "existing user" path
-      await createTestUser({ email: "invited@test.com" });
+    it("returns 403 when authenticated user's email does not match invitation", async () => {
+      const wrongUser = await createTestUser({ email: "wrong@test.com" });
+      await createTestUser({ email: "target@test.com" });
 
       const inv = await seedInvitation({
         orgId: ctx.orgId,
-        email: "invited@test.com",
+        email: "target@test.com",
         invitedBy: ctx.user.id,
       });
 
-      // Create a second user with a different email and get their session cookie
-      const otherUser = await createTestUser({ email: "other@test.com" });
-
-      // Try to accept the invitation while authenticated as the wrong user
       const res = await app.request(`/invite/${inv.token}/accept`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Cookie: otherUser.cookie,
+          Cookie: wrongUser.cookie,
         },
         body: JSON.stringify({}),
       });
@@ -191,5 +187,34 @@ describe("Invitations API", () => {
       const body = (await res.json()) as any;
       expect(body.code).toBe("email_mismatch");
     });
+
+    it("accepts invitation when existing user re-accepts (idempotent addMember)", async () => {
+      const existingUser = await createTestUser({ email: "idempotent@test.com" });
+      const { addOrgMember } = await import("../../helpers/auth.ts");
+
+      // Pre-add the user as member (simulates double-click / race)
+      await addOrgMember(ctx.orgId, existingUser.id, "member");
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "idempotent@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: existingUser.cookie,
+        },
+        body: JSON.stringify({}),
+      });
+
+      // Should succeed (idempotent), not 500
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(true);
+    });
+
   });
 });

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
-import { useSchedules } from "../../hooks/use-schedules";
+import { useSchedules, useAllSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
@@ -36,25 +36,15 @@ export function FlowExecutionsTab({
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
+  const { data: allSchedules } = useAllSchedules();
   const readiness = useFlowReadiness(detail, undefined, undefined, configSchemaOverride);
 
   if (!detail) return null;
 
-  const {
-    allConnected,
-    hasReconnectionNeeded,
-    hasRequiredConfig,
-    hasPrompt,
-    hasRequiredSkills,
-    hasRequiredTools,
-  } = readiness;
-  const runDisabled =
-    !hasPrompt ||
-    !hasRequiredSkills ||
-    !hasRequiredTools ||
-    !allConnected ||
-    hasReconnectionNeeded ||
-    !hasRequiredConfig;
+  const { hasRequiredConfig, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
+  // Provider connection checks are handled by the ConnectionSummaryModal,
+  // so only non-connection readiness gates disable the button.
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig;
 
   return (
     <>
@@ -75,6 +65,11 @@ export function FlowExecutionsTab({
               key={exec.id}
               execution={exec}
               userName={exec.userId ? profileMap.get(exec.userId) : undefined}
+              scheduleName={
+                exec.scheduleId
+                  ? (allSchedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
+                  : null
+              }
             />
           ))}
         </div>
@@ -117,8 +112,14 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
   );
 }
 
-export function FlowConnectorsTab({ packageId }: { packageId: string }) {
-  return <FlowProvidersSection packageId={packageId} />;
+export function FlowConnectorsTab({
+  packageId,
+  detail,
+}: {
+  packageId: string;
+  detail?: import("@appstrate/shared-types").FlowDetail;
+}) {
+  return <FlowProvidersSection packageId={packageId} detail={detail} />;
 }
 
 export function FlowMemoriesTab({

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
@@ -20,6 +20,7 @@ import type { ProviderConfig } from "@appstrate/shared-types";
 export function ProvidersPage() {
   const { t } = useTranslation(["settings", "flows"]);
   const [showAll, setShowAll] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();
   const { isOrgAdmin } = useOrg();
 
@@ -27,28 +28,31 @@ export function ProvidersPage() {
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
 
   // Build lookups: providerId → badge, actions, icon
-  const badgeMap = new Map<string, ReactNode>();
-  const actionsMap = new Map<string, ReactNode>();
-  const iconMap = new Map<string, string>();
-  if (providersData?.providers) {
-    for (const p of providersData.providers) {
-      if (p.iconUrl) iconMap.set(p.id, p.iconUrl);
+  const { badgeMap, actionsMap, iconMap } = useMemo(() => {
+    const badges = new Map<string, ReactNode>();
+    const actions = new Map<string, ReactNode>();
+    const icons = new Map<string, string>();
+    if (providersData?.providers) {
+      for (const p of providersData.providers) {
+        if (p.iconUrl) icons.set(p.id, p.iconUrl);
 
-      badgeMap.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
+        badges.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
-      const configButton = isOrgAdmin ? (
-        <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
-      ) : null;
+        const configButton = isOrgAdmin ? (
+          <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
+        ) : null;
 
-      actionsMap.set(
-        p.id,
-        <div className="flex items-center gap-2 ml-auto">
-          <ProviderConnectButton provider={p} />
-          {configButton}
-        </div>,
-      );
+        actions.set(
+          p.id,
+          <div className="flex items-center gap-2 ml-auto">
+            <ProviderConnectButton provider={p} />
+            {configButton}
+          </div>,
+        );
+      }
     }
-  }
+    return { badgeMap: badges, actionsMap: actions, iconMap: icons };
+  }, [providersData, isOrgAdmin]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();
@@ -67,7 +71,7 @@ export function ProvidersPage() {
           <TabsTrigger value="all">{t("providers.filterAll")}</TabsTrigger>
         </TabsList>
       </Tabs>
-      <ProfileSelector />
+      <ProfileSelector value={profileId} onChange={setProfileId} />
     </div>
   );
 

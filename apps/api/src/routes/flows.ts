@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   setPackageConfig,
-  getPackageConfigFull,
+  getPackageConfig,
   setFlowOverride,
   getRunningExecutionsCounts,
   getPackageMemories,
@@ -14,17 +14,20 @@ import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { getActor } from "../lib/actor.ts";
 import {
-  setPackageProfileOverride,
-  removePackageProfileOverride,
+  setUserFlowProviderOverride,
+  removeUserFlowProviderOverride,
+  getUserFlowProviderOverrides,
+  getProfileForActor,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
-import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
+const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
 
 export function createFlowsRouter() {
   const router = new Hono<AppEnv>();
@@ -54,8 +57,8 @@ export function createFlowsRouter() {
         runningExecutions: runningCounts[f.id] ?? 0,
         source: f.source,
         scope: parsed?.scope ?? null,
-        version: f.manifest.version ?? null,
-        type: f.manifest.type ?? "flow",
+        version: f.manifest.version,
+        type: f.manifest.type,
       };
     });
 
@@ -86,25 +89,40 @@ export function createFlowsRouter() {
     });
   });
 
-  // PUT /api/flows/:scope/:name/profile — set flow profile override
-  router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
+  // GET /api/flows/:scope/:name/provider-profiles — get per-provider profile overrides
+  router.get("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const actor = getActor(c);
+    const overrides = await getUserFlowProviderOverrides(actor, flow.id);
+    return c.json({ overrides });
+  });
+
+  // PUT /api/flows/:scope/:name/provider-profiles — set per-provider override
+  // Provider ID passed in body (scoped IDs contain slashes, can't be in URL)
+  router.put("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const actor = getActor(c);
     const body = await c.req.json();
-    const data = parseBody(
-      z.object({ profileId: z.string().min(1, "profileId is required") }),
-      body,
-      "profileId",
-    );
-    await setPackageProfileOverride(actor, flow.id, data.profileId);
+    const data = parseBody(z.object({ providerId: z.string().min(1), profileId: z.uuid() }), body);
+
+    // Validate ownership — user can only set overrides to their own profiles
+    const profile = await getProfileForActor(data.profileId, actor);
+    if (!profile) {
+      throw forbidden("Cannot use a profile you do not own");
+    }
+
+    await setUserFlowProviderOverride(actor, flow.id, data.providerId, data.profileId);
     return c.json({ success: true });
   });
 
-  // DELETE /api/flows/:scope/:name/profile — remove flow profile override
-  router.delete("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {
+  // DELETE /api/flows/:scope/:name/provider-profiles — remove per-provider override
+  // Provider ID passed in body
+  router.delete("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const actor = getActor(c);
-    await removePackageProfileOverride(actor, flow.id);
+    const body = await c.req.json();
+    const data = parseBody(z.object({ providerId: z.string().min(1) }), body);
+    await removeUserFlowProviderOverride(actor, flow.id, data.providerId);
     return c.json({ success: true });
   });
 
@@ -112,7 +130,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const { proxyId } = await getPackageConfigFull(orgId, flow.id);
+    const { proxyId } = await getPackageConfig(orgId, flow.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -133,7 +151,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const { modelId } = await getPackageConfigFull(orgId, flow.id);
+    const { modelId } = await getPackageConfig(orgId, flow.id);
 
     return c.json({ modelId });
   });
@@ -146,6 +164,18 @@ export function createFlowsRouter() {
     const data = parseBody(modelIdSchema, body);
 
     await setFlowOverride(orgId, flow.id, "modelId", data.modelId);
+
+    return c.json({ success: true });
+  });
+
+  // PUT /api/flows/:scope/:name/org-profile — set org profile for this flow (admin-only)
+  router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), requireAdmin(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const body = await c.req.json();
+    const data = parseBody(orgProfileIdSchema, body);
+
+    await setFlowOverride(orgId, flow.id, "orgProfileId", data.orgProfileId);
 
     return c.json({ success: true });
   });

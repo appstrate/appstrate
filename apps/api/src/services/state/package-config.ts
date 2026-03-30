@@ -8,29 +8,18 @@ import { asRecord } from "../../lib/safe-json.ts";
 export async function getPackageConfig(
   orgId: string,
   packageId: string,
-): Promise<Record<string, unknown>> {
-  const [row] = await db
-    .select({ config: packageConfigs.config })
-    .from(packageConfigs)
-    .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
-    .limit(1);
-  return asRecord(row?.config);
-}
-
-/** Get config + model/proxy overrides in a single query (used by env-builder). */
-export async function getPackageConfigFull(
-  orgId: string,
-  packageId: string,
 ): Promise<{
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
+  orgProfileId: string | null;
 }> {
   const [row] = await db
     .select({
       config: packageConfigs.config,
       modelId: packageConfigs.modelId,
       proxyId: packageConfigs.proxyId,
+      orgProfileId: packageConfigs.orgProfileId,
     })
     .from(packageConfigs)
     .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
@@ -39,6 +28,7 @@ export async function getPackageConfigFull(
     config: asRecord(row?.config),
     modelId: row?.modelId ?? null,
     proxyId: row?.proxyId ?? null,
+    orgProfileId: row?.orgProfileId ?? null,
   };
 }
 
@@ -67,7 +57,7 @@ export async function setPackageConfig(
 export async function setFlowOverride(
   orgId: string,
   packageId: string,
-  field: "modelId" | "proxyId",
+  field: "modelId" | "proxyId" | "orgProfileId",
   value: string | null,
 ): Promise<void> {
   await db

@@ -6,7 +6,7 @@ import { CURRENT_API_VERSION } from "../../src/lib/api-versions.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 
-function createApp(deps: Parameters<typeof apiVersion>[0] = {}) {
+function createApp(getOrgApiVersion?: Parameters<typeof apiVersion>[0]) {
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
   app.use("*", requestId());
@@ -15,7 +15,7 @@ function createApp(deps: Parameters<typeof apiVersion>[0] = {}) {
     c.set("orgId", "org-1");
     return next();
   });
-  app.use("*", apiVersion(deps));
+  app.use("*", apiVersion(getOrgApiVersion));
   app.get("/test", (c) => c.json({ version: c.get("apiVersion") }));
   return app;
 }
@@ -60,27 +60,21 @@ describe("apiVersion middleware", () => {
   });
 
   it("uses org-pinned version when available", async () => {
-    const app = createApp({
-      getOrgApiVersion: async () => "2026-03-21",
-    });
+    const app = createApp(async () => "2026-03-21");
     const res = await app.request("/test");
     expect(res.status).toBe(200);
     expect(res.headers.get("Appstrate-Version")).toBe("2026-03-21");
   });
 
   it("falls back to current version when org has no pinned version", async () => {
-    const app = createApp({
-      getOrgApiVersion: async () => null,
-    });
+    const app = createApp(async () => null);
     const res = await app.request("/test");
     expect(res.status).toBe(200);
     expect(res.headers.get("Appstrate-Version")).toBe(CURRENT_API_VERSION);
   });
 
   it("header takes priority over org-pinned version", async () => {
-    const app = createApp({
-      getOrgApiVersion: async () => "2026-03-21",
-    });
+    const app = createApp(async () => "2026-03-21");
     const res = await app.request("/test", {
       headers: { "Appstrate-Version": "2026-03-21" },
     });

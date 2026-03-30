@@ -16,7 +16,6 @@ export { validateScopes } from "./scopes.ts";
 export {
   getProvider,
   getProviderOrThrow,
-  getProviderOAuthCredentials,
   getProviderOAuthCredentialsOrThrow,
   getProviderOAuth1CredentialsOrThrow,
   listProviders,

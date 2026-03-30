@@ -7,12 +7,7 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signExecutionToken } from "../lib/execution-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import {
-  getPackageConfig,
-  getPackageConfigFull,
-  getLastExecutionState,
-  getPackageMemories,
-} from "./state/index.ts";
+import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildFlowPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
@@ -20,38 +15,14 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
-import { validateFlowReadiness } from "./flow-readiness.ts";
+import type { ProviderProfileMap } from "../types/index.ts";
+import { toISO } from "../lib/date-helpers.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
     super("No LLM model configured for this organization");
     this.name = "ModelNotConfiguredError";
   }
-}
-
-/**
- * Resolve provider profiles, config, and validate flow readiness.
- * Shared preflight logic for all execution paths (manual run, scheduled).
- */
-export async function resolvePreflightContext(params: {
-  flow: LoadedPackage;
-  actor: Actor | null;
-  packageId: string;
-  orgId: string;
-  profileIdOverride?: string;
-}): Promise<{ providerProfiles: Record<string, string>; config: Record<string, unknown> }> {
-  const { flow, actor, packageId, orgId, profileIdOverride } = params;
-  const manifestProviders = resolveManifestProviders(flow.manifest);
-
-  const [providerProfiles, config] = await Promise.all([
-    resolveProviderProfiles(manifestProviders, actor, packageId, orgId, profileIdOverride),
-    getPackageConfig(orgId, packageId),
-  ]);
-
-  await validateFlowReadiness({ flow, providerProfiles, orgId, config });
-
-  return { providerProfiles, config };
 }
 
 /**
@@ -66,10 +37,11 @@ export async function resolveProviderDefs(
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
   return defs
     .filter((def): def is NonNullable<typeof def> => def != null)
+    .filter((def) => def.authMode != null)
     .map((def) => ({
       id: def.id,
       displayName: def.displayName,
-      authMode: def.authMode,
+      authMode: def.authMode!,
       credentialSchema: def.credentialSchema,
       credentialFieldName: def.credentialFieldName,
       credentialHeaderName: def.credentialHeaderName,
@@ -149,13 +121,121 @@ export function buildPromptContext(params: {
 }
 
 /**
+ * Load all independent execution data in parallel: tokens, config, state,
+ * provider definitions, flow package, latest version, and memories.
+ */
+async function loadExecutionData(params: {
+  flow: LoadedPackage;
+  providerProfiles: ProviderProfileMap;
+  orgId: string;
+  actor: Actor | null;
+  manifestProviders: FlowProviderRequirement[];
+  skipConfigFetch: boolean;
+  overrideVersionId?: number;
+}) {
+  const { flow, providerProfiles, orgId, actor, manifestProviders, skipConfigFetch } = params;
+
+  const [
+    tokens,
+    configFull,
+    previousState,
+    providerDefs,
+    flowPackageResult,
+    latestVersion,
+    memories,
+  ] = await Promise.all([
+    buildProviderTokens(manifestProviders, providerProfiles, orgId),
+    skipConfigFetch ? null : getPackageConfig(orgId, flow.id),
+    getLastExecutionState(flow.id, actor, orgId),
+    resolveProviderDefs(db, orgId, manifestProviders),
+    buildFlowPackage(flow, orgId),
+    params.overrideVersionId
+      ? Promise.resolve(params.overrideVersionId)
+      : flow.source !== "system"
+        ? getLatestVersionWithManifest(flow.id).catch(() => null)
+        : null,
+    getPackageMemories(flow.id, orgId),
+  ]);
+
+  return {
+    tokens,
+    configFull,
+    previousState,
+    providerDefs,
+    flowPackageResult,
+    latestVersion,
+    memories,
+  };
+}
+
+/**
+ * Resolve model and proxy with cascade logic:
+ * request override → flow column → org/system default.
+ * Throws ModelNotConfiguredError if no model is found.
+ */
+async function resolveModelAndProxy(params: {
+  orgId: string;
+  flowId: string;
+  effectiveModelId: string | null;
+  effectiveProxyId: string | null;
+}) {
+  const { orgId, flowId, effectiveModelId, effectiveProxyId } = params;
+
+  const [proxyResult, modelResult] = await Promise.all([
+    resolveProxy(orgId, flowId, effectiveProxyId),
+    resolveModel(orgId, flowId, effectiveModelId),
+  ]);
+
+  if (!modelResult) {
+    throw new ModelNotConfiguredError();
+  }
+
+  const proxyUrl = proxyResult?.url ?? null;
+  const proxyLabel = proxyResult?.label ?? null;
+  const modelLabel = modelResult.label;
+  const llmConfig: PromptContext["llmConfig"] = {
+    api: modelResult.api,
+    baseUrl: modelResult.baseUrl,
+    modelId: modelResult.modelId,
+    apiKey: modelResult.apiKey,
+    input: modelResult.input,
+    contextWindow: modelResult.contextWindow,
+    maxTokens: modelResult.maxTokens,
+    reasoning: modelResult.reasoning,
+    cost: modelResult.cost,
+  };
+
+  return { proxyUrl, proxyLabel, modelLabel, llmConfig };
+}
+
+/**
+ * Resolve the package version ID from the latest version result.
+ * Explicit override is trusted; otherwise only associate the latest version
+ * if its manifest matches the live flow (dirty check).
+ */
+function resolvePackageVersionId(
+  latestVersion: number | { id: number; manifest: Record<string, unknown> } | null,
+  flowManifest: Record<string, unknown>,
+): number | null {
+  if (typeof latestVersion === "number") {
+    return latestVersion;
+  }
+  if (latestVersion) {
+    const liveKey = JSON.stringify(flowManifest);
+    const versionKey = JSON.stringify(latestVersion.manifest);
+    return liveKey === versionKey ? latestVersion.id : null;
+  }
+  return null;
+}
+
+/**
  * Build the full execution context (tokens, config, state, providers, package, version).
  * Shared by executions.ts and scheduler.ts.
  */
 export async function buildExecutionContext(params: {
   executionId: string;
   flow: LoadedPackage;
-  providerProfiles: Record<string, string>;
+  providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
@@ -172,11 +252,14 @@ export async function buildExecutionContext(params: {
   modelLabel: string | null;
 }> {
   const { executionId, flow, providerProfiles, orgId, actor, input, files } = params;
-
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
-  // Step 1: load config + overrides and independent data in parallel
-  const [
+  // Skip getPackageConfig when all values are already provided by the caller (from preflight)
+  const skipConfigFetch =
+    params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
+
+  // Step 1: load all independent data in parallel
+  const {
     tokens,
     configFull,
     previousState,
@@ -184,67 +267,35 @@ export async function buildExecutionContext(params: {
     flowPackageResult,
     latestVersion,
     memories,
-  ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    getPackageConfigFull(orgId, flow.id),
-    getLastExecutionState(flow.id, actor, orgId),
-    resolveProviderDefs(db, orgId, manifestProviders),
-    buildFlowPackage(flow, orgId),
-    params.overrideVersionId
-      ? Promise.resolve(params.overrideVersionId)
-      : flow.source !== "system"
-        ? getLatestVersionWithManifest(flow.id).catch(() => null)
-        : null,
-    getPackageMemories(flow.id, orgId),
-  ]);
+  } = await loadExecutionData({
+    flow,
+    providerProfiles,
+    orgId,
+    actor,
+    manifestProviders,
+    skipConfigFetch,
+    overrideVersionId: params.overrideVersionId,
+  });
 
-  const config = params.config ?? configFull.config;
+  const config = params.config ?? configFull?.config ?? {};
   const flowPackage = flowPackageResult.zip;
   const { toolDocs } = flowPackageResult;
 
-  // Step 2: resolve model and proxy with cascade (request override → flow column → org/system default)
-  const effectiveModelId = params.modelId ?? configFull.modelId;
-  const effectiveProxyId = params.proxyId ?? configFull.proxyId;
+  // Step 2: resolve model and proxy with cascade
+  const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
+  const effectiveProxyId = params.proxyId ?? configFull?.proxyId ?? null;
 
-  const [proxyResult, modelResult] = await Promise.all([
-    resolveProxy(orgId, flow.id, effectiveProxyId),
-    resolveModel(orgId, flow.id, effectiveModelId),
-  ]);
+  const { proxyUrl, proxyLabel, modelLabel, llmConfig } = await resolveModelAndProxy({
+    orgId,
+    flowId: flow.id,
+    effectiveModelId,
+    effectiveProxyId,
+  });
 
-  if (!modelResult) {
-    throw new ModelNotConfiguredError();
-  }
+  // Step 3: resolve version ID
+  const packageVersionId = resolvePackageVersionId(latestVersion, flow.manifest);
 
-  // Resolve version ID: explicit override is trusted; otherwise only associate
-  // the latest version if its manifest matches the live flow (dirty check).
-  let packageVersionId: number | null;
-  if (typeof latestVersion === "number") {
-    // overrideVersionId path — already a plain number
-    packageVersionId = latestVersion;
-  } else if (latestVersion) {
-    // Compare version manifest with live flow manifest
-    const liveKey = JSON.stringify(flow.manifest);
-    const versionKey = JSON.stringify(latestVersion.manifest);
-    packageVersionId = liveKey === versionKey ? latestVersion.id : null;
-  } else {
-    packageVersionId = null;
-  }
-
-  const proxyUrl = proxyResult?.url ?? null;
-  const proxyLabel = proxyResult?.label ?? null;
-  const modelLabel = modelResult.label ?? null;
-  const llmConfig: PromptContext["llmConfig"] = {
-    api: modelResult.api,
-    baseUrl: modelResult.baseUrl,
-    modelId: modelResult.modelId,
-    apiKey: modelResult.apiKey,
-    input: modelResult.input,
-    contextWindow: modelResult.contextWindow,
-    maxTokens: modelResult.maxTokens,
-    reasoning: modelResult.reasoning,
-    cost: modelResult.cost,
-  };
-
+  // Step 4: assemble prompt context
   const promptContext = buildPromptContext({
     flow,
     tokens,
@@ -257,7 +308,7 @@ export async function buildExecutionContext(params: {
     memories: memories.map((m) => ({
       id: m.id,
       content: m.content,
-      createdAt: m.createdAt?.toISOString() ?? null,
+      createdAt: toISO(m.createdAt),
     })),
     toolDocs,
     proxyUrl,

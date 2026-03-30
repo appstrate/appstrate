@@ -7,6 +7,8 @@ import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 
 // --- URL Masking ---
 
@@ -28,53 +30,36 @@ function maskProxyUrl(rawUrl: string): string {
 
 export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
   const system = getSystemProxies();
-  const result: OrgProxyInfo[] = [];
-
-  // DB proxies for this org
   const rows = await db.select().from(orgProxies).where(eq(orgProxies.orgId, orgId));
-
-  // Check if org has its own default set
   const orgHasDefault = rows.some((r) => r.isDefault);
+  const now = toISORequired(new Date());
 
-  // System proxies first
-  const now = new Date().toISOString();
-  for (const [id, def] of system) {
-    result.push({
+  return mergeSystemAndDb({
+    system,
+    rows,
+    mapSystem: (id, def) => ({
       id,
       label: def.label,
       urlPrefix: maskProxyUrl(def.url),
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in",
+      source: "built-in" as const,
       createdBy: null,
       createdAt: now,
       updatedAt: now,
-    });
-  }
-
-  // DB proxies (skip if ID conflicts with system proxy)
-  for (const row of rows) {
-    if (system.has(row.id)) continue;
-    let urlPrefix: string;
-    try {
-      urlPrefix = maskProxyUrl(decrypt(row.urlEncrypted));
-    } catch {
-      urlPrefix = "***";
-    }
-    result.push({
+    }),
+    mapRow: (row) => ({
       id: row.id,
       label: row.label,
-      urlPrefix,
+      urlPrefix: maskProxyUrl(decrypt(row.urlEncrypted)),
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
+      source: row.source as "custom" | "built-in",
       createdBy: row.createdBy,
-      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
-      updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),
-    });
-  }
-
-  return result;
+      createdAt: toISORequired(row.createdAt),
+      updatedAt: toISORequired(row.updatedAt),
+    }),
+  });
 }
 
 // --- CRUD (DB proxies only) ---
@@ -109,13 +94,12 @@ export async function updateOrgProxy(
     throw new Error("Cannot modify built-in proxy");
   }
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (data.label !== undefined) updates.label = data.label;
-  if (data.url !== undefined) {
-    if (isBlockedUrl(data.url)) throw new Error("URL targets a blocked network");
-    updates.urlEncrypted = encrypt(data.url);
+  const { url, ...rest } = data;
+  const updates = buildUpdateSet(rest);
+  if (url !== undefined) {
+    if (isBlockedUrl(url)) throw new Error("URL targets a blocked network");
+    updates.urlEncrypted = encrypt(url);
   }
-  if (data.enabled !== undefined) updates.enabled = data.enabled;
 
   await db
     .update(orgProxies)

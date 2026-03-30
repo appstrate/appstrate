@@ -246,8 +246,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         if (status === 200) {
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
           const remaining = combined.subarray(headerEnd + 4);
-          if (remaining.length > 0) clientSocket.write(remaining);
-          if (head.length > 0) proxySocket.write(head);
+          if (remaining.length) clientSocket.write(remaining);
+          if (head.length) proxySocket.write(head);
           relay(clientSocket, proxySocket);
         } else {
           console.error(JSON.stringify({ msg: "Upstream CONNECT rejected", target, status }));
@@ -266,7 +266,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       // Direct connection (pass-through)
       const targetSocket = netConnectWithTimeout(port, host, () => {
         clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length > 0) targetSocket.write(head);
+        if (head.length) targetSocket.write(head);
         relay(clientSocket, targetSocket);
       });
       targetSocket.on("error", (err) => {

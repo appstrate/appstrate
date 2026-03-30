@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
+import { prefixedId } from "../lib/ids.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).optional(),
@@ -10,18 +11,13 @@ export const appSettingsSchema = z.object({
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
-/** Generate a prefixed application ID. */
-function generateAppId(): string {
-  return `app_${crypto.randomUUID()}`;
-}
-
 /** Create a new application for an organization. */
 export async function createApplication(
   orgId: string,
   params: { name: string; settings?: AppSettings; isDefault?: boolean },
   createdBy?: string,
 ) {
-  const id = generateAppId();
+  const id = prefixedId("app");
   const [app] = await db
     .insert(applications)
     .values({

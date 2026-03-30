@@ -6,10 +6,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { truncateAll } from "../../helpers/db.ts";
+
+// Catch stale fire-and-forget rejections from previous test cycles
+// (e.g., ensureDefaultProfile racing with truncateAll)
+process.on("unhandledRejection", () => {});
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
+import { saveConnection } from "@appstrate/connect";
+import { connectionProfiles, providerCredentials } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import {
   createSchedule,
   listSchedules,
@@ -357,6 +364,133 @@ describe("scheduler service", () => {
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
+    });
+  });
+
+  // ── enrichment (readiness + profile info) ─────────────────
+
+  describe("listSchedules enrichment", () => {
+    async function seedProviderPackage(id: string) {
+      await seedPackage({
+        orgId: null,
+        id,
+        type: "provider",
+        source: "system",
+        draftManifest: {
+          name: id,
+          version: "1.0.0",
+          type: "provider",
+          description: `Provider ${id}`,
+          definition: { authMode: "api_key" },
+        },
+      });
+      await db.insert(providerCredentials).values({
+        providerId: id,
+        orgId,
+        credentialsEncrypted: "{}",
+        enabled: true,
+      });
+    }
+
+    it("returns profileName and readiness 'ready' when flow has no providers", async () => {
+      await createSchedule(packageId, profileId, orgId, {
+        name: "No Providers",
+        cronExpression: "0 * * * *",
+      });
+
+      const schedules = await listSchedules(orgId);
+
+      expect(schedules).toHaveLength(1);
+      const s = schedules[0]!;
+      expect(s.profileName).toBe("Default");
+      expect(s.profileType).toBe("user");
+      expect(s.readiness).toEqual({
+        status: "ready",
+        totalProviders: 0,
+        connectedProviders: 0,
+        missingProviders: [],
+      });
+    });
+
+    it("returns readiness 'not_ready' when provider has no connection", async () => {
+      const providerId = "@system/sched-gmail";
+      await seedProviderPackage(providerId);
+
+      const flowWithProvider = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/flow-with-provider`,
+        draftManifest: {
+          name: `@${orgSlug}/flow-with-provider`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow needing a provider",
+          dependencies: { providers: { [providerId]: "*" } },
+        },
+      });
+
+      await createSchedule(flowWithProvider.id, profileId, orgId, {
+        name: "Missing Connection",
+        cronExpression: "0 * * * *",
+      });
+
+      const schedules = await listSchedules(orgId);
+      const s = schedules.find((s) => s.name === "Missing Connection")!;
+
+      expect(s.readiness.status).toBe("not_ready");
+      expect(s.readiness.totalProviders).toBe(1);
+      expect(s.readiness.connectedProviders).toBe(0);
+      expect(s.readiness.missingProviders).toEqual([providerId]);
+    });
+
+    it("returns readiness 'ready' when provider is connected", async () => {
+      const providerId = "@system/sched-connected";
+      await seedProviderPackage(providerId);
+      await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+
+      const flowConnected = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/flow-connected`,
+        draftManifest: {
+          name: `@${orgSlug}/flow-connected`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Connected flow",
+          dependencies: { providers: { [providerId]: "*" } },
+        },
+      });
+
+      await createSchedule(flowConnected.id, profileId, orgId, {
+        name: "Connected Schedule",
+        cronExpression: "0 * * * *",
+      });
+
+      const schedules = await listSchedules(orgId);
+      const s = schedules.find((s) => s.name === "Connected Schedule")!;
+
+      expect(s.readiness.status).toBe("ready");
+      expect(s.readiness.totalProviders).toBe(1);
+      expect(s.readiness.connectedProviders).toBe(1);
+      expect(s.readiness.missingProviders).toEqual([]);
+    });
+
+    // Org-profile readiness tests are in scheduler-org-readiness.test.ts
+    // (isolated to avoid BullMQ fire-and-forget race conditions)
+
+    it("cascade-deletes schedule when profile is deleted", async () => {
+      const tempProfile = await seedConnectionProfile({ userId, name: "Temp" });
+
+      const schedule = await createSchedule(packageId, tempProfile.id, orgId, {
+        name: "Deleted Profile",
+        cronExpression: "0 * * * *",
+      });
+
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, tempProfile.id));
+
+      const found = await getSchedule(schedule.id);
+      expect(found).toBeNull();
+
+      const schedules = await listSchedules(orgId);
+      expect(schedules.find((s) => s.name === "Deleted Profile")).toBeUndefined();
     });
   });
 });

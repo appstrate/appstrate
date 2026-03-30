@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import { parseScopedName } from "@appstrate/core/naming";
-import { buildDependenciesFromRows, type Dependencies } from "@appstrate/core/dependencies";
+import type { Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
@@ -107,7 +107,29 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
     };
   });
 
-  return buildDependenciesFromRows(rows);
+  const skills: Record<string, string> = {};
+  const tools: Record<string, string> = {};
+  const providers: Record<string, string> = {};
+
+  for (const row of rows) {
+    if (!row.registryScope || !row.registryName) continue;
+    const scopedName = `@${row.registryScope}/${row.registryName}`;
+    const version = row.version || "*";
+    if (row.type === "skill") skills[scopedName] = version;
+    else if (row.type === "tool") tools[scopedName] = version;
+    else if (row.type === "provider") providers[scopedName] = version;
+  }
+
+  const hasSkills = Object.keys(skills).length > 0;
+  const hasTools = Object.keys(tools).length > 0;
+  const hasProviders = Object.keys(providers).length > 0;
+  if (!hasSkills && !hasTools && !hasProviders) return null;
+
+  const result: Dependencies = {};
+  if (hasSkills) result.skills = skills;
+  if (hasTools) result.tools = tools;
+  if (hasProviders) result.providers = providers;
+  return result;
 }
 
 /** Get all files for a package's transitive deps of a type. Returns Map<itemId, files>. */

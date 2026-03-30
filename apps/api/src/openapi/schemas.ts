@@ -143,6 +143,19 @@ export const schemas = {
       scopesGranted: { type: "array", items: { type: "string" } },
       scopesSufficient: { type: "boolean" },
       scopesMissing: { type: "array", items: { type: "string" } },
+      source: {
+        type: "string",
+        enum: ["org_binding", "user_profile"],
+        description: "How the connection profile was resolved",
+      },
+      profileName: {
+        type: ["string", "null"],
+        description: "Name of the connection profile used",
+      },
+      profileOwnerName: {
+        type: ["string", "null"],
+        description: "Name of the owner of the connection profile",
+      },
     },
   },
   FlowSkillRef: {
@@ -280,6 +293,15 @@ export const schemas = {
       versionCount: {
         type: "integer",
         description: "Number of published versions (0 for built-in flows)",
+      },
+      flowOrgProfileId: {
+        type: ["string", "null"],
+        format: "uuid",
+        description: "Admin-configured org connection profile ID (null if none)",
+      },
+      flowOrgProfileName: {
+        type: ["string", "null"],
+        description: "Display name of the admin-configured org connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnpublishedChanges: {
