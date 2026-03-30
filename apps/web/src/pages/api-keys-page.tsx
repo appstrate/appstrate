@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { KeyRound, ShieldAlert } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useOrg } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
@@ -29,7 +27,6 @@ function isExpired(expiresAt: string | null): boolean {
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isOrgAdmin } = useOrg();
   const appId = useCurrentApplicationId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const revokeApiKeyMutation = useRevokeApiKey();
@@ -37,16 +34,6 @@ export function ApiKeysPage() {
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
-
-  if (!isOrgAdmin) {
-    return (
-      <EmptyState message={t("settings:orgSettings.adminOnly")} icon={ShieldAlert}>
-        <Link to="/">
-          <Button variant="outline">{t("common:btn.back")}</Button>
-        </Link>
-      </EmptyState>
-    );
-  }
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;

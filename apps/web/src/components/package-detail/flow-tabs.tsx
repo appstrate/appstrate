@@ -101,13 +101,7 @@ export function FlowConnectorsTab({
   return <FlowProvidersSection packageId={packageId} detail={detail} />;
 }
 
-export function FlowMemoriesTab({
-  packageId,
-  isOrgAdmin,
-}: {
-  packageId: string;
-  isOrgAdmin: boolean;
-}) {
+export function FlowMemoriesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: memories } = useFlowMemories(packageId);
   const deleteMemory = useDeleteMemory(packageId);
@@ -132,16 +126,14 @@ export function FlowMemoriesTab({
               <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {mem.createdAt ? formatDateField(mem.createdAt) : ""}
               </span>
-              {isOrgAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => deleteMemory.mutate(mem.id)}
-                  disabled={deleteMemory.isPending}
-                >
-                  {t("btn.delete")}
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => deleteMemory.mutate(mem.id)}
+                disabled={deleteMemory.isPending}
+              >
+                {t("btn.delete")}
+              </Button>
             </div>
           ))}
         </div>
@@ -231,7 +223,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
 
 // ─── Flow API Tab ─────────────────────────────────────────────────────
 
-export function FlowApiTab({ packageId, isOrgAdmin }: { packageId: string; isOrgAdmin: boolean }) {
+export function FlowApiTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = usePackageDetail("flow", packageId);
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
@@ -296,14 +288,10 @@ export function FlowApiTab({ packageId, isOrgAdmin }: { packageId: string; isOrg
       ) : !firstKey && !rawKey ? (
         <div className="rounded-md border border-warning/30 bg-warning/5 px-4 py-3">
           <p className="text-sm text-warning">{t("api.noKey")}</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {isOrgAdmin ? t("api.noKeyHint") : t("api.noKeyNonAdmin")}
-          </p>
-          {isOrgAdmin && (
-            <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
-              {t("api.createKey")}
-            </Button>
-          )}
+          <p className="text-xs text-muted-foreground mt-1">{t("api.noKeyHint")}</p>
+          <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
+            {t("api.createKey")}
+          </Button>
         </div>
       ) : (
         <div className="space-y-2 text-sm">

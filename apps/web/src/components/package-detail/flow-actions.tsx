@@ -16,7 +16,6 @@ import { ConfirmModal } from "../confirm-modal";
 export function FlowActions({
   packageId,
   manifest,
-  isOrgAdmin,
   isOwned,
   isHistoricalVersion,
   hasDraftChanges,
@@ -27,7 +26,6 @@ export function FlowActions({
 }: {
   packageId: string;
   manifest?: Record<string, unknown>;
-  isOrgAdmin: boolean;
   isOwned: boolean;
   isHistoricalVersion: boolean;
   hasDraftChanges: boolean;
@@ -79,7 +77,6 @@ export function FlowActions({
         packageId={packageId}
         type="flow"
         manifest={manifest}
-        isOrgAdmin={isOrgAdmin}
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}

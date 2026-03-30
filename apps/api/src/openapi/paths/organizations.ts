@@ -250,7 +250,7 @@ export const organizationsPaths = {
       operationId: "removeMember",
       tags: ["Organizations"],
       summary: "Remove a member",
-      description: "Remove a member from the organization. Admin or owner only.",
+      description: "Remove a member from the organization.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -315,7 +315,7 @@ export const organizationsPaths = {
       operationId: "cancelInvitation",
       tags: ["Organizations"],
       summary: "Cancel an invitation",
-      description: "Cancel a pending invitation. Admin or owner only.",
+      description: "Cancel a pending invitation.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
@@ -344,7 +344,7 @@ export const organizationsPaths = {
       operationId: "getOrgSettings",
       tags: ["Organizations"],
       summary: "Get organization settings",
-      description: "Get organization settings (redirect domains, etc.). Admin only.",
+      description: "Get organization settings (redirect domains, etc.).",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       responses: {
         "200": {
@@ -367,8 +367,7 @@ export const organizationsPaths = {
       operationId: "updateOrgSettings",
       tags: ["Organizations"],
       summary: "Update organization settings",
-      description:
-        "Update organization settings (merge — only provided fields are updated). Admin only.",
+      description: "Update organization settings (merge — only provided fields are updated).",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         content: {

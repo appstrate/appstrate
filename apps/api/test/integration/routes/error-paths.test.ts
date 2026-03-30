@@ -2,7 +2,6 @@
  * Systematic error-path tests for all routes.
  *
  * Validates that all authenticated routes return 401 without auth,
- * admin-only routes return 403 for non-admin members,
  * and resource routes return 404 for non-existent resources.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -11,11 +10,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
   createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedWebhook, seedSchedule } from "../../helpers/seed.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -84,48 +82,6 @@ describe("400 — missing X-Org-Id header on org-scoped routes", () => {
       const body = (await res.json()) as any;
       expect(body.code).toBe("invalid_request");
       expect(body.param).toBe("X-Org-Id");
-    });
-  }
-});
-
-// ─── 403 — non-admin access to admin routes ─────────────────
-
-describe("403 — member role on admin-only routes", () => {
-  let memberCtx: TestContext;
-  let ownerCtx: TestContext;
-
-  beforeEach(async () => {
-    await truncateAll();
-    ownerCtx = await createTestContext({ orgSlug: "adminorg" });
-
-    // Create a second user as member (not admin)
-    const member = await createTestUser();
-    await addOrgMember(ownerCtx.orgId, member.id, "member");
-    memberCtx = {
-      user: member,
-      org: ownerCtx.org,
-      cookie: member.cookie,
-      orgId: ownerCtx.orgId,
-      defaultAppId: ownerCtx.defaultAppId,
-    };
-  });
-
-  const adminRoutes = [
-    { method: "POST", path: "/api/provider-keys", body: { label: "x", api: "openai", baseUrl: "https://api.openai.com", apiKey: "sk-test" } },
-    { method: "POST", path: "/api/proxies", body: { label: "x", url: "https://proxy.example.com" } },
-  ];
-
-  for (const route of adminRoutes) {
-    it(`${route.method} ${route.path} returns 403 for member`, async () => {
-      const res = await app.request(route.path, {
-        method: route.method,
-        headers: {
-          ...authHeaders(memberCtx),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(route.body),
-      });
-      expect(res.status).toBe(403);
     });
   }
 });

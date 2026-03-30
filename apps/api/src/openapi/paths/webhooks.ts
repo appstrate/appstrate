@@ -5,7 +5,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Create a webhook",
       description:
-        "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org. Admin only.",
+        "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -101,7 +101,7 @@ export const webhooksPaths = {
       operationId: "listWebhooks",
       tags: ["Webhooks"],
       summary: "List webhooks",
-      description: "List all webhooks for the organization. Admin only.",
+      description: "List all webhooks for the organization.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -148,7 +148,7 @@ export const webhooksPaths = {
       operationId: "getWebhook",
       tags: ["Webhooks"],
       summary: "Get a webhook",
-      description: "Get a single webhook by ID. Admin only.",
+      description: "Get a single webhook by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -174,7 +174,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Update a webhook",
       description:
-        "Update webhook URL, events, filters, or active status. Cannot change the secret. Admin only.",
+        "Update webhook URL, events, filters, or active status. Cannot change the secret.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -215,7 +215,7 @@ export const webhooksPaths = {
       operationId: "deleteWebhook",
       tags: ["Webhooks"],
       summary: "Delete a webhook",
-      description: "Delete a webhook and all its delivery history. Admin only.",
+      description: "Delete a webhook and all its delivery history.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

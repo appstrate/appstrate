@@ -41,8 +41,7 @@ export const flowsPaths = {
       operationId: "saveFlowConfig",
       tags: ["Flows"],
       summary: "Save flow configuration",
-      description:
-        "Save flow configuration values. Validated against manifest config schema. Admin only.",
+      description: "Save flow configuration values. Validated against manifest config schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -121,7 +120,7 @@ export const flowsPaths = {
       tags: ["Flows"],
       summary: "Set flow proxy override",
       description:
-        'Set a proxy override for this flow. Pass a proxy ID, "none" to disable proxying, or null to use org default. Admin only.',
+        'Set a proxy override for this flow. Pass a proxy ID, "none" to disable proxying, or null to use org default.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -203,7 +202,7 @@ export const flowsPaths = {
       operationId: "deleteAllFlowMemories",
       tags: ["Flows"],
       summary: "Delete all flow memories",
-      description: "Delete all accumulated memories for a flow. Admin only.",
+      description: "Delete all accumulated memories for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -238,7 +237,7 @@ export const flowsPaths = {
       operationId: "deleteFlowMemory",
       tags: ["Flows"],
       summary: "Delete a single flow memory",
-      description: "Delete a specific memory by ID. Admin only.",
+      description: "Delete a specific memory by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -307,7 +306,7 @@ export const flowsPaths = {
       tags: ["Flows"],
       summary: "Set flow model override",
       description:
-        "Set a model override for this flow. Pass a model ID or null to revert to org default. Admin only.",
+        "Set a model override for this flow. Pass a model ID or null to revert to org default.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -354,7 +353,7 @@ export const flowsPaths = {
       operationId: "updateFlowSkills",
       tags: ["Flows"],
       summary: "Update linked skills",
-      description: "Set the skill references for a user flow. Admin only.",
+      description: "Set the skill references for a user flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -412,7 +411,7 @@ export const flowsPaths = {
       operationId: "updateFlowTools",
       tags: ["Flows"],
       summary: "Update linked tools",
-      description: "Set the tool references for a user flow. Admin only.",
+      description: "Set the tool references for a user flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -596,7 +595,7 @@ export const flowsPaths = {
       tags: ["Flows"],
       summary: "Set org profile for a flow",
       description:
-        "Set or clear the org-level connection profile for this flow. Pass a profile ID to set, or null to clear. Admin only.",
+        "Set or clear the org-level connection profile for this flow. Pass a profile ID to set, or null to clear.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },

@@ -12,7 +12,6 @@ import { ProviderConfigBadge } from "../provider-config-badge";
 import { ProviderCredentialsModal } from "../provider-credentials-modal";
 import { Modal } from "../modal";
 import { useProviders } from "../../hooks/use-providers";
-import { useOrg } from "../../hooks/use-org";
 import type { ProviderEntry } from "./types";
 import type { AvailableScope, ProviderConfig } from "@appstrate/shared-types";
 import { VersionSelect } from "./resource-section";
@@ -180,8 +179,6 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const { data: providersData, isLoading } = useProviders();
   const providers = providersData?.providers;
-  const { isOrgAdmin } = useOrg();
-
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
 
@@ -291,13 +288,11 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
       ) : enabledProviders.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-6 text-sm text-muted-foreground">
           {t("editor.noIntegration")}
-          {isOrgAdmin && (
-            <div className="mt-3">
-              <Button variant="outline" size="sm" onClick={() => setConfigurePickerOpen(true)}>
-                {t("providers.addProvider", { ns: "settings" })}
-              </Button>
-            </div>
-          )}
+          <div className="mt-3">
+            <Button variant="outline" size="sm" onClick={() => setConfigurePickerOpen(true)}>
+              {t("providers.addProvider", { ns: "settings" })}
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
@@ -329,20 +324,18 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
               </Button>
             );
           })}
-          {isOrgAdmin && (
-            <button
-              type="button"
-              className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
-              onClick={() => setConfigurePickerOpen(true)}
-            >
-              <span className="text-2xl leading-none">+</span>
-              <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm font-medium truncate">
-                  {t("providers.addProvider", { ns: "settings" })}
-                </span>
-              </div>
-            </button>
-          )}
+          <button
+            type="button"
+            className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+            onClick={() => setConfigurePickerOpen(true)}
+          >
+            <span className="text-2xl leading-none">+</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="text-sm font-medium truncate">
+                {t("providers.addProvider", { ns: "settings" })}
+              </span>
+            </div>
+          </button>
         </div>
       )}
 

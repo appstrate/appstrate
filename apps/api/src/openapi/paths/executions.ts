@@ -150,7 +150,7 @@ export const executionsPaths = {
       operationId: "deleteFlowExecutions",
       tags: ["Executions"],
       summary: "Delete all executions for a flow",
-      description: "Delete all completed executions for a flow. Admin only.",
+      description: "Delete all completed executions for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },

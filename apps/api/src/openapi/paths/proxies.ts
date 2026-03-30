@@ -4,8 +4,7 @@ export const proxiesPaths = {
       operationId: "listProxies",
       tags: ["Proxies"],
       summary: "List organization proxies",
-      description:
-        "Returns all proxies (built-in + custom) for the current organization. Admin only.",
+      description: "Returns all proxies (built-in + custom) for the current organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -36,7 +35,7 @@ export const proxiesPaths = {
       operationId: "createProxy",
       tags: ["Proxies"],
       summary: "Create a custom proxy",
-      description: "Create a new custom proxy for the organization. Admin only.",
+      description: "Create a new custom proxy for the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -82,7 +81,7 @@ export const proxiesPaths = {
       tags: ["Proxies"],
       summary: "Set the organization default proxy",
       description:
-        "Set or unset the default proxy for the organization. Pass null to remove the default. Admin only.",
+        "Set or unset the default proxy for the organization. Pass null to remove the default.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -125,7 +124,7 @@ export const proxiesPaths = {
       tags: ["Proxies"],
       summary: "Update a custom proxy",
       description:
-        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Admin only.",
+        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -166,7 +165,7 @@ export const proxiesPaths = {
       operationId: "deleteProxy",
       tags: ["Proxies"],
       summary: "Delete a custom proxy",
-      description: "Delete a custom proxy. Built-in proxies cannot be deleted. Admin only.",
+      description: "Delete a custom proxy. Built-in proxies cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -189,7 +188,7 @@ export const proxiesPaths = {
       tags: ["Proxies"],
       summary: "Test proxy connection",
       description:
-        "Test that the proxy is reachable by making a lightweight request through it. Rate limited to 5 requests per minute. Admin only.",
+        "Test that the proxy is reachable by making a lightweight request through it. Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

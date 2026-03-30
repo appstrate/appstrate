@@ -3,8 +3,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -70,22 +68,6 @@ describe("Webhooks API", () => {
       expect(detail.secret).toBeUndefined();
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const member = await createTestUser({ email: "member@test.com" });
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/webhooks", {
-        method: "POST",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(webhookPayload()),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("GET /api/webhooks", () => {

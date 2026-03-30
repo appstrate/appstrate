@@ -27,7 +27,7 @@ export const responses = {
           type: "https://docs.appstrate.dev/errors/forbidden",
           title: "Forbidden",
           status: 403,
-          detail: "Admin access required",
+          detail: "Insufficient permissions",
           code: "forbidden",
           requestId: "req_abc123",
         },

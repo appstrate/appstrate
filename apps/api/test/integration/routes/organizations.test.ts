@@ -214,24 +214,6 @@ describe("Organizations API", () => {
       );
     });
 
-    it("rejects non-admin with 403", async () => {
-      const ctx = await createTestContext({ orgSlug: "memberorg" });
-      const member = await createTestUser({ email: "regular@test.com" });
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {
-        method: "POST",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email: "someone@test.com" }),
-      });
-
-      expect(res.status).toBe(403);
-    });
-
     it("rejects invalid email", async () => {
       const ctx = await createTestContext({ orgSlug: "memberorg" });
       const res = await app.request(`/api/orgs/${ctx.orgId}/members`, {

@@ -4,8 +4,7 @@ export const modelsPaths = {
       operationId: "listModels",
       tags: ["Models"],
       summary: "List organization models",
-      description:
-        "Returns all models (built-in + custom) for the current organization. Admin only.",
+      description: "Returns all models (built-in + custom) for the current organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -36,7 +35,7 @@ export const modelsPaths = {
       operationId: "createModel",
       tags: ["Models"],
       summary: "Create a custom model",
-      description: "Create a new custom LLM model for the organization. Admin only.",
+      description: "Create a new custom LLM model for the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -111,7 +110,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Set the organization default model",
       description:
-        "Set or unset the default model for the organization. Pass null to remove the default. Admin only.",
+        "Set or unset the default model for the organization. Pass null to remove the default.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -154,7 +153,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Search OpenRouter models",
       description:
-        "Search available models on OpenRouter. Results include model capabilities (context window, max tokens, input modalities). Rate limited to 10 requests per minute. Admin only.",
+        "Search available models on OpenRouter. Results include model capabilities (context window, max tokens, input modalities). Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -223,7 +222,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
-        "Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute. Admin only.",
+        "Test a model configuration without saving it first. If editing an existing model, pass existingModelId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -271,8 +270,7 @@ export const modelsPaths = {
       operationId: "updateModel",
       tags: ["Models"],
       summary: "Update a custom model",
-      description:
-        "Update a custom model configuration. Built-in models cannot be modified. Admin only.",
+      description: "Update a custom model configuration. Built-in models cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -333,7 +331,7 @@ export const modelsPaths = {
       operationId: "deleteModel",
       tags: ["Models"],
       summary: "Delete a custom model",
-      description: "Delete a custom model. Built-in models cannot be deleted. Admin only.",
+      description: "Delete a custom model. Built-in models cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -356,7 +354,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model connection",
       description:
-        "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Admin only.",
+        "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

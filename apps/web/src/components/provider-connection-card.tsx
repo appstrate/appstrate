@@ -41,7 +41,6 @@ export function ProviderConnectionCard({
   const { t } = useTranslation(["settings", "flows"]);
 
   const {
-    isOrgAdmin,
     userProfiles,
     hasMultipleProfiles,
     effectiveProfileId,
@@ -119,9 +118,7 @@ export function ProviderConnectionCard({
             {isBoundButDisconnected ? (
               <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
                 <AlertTriangle className="size-3" />
-                {!isOrgAdmin
-                  ? t("providerCard.boundDisconnectedUser")
-                  : t("providerCard.boundDisconnected")}
+                {t("providerCard.boundDisconnected")}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
@@ -131,7 +128,7 @@ export function ProviderConnectionCard({
                   : binding?.sourceProfileName}
               </span>
             )}
-            {!readOnly && isOrgAdmin && (
+            {!readOnly && (
               <Button
                 variant="outline"
                 size="sm"
@@ -199,7 +196,7 @@ export function ProviderConnectionCard({
                     {t("providerCard.disconnect")}
                   </Button>
                 )}
-                {isConnected && orgProfileId && isOrgAdmin && (
+                {isConnected && orgProfileId && (
                   <Button
                     variant="outline"
                     size="sm"

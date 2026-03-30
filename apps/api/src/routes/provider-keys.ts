@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemProviderKey } from "../services/model-registry.ts";
 import {
@@ -45,8 +44,6 @@ const testInlineSchema = z.object({
 
 export function createProviderKeysRouter() {
   const router = new Hono<AppEnv>();
-  router.use("*", requireAdmin());
-
   // GET /api/provider-keys
   router.get("/", async (c) => {
     const orgId = c.get("orgId");

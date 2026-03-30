@@ -243,12 +243,10 @@ router.delete("/:orgId", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/orgs/:orgId/members — add a member by email (admin/owner only)
+// POST /api/orgs/:orgId/members — add a member by email
 router.post("/:orgId/members", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
-
-  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Only admins can add members");
 
   const body = await c.req.json();
   const data = parseBody(addMemberSchema, body);
@@ -304,13 +302,10 @@ router.post("/:orgId/members", async (c) => {
   }
 });
 
-// DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation (admin/owner only)
+// DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation
 router.delete("/:orgId/invitations/:invitationId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
-
-  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Only admins can cancel invitations");
 
   await cancelInvitation(invitationId, orgId);
   return c.json({ ok: true });
@@ -335,18 +330,11 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
   return c.json({ id: updated.id, role: updated.role });
 });
 
-// DELETE /api/orgs/:orgId/members/:userId — remove a member (admin/owner only)
+// DELETE /api/orgs/:orgId/members/:userId — remove a member
 router.delete("/:orgId/members/:userId", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  const member = await getOrgMember(orgId, user.id);
-  if (!member || !["owner", "admin"].includes(member.role)) {
-    throw forbidden("Only admins can remove members");
-  }
-
-  // Cannot remove the owner
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
     throw notFound("Member not found");
@@ -381,10 +369,7 @@ router.put("/:orgId/members/:userId", async (c) => {
 
 // GET /api/orgs/:orgId/settings — get org settings
 router.get("/:orgId/settings", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
-
-  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
 
   const settings = await getOrgSettings(orgId);
   return c.json(settings);
@@ -392,10 +377,7 @@ router.get("/:orgId/settings", async (c) => {
 
 // PUT /api/orgs/:orgId/settings — update org settings (merge)
 router.put("/:orgId/settings", async (c) => {
-  const user = c.get("user");
   const orgId = c.req.param("orgId");
-
-  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
 
   const raw = await c.req.json();
   const data = parseBody(orgSettingsSchema.partial(), raw);

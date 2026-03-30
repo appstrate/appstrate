@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
+import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldAlert, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { usePackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
 import { useCreatePackage, useUpdatePackage } from "../hooks/use-mutations";
 import type { OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
@@ -25,7 +24,6 @@ import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
-import { EmptyState } from "../components/page-states";
 import { EditorShell } from "../components/editor-shell";
 import { useProviders } from "../hooks/use-providers";
 
@@ -476,12 +474,11 @@ function PackageEditorInner({
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
 export function PackageEditorPage({ type }: { type: PackageType }) {
-  const { t } = useTranslation(["flows", "common"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isOrgAdmin, currentOrg } = useOrg();
+  const { currentOrg } = useOrg();
   const { isOwned } = usePackageOwnership(packageId);
   const isEdit = !!scope;
 
@@ -505,16 +502,6 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       : type === "provider"
         ? providersQuery.data?.providers.find((p) => p.id === packageId)
         : pkgQuery.data;
-
-  if (!isOrgAdmin) {
-    return (
-      <EmptyState message={t("editor.adminOnly")} icon={ShieldAlert}>
-        <Link to="/">
-          <Button variant="outline">{t("btn.back")}</Button>
-        </Link>
-      </EmptyState>
-    );
-  }
 
   if (isEdit && isLoading) {
     return (

@@ -5,7 +5,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (flow, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Admin only. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (flow, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -113,7 +113,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
-        "Import a package (flow, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. Admin only. Rate-limited to 10 requests/minute.",
+        "Import a package (flow, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. Rate-limited to 10 requests/minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -326,7 +326,7 @@ export const packagesPaths = {
       operationId: "createSkill",
       tags: ["Packages"],
       summary: "Create a skill",
-      description: "Create a new skill in the organization packages. Admin only.",
+      description: "Create a new skill in the organization packages.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -484,7 +484,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. Admin only.",
+        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -550,7 +550,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore a skill version into the draft",
       description:
-        "Restore a previously published version into the skill draft. Does not create a new version. Admin only.",
+        "Restore a previously published version into the skill draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -669,7 +669,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill version",
       description:
-        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -746,7 +746,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update a skill",
       description:
-        "Update a skill in the organization packages. Built-in skills cannot be modified. Admin only.",
+        "Update a skill in the organization packages. Built-in skills cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -814,7 +814,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill",
       description:
-        "Delete a skill from the organization packages. Built-in skills cannot be deleted. Admin only.",
+        "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -915,7 +915,7 @@ export const packagesPaths = {
       operationId: "createTool",
       tags: ["Packages"],
       summary: "Create a tool",
-      description: "Create a new tool in the organization packages. Admin only.",
+      description: "Create a new tool in the organization packages.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -1066,7 +1066,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden. Admin only.",
+        "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1132,7 +1132,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore a tool version into the draft",
       description:
-        "Restore a previously published version into the tool draft. Does not create a new version. Admin only.",
+        "Restore a previously published version into the tool draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1251,7 +1251,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a tool version",
       description:
-        "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+        "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1327,8 +1327,7 @@ export const packagesPaths = {
       operationId: "updateTool",
       tags: ["Packages"],
       summary: "Update a tool",
-      description:
-        "Update a tool in the organization packages. Built-in tools cannot be modified. Admin only.",
+      description: "Update a tool in the organization packages. Built-in tools cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1396,7 +1395,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a tool",
       description:
-        "Delete a tool from the organization packages. Built-in tools cannot be deleted. Admin only.",
+        "Delete a tool from the organization packages. Built-in tools cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1468,7 +1467,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a user flow",
       description:
-        "Create a new user flow from manifest and content. Creates an initial version automatically. Admin only.",
+        "Create a new user flow from manifest and content. Creates an initial version automatically.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -1560,8 +1559,7 @@ export const packagesPaths = {
       operationId: "updateFlow",
       tags: ["Packages"],
       summary: "Update a user flow",
-      description:
-        "Update manifest and content of a user flow with optimistic locking. Admin only.",
+      description: "Update manifest and content of a user flow with optimistic locking.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1625,7 +1623,7 @@ export const packagesPaths = {
       operationId: "deleteFlow",
       tags: ["Packages"],
       summary: "Delete a user flow",
-      description: "Delete a user flow. Built-in flows cannot be deleted. Admin only.",
+      description: "Delete a user flow. Built-in flows cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1756,7 +1754,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a flow version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running executions. Admin only.",
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running executions.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1822,8 +1820,7 @@ export const packagesPaths = {
       operationId: "restoreFlowVersion",
       tags: ["Packages"],
       summary: "Restore a flow version into the draft",
-      description:
-        "Restore a published version into the draft. Requires no running executions. Admin only.",
+      description: "Restore a published version into the draft. Requires no running executions.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1929,7 +1926,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a flow version",
       description:
-        "Permanently delete a flow version. Reassigns affected dist-tags to the next best stable version. Requires admin role. Blocked if executions are running.",
+        "Permanently delete a flow version. Reassigns affected dist-tags to the next best stable version. Blocked if executions are running.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1981,7 +1978,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
-        "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version. Admin only.",
+        "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -2065,7 +2062,7 @@ export const packagesPaths = {
           },
         },
         "403": {
-          description: "Not an admin",
+          description: "Forbidden",
           content: {
             "application/json": {
               schema: {
@@ -2134,7 +2131,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a provider package",
       description:
-        "Create a new provider package from manifest and content. Creates an initial version automatically. Admin only.",
+        "Create a new provider package from manifest and content. Creates an initial version automatically.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -2282,7 +2279,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden. Admin only.",
+        "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -2348,7 +2345,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore a provider package version into the draft",
       description:
-        "Restore a previously published version into the provider package draft. Does not create a new version. Admin only.",
+        "Restore a previously published version into the provider package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -2467,7 +2464,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a provider package version",
       description:
-        "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version. Requires admin role.",
+        "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -2544,7 +2541,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update a provider package",
       description:
-        "Update a provider package in the organization. Built-in providers cannot be modified. Admin only.",
+        "Update a provider package in the organization. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -2608,7 +2605,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a provider package",
       description:
-        "Delete a provider package from the organization. Built-in providers cannot be deleted. Admin only.",
+        "Delete a provider package from the organization. Built-in providers cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {

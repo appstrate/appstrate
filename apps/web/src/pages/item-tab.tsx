@@ -2,7 +2,6 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { useOrg } from "../hooks/use-org";
 import { ImportModal } from "../components/import-modal";
 import type { PackageType } from "@appstrate/shared-types";
 import { type CardItem, PackageTab } from "./package-list";
@@ -38,7 +37,6 @@ export function ItemTab({
   title?: string;
 }) {
   const { t } = useTranslation(["settings", "flows", "common"]);
-  const { isOrgAdmin } = useOrg();
   const { data: rawItems, isLoading } = config.useData();
   const [importOpen, setImportOpen] = useState(false);
 
@@ -68,17 +66,15 @@ export function ItemTab({
         emptyHint={t(config.emptyHintKey, { type: typeLabel })}
         emptyIcon={config.emptyIcon}
         extraActions={
-          isOrgAdmin ? (
-            <>
-              {externalActions}
-              <Button variant="outline" onClick={() => setImportOpen(true)}>
-                {t("nav.import", { ns: "common" })}
-              </Button>
-              <Link to={packageNewPath(config.type)}>
-                <Button>{t("list.createItem", { ns: "flows", type: typeLabel })}</Button>
-              </Link>
-            </>
-          ) : undefined
+          <>
+            {externalActions}
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              {t("nav.import", { ns: "common" })}
+            </Button>
+            <Link to={packageNewPath(config.type)}>
+              <Button>{t("list.createItem", { ns: "flows", type: typeLabel })}</Button>
+            </Link>
+          </>
         }
         emptyExtraActions={emptyExtraActions}
         headerContent={headerContent}

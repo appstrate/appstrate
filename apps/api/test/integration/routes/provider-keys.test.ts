@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, addOrgMember, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -31,16 +31,6 @@ describe("Provider Keys API", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/provider-keys", {
-        headers: { Cookie: member.cookie, "X-Org-Id": ctx.orgId },
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("POST /api/provider-keys", () => {
@@ -62,27 +52,6 @@ describe("Provider Keys API", () => {
       expect(typeof body.id).toBe("string");
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/provider-keys", {
-        method: "POST",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          label: "Test Key",
-          api: "openai",
-          baseUrl: "https://api.openai.com",
-          apiKey: "sk-test-key-123",
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("PUT /api/provider-keys/:id", () => {

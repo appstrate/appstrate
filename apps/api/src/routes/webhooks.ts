@@ -1,12 +1,10 @@
 /**
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
- * All routes require API key auth (admin).
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import {
@@ -59,7 +57,7 @@ export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/webhooks — create a webhook (returns secret once)
-  router.post("/", rateLimit(10), idempotency(), requireAdmin(), async (c) => {
+  router.post("/", rateLimit(10), idempotency(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(createWebhookSchema, body);
@@ -82,7 +80,7 @@ export function createWebhooksRouter() {
   });
 
   // GET /api/webhooks — list webhooks (optionally filtered by scope/applicationId)
-  router.get("/", rateLimit(300), requireAdmin(), async (c) => {
+  router.get("/", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.req.query("applicationId");
     const scope = c.req.query("scope");
@@ -91,14 +89,14 @@ export function createWebhooksRouter() {
   });
 
   // GET /api/webhooks/:id — get webhook detail
-  router.get("/:id", rateLimit(300), requireAdmin(), async (c) => {
+  router.get("/:id", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
     const result = await getWebhook(orgId, c.req.param("id")!);
     return c.json(result);
   });
 
   // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret)
-  router.put("/:id", rateLimit(10), requireAdmin(), async (c) => {
+  router.put("/:id", rateLimit(10), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(updateWebhookSchema, body);
@@ -108,14 +106,14 @@ export function createWebhooksRouter() {
   });
 
   // DELETE /api/webhooks/:id — delete webhook
-  router.delete("/:id", rateLimit(10), requireAdmin(), async (c) => {
+  router.delete("/:id", rateLimit(10), async (c) => {
     const orgId = c.get("orgId");
     await deleteWebhook(orgId, c.req.param("id")!);
     return c.body(null, 204);
   });
 
   // POST /api/webhooks/:id/test — send a synthetic test.ping event
-  router.post("/:id/test", rateLimit(5), requireAdmin(), async (c) => {
+  router.post("/:id/test", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const webhookId = c.req.param("id")!;
     const wh = await getWebhook(orgId, webhookId);
@@ -131,14 +129,14 @@ export function createWebhooksRouter() {
   });
 
   // POST /api/webhooks/:id/rotate — rotate secret (24h grace period)
-  router.post("/:id/rotate", rateLimit(5), requireAdmin(), async (c) => {
+  router.post("/:id/rotate", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const result = await rotateSecret(orgId, c.req.param("id")!);
     return c.json(result);
   });
 
   // GET /api/webhooks/:id/deliveries — delivery history
-  router.get("/:id/deliveries", rateLimit(300), requireAdmin(), async (c) => {
+  router.get("/:id/deliveries", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
     const result = await listDeliveries(orgId, c.req.param("id")!, limit);

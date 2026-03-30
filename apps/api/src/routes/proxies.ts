@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemProxy } from "../services/proxy-registry.ts";
 import {
@@ -38,9 +37,6 @@ const setDefaultSchema = z.object({
 
 export function createProxiesRouter() {
   const router = new Hono<AppEnv>();
-
-  // All endpoints are admin-only
-  router.use("*", requireAdmin());
 
   // GET /api/proxies — list all proxies (system + DB)
   router.get("/", async (c) => {

@@ -1,9 +1,8 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, ShieldAlert, Users } from "lucide-react";
+import { Search, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useOrg } from "../hooks/use-org";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
@@ -14,7 +13,6 @@ import { EndUserDetailModal } from "../components/end-user-detail-modal";
 
 export function EndUsersPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isOrgAdmin } = useOrg();
   const appId = useCurrentApplicationId();
 
   const [search, setSearch] = useState("");
@@ -42,10 +40,6 @@ export function EndUsersPage() {
         u.id.toLowerCase().includes(q),
     );
   }, [endUsers, search]);
-
-  if (!isOrgAdmin) {
-    return <EmptyState message={t("applications.adminOnly")} icon={ShieldAlert} />;
-  }
 
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
   if (error) return <ErrorState message={error.message} />;

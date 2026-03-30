@@ -3,8 +3,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -307,33 +305,6 @@ describe("Packages API", () => {
       expect(body.code).toBe("name_collision");
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request("/api/packages/flows", {
-        method: "POST",
-        headers: {
-          Cookie: memberUser.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          manifest: {
-            name: "@pkgorg/blocked-flow",
-            version: "0.1.0",
-            type: "flow",
-            schemaVersion: "1.0",
-            displayName: "Blocked Flow",
-            description: "Should be blocked",
-          },
-          content: "blocked prompt",
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
-
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/packages/flows", {
         method: "POST",
@@ -466,43 +437,6 @@ describe("Packages API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const flow = await seedFlow({
-        id: "@pkgorg/member-update",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/member-update",
-        {
-          method: "PUT",
-          headers: {
-            Cookie: memberUser.cookie,
-            "X-Org-Id": ctx.orgId,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            manifest: {
-              name: "@pkgorg/member-update",
-              version: "0.2.0",
-              type: "flow",
-              schemaVersion: "1.0",
-              displayName: "Member Update",
-              description: "Member blocked",
-            },
-            content: "blocked",
-            lockVersion: flow.lockVersion,
-          }),
-        },
-      );
-
-      expect(res.status).toBe(403);
-    });
-
     it("returns 403 when trying to update package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "foreignorg" });
       await seedFlow({
@@ -557,30 +491,6 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(204);
       await assertDbMissing(packages, eq(packages.id, "@pkgorg/delete-me"));
-    });
-
-    it("returns 403 for non-admin member", async () => {
-      await seedFlow({
-        id: "@pkgorg/no-delete",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/no-delete",
-        {
-          method: "DELETE",
-          headers: {
-            Cookie: memberUser.cookie,
-            "X-Org-Id": ctx.orgId,
-          },
-        },
-      );
-
-      expect(res.status).toBe(403);
     });
 
     it("returns 403 when trying to delete package from another org", async () => {
@@ -765,28 +675,6 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(400);
-    });
-
-    it("returns 403 for non-admin member", async () => {
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const formData = new FormData();
-      formData.append(
-        "file",
-        new File([new Uint8Array([1])], "import.zip"),
-      );
-
-      const res = await app.request("/api/packages/import", {
-        method: "POST",
-        headers: {
-          Cookie: memberUser.cookie,
-          "X-Org-Id": ctx.orgId,
-        },
-        body: formData,
-      });
-
-      expect(res.status).toBe(403);
     });
 
     it("returns 401 without authentication", async () => {

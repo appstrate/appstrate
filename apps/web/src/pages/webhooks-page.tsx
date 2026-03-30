@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Webhook, ShieldAlert } from "lucide-react";
+import { Webhook } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { PageHeader } from "../components/page-header";
@@ -23,7 +22,6 @@ type ScopeTab = "all" | "organization" | "application";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isOrgAdmin } = useOrg();
   const { data: applications } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const [scopeTab, setScopeTab] = useState<ScopeTab>("all");
@@ -38,16 +36,6 @@ export function WebhooksPage() {
     isLoading,
     error,
   } = useWebhooks(Object.keys(filters).length > 0 ? filters : undefined);
-
-  if (!isOrgAdmin) {
-    return (
-      <EmptyState message={t("settings:webhooks.adminOnly")} icon={ShieldAlert}>
-        <Link to="/">
-          <Button variant="outline">{t("common:btn.back")}</Button>
-        </Link>
-      </EmptyState>
-    );
-  }
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;

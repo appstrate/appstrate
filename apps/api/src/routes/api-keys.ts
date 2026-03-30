@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
 import {
@@ -25,9 +24,6 @@ const createApiKeySchema = z.object({
 
 export function createApiKeysRouter() {
   const router = new Hono<AppEnv>();
-
-  // All endpoints are admin-only
-  router.use("*", requireAdmin());
 
   // GET /api/api-keys — list active keys for the org (optionally filtered by applicationId)
   router.get("/", async (c) => {

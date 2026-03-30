@@ -28,7 +28,6 @@ interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
   manifest?: Record<string, unknown>;
-  isOrgAdmin: boolean;
   isOwned: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
@@ -58,7 +57,6 @@ export function PackageActionsDropdown({
   packageId,
   type,
   manifest,
-  isOrgAdmin,
   isOwned,
   isBuiltIn,
   isHistoricalVersion,
@@ -87,8 +85,7 @@ export function PackageActionsDropdown({
   const isFlow = type === "flow";
   const isMutable = !isBuiltIn && !isHistoricalVersion && isOwned;
 
-  // Nothing to show for non-admin on non-flow packages (unless there's a manifest to view)
-  if (!isOrgAdmin && !isFlow && !manifest) return null;
+  if (!isFlow && !manifest) return null;
 
   return (
     <>
@@ -111,7 +108,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Download ── */}
-          {isOrgAdmin && downloadVersion && onDownload && (
+          {downloadVersion && onDownload && (
             <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
               <Download size={14} />
               {t("btn.download", { ns: "common" })}
@@ -119,7 +116,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Create version ── */}
-          {isOrgAdmin && isMutable && onCreateVersion && (
+          {isMutable && onCreateVersion && (
             <DropdownMenuItem onSelect={onCreateVersion} disabled={!hasDraftChanges}>
               <GitBranchPlus size={14} />
               {t("version.createVersion")}
@@ -127,7 +124,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Edit ── */}
-          {isOrgAdmin && isMutable && (
+          {isMutable && (
             <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
               <Pencil size={14} />
               {t("btn.edit")}
@@ -135,7 +132,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Fork (non-owned packages, including system) ── */}
-          {isOrgAdmin && !isOwned && onFork && (
+          {!isOwned && onFork && (
             <DropdownMenuItem onSelect={onFork}>
               <GitFork size={14} />
               {t("fork.button")}
@@ -143,7 +140,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Flow secondary actions ── */}
-          {isFlow && isOrgAdmin && (
+          {isFlow && (
             <>
               <DropdownMenuSeparator />
               {!hasFileInput && onAddSchedule && (
@@ -175,7 +172,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete credentials (provider-only) ── */}
-          {type === "provider" && isOrgAdmin && hasCredentials && onDeleteCredentials && (
+          {type === "provider" && hasCredentials && onDeleteCredentials && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -189,7 +186,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete ── */}
-          {isOrgAdmin && !isBuiltIn && isOwned && (
+          {!isBuiltIn && isOwned && (
             <>
               <DropdownMenuSeparator />
               {isFlow && onDeleteFlow && (

@@ -3,9 +3,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  createTestOrg,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -427,21 +424,6 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(409);
-    });
-
-    it("returns 403 for non-admin users", async () => {
-      await seedFlow({ id: "@execorg/admin-flow", orgId: ctx.orgId, createdBy: ctx.user.id });
-
-      // Create a member-role user
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request("/api/flows/@execorg/admin-flow/executions", {
-        method: "DELETE",
-        headers: { Cookie: memberUser.cookie, "X-Org-Id": ctx.orgId },
-      });
-
-      expect(res.status).toBe(403);
     });
 
     it("returns 401 without authentication", async () => {

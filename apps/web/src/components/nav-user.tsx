@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, LogOut, Settings, FileText, Palette } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
-import { useOrg } from "../hooks/use-org";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -37,7 +36,6 @@ function getInitials(name: string): string {
 export function NavUser() {
   const { t } = useTranslation();
   const { user, profile, logout } = useAuth();
-  const { isOrgAdmin } = useOrg();
   const { theme, setTheme } = useTheme();
   const { isMobile } = useSidebar();
   const queryClient = useQueryClient();
@@ -88,14 +86,7 @@ export function NavUser() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold flex items-center gap-2">
-                    {displayName}
-                    {isOrgAdmin && (
-                      <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium uppercase">
-                        {t("admin")}
-                      </span>
-                    )}
-                  </span>
+                  <span className="truncate font-semibold">{displayName}</span>
                   <span className="truncate text-xs">{user.email}</span>
                 </div>
               </div>

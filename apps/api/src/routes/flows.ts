@@ -11,7 +11,7 @@ import {
 } from "../services/state/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
-import { requireAdmin, requireFlow } from "../middleware/guards.ts";
+import { requireFlow } from "../middleware/guards.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   setUserFlowProviderOverride,
@@ -66,7 +66,7 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/config — save flow configuration (admin-only)
-  router.put("/:scope{@[^/]+}/:name/config", requireFlow(), requireAdmin(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name/config", requireFlow(), async (c) => {
     const flow = c.get("flow");
 
     const body = await c.req.json<Record<string, unknown>>();
@@ -136,7 +136,7 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/proxy — set flow proxy override (admin-only)
-  router.put("/:scope{@[^/]+}/:name/proxy", requireFlow(), requireAdmin(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json();
@@ -157,7 +157,7 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/model — set flow model override (admin-only)
-  router.put("/:scope{@[^/]+}/:name/model", requireFlow(), requireAdmin(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json();
@@ -169,7 +169,7 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/org-profile — set org profile for this flow (admin-only)
-  router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), requireAdmin(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const body = await c.req.json();
@@ -196,7 +196,7 @@ export function createFlowsRouter() {
   });
 
   // DELETE /api/flows/:scope/:name/memories — delete all memories (admin only)
-  router.delete("/:scope{@[^/]+}/:name/memories", requireFlow(), requireAdmin(), async (c) => {
+  router.delete("/:scope{@[^/]+}/:name/memories", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
     const deleted = await deleteAllPackageMemories(flow.id, orgId);
@@ -204,25 +204,20 @@ export function createFlowsRouter() {
   });
 
   // DELETE /api/flows/:scope/:name/memories/:memoryId — delete single memory (admin only)
-  router.delete(
-    "/:scope{@[^/]+}/:name/memories/:memoryId",
-    requireFlow(),
-    requireAdmin(),
-    async (c) => {
-      const flow = c.get("flow");
-      const orgId = c.get("orgId");
-      const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
-      if (!result.success) {
-        throw invalidRequest("Invalid memory ID", "memoryId");
-      }
-      const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
-      if (!deleted) {
-        throw notFound("Memory not found");
-      }
-      return c.json({ deleted: true });
-    },
-  );
+  router.delete("/:scope{@[^/]+}/:name/memories/:memoryId", requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const orgId = c.get("orgId");
+    const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
+    if (!result.success) {
+      throw invalidRequest("Invalid memory ID", "memoryId");
+    }
+    const memoryId = result.data;
+    const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
+    if (!deleted) {
+      throw notFound("Memory not found");
+    }
+    return c.json({ deleted: true });
+  });
 
   return router;
 }
