@@ -15,10 +15,12 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { ExecutionList } from "../components/execution-list";
+import { NextExecutionPreview } from "../components/next-execution-preview";
 import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
 import { OrgProfileProvidersBlock } from "../components/org-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
+import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   useScheduleById,
@@ -30,8 +32,6 @@ import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
 import {
-  User,
-  Building2,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -178,7 +178,6 @@ function ScheduleParams({
   const { data: flows } = useFlows();
   const flowDisplayName =
     flows?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
-  const ProfileIcon = schedule.profileType === "org" ? Building2 : User;
   const input = schedule.input as Record<string, unknown> | null;
 
   return (
@@ -187,10 +186,12 @@ function ScheduleParams({
         <div className="rounded-lg border border-border bg-muted/30 p-4">
           <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramProfile")}</p>
           <p className="text-sm font-medium inline-flex items-center gap-1.5">
-            <ProfileIcon className="size-3.5" />
-            {schedule.profileType === "user" && schedule.profileOwnerName
-              ? `${schedule.profileOwnerName} — ${schedule.profileName}`
-              : (schedule.profileName ?? "-")}
+            <ProfileLabel
+              profileType={schedule.profileType}
+              profileName={schedule.profileName}
+              profileOwnerName={schedule.profileOwnerName}
+              iconSize="size-3.5"
+            />
             {schedule.profileType && (
               <UIBadge variant="outline" className="text-[10px] px-1 py-0">
                 {schedule.profileType}
@@ -279,12 +280,13 @@ function ScheduleProviders({
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <User className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">
-          {schedule.profileOwnerName && schedule.profileName
-            ? `${schedule.profileOwnerName} — ${schedule.profileName}`
-            : (schedule.profileName ?? "-")}
-        </span>
+        <ProfileLabel
+          profileType={schedule.profileType}
+          profileName={schedule.profileName}
+          profileOwnerName={schedule.profileOwnerName}
+          iconSize="size-4"
+          className="text-sm font-medium text-muted-foreground"
+        />
         <UIBadge variant="outline" className="text-[10px] px-1 py-0">
           {schedule.profileType}
         </UIBadge>
@@ -349,27 +351,12 @@ function ScheduleHistory({
 
   const previewRow =
     isActive && showNext && schedule.nextRunAt ? (
-      <div className="flex items-center gap-2 px-3 py-2 text-sm opacity-50">
-        <div className="flex flex-1 items-center gap-2 min-w-0">
-          <span className="text-muted-foreground font-mono text-xs">
-            #{(firstExec?.executionNumber ?? 0) + 1}
-          </span>
-          {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
-          <UIBadge variant="secondary" className="gap-1">
-            <Clock className="size-3" />
-            {t("schedule.scheduled")}
-          </UIBadge>
-          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
-            <Calendar className="size-3" />
-            {schedule.name || schedule.id}
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">
-              {formatDateField(schedule.nextRunAt)}
-            </span>
-          </div>
-        </div>
-      </div>
+      <NextExecutionPreview
+        executionNumber={(firstExec?.executionNumber ?? 0) + 1}
+        flowName={flowName}
+        scheduleName={schedule.name || schedule.id}
+        nextRunAt={schedule.nextRunAt}
+      />
     ) : null;
 
   return (

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { User, Building2, Layers } from "lucide-react";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
+import { NextExecutionPreview } from "./next-execution-preview";
+import { ProfileLabel } from "./profile-label";
 import { useScheduleExecutions } from "../hooks/use-schedules";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
@@ -26,6 +27,9 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
   const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
   const effectiveHasProviders = isLoading ? schedule.readiness.totalProviders > 0 : hasProviders;
 
+  const isActive = (schedule.enabled ?? true) && effectiveReady;
+  const lastExecutionNumber = executions?.[0]?.executionNumber ?? 0;
+
   const statusBadge = (
     <ScheduleStatusBadge
       enabled={schedule.enabled ?? true}
@@ -34,15 +38,12 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
     />
   );
 
-  const ProfileIcon = schedule.profileType === "org" ? Building2 : User;
-
   return (
     <Link
       to={`/schedules/${schedule.id}`}
-      className="block rounded-lg border border-border bg-card p-3 hover:bg-accent/50 transition-colors"
+      className="block rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors"
     >
-      {/* Line 1: name + status badge + running/unread indicators */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 p-3">
         <span className="font-medium truncate">{schedule.name || schedule.id}</span>
         {statusBadge}
         {unreadCount > 0 && (
@@ -51,28 +52,24 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
           </span>
         )}
         {runningExecutions > 0 && <Badge status="running" />}
+        <ProfileLabel
+          profileType={schedule.profileType}
+          profileName={schedule.profileName}
+          profileOwnerName={schedule.profileOwnerName}
+          className="ml-auto text-xs text-muted-foreground"
+        />
       </div>
 
-      {/* Line 2: profile + flow name */}
-      <div className="flex items-center gap-2 mt-1.5">
-        {schedule.profileName && (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <ProfileIcon className="size-3" />
-            {schedule.profileType === "user" && schedule.profileOwnerName
-              ? `${schedule.profileOwnerName} — ${schedule.profileName}`
-              : schedule.profileName}
-          </span>
-        )}
-        {schedule.profileName && flowName && (
-          <span className="text-xs text-muted-foreground/50">·</span>
-        )}
-        {flowName && (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Layers className="size-3" />
-            {flowName}
-          </span>
-        )}
-      </div>
+      {/* Next run preview — flush to card edges */}
+      {isActive && schedule.nextRunAt && (
+        <NextExecutionPreview
+          executionNumber={lastExecutionNumber + 1}
+          flowName={flowName}
+          scheduleName={schedule.name || schedule.id}
+          nextRunAt={schedule.nextRunAt}
+          className="border-t border-dashed border-border"
+        />
+      )}
     </Link>
   );
 }
