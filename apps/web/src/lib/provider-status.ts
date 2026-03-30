@@ -4,7 +4,7 @@ import type { TFunction } from "i18next";
  * Check whether a provider status string represents a connected state.
  */
 export function isProviderStatusConnected(status: string): boolean {
-  return status === "connected";
+  return status === "connected" || status === "needs_reconnection";
 }
 
 /**

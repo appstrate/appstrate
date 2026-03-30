@@ -38,6 +38,7 @@ export function OrgProfileDetailPage() {
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameName, setRenameName] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (profilesLoading) return <LoadingState />;
 
@@ -64,11 +65,9 @@ export function OrgProfileDetailPage() {
   };
 
   const handleDelete = () => {
-    if (confirm(t("orgProfiles.deleteConfirm", { name: profile.name }))) {
-      deleteMutation.mutate(profile.id, {
-        onSuccess: () => navigate("/org-profiles"),
-      });
-    }
+    deleteMutation.mutate(profile.id, {
+      onSuccess: () => navigate("/org-profiles"),
+    });
   };
 
   return (
@@ -91,7 +90,7 @@ export function OrgProfileDetailPage() {
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive"
-                onClick={handleDelete}
+                onClick={() => setDeleteOpen(true)}
                 disabled={deleteMutation.isPending}
               >
                 <Trash2 className="size-3.5 mr-1.5" />
@@ -196,6 +195,31 @@ export function OrgProfileDetailPage() {
           onKeyDown={(e) => e.key === "Enter" && handleRename()}
           autoFocus
         />
+      </Modal>
+
+      {/* Delete confirmation modal */}
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={t("orgProfiles.deleteTitle")}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              {t("btn.cancel", { ns: "common" })}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {t("orgProfiles.deleteBtn")}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          {t("orgProfiles.deleteConfirm", { name: profile.name })}
+        </p>
       </Modal>
     </>
   );

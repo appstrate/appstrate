@@ -85,7 +85,12 @@ function createRateLimitMiddleware(config: RateLimiterConfig) {
       try {
         const res = await limiter.consume(key);
         if (config.emitHeaders) {
-          setRateLimitHeaders(c, maxPerMinute, res.remainingPoints, Math.ceil(res.msBeforeNext / 1000));
+          setRateLimitHeaders(
+            c,
+            maxPerMinute,
+            res.remainingPoints,
+            Math.ceil(res.msBeforeNext / 1000),
+          );
         }
         return next();
       } catch (rej) {
