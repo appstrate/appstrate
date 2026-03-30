@@ -70,7 +70,7 @@ export function CombinedProfileSelect({
               <Building2 className="size-3" />
               {t("schedule.orgProfiles", { ns: "flows" })}
             </div>
-            {orgProfiles!.map((p) => (
+            {orgProfiles?.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
               </SelectItem>

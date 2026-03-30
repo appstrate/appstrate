@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
-import { useSchedules } from "../../hooks/use-schedules";
+import { useSchedules, useAllSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 import { useProfiles } from "../../hooks/use-profiles";
@@ -36,6 +36,7 @@ export function FlowExecutionsTab({
   const profileMap = useProfiles(
     (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
   );
+  const { data: allSchedules } = useAllSchedules();
   const readiness = useFlowReadiness(detail, undefined, undefined, configSchemaOverride);
 
   if (!detail) return null;
@@ -64,6 +65,11 @@ export function FlowExecutionsTab({
               key={exec.id}
               execution={exec}
               userName={exec.userId ? profileMap.get(exec.userId) : undefined}
+              scheduleName={
+                exec.scheduleId
+                  ? (allSchedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
+                  : null
+              }
             />
           ))}
         </div>

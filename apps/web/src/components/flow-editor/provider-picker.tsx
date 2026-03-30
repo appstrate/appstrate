@@ -228,7 +228,7 @@ export function ProviderPicker({ value, onChange }: ProviderPickerProps) {
               | ProviderConfig
               | undefined;
             return (
-              <div key={i} className="border border-border rounded-lg p-3 mb-2 bg-card">
+              <div key={svc.id} className="border border-border rounded-lg p-3 mb-2 bg-card">
                 <div className="flex items-center gap-2.5 mb-2">
                   {providerDef?.iconUrl && (
                     <ProviderIcon src={providerDef.iconUrl} className="h-6 w-6" />

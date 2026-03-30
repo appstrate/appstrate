@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useFlows } from "../hooks/use-packages";
 import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { useAllSchedules } from "../hooks/use-schedules";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ExecutionRow } from "../components/execution-row";
@@ -14,6 +15,7 @@ export function DashboardPage() {
   const { data: execData, isLoading: execLoading, error: execError } = useAllExecutions(0, 20);
   const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
   const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { data: schedules } = useAllSchedules();
 
   const isLoading = execLoading || flowsLoading;
   const error = execError || flowsError;
@@ -136,6 +138,11 @@ export function DashboardPage() {
               key={exec.id}
               execution={exec}
               flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
+              scheduleName={
+                exec.scheduleId
+                  ? (schedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
+                  : null
+              }
             />
           ))}
         </div>

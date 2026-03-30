@@ -381,7 +381,12 @@ function ScheduleHistory({
         </div>
       ) : (
         executions.map((exec: Execution) => (
-          <ExecutionRow key={exec.id} execution={exec} flowName={flowName} />
+          <ExecutionRow
+            key={exec.id}
+            execution={exec}
+            flowName={flowName}
+            scheduleName={schedule.name}
+          />
         ))
       )}
     </div>

@@ -27,7 +27,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 // ─── Packages / Flows ─────────────────────────────────────
 
 type PackageInsert = Partial<InferInsertModel<typeof packages>> & {
-  orgId: string;
+  orgId: string | null;
 };
 
 export async function seedPackage(

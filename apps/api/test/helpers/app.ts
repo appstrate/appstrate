@@ -43,7 +43,7 @@ import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createWebhooksRouter } from "../../src/routes/webhooks.ts";
 import healthRouter from "../../src/routes/health.ts";
-import connectionsRouter from "../../src/routes/connections.ts";
+import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
@@ -231,7 +231,7 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
-  app.route("/api/connections", connectionsRouter);
+  app.route("/api/connections", createConnectionsRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
