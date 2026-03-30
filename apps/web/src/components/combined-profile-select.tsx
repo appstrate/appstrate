@@ -3,6 +3,7 @@ import { Building2 } from "lucide-react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -61,8 +62,11 @@ export function CombinedProfileSelect({
           </SelectItem>
         ))}
         {hasOrgProfiles && (
-          <>
-            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground flex items-center gap-1">
+          <SelectGroup>
+            <div
+              className="px-2 py-1.5 text-xs font-medium text-muted-foreground flex items-center gap-1"
+              role="presentation"
+            >
               <Building2 className="size-3" />
               {t("schedule.orgProfiles", { ns: "flows" })}
             </div>
@@ -71,7 +75,7 @@ export function CombinedProfileSelect({
                 {p.name}
               </SelectItem>
             ))}
-          </>
+          </SelectGroup>
         )}
       </SelectContent>
     </Select>

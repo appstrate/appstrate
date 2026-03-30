@@ -7,11 +7,7 @@
 
 // --- System + DB merge ---
 
-export interface MergeSystemAndDbOptions<
-  SystemDef,
-  DbRow extends { id: string },
-  Out,
-> {
+export interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
   /** System registry map (id → definition). */
   system: ReadonlyMap<string, SystemDef>;
   /** Database rows for the current org. */

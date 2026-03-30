@@ -126,9 +126,9 @@ export function ProviderConnectionCard({
             ) : (
               <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
                 <Building2 className="size-3" />
-                {binding!.boundByUserName
-                  ? `${binding!.boundByUserName} — ${binding!.sourceProfileName}`
-                  : binding!.sourceProfileName}
+                {binding?.boundByUserName
+                  ? `${binding.boundByUserName} — ${binding.sourceProfileName}`
+                  : binding?.sourceProfileName}
               </span>
             )}
             {!readOnly && isOrgAdmin && (

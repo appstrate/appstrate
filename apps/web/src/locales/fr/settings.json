@@ -615,6 +615,7 @@
   "orgProfiles.bindingCount_other": "{{count}} liaisons",
   "orgProfiles.expand": "Détails",
   "orgProfiles.collapse": "Réduire",
+  "orgProfiles.deleteTitle": "Supprimer le profil",
   "orgProfiles.deleteConfirm": "Supprimer le profil \"{{name}}\" ? Les schedules liés ne pourront plus s'exécuter.",
   "orgProfiles.bindings": "Bindings des providers",
   "orgProfiles.noBindings": "Aucun provider lié. Utilisez le bouton \"Lier\" pour connecter un provider.",

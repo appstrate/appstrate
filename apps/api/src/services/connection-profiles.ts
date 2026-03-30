@@ -37,16 +37,31 @@ export async function ensureDefaultProfile(actor: Actor): Promise<ConnectionProf
 
   if (existing) return existing;
 
-  const [created] = await db
-    .insert(connectionProfiles)
-    .values({
-      ...actorInsert(actor),
-      name: "Default",
-      isDefault: true,
-    })
-    .returning();
+  try {
+    const [created] = await db
+      .insert(connectionProfiles)
+      .values({
+        ...actorInsert(actor),
+        name: "Default",
+        isDefault: true,
+      })
+      .returning();
 
-  return created!;
+    return created!;
+  } catch (err: unknown) {
+    // Handle race condition: unique index violation means another request created the profile
+    if (err instanceof Error && err.message.includes("idx_connection_profiles_default")) {
+      const [existing] = await db
+        .select()
+        .from(connectionProfiles)
+        .where(
+          and(actorFilter(actor, PROFILE_ACTOR_COLUMNS), eq(connectionProfiles.isDefault, true)),
+        )
+        .limit(1);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 export async function listProfiles(
