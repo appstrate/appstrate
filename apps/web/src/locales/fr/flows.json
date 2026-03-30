@@ -1,6 +1,7 @@
 {
   "dashboard.recentFlows": "Derniers flows exécutés",
   "dashboard.recentExecutions": "Dernières exécutions",
+  "dashboard.upcomingSchedules": "Prochaines planifications",
   "dashboard.seeAll": "Voir tout",
   "dashboard.empty": "Aucune activité récente",
   "dashboard.emptyHint": "Lancez un flow pour voir votre activité ici",

@@ -3,9 +3,11 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useFlows } from "../hooks/use-packages";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
+import { ScheduleCard } from "../components/schedule-card";
 import { ExecutionList } from "../components/execution-list";
 
 export function DashboardPage() {
@@ -17,6 +19,7 @@ export function DashboardPage() {
   });
   const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
   const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { data: schedules } = useAllSchedules();
 
   const isLoading = execLoading || flowsLoading;
   const error = execError || flowsError;
@@ -66,6 +69,12 @@ export function DashboardPage() {
     if (recentFlowIds.length >= 8) break;
   }
 
+  // Upcoming schedules: active, with nextRunAt, sorted by soonest first
+  const upcomingSchedules = (schedules ?? [])
+    .filter((s) => s.enabled !== false && s.nextRunAt)
+    .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())
+    .slice(0, 5);
+
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
 
   return (
@@ -73,6 +82,32 @@ export function DashboardPage() {
       <h1 className="text-3xl font-bold">
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>
+      {/* Upcoming schedules */}
+      {upcomingSchedules.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              {t("dashboard.upcomingSchedules")}
+            </h2>
+            <Link
+              to="/schedules"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {t("dashboard.seeAll")}
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {upcomingSchedules.map((sched) => (
+              <ScheduleCard
+                key={sched.id}
+                schedule={sched}
+                flowName={flowMap.get(sched.packageId)?.displayName}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Recent flows (horizontal scroll) */}
       {recentFlowIds.length > 0 && (
         <section>
@@ -110,7 +145,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Recent executions — same query key as usePaginatedExecutions above, no double fetch */}
+      {/* Recent executions */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-medium text-muted-foreground">
