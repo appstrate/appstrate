@@ -333,6 +333,7 @@
   "api.keyCreated": "Key injected in the example below. Copy the curl now — the key won't be visible after navigation.",
   "run.confirmTitle": "Confirm execution",
   "run.confirm": "Run",
+  "schedule.providersNotBoundWarning": "Some providers are not bound to this profile. The schedule cannot run until all required providers are bound.",
   "run.notConnected": "Not connected",
   "run.notAllConnected": "All providers must be connected before running this flow.",
   "run.configureConnections": "Configure connections"
