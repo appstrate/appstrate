@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Play } from "lucide-react";
@@ -9,6 +9,7 @@ import { ConnectionSummaryModal } from "./connection-summary-modal";
 import { useRunFlow } from "../hooks/use-mutations";
 import { api } from "../api";
 import { hasDisconnectedProviders } from "../lib/provider-status";
+import { packageDetailPath } from "../lib/package-paths";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 interface RunFlowButtonProps {
@@ -45,6 +46,17 @@ export function RunFlowButton({
 
   const detail = providedDetail ?? fetchedDetail;
 
+  // Eagerly fetch flow detail on mount (for cards in list/dashboard) so the
+  // orange warning badge is visible before the user clicks the button.
+  useEffect(() => {
+    if (providedDetail || fetchedDetail) return;
+    let cancelled = false;
+    api<{ flow: FlowDetail }>(`/packages/flows/${packageId}`).then((data) => {
+      if (!cancelled) setFetchedDetail(data.flow);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [packageId, providedDetail, fetchedDetail]);
+
   const providers = detail?.dependencies?.providers ?? [];
   const hasProviders = providers.length > 0;
   const hasDisconnected = hasDisconnectedProviders(providers);
@@ -75,12 +87,13 @@ export function RunFlowButton({
     e.preventDefault();
     e.stopPropagation();
 
-    if (providedDetail) {
+    // Detail already available (provided or eagerly fetched)
+    if (detail) {
       startRun();
       return;
     }
 
-    // Lazy fetch for list page
+    // Fallback: fetch on click if eager fetch hasn't completed yet
     setFetching(true);
     try {
       const data = await api<{ flow: FlowDetail }>(`/packages/flows/${packageId}`);
@@ -149,7 +162,7 @@ export function RunFlowButton({
           onConfirm={proceedAfterSummary}
           onConfigureConnections={() => {
             setSummaryOpen(false);
-            navigate({ hash: "connectors" }, { replace: true });
+            navigate(`${packageDetailPath("flow", packageId)}#connectors`);
           }}
           providers={detail.dependencies?.providers ?? []}
           orgProfileName={detail.flowOrgProfileName}
