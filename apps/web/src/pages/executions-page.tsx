@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
+import { useProfiles } from "../hooks/use-profiles";
 import { useUnreadCount, useAllExecutions, useMarkAllRead } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
@@ -29,6 +30,9 @@ export function ExecutionsPage() {
   }
 
   const executions = data?.executions ?? [];
+  const profileMap = useProfiles(
+    executions.map((e) => e.userId).filter((id): id is string => !!id),
+  );
   const total = data?.total ?? 0;
   const hasMore = (page + 1) * limit < total;
 
@@ -73,6 +77,7 @@ export function ExecutionsPage() {
                 key={exec.id}
                 execution={exec}
                 flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
+                userName={exec.userId ? profileMap.get(exec.userId) : undefined}
                 scheduleName={
                   exec.scheduleId
                     ? (schedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
