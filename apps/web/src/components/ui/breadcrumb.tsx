@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
+import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -13,22 +14,39 @@ const Breadcrumb = React.forwardRef<
 Breadcrumb.displayName = "Breadcrumb";
 
 const BreadcrumbList = React.forwardRef<HTMLOListElement, React.ComponentPropsWithoutRef<"ol">>(
-  ({ className, ...props }, ref) => (
-    <ol
-      ref={ref}
-      className={cn(
-        "flex flex-wrap items-center gap-1.5 break-words text-sm text-muted-foreground sm:gap-2.5",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  ({ className, ...props }, ref) => {
+    const viewportRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      const el = viewportRef.current;
+      if (el) el.scrollLeft = el.scrollWidth;
+    });
+    return (
+      <ScrollAreaPrimitive.Root className="min-w-0 overflow-hidden">
+        <ScrollAreaPrimitive.Viewport ref={viewportRef} className="w-full">
+          <ol
+            ref={ref}
+            className={cn(
+              "flex flex-nowrap items-center gap-1.5 text-sm text-muted-foreground sm:gap-2.5",
+              className,
+            )}
+            {...props}
+          />
+        </ScrollAreaPrimitive.Viewport>
+        <ScrollAreaPrimitive.ScrollAreaScrollbar
+          orientation="horizontal"
+          className="flex h-1.5 touch-none select-none flex-col border-t border-t-transparent transition-colors"
+        >
+          <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+        </ScrollAreaPrimitive.ScrollAreaScrollbar>
+      </ScrollAreaPrimitive.Root>
+    );
+  },
 );
 BreadcrumbList.displayName = "BreadcrumbList";
 
 const BreadcrumbItem = React.forwardRef<HTMLLIElement, React.ComponentPropsWithoutRef<"li">>(
   ({ className, ...props }, ref) => (
-    <li ref={ref} className={cn("inline-flex items-center gap-1.5", className)} {...props} />
+    <li ref={ref} className={cn("inline-flex items-center gap-1.5 shrink-0", className)} {...props} />
   ),
 );
 BreadcrumbItem.displayName = "BreadcrumbItem";
@@ -44,7 +62,7 @@ const BreadcrumbLink = React.forwardRef<
   return (
     <Comp
       ref={ref}
-      className={cn("transition-colors hover:text-foreground", className)}
+      className={cn("whitespace-nowrap transition-colors hover:text-foreground", className)}
       {...props}
     />
   );
@@ -58,7 +76,7 @@ const BreadcrumbPage = React.forwardRef<HTMLSpanElement, React.ComponentPropsWit
       role="link"
       aria-disabled="true"
       aria-current="page"
-      className={cn("font-normal text-foreground", className)}
+      className={cn("whitespace-nowrap font-normal text-foreground", className)}
       {...props}
     />
   ),
@@ -69,7 +87,7 @@ const BreadcrumbSeparator = ({ children, className, ...props }: React.ComponentP
   <li
     role="presentation"
     aria-hidden="true"
-    className={cn("[&>svg]:w-3.5 [&>svg]:h-3.5", className)}
+    className={cn("[&>svg]:w-3.5 [&>svg]:h-3.5 shrink-0", className)}
     {...props}
   >
     {children ?? <ChevronRight />}
