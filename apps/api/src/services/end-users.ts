@@ -13,6 +13,8 @@ import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { getDefaultApplication } from "./applications.ts";
 import { prefixedId } from "../lib/ids.ts";
+import { buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -32,8 +34,8 @@ function toEndUserResponse(row: {
     email: row.email,
     externalId: row.externalId,
     metadata: row.metadata as Record<string, unknown> | null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
   };
 }
 
@@ -219,21 +221,18 @@ export async function updateEndUser(
   }
 
   // Build update set — merge metadata (Stripe pattern)
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (params.name !== undefined) updates.name = params.name;
-  if (params.email !== undefined) updates.email = params.email;
-  if (params.externalId !== undefined) updates.externalId = params.externalId;
-  if (params.metadata !== undefined) {
+  const { metadata, ...rest } = params;
+  const updates = buildUpdateSet(rest);
+  if (metadata !== undefined) {
     const [current] = await db
       .select({ metadata: endUsers.metadata })
       .from(endUsers)
       .where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)))
       .limit(1);
-    const merged = {
+    updates.metadata = {
       ...((current?.metadata as Record<string, unknown>) ?? {}),
-      ...params.metadata,
+      ...metadata,
     };
-    updates.metadata = merged;
   }
 
   const [updated] = await db

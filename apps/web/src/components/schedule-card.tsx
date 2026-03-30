@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { User, Building2, Layers } from "lucide-react";
-import { Badge } from "./badge";
+import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { useScheduleExecutions } from "../hooks/use-schedules";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";

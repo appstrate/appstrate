@@ -38,15 +38,11 @@ const WORKSPACE = "/workspace";
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
 async function initGitWorkspace(): Promise<void> {
   const gitDir = `${WORKSPACE}/.git`;
-  try {
-    await fs.mkdir(`${gitDir}/refs`, { recursive: true });
-    await Promise.all([
-      fs.writeFile(`${gitDir}/HEAD`, "ref: refs/heads/main\n"),
-      fs.writeFile(`${gitDir}/config`, "[user]\n\temail = pi@appstrate.local\n\tname = Pi\n"),
-    ]);
-  } catch {
-    // Non-fatal — git dir may already exist
-  }
+  await fs.mkdir(`${gitDir}/refs`, { recursive: true });
+  await Promise.all([
+    fs.writeFile(`${gitDir}/HEAD`, "ref: refs/heads/main\n"),
+    fs.writeFile(`${gitDir}/config`, "[user]\n\temail = pi@appstrate.local\n\tname = Pi\n"),
+  ]);
 }
 
 // --- 2. Load tools ---
@@ -197,7 +193,9 @@ function deriveProviderFromApi(api: string): string {
     "azure-openai-responses": "azure-openai-responses",
     "bedrock-converse-stream": "amazon-bedrock",
   };
-  return known[api] ?? api.split("-")[0];
+  const provider = known[api];
+  if (!provider) throw new Error(`Unknown MODEL_API: "${api}"`);
+  return provider;
 }
 
 const api = process.env.MODEL_API;
@@ -214,15 +212,6 @@ if (llmApiKey) {
   authStorage.setRuntimeApiKey(provider, llmApiKey);
 }
 
-function safeJsonParse<T>(raw: string | undefined, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 const modelRegistry = new ModelRegistry(authStorage);
 
 const model: Model<Api> = {
@@ -232,8 +221,8 @@ const model: Model<Api> = {
   provider,
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
-  input: safeJsonParse<string[]>(process.env.MODEL_INPUT, ["text"]),
-  cost: safeJsonParse(process.env.MODEL_COST, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+  input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) as string[] : ["text"],
+  cost: process.env.MODEL_COST ? JSON.parse(process.env.MODEL_COST) : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW) || 128000,
   maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
 };
@@ -354,6 +343,8 @@ try {
         break;
       }
 
+      default:
+        break;
 }
   });
 

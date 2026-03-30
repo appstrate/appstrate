@@ -121,10 +121,7 @@ export function createSchedulesRouter() {
     if (!existing || existing.orgId !== orgId) {
       throw notFound(`Schedule '${id}' not found`);
     }
-    const deleted = await deleteSchedule(id);
-    if (!deleted) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    await deleteSchedule(id);
     return c.json({ ok: true });
   });
 

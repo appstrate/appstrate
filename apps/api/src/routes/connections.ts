@@ -49,10 +49,13 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
   }
 
   try {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      scopes?: string[];
-      profileId?: string;
-    };
+    const body = parseBody(
+      z.object({
+        scopes: z.array(z.string()).optional(),
+        profileId: z.string().optional(),
+      }),
+      await c.req.json(),
+    );
     const { scopes, profileId } = body;
 
     const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
@@ -67,8 +70,7 @@ router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
     return c.json({ authUrl: result.authUrl, state: result.state });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
-    const message = err instanceof Error ? err.message : "Failed to create connect session";
-    throw internalError(message);
+    throw internalError();
   }
 });
 
@@ -104,8 +106,7 @@ router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
     return c.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
-    const message = err instanceof Error ? err.message : "Failed to create API key connection";
-    throw internalError(message);
+    throw internalError();
   }
 });
 
@@ -146,8 +147,7 @@ router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
     return c.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
-    const message = err instanceof Error ? err.message : "Failed to save credentials";
-    throw internalError(message);
+    throw internalError();
   }
 });
 
@@ -238,8 +238,7 @@ router.delete("/:scope{@[^/]+}/:name", async (c) => {
     }
     return c.json({ success: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to delete connection";
-    throw internalError(message);
+    throw internalError();
   }
 });
 

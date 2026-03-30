@@ -32,7 +32,7 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
     if (isOrgProfile) {
       if (bindings?.find((b) => b.providerId === pid && b.connected)) connectedCount++;
     } else {
-      if (isProviderConnectedInProfile(pid, profileConnections ?? undefined)) connectedCount++;
+      if (isProviderConnectedInProfile(pid, profileConnections)) connectedCount++;
     }
   }
 

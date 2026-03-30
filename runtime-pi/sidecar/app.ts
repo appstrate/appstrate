@@ -31,6 +31,36 @@ export interface AppDeps {
 
 const CREDENTIAL_PROXY_SKIP = new Set(["x-provider", "x-target", "x-substitute-body"]);
 
+type FetchResult =
+  | { ok: true; response: Response }
+  | { ok: false; errorResponse: Response };
+
+/**
+ * Wrapper around fetch that converts network/timeout errors into a 502 JSON response.
+ * Callers check `result.ok` to distinguish success from a pre-built error response.
+ */
+async function fetchOrError(
+  c: { json: (body: unknown, status: number) => Response },
+  fetchFn: typeof fetch,
+  label: string,
+  url: string,
+  init: RequestInit & Record<string, unknown>,
+): Promise<FetchResult> {
+  try {
+    return { ok: true, response: await fetchFn(url, init) };
+  } catch (err) {
+    const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+    let domain: string | undefined;
+    try { domain = new URL(url).hostname; } catch {}
+    const suffix = code ? `: ${code}` : "";
+    const domainHint = domain ? ` (${domain})` : "";
+    return {
+      ok: false,
+      errorResponse: c.json({ error: `${label}${suffix}${domainHint}` }, 502),
+    };
+  }
+}
+
 export function createApp(deps: AppDeps): Hono {
   const { config, fetchCredentials, cookieJar } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
@@ -102,21 +132,14 @@ export function createApp(deps: AppDeps): Hono {
     const qs = new URL(c.req.url).search;
     const url = `${config.platformApiUrl}/internal/execution-history${qs}`;
 
-    let res: Response;
-    try {
-      res = await fetchFn(url, {
-        headers: { Authorization: `Bearer ${config.executionToken}` },
-      });
-    } catch (err) {
-      return c.json(
-        { error: `Execution history fetch failed: ${err instanceof Error ? err.message : String(err)}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "Execution history fetch failed", url, {
+      headers: { Authorization: `Bearer ${config.executionToken}` },
+    });
+    if (!result.ok) return result.errorResponse;
 
-    const body = await res.text();
-    return c.body(body, res.status, {
-      "Content-Type": res.headers.get("Content-Type") || "application/json",
+    const body = await result.response.text();
+    return c.body(body, result.response.status, {
+      "Content-Type": result.response.headers.get("Content-Type") || "application/json",
     });
   });
 
@@ -155,29 +178,22 @@ export function createApp(deps: AppDeps): Hono {
       ? (c.req.raw.body ?? undefined)
       : undefined;
 
-    let targetRes: Response;
-    try {
-      targetRes = await fetchFn(targetUrl, {
-        method,
-        headers: forwardedHeaders,
-        body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-        // @ts-expect-error - Bun supports duplex for streaming request bodies
-        duplex: body instanceof ReadableStream ? "half" : undefined,
-      });
-    } catch (err) {
-      return c.json(
-        { error: `LLM request failed: ${err instanceof Error ? err.message : String(err)}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "LLM request failed", targetUrl, {
+      method,
+      headers: forwardedHeaders,
+      body,
+      signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+      // @ts-expect-error - Bun supports duplex for streaming request bodies
+      duplex: body instanceof ReadableStream ? "half" : undefined,
+    });
+    if (!result.ok) return result.errorResponse;
 
     // Stream-through response (zero-copy — no buffering/truncation)
     const responseHeaders: Record<string, string> = {};
-    const ct = targetRes.headers.get("content-type");
+    const ct = result.response.headers.get("content-type");
     if (ct) responseHeaders["Content-Type"] = ct;
 
-    return c.body(targetRes.body, targetRes.status, responseHeaders);
+    return c.body(result.response.body, result.response.status, responseHeaders);
   });
 
   // Transparent credential-injecting proxy
@@ -313,27 +329,18 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 7. Make the request to the target (with timeout)
-    let targetRes: Response;
-    try {
-      targetRes = await fetchFn(resolvedUrl, {
-        method,
-        headers: forwardedHeaders,
-        body,
-        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        // @ts-expect-error - Bun supports proxy option natively
-        proxy: resolvedProxy || undefined,
-        // @ts-expect-error - Bun supports duplex for streaming request bodies
-        duplex: body instanceof ReadableStream ? "half" : undefined,
-      });
-    } catch (err) {
-      const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-      let domain: string | undefined;
-      try { domain = new URL(resolvedUrl).hostname; } catch {}
-      return c.json(
-        { error: `Upstream request failed${code ? `: ${code}` : ""}${domain ? ` (${domain})` : ""}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
+      method,
+      headers: forwardedHeaders,
+      body,
+      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      // @ts-expect-error - Bun supports proxy option natively
+      proxy: resolvedProxy || undefined,
+      // @ts-expect-error - Bun supports duplex for streaming request bodies
+      duplex: body instanceof ReadableStream ? "half" : undefined,
+    });
+    if (!result.ok) return result.errorResponse;
+    const targetRes = result.response;
 
     // 8. Capture Set-Cookie headers into cookie jar
     const setCookieHeaders = targetRes.headers.getSetCookie();

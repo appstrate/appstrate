@@ -9,7 +9,7 @@ export const profiles = pgTable(
       .primaryKey()
       .references(() => user.id, { onDelete: "cascade" }),
     displayName: text("display_name"),
-    language: text("language").notNull().default("fr"),
+    language: text("language").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

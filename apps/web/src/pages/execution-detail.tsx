@@ -13,7 +13,7 @@ import { Spinner } from "../components/spinner";
 import { useExecutionRealtime, useExecutionLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { Coins, Shield } from "lucide-react";
-import { Badge } from "../components/badge";
+import { Badge } from "../components/status-badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { InputModal } from "../components/input-modal";

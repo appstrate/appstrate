@@ -34,7 +34,7 @@ export const organizationMembers = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: orgRoleEnum("role").notNull().default("member"),
+    role: orgRoleEnum("role").notNull(),
     joinedAt: timestamp("joined_at").defaultNow().notNull(),
   },
   (table) => [
@@ -54,7 +54,7 @@ export const orgInvitations = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    role: orgRoleEnum("role").notNull().default("member"),
+    role: orgRoleEnum("role").notNull(),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id),
     acceptedBy: text("accepted_by").references(() => user.id),
