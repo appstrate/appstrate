@@ -145,6 +145,16 @@ router.post("/:token/accept", async (c) => {
     // --- EXISTING USER ---
     const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
 
+    // Prevent a logged-in user from accepting an invitation meant for a different email
+    if (session?.user && session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+      throw new ApiError({
+        status: 403,
+        code: "email_mismatch",
+        title: "Email mismatch",
+        detail: `This invitation is for ${invitation.email}`,
+      });
+    }
+
     await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
 
     await markInvitationAccepted(invitation.id, existingUser.id);

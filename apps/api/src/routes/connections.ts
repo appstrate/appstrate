@@ -42,6 +42,13 @@ router.get("/", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
   const profileId = await resolveProfileId(c, actor);
+
+  // Validate ownership — user can only list their own profile's connections
+  const profile = await getProfileForActor(profileId, actor);
+  if (!profile) {
+    throw forbidden("Cannot view connections for a profile you do not own");
+  }
+
   const connections = await listActorConnections(profileId, orgId);
   return c.json({ connections });
 });
@@ -218,6 +225,13 @@ router.get("/integrations", async (c) => {
   const actor = getActor(c);
   const orgId = c.get("orgId");
   const profileId = await resolveProfileId(c, actor);
+
+  // Validate ownership — user can only list their own profile's integrations
+  const profile = await getProfileForActor(profileId, actor);
+  if (!profile) {
+    throw forbidden("Cannot view integrations for a profile you do not own");
+  }
+
   const integrations = await getAvailableProvidersWithStatus(profileId, orgId);
   return c.json({ integrations });
 });
