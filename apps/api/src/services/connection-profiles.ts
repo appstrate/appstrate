@@ -457,6 +457,27 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
   return row ?? null;
 }
 
+// ─── Schedule Profile Resolution ────────────────────────────
+
+/**
+ * Determine how to pass a schedule's connectionProfileId to resolveProviderProfiles
+ * based on whether the profile is an org profile or a user profile.
+ *
+ * - Org profile → passed as orgProfileId (bindings loaded), no user fallback
+ * - User profile → passed as defaultUserProfileId, flowOrgProfileId as org fallback
+ */
+export function resolveScheduleProfileArgs(
+  profile: ConnectionProfile,
+  connectionProfileId: string,
+  flowOrgProfileId?: string | null,
+): { defaultUserProfileId: string | null; orgProfileId: string | null } {
+  const isOrgProfile = !!profile.orgId;
+  return {
+    defaultUserProfileId: isOrgProfile ? null : connectionProfileId,
+    orgProfileId: isOrgProfile ? connectionProfileId : (flowOrgProfileId ?? null),
+  };
+}
+
 // ─── Provider Profile Resolution ────────────────────────────
 
 /** Dependencies for resolveProviderProfiles — injectable for testing. */

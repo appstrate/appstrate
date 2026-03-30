@@ -39,7 +39,13 @@ import { saveConnection } from "@appstrate/connect";
 import { providerCredentials } from "@appstrate/db/schema";
 import { createSchedule, listSchedules } from "../../../src/services/scheduler.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
-import { ensureDefaultProfile } from "../../../src/services/connection-profiles.ts";
+import {
+  ensureDefaultProfile,
+  resolveProviderProfiles,
+  resolveScheduleProfileArgs,
+  getProfileByIdUnsafe,
+} from "../../../src/services/connection-profiles.ts";
+import type { FlowProviderRequirement } from "../../../src/types/index.ts";
 
 describe("scheduler org-profile readiness", () => {
   let userId: string;
@@ -153,5 +159,73 @@ describe("scheduler org-profile readiness", () => {
     expect(s.readiness.totalProviders).toBe(1);
     expect(s.readiness.connectedProviders).toBe(0);
     expect(s.readiness.missingProviders).toEqual([providerId]);
+  });
+
+  // ── Execution-path resolution (triggerScheduledExecution parity) ──
+
+  it("resolves providers via org bindings without flowOrgProfileId (execution path)", async () => {
+    // This is the exact scenario that caused the production bug:
+    // schedule uses org profile, no flowOrgProfileId in package_configs,
+    // providers connected only via org profile bindings.
+    const providerId = "@system/org-exec-path";
+    await seedProviderPackage(providerId);
+    await saveConnection(db, userProfileId, providerId, orgId, { api_key: "k" });
+
+    const orgProfile = await seedConnectionProfile({ orgId, name: "Org Exec" });
+    await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);
+
+    // Simulate what triggerScheduledExecution does:
+    // 1. Load profile
+    const profile = await getProfileByIdUnsafe(orgProfile.id);
+    expect(profile).not.toBeNull();
+
+    // 2. Resolve args with NO flowOrgProfileId (not configured in package_configs)
+    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+      profile!,
+      orgProfile.id,
+      null, // no flowOrgProfileId — the production bug scenario
+    );
+
+    // 3. Resolve provider profiles
+    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providerProfiles = await resolveProviderProfiles(
+      providers,
+      defaultUserProfileId,
+      undefined,
+      orgProfileId,
+      orgId,
+    );
+
+    // Provider should be resolved via org binding
+    expect(providerProfiles[providerId]).toBeDefined();
+    expect(providerProfiles[providerId]!.source).toBe("org_binding");
+    expect(providerProfiles[providerId]!.profileId).toBe(userProfileId);
+  });
+
+  it("omits provider when org profile has no binding and no user fallback (execution path)", async () => {
+    const providerId = "@system/org-exec-missing";
+    await seedProviderPackage(providerId);
+
+    // Org profile with NO bindings
+    const orgProfile = await seedConnectionProfile({ orgId, name: "Org No Bindings" });
+
+    const profile = await getProfileByIdUnsafe(orgProfile.id);
+    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+      profile!,
+      orgProfile.id,
+      null,
+    );
+
+    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providerProfiles = await resolveProviderProfiles(
+      providers,
+      defaultUserProfileId,
+      undefined,
+      orgProfileId,
+      orgId,
+    );
+
+    // Provider not in map — no binding, no user fallback
+    expect(providerProfiles[providerId]).toBeUndefined();
   });
 });

@@ -10,8 +10,9 @@ import {
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createExecution } from "./state/index.ts";
+import { createExecution, createFailedExecution } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
+import { dispatchWebhookEvents } from "./webhooks.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
@@ -22,6 +23,7 @@ import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
+  resolveScheduleProfileArgs,
   getFlowOrgProfile,
 } from "./connection-profiles.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
@@ -207,10 +209,42 @@ async function triggerScheduledExecution(
   orgId: string,
   input: Record<string, unknown> | undefined,
 ) {
+  /** Create a failed execution record + dispatch webhook so the user is notified. */
+  async function failSchedule(
+    error: string,
+    actor: Actor | null = null,
+  ): Promise<void> {
+    const executionId = `exec_${crypto.randomUUID()}`;
+    try {
+      await createFailedExecution(
+        executionId,
+        packageId,
+        actor,
+        orgId,
+        error,
+        scheduleId,
+        connectionProfileId,
+      );
+      dispatchWebhookEvents(orgId, "execution.failed", {
+        id: executionId,
+        packageId,
+        status: "failed",
+        error,
+      }).catch(() => {});
+    } catch (err) {
+      logger.error("Failed to create failed schedule execution record", {
+        scheduleId,
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   try {
     const flow = await getPackage(packageId, orgId);
     if (!flow) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
+      await failSchedule(`Package '${packageId}' not found`);
       return;
     }
 
@@ -221,6 +255,7 @@ async function triggerScheduledExecution(
         scheduleId,
         connectionProfileId,
       });
+      await failSchedule("Connection profile not found");
       return;
     }
 
@@ -228,11 +263,14 @@ async function triggerScheduledExecution(
 
     // Load the flow's admin-configured org profile (validates it still exists)
     const flowOrgProfile = await getFlowOrgProfile(orgId, packageId);
-    const flowOrgProfileId = flowOrgProfile?.id ?? null;
+    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+      profile,
+      connectionProfileId,
+      flowOrgProfile?.id ?? null,
+    );
 
     // Resolve provider profiles, config, and validate readiness (inlined preflight).
-    // Schedules don't support per-provider overrides — the schedule's connectionProfileId
-    // is used as the default for all unbound providers.
+    // Schedules don't support per-provider overrides.
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
@@ -243,9 +281,9 @@ async function triggerScheduledExecution(
       const [resolvedProfiles, packageConfig] = await Promise.all([
         resolveProviderProfiles(
           manifestProviders,
-          connectionProfileId,
+          defaultUserProfileId,
           undefined,
-          flowOrgProfileId,
+          orgProfileId,
           orgId,
         ),
         getPackageConfig(orgId, packageId),
@@ -270,6 +308,7 @@ async function triggerScheduledExecution(
           code: err.code,
           detail: err.message,
         });
+        await failSchedule(err.message, actor);
         return;
       }
       throw err;
@@ -285,6 +324,10 @@ async function triggerScheduledExecution(
           packageId,
           errors: inputValidation.errors,
         });
+        await failSchedule(
+          `Input validation failed: ${inputValidation.errors?.map((e) => e.message).join(", ")}`,
+          actor,
+        );
         return;
       }
     }
@@ -317,6 +360,7 @@ async function triggerScheduledExecution(
           packageId,
           orgId,
         });
+        await failSchedule("No model configured", actor);
         return;
       }
       throw err;
@@ -336,6 +380,7 @@ async function triggerScheduledExecution(
             orgId,
             reason: err.message,
           });
+          await failSchedule(err.message, actor);
           return;
         }
         throw err;
@@ -446,14 +491,15 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  // Schedule profile: if org profile, all providers must be bound (no user fallback).
-  // If user profile, all providers use it directly.
-  const isOrgProfile = !!profile.orgId;
+  const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+    profile,
+    schedule.connectionProfileId,
+  );
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    isOrgProfile ? null : schedule.connectionProfileId, // org profiles have no user fallback
-    undefined, // no per-provider overrides for schedules
-    isOrgProfile ? schedule.connectionProfileId : null,
+    defaultUserProfileId,
+    undefined,
+    orgProfileId,
     orgId,
   );
 
