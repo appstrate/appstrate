@@ -10,6 +10,7 @@ import {
   userProviderConnections,
   orgProfileProviderBindings,
   organizationMembers,
+  packageConfigs,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
@@ -252,6 +253,13 @@ export async function deleteOrgProfile(profileId: string, orgId: string): Promis
     .limit(1);
 
   if (!profile) throw notFound("Profile not found");
+
+  // Clear stale orgProfileId references in package_configs before deleting the profile.
+  // The FK has onDelete: "set null", but we clear explicitly as defense-in-depth.
+  await db
+    .update(packageConfigs)
+    .set({ orgProfileId: null, updatedAt: new Date() })
+    .where(eq(packageConfigs.orgProfileId, profileId));
 
   await db
     .delete(connectionProfiles)
