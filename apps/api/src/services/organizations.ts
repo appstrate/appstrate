@@ -185,11 +185,20 @@ export async function addMember(
   userId: string,
   role: OrgRole = "member",
 ): Promise<void> {
-  await db.insert(organizationMembers).values({
-    orgId,
-    userId,
-    role,
-  });
+  try {
+    await db.insert(organizationMembers).values({
+      orgId,
+      userId,
+      role,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("duplicate key") || message.includes("unique constraint")) {
+      // User is already a member — idempotent, silently ignore
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
