@@ -43,11 +43,10 @@ export function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <div
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           className={cn(
-            "relative inline-flex items-center justify-center size-8 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer",
+            "relative inline-flex items-center justify-center size-8 shrink-0 rounded-md bg-transparent border-none p-0 cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent transition-colors",
             hasRunning && unread === 0 && "text-primary animate-pulse",
           )}
           aria-label={t("notifications.ariaLabel")}
@@ -58,7 +57,7 @@ export function NotificationBell() {
               {unread > 99 ? "99+" : unread}
             </span>
           )}
-        </div>
+        </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
         {/* Header */}

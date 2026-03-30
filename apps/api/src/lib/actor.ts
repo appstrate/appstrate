@@ -5,14 +5,14 @@ import type { Actor } from "@appstrate/connect";
 
 export type { Actor };
 
-/** Résout l'acteur depuis le contexte Hono. */
+/** Resolves the actor from the Hono context. */
 export function getActor(c: Context): Actor {
   const endUser = c.get("endUser");
   if (endUser) return { type: "end_user", id: endUser.id };
   return { type: "member", id: c.get("user").id };
 }
 
-/** Produit les colonnes {userId, endUserId} pour un INSERT. */
+/** Produces the {userId, endUserId} columns for an INSERT. */
 export function actorInsert(actor: Actor): {
   userId: string | null;
   endUserId: string | null;
@@ -23,14 +23,14 @@ export function actorInsert(actor: Actor): {
   };
 }
 
-/** Reconstruit un Actor à partir de colonnes userId/endUserId nullable. */
+/** Reconstructs an Actor from nullable userId/endUserId columns. */
 export function actorFromIds(userId: string | null, endUserId: string | null): Actor | null {
   if (userId) return { type: "member", id: userId };
   if (endUserId) return { type: "end_user", id: endUserId };
   return null;
 }
 
-/** Produit le WHERE clause pour filtrer par acteur. */
+/** Produces the WHERE clause to filter by actor. */
 export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Column }) {
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);
 }

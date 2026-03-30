@@ -7,9 +7,7 @@ import type { FlowProviderRequirement } from "../../src/types/index.ts";
 
 const TEST_ORG_ID = "test-org-id";
 
-function createMockDeps(
-  bindings: Record<string, string> = {},
-): ResolveProviderProfilesDeps {
+function createMockDeps(bindings: Record<string, string> = {}): ResolveProviderProfilesDeps {
   return {
     getOrgProfileBindings: async () => bindings,
   };
@@ -237,6 +235,20 @@ describe("resolveProviderProfiles", () => {
       "@test/gmail": { profileId: "deleted-profile-id", source: "org_binding" },
       "@test/clickup": { profileId: "default-profile", source: "user_profile" },
     });
+  });
+
+  it("omits provider from map when defaultUserProfileId is null and no org bindings or overrides", async () => {
+    const deps = createMockDeps();
+    const result = await resolveProviderProfiles(
+      [gmail, clickup],
+      null,
+      undefined,
+      undefined,
+      TEST_ORG_ID,
+      deps,
+    );
+
+    expect(result).toEqual({});
   });
 
   it("empty org bindings fall back to user profiles for all providers", async () => {

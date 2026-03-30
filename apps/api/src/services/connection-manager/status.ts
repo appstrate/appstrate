@@ -170,39 +170,39 @@ export async function resolveProviderStatuses(
 
     const authMode = authModeMap.get(svc.id);
     const label = authModeLabel(authMode);
-      const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
-      const entry = providerProfiles[svc.id];
+    const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
+    const entry = providerProfiles[svc.id];
 
-      if (!entry) {
-        return {
-          ...base,
-          status: "not_connected" as const,
-          authMode: label,
-          source: null,
-          profileName: null,
-          profileOwnerName: null,
-          ...(scopesRequired ? { scopesRequired } : {}),
-        };
-      }
-
-      // Look up connection from batch-fetched map
-      const connKey = `${entry.profileId}:${svc.id}`;
-      const conn = connectionMap.get(connKey);
-      const connStatus: ConnectionStatusValue = conn ? "connected" : "not_connected";
-
-      const profileInfo = profileInfoMap.get(entry.profileId) ?? {
-        profileName: null,
-        profileOwnerName: null,
-      };
-      const connScopesGranted = conn?.scopesGranted ?? undefined;
+    if (!entry) {
       return {
         ...base,
-        status: connStatus,
+        status: "not_connected" as const,
         authMode: label,
-        source: entry.source,
-        profileName: profileInfo.profileName,
-        profileOwnerName: profileInfo.profileOwnerName,
-        ...buildScopeInfo(connScopesGranted, scopesRequired, connStatus === "connected"),
+        source: null,
+        profileName: null,
+        profileOwnerName: null,
+        ...(scopesRequired ? { scopesRequired } : {}),
       };
-    });
+    }
+
+    // Look up connection from batch-fetched map
+    const connKey = `${entry.profileId}:${svc.id}`;
+    const conn = connectionMap.get(connKey);
+    const connStatus: ConnectionStatusValue = conn ? "connected" : "not_connected";
+
+    const profileInfo = profileInfoMap.get(entry.profileId) ?? {
+      profileName: null,
+      profileOwnerName: null,
+    };
+    const connScopesGranted = conn?.scopesGranted ?? undefined;
+    return {
+      ...base,
+      status: connStatus,
+      authMode: label,
+      source: entry.source,
+      profileName: profileInfo.profileName,
+      profileOwnerName: profileInfo.profileOwnerName,
+      ...buildScopeInfo(connScopesGranted, scopesRequired, connStatus === "connected"),
+    };
+  });
 }

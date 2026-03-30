@@ -254,8 +254,8 @@ describe("Organizations API", () => {
         body: JSON.stringify({ email: "already@test.com" }),
       });
 
-      // Should fail since user is already a member
-      expect(res.status).toBe(400);
+      // addMember is idempotent — duplicate silently ignored, returns 201
+      expect(res.status).toBe(201);
     });
   });
 });

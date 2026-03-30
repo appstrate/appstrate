@@ -29,7 +29,7 @@ import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
-import connectionsRouter from "./routes/connections.ts";
+import { createConnectionsRouter } from "./routes/connections.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -266,7 +266,7 @@ app.route("/api/applications", createApplicationsRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
-app.route("/api/connections", connectionsRouter);
+app.route("/api/connections", createConnectionsRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

@@ -460,9 +460,7 @@ async function computeScheduleReadiness(
   // Batch-fetch all connections for resolved profile IDs in one query
   const resolvedProfileIds = [
     ...new Set(
-      providers
-        .map((p) => providerProfiles[p.id]?.profileId)
-        .filter((id): id is string => !!id),
+      providers.map((p) => providerProfiles[p.id]?.profileId).filter((id): id is string => !!id),
     ),
   ];
 

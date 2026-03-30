@@ -5,6 +5,7 @@ import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useUnreadCount, useAllExecutions, useMarkAllRead } from "../hooks/use-notifications";
+import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ExecutionRow } from "../components/execution-row";
@@ -17,6 +18,7 @@ export function ExecutionsPage() {
   const { data, isLoading, error } = useAllExecutions(page, limit);
   const { data: flows } = useFlows();
   const { data: unreadCount } = useUnreadCount();
+  const { data: schedules } = useAllSchedules();
   const markAllRead = useMarkAllRead();
 
   const flowNameMap = new Map<string, string>();
@@ -71,6 +73,11 @@ export function ExecutionsPage() {
                 key={exec.id}
                 execution={exec}
                 flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
+                scheduleName={
+                  exec.scheduleId
+                    ? (schedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
+                    : null
+                }
               />
             ))}
           </div>

@@ -25,7 +25,7 @@ describe("resolveProviderStatuses", () => {
 
   async function seedProvider(id: string) {
     await seedPackage({
-      orgId: null as unknown as string,
+      orgId: null,
       id,
       type: "provider",
       source: "system",
