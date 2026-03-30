@@ -1,5 +1,6 @@
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 import {
   organizations,
   organizationMembers,
@@ -30,8 +31,8 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     name: row.name,
     slug: row.slug,
     createdBy: row.createdBy ?? "",
-    createdAt: row.createdAt?.toISOString() ?? "",
-    updatedAt: row.updatedAt?.toISOString() ?? "",
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
   };
 }
 
@@ -184,19 +185,11 @@ export async function addMember(
   userId: string,
   role: OrgRole = "member",
 ): Promise<void> {
-  try {
-    await db.insert(organizationMembers).values({
-      orgId,
-      userId,
-      role,
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("duplicate key") || message.includes("unique constraint")) {
-      throw new Error("This user is already a member of this organization", { cause: err });
-    }
-    throw new Error(`Failed to add member: ${message}`, { cause: err });
-  }
+  await db.insert(organizationMembers).values({
+    orgId,
+    userId,
+    role,
+  });
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {

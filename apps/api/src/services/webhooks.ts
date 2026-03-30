@@ -12,6 +12,8 @@ import { logger } from "../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";
 import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { toISORequired } from "../lib/date-helpers.ts";
+import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
 import { prefixedId } from "../lib/ids.ts";
@@ -38,7 +40,6 @@ const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 15_000;
 const MAX_WEBHOOKS_PER_ORG = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
-const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000; // 24h
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,7 +68,7 @@ function toWebhookResponse(row: {
   scope: string;
   applicationId: string | null;
   url: string;
-  events: string[] | null;
+  events: string[];
   packageId: string | null;
   payloadMode: string;
   active: boolean;
@@ -77,15 +78,15 @@ function toWebhookResponse(row: {
   return {
     id: row.id,
     object: "webhook",
-    scope: row.scope === "organization" ? "organization" : "application",
+    scope: row.scope as "organization" | "application",
     applicationId: row.applicationId,
     url: row.url,
-    events: row.events ?? [],
+    events: row.events,
     packageId: row.packageId,
-    payloadMode: row.payloadMode === "summary" ? "summary" : "full",
+    payloadMode: row.payloadMode as "summary" | "full",
     active: row.active,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
   };
 }
 
@@ -142,16 +143,9 @@ export async function buildSignedHeaders(
   timestamp: number,
   body: string,
   secret: string,
-  previousSecret?: string | null,
 ): Promise<Record<string, string>> {
   const content = `${eventId}.${timestamp}.${body}`;
-  const sig = await sign(secret, content);
-
-  let signature = sig;
-  if (previousSecret) {
-    const prevSig = await sign(previousSecret, content);
-    signature = `${sig} ${prevSig}`; // Standard Webhooks: space-separated
-  }
+  const signature = await sign(secret, content);
 
   return {
     "webhook-id": eventId,
@@ -286,12 +280,7 @@ export async function updateWebhook(
   if (params.url) validateWebhookUrl(params.url);
   if (params.events) validateEvents(params.events);
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (params.url !== undefined) updates.url = params.url;
-  if (params.events !== undefined) updates.events = params.events;
-  if (params.packageId !== undefined) updates.packageId = params.packageId;
-  if (params.payloadMode !== undefined) updates.payloadMode = params.payloadMode;
-  if (params.active !== undefined) updates.active = params.active;
+  const updates = buildUpdateSet(params);
 
   const [updated] = await db
     .update(webhooks)
@@ -321,8 +310,8 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
     .update(webhooks)
     .set({
       secret: newSecret,
-      previousSecret: row.secret,
-      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
+      previousSecret: null,
+      previousSecretExpiresAt: null,
       updatedAt: new Date(),
     })
     .where(eq(webhooks.id, webhookId));
@@ -365,7 +354,7 @@ export async function listDeliveries(
     latency: r.latency,
     attempt: r.attempt,
     error: r.error,
-    createdAt: r.createdAt.toISOString(),
+    createdAt: toISORequired(r.createdAt),
   }));
 }
 
@@ -472,8 +461,7 @@ export async function dispatchWebhookEvents(
     const { eventId, payload } = buildEventEnvelope({
       eventType,
       execution,
-      payloadMode:
-        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
+      payloadMode: wh.payloadMode as "full" | "summary",
     });
 
     await queue.add("deliver", {
@@ -498,8 +486,6 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
     .select({
       url: webhooks.url,
       secret: webhooks.secret,
-      previousSecret: webhooks.previousSecret,
-      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
     })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
@@ -512,13 +498,7 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
 
   const timestamp = Math.floor(Date.now() / 1000);
 
-  // Determine active secrets (handle rotation grace period)
-  const prevSecret =
-    wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()
-      ? wh.previousSecret
-      : null;
-
-  const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret, prevSecret);
+  const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();

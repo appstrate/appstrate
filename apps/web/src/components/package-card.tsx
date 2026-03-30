@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
 import { ShieldCheck } from "lucide-react";
-import { Badge } from "./badge";
+import { Badge } from "./status-badge";
 import { RunFlowButton } from "./run-flow-button";
 import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";

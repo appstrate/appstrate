@@ -48,7 +48,7 @@ export function useProviderConnection({
   // Connection status — use viewProfileId when viewing another user's profile (read-only)
   const statusProfileId = viewProfileId ?? effectiveProfileId;
   const { data: profileConnections } = useProfileConnections(statusProfileId);
-  const isConnected = isProviderConnectedInProfile(providerId, profileConnections ?? undefined);
+  const isConnected = isProviderConnectedInProfile(providerId, profileConnections);
 
   // Binding status (only when orgProfileId is provided)
   const { data: bindings } = useOrgProfileBindings(orgProfileId);

@@ -287,7 +287,7 @@ export function createProvidersRouter() {
       logger.error("Provider create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create provider");
+      throw internalError();
     }
 
     // Create initial version (non-fatal)
@@ -352,7 +352,6 @@ export function createProvidersRouter() {
       throw notFound(`Provider '${providerId}' not found`);
     }
 
-    // Build complete definition from request (no merge with old values)
     const definition = buildProviderDefinition(data);
 
     try {
@@ -402,7 +401,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to update provider");
+      throw internalError();
     }
 
     return c.json({ id: providerId });
@@ -524,7 +523,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete provider");
+      throw internalError();
     }
 
     return c.body(null, 204);

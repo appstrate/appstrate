@@ -13,20 +13,6 @@ import {
 } from "../services/invitations.ts";
 import { addMember } from "../services/organizations.ts";
 
-async function addMemberIgnoreDuplicate(
-  orgId: string,
-  userId: string,
-  role: "member" | "admin",
-): Promise<void> {
-  try {
-    await addMember(orgId, userId, role);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("duplicate key") && !msg.includes("unique constraint")) throw err;
-    // Already a member — skip
-  }
-}
-
 const router = new Hono();
 
 function assertInvitationExists(
@@ -115,7 +101,7 @@ router.post("/:token/accept", async (c) => {
         logger.error("Invitation signup failed — no user returned", {
           email: invitation.email,
         });
-        throw internalError("Failed to create account");
+        throw internalError();
       }
 
       const newUserId = signupRes.user.id;
@@ -127,7 +113,7 @@ router.post("/:token/accept", async (c) => {
       });
 
       // Add member to org
-      await addMemberIgnoreDuplicate(
+      await addMember(
         invitation.orgId,
         newUserId,
         invitation.role as "member" | "admin",
@@ -157,23 +143,13 @@ router.post("/:token/accept", async (c) => {
         error: err instanceof Error ? err.message : String(err),
         email: invitation.email,
       });
-      throw internalError("Failed to accept invitation");
+      throw internalError();
     }
   } else {
     // --- EXISTING USER ---
-    // Check session and enforce email match before modifying org membership
     const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
 
-    if (session?.user && session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-      throw new ApiError({
-        status: 403,
-        code: "email_mismatch",
-        title: "Email mismatch",
-        detail: `This invitation is for ${invitation.email}`,
-      });
-    }
-
-    await addMemberIgnoreDuplicate(
+    await addMember(
       invitation.orgId,
       existingUser.id,
       invitation.role as "member" | "admin",

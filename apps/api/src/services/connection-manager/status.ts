@@ -7,6 +7,7 @@ import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-ty
 import { getConnection, validateScopes } from "@appstrate/connect";
 import { getProviderAuthMode } from "./providers.ts";
 import { authModeLabel } from "./helpers.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
 
 export interface ConnectionStatus {
   provider: string;
@@ -117,7 +118,7 @@ async function batchGetConnectionStatuses(
     const key = `${row.profileId}:${row.providerId}`;
     map.set(key, {
       id: row.id,
-      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
+      createdAt: toISORequired(row.createdAt) || toISORequired(new Date()),
       scopesGranted: row.scopesGranted,
     });
   }

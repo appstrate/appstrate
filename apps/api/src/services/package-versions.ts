@@ -25,6 +25,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "../lib/safe-json.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
+import { toISO } from "../lib/date-helpers.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -101,23 +102,18 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
         .values({ packageId, version, integrity, artifactSize, manifest, orgId, createdBy })
         .returning({ id: packageVersions.id, version: packageVersions.version });
 
-      if (!row) {
-        logger.error("Insert returned no row", { packageId, version });
-        return null;
-      }
-
       // Auto-manage "latest" dist-tag
       if (outcome.shouldUpdateLatest) {
         await tx
           .insert(packageDistTags)
-          .values({ packageId, tag: "latest", versionId: row.id })
+          .values({ packageId, tag: "latest", versionId: row!.id })
           .onConflictDoUpdate({
             target: [packageDistTags.packageId, packageDistTags.tag],
-            set: { versionId: row.id, updatedAt: new Date() },
+            set: { versionId: row!.id, updatedAt: new Date() },
           });
       }
 
-      return { id: row.id, version: row.version };
+      return { id: row!.id, version: row!.version };
     });
   } catch (err) {
     logger.error("Failed to create package version", {
@@ -151,7 +147,7 @@ export async function listPackageVersions(packageId: string) {
 
   return rows.map((r) => ({
     ...r,
-    createdAt: r.createdAt?.toISOString() ?? null,
+    createdAt: toISO(r.createdAt),
   }));
 }
 
@@ -339,7 +335,7 @@ export async function getVersionDetail(
     yankedReason: row.yankedReason,
     integrity: row.integrity,
     artifactSize: row.artifactSize,
-    createdAt: row.createdAt?.toISOString() ?? null,
+    createdAt: toISO(row.createdAt),
   };
 }
 

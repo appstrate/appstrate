@@ -4,6 +4,7 @@ import { executions, executionLogs, packageVersions } from "@appstrate/db/schema
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
+import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Executions ---
 
@@ -155,7 +156,7 @@ export async function getRecentExecutions(
     const entry: Record<string, unknown> = {
       id: row.id,
       status: row.status,
-      date: row.startedAt?.toISOString() ?? null,
+      date: toISO(row.startedAt),
       duration: row.duration,
     };
     if (fields.includes("state")) entry.state = row.state;

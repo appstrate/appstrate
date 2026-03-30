@@ -7,23 +7,21 @@ import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
 
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
-  const result: OrgModelInfo[] = [];
-
-  // DB models for this org
   const rows = await db.select().from(orgModels).where(eq(orgModels.orgId, orgId));
-
-  // Check if org has its own default set
   const orgHasDefault = rows.some((r) => r.isDefault);
+  const now = toISORequired(new Date());
 
-  // System models first
-  const now = new Date().toISOString();
-  for (const [id, def] of system) {
-    result.push({
+  return mergeSystemAndDb({
+    system,
+    rows,
+    mapSystem: (id, def) => ({
       id,
       label: def.label,
       api: def.api,
@@ -36,19 +34,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       cost: def.cost ?? null,
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in",
+      source: "built-in" as const,
       providerKeyId: def.providerKeyId,
       providerKeyLabel: null,
       createdBy: null,
       createdAt: now,
       updatedAt: now,
-    });
-  }
-
-  // DB models (skip if ID conflicts with system model)
-  for (const row of rows) {
-    if (system.has(row.id)) continue;
-    result.push({
+    }),
+    mapRow: (row) => ({
       id: row.id,
       label: row.label,
       api: row.api,
@@ -65,12 +58,10 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
       createdBy: row.createdBy,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    });
-  }
-
-  return result;
+      createdAt: toISORequired(row.createdAt),
+      updatedAt: toISORequired(row.updatedAt),
+    }),
+  });
 }
 
 // --- CRUD (DB models only) ---
@@ -142,18 +133,7 @@ export async function updateOrgModel(
     throw new Error("Cannot modify built-in model");
   }
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (data.label !== undefined) updates.label = data.label;
-  if (data.api !== undefined) updates.api = data.api;
-  if (data.baseUrl !== undefined) updates.baseUrl = data.baseUrl;
-  if (data.modelId !== undefined) updates.modelId = data.modelId;
-  if (data.providerKeyId !== undefined) updates.providerKeyId = data.providerKeyId;
-  if (data.enabled !== undefined) updates.enabled = data.enabled;
-  if (data.input !== undefined) updates.input = data.input;
-  if (data.contextWindow !== undefined) updates.contextWindow = data.contextWindow;
-  if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens;
-  if (data.reasoning !== undefined) updates.reasoning = data.reasoning;
-  if (data.cost !== undefined) updates.cost = data.cost;
+  const updates = buildUpdateSet(data);
 
   await db
     .update(orgModels)

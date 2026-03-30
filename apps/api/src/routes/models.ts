@@ -109,7 +109,7 @@ export function createModelsRouter() {
       logger.error("Model create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create model");
+      throw internalError();
     }
   });
 
@@ -127,7 +127,7 @@ export function createModelsRouter() {
       logger.error("Set default model failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to set default model");
+      throw internalError();
     }
   });
 
@@ -254,7 +254,7 @@ export function createModelsRouter() {
       logger.error("Model inline test failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Test failed");
+      throw internalError();
     }
   });
 
@@ -273,7 +273,7 @@ export function createModelsRouter() {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Test failed");
+      throw internalError();
     }
   });
 
@@ -296,7 +296,7 @@ export function createModelsRouter() {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to update model");
+      throw internalError();
     }
   });
 
@@ -317,7 +317,7 @@ export function createModelsRouter() {
         modelId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete model");
+      throw internalError();
     }
   });
 

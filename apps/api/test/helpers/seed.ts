@@ -330,6 +330,7 @@ export async function seedInvitation(
     .values({
       token: crypto.randomUUID(),
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 48), // 48h
+      role: "member",
       ...overrides,
     })
     .returning();

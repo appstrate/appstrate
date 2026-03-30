@@ -5,17 +5,20 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemProviderKeys } from "./model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
 
 export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKeyInfo[]> {
   const system = getSystemProviderKeys();
-  const result: OrgProviderKeyInfo[] = [];
+  const rows = await db.select().from(orgProviderKeys).where(eq(orgProviderKeys.orgId, orgId));
+  const now = toISORequired(new Date());
 
-  // System provider keys first
-  const now = new Date().toISOString();
-  for (const [id, def] of system) {
-    result.push({
+  return mergeSystemAndDb({
+    system,
+    rows,
+    mapSystem: (id, def): OrgProviderKeyInfo => ({
       id,
       label: def.label,
       api: def.api,
@@ -24,26 +27,18 @@ export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKey
       createdBy: null,
       createdAt: now,
       updatedAt: now,
-    });
-  }
-
-  // DB provider keys
-  const rows = await db.select().from(orgProviderKeys).where(eq(orgProviderKeys.orgId, orgId));
-  for (const r of rows) {
-    if (system.has(r.id)) continue;
-    result.push({
+    }),
+    mapRow: (r) => ({
       id: r.id,
       label: r.label,
       api: r.api,
       baseUrl: r.baseUrl,
       source: "custom",
       createdBy: r.createdBy,
-      createdAt: r.createdAt?.toISOString() ?? now,
-      updatedAt: r.updatedAt?.toISOString() ?? now,
-    });
-  }
-
-  return result;
+      createdAt: toISO(r.createdAt) ?? now,
+      updatedAt: toISO(r.updatedAt) ?? now,
+    }),
+  });
 }
 
 // --- CRUD ---
@@ -75,11 +70,9 @@ export async function updateOrgProviderKey(
   id: string,
   data: { label?: string; api?: string; baseUrl?: string; apiKey?: string },
 ): Promise<void> {
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (data.label !== undefined) updates.label = data.label;
-  if (data.api !== undefined) updates.api = data.api;
-  if (data.baseUrl !== undefined) updates.baseUrl = data.baseUrl;
-  if (data.apiKey !== undefined) updates.apiKeyEncrypted = encrypt(data.apiKey);
+  const { apiKey, ...rest } = data;
+  const updates = buildUpdateSet(rest);
+  if (apiKey !== undefined) updates.apiKeyEncrypted = encrypt(apiKey);
   await db
     .update(orgProviderKeys)
     .set(updates)

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Shield, User, Calendar } from "lucide-react";
-import { Badge } from "./badge";
+import { Badge } from "./status-badge";
 import { cn } from "@/lib/utils";
 import { formatDateField } from "../lib/markdown";
 import { useAllSchedules } from "../hooks/use-schedules";

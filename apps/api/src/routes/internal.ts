@@ -134,7 +134,7 @@ export function createInternalRouter() {
         executionId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to fetch execution history");
+      throw internalError();
     }
   });
 

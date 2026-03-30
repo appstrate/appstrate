@@ -16,6 +16,7 @@ import { resolveModel } from "./org-models.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
+import { toISO } from "../lib/date-helpers.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -36,10 +37,11 @@ export async function resolveProviderDefs(
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
   return defs
     .filter((def): def is NonNullable<typeof def> => def != null)
+    .filter((def) => def.authMode != null)
     .map((def) => ({
       id: def.id,
       displayName: def.displayName,
-      authMode: def.authMode,
+      authMode: def.authMode!,
       credentialSchema: def.credentialSchema,
       credentialFieldName: def.credentialFieldName,
       credentialHeaderName: def.credentialHeaderName,
@@ -306,7 +308,7 @@ export async function buildExecutionContext(params: {
     memories: memories.map((m) => ({
       id: m.id,
       content: m.content,
-      createdAt: m.createdAt?.toISOString() ?? null,
+      createdAt: toISO(m.createdAt),
     })),
     toolDocs,
     proxyUrl,
