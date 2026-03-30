@@ -113,8 +113,9 @@ describe("Executions API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json() as any;
-      expect(body).toBeArray();
-      expect(body).toHaveLength(0);
+      expect(body.executions).toBeArray();
+      expect(body.executions).toHaveLength(0);
+      expect(body.total).toBe(0);
     });
 
     it("returns executions for a flow", async () => {
@@ -132,8 +133,8 @@ describe("Executions API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json() as any;
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      const found = body.find((e: { id: string }) => e.id === exec.id);
+      expect(body.executions.length).toBeGreaterThanOrEqual(1);
+      const found = body.executions.find((e: { id: string }) => e.id === exec.id);
       expect(found).toBeDefined();
     });
 

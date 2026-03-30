@@ -13,7 +13,11 @@ import { ExecutionList } from "../components/execution-list";
 export function DashboardPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { profile, user } = useAuth();
-  const { data: execData, isLoading: execLoading, error: execError } = usePaginatedExecutions({
+  const {
+    data: execData,
+    isLoading: execLoading,
+    error: execError,
+  } = usePaginatedExecutions({
     limit: 15,
     offset: 0,
   });

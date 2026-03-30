@@ -314,9 +314,10 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body).toBeArray();
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      expect(body[0].scheduleId).toBe(schedule.id);
+      expect(body.executions).toBeArray();
+      expect(body.executions.length).toBeGreaterThanOrEqual(1);
+      expect(body.executions[0].scheduleId).toBe(schedule.id);
+      expect(body.total).toBeGreaterThanOrEqual(1);
     });
 
     it("returns empty array when no executions exist", async () => {
@@ -335,8 +336,9 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body).toBeArray();
-      expect(body).toHaveLength(0);
+      expect(body.executions).toBeArray();
+      expect(body.executions).toHaveLength(0);
+      expect(body.total).toBe(0);
     });
   });
 

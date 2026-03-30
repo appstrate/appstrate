@@ -292,10 +292,7 @@ async function listExecutionsWithFilter(
   limit: number,
   offset = 0,
 ): Promise<{ executions: Record<string, unknown>[]; total: number }> {
-  const [countRow] = await db
-    .select({ count: count() })
-    .from(executions)
-    .where(filter);
+  const [countRow] = await db.select({ count: count() }).from(executions).where(filter);
 
   const rows = await db
     .select({
@@ -310,7 +307,10 @@ async function listExecutionsWithFilter(
     .offset(offset);
 
   return {
-    executions: rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion })) as unknown as Record<string, unknown>[],
+    executions: rows.map((r) => ({
+      ...r.execution,
+      packageVersion: r.packageVersion,
+    })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
@@ -318,7 +318,12 @@ async function listExecutionsWithFilter(
 export async function listPackageExecutions(
   packageId: string,
   orgId: string,
-  options: { limit?: number; offset?: number; applicationId?: string | null; endUserId?: string | null } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    applicationId?: string | null;
+    endUserId?: string | null;
+  } = {},
 ) {
   const { limit = 50, offset = 0, applicationId, endUserId } = options;
   const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];

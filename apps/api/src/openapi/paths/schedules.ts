@@ -223,10 +223,15 @@ export const schedulesPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
+        {
+          name: "offset",
+          in: "query",
+          schema: { type: "integer", minimum: 0, default: 0 },
+        },
       ],
       responses: {
         "200": {
-          description: "Execution list",
+          description: "Paginated execution list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -234,8 +239,15 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: {
-                type: "array",
-                items: { $ref: "#/components/schemas/Execution" },
+                type: "object",
+                properties: {
+                  executions: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/Execution" },
+                  },
+                  total: { type: "integer" },
+                },
+                required: ["executions", "total"],
               },
             },
           },

@@ -22,24 +22,12 @@ import { OrgProfileProvidersBlock } from "../components/org-profile-providers-bl
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import {
-  useScheduleById,
-  useUpdateSchedule,
-  useDeleteSchedule,
-} from "../hooks/use-schedules";
+import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { usePackageDetail, useFlows } from "../hooks/use-packages";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
-import {
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-  Play,
-  Pause,
-  Calendar,
-  Clock,
-} from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Play, Pause, Calendar, Clock } from "lucide-react";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
