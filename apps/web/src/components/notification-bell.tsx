@@ -16,6 +16,7 @@ import {
 } from "../hooks/use-notifications";
 import { useFlows } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
+import type { Execution } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 function NotificationContent({
@@ -27,12 +28,7 @@ function NotificationContent({
   markAllRead,
 }: {
   unread: number;
-  unreadExecutions: Array<{
-    id: string;
-    packageId: string;
-    status: string;
-    startedAt: string | null;
-  }>;
+  unreadExecutions: Pick<Execution, "id" | "packageId" | "status" | "startedAt">[];
   flowNameMap: Map<string, string>;
   onItemClick: (executionId: string) => void;
   onClose: () => void;
