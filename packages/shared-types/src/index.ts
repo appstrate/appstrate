@@ -1,18 +1,10 @@
 export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {
-  AuthMode,
-  AvailableScope,
   PackageType,
   ProviderSetupGuide,
   ResolvedProviderDefinition,
 } from "@appstrate/core/validation";
-export type {
-  AuthMode,
-  AvailableScope,
-  PackageType,
-  ProviderSetupGuide,
-  ResolvedProviderDefinition,
-};
+export type { PackageType };
 
 import type { Execution as _Execution } from "@appstrate/db/schema";
 export type Execution = _Execution & { packageVersion?: string | null };
@@ -101,9 +93,6 @@ export interface OrgInvitation {
   createdAt: string;
 }
 
-// --- JSON Schema Types (re-exported because FlowDetail/ProviderConfig reference them) ---
-
-export type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
 // --- Flow Readiness Utilities ---
@@ -125,7 +114,18 @@ export function findMissingDependencies(
   return Object.keys(required).filter((id) => !installed.has(id));
 }
 
-// --- Connection Status ---
+// --- Connection Types ---
+
+/** Connection record as returned by the API (no encrypted credentials). */
+export interface ConnectionInfo {
+  id: string;
+  profileId: string;
+  providerId: string;
+  orgId: string;
+  scopesGranted?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
 
 export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
 

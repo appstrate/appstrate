@@ -214,7 +214,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
       propertyOrder: ["doc"],
     };
     const fields = schemaToFields(schema, "input", wrapper);
-    expect(fields[0]!.type).toBe("file");
+    expect(fields[0]!.type).toBe("string");
+    expect(fields[0]!.isFile).toBe(true);
     expect(fields[0]!.multiple).toBe(true);
     expect(fields[0]!.accept).toBe(".pdf");
     expect(fields[0]!.maxFiles).toBe("5");
@@ -279,7 +280,8 @@ describe("fieldsToSchema — JSON Schema purity", () => {
       {
         _id: "2",
         key: "doc",
-        type: "file",
+        type: "string",
+        isFile: true,
         description: "Upload",
         required: false,
         accept: ".pdf,.docx",
@@ -303,7 +305,8 @@ describe("fieldsToSchema — JSON Schema purity", () => {
       {
         _id: "1",
         key: "attachment",
-        type: "file",
+        type: "string",
+        isFile: true,
         description: "File",
         required: false,
         accept: "",
@@ -355,7 +358,8 @@ describe("fieldsToSchema — JSON Schema purity", () => {
       {
         _id: "1",
         key: "doc",
-        type: "file",
+        type: "string",
+        isFile: true,
         description: "Document",
         required: false,
         accept: ".pdf",

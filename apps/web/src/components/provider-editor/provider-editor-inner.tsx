@@ -24,7 +24,8 @@ import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
 import { schemaToFields, fieldsToSchema, getManifestName } from "../flow-editor/utils";
 import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
-import type { ProviderConfig, AvailableScope } from "@appstrate/shared-types";
+import type { ProviderConfig } from "@appstrate/shared-types";
+import type { AvailableScope } from "@appstrate/core/validation";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "json";

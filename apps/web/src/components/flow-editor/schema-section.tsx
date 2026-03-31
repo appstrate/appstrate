@@ -35,6 +35,7 @@ export interface SchemaField {
   type: string;
   description: string;
   required: boolean;
+  isFile?: boolean;
   placeholder?: string;
   default?: string;
   enumValues?: string;
@@ -56,7 +57,6 @@ interface SchemaSectionProps {
 }
 
 const TYPE_OPTIONS = ["string", "number", "boolean", "array", "object"];
-const INPUT_TYPE_OPTIONS = [...TYPE_OPTIONS, "file"];
 
 function emptyField(mode: SchemaMode): SchemaField {
   return {
@@ -96,8 +96,7 @@ function SortableFieldCard({
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
-  const isFile = mode === "input" && field.type === "file";
-  const typeOptions = mode === "input" ? INPUT_TYPE_OPTIONS : TYPE_OPTIONS;
+  const isFile = mode === "input" && !!field.isFile;
   const showDetails = hasDetailsRow(mode);
 
   return (
@@ -127,14 +126,14 @@ function SortableFieldCard({
         />
         <Select
           value={field.type}
-          onValueChange={(v) => onUpdate(index, { type: v })}
+          onValueChange={(v) => onUpdate(index, { type: v, ...(v !== "string" ? { isFile: false } : {}) })}
           disabled={readOnly}
         >
           <SelectTrigger className="h-7 w-[100px] text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {typeOptions.map((t) => (
+            {TYPE_OPTIONS.map((t) => (
               <SelectItem key={t} value={t}>
                 {t}
               </SelectItem>
@@ -163,6 +162,22 @@ function SortableFieldCard({
             {t("editor.fieldReq")}
           </Label>
         </div>
+        {mode === "input" && field.type === "string" && (
+          <div className="flex items-center gap-1.5">
+            <Checkbox
+              id={`field-file-${index}`}
+              checked={field.isFile ?? false}
+              onCheckedChange={(checked) => onUpdate(index, { isFile: Boolean(checked) })}
+              disabled={readOnly}
+            />
+            <Label
+              htmlFor={`field-file-${index}`}
+              className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+            >
+              {t("editor.fieldIsFile")}
+            </Label>
+          </div>
+        )}
         {!readOnly && (
           <Button
             type="button"
@@ -185,6 +200,7 @@ function SortableFieldCard({
                 value={field.accept ?? ""}
                 onChange={(e) => onUpdate(index, { accept: e.target.value })}
                 className="flex-1 min-w-[100px] h-7 text-xs"
+                disabled={readOnly}
               />
               <Input
                 type="text"
@@ -192,12 +208,14 @@ function SortableFieldCard({
                 value={field.maxSize ?? ""}
                 onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
                 className="flex-1 min-w-[100px] h-7 text-xs"
+                disabled={readOnly}
               />
               <div className="flex items-center gap-1.5">
                 <Checkbox
                   id={`field-multiple-${index}`}
                   checked={field.multiple ?? false}
                   onCheckedChange={(checked) => onUpdate(index, { multiple: Boolean(checked) })}
+                  disabled={readOnly}
                 />
                 <Label
                   htmlFor={`field-multiple-${index}`}
@@ -213,6 +231,7 @@ function SortableFieldCard({
                   value={field.maxFiles ?? ""}
                   onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
                   className="flex-1 min-w-[100px] h-7 text-xs"
+                  disabled={readOnly}
                 />
               )}
             </>
@@ -225,6 +244,7 @@ function SortableFieldCard({
                   value={field.default ?? ""}
                   onChange={(e) => onUpdate(index, { default: e.target.value })}
                   className="flex-1 min-w-[100px] h-7 text-xs"
+                  disabled={readOnly}
                 />
               )}
               {mode === "input" && (
@@ -234,6 +254,7 @@ function SortableFieldCard({
                   value={field.placeholder ?? ""}
                   onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
                   className="flex-1 min-w-[100px] h-7 text-xs"
+                  disabled={readOnly}
                 />
               )}
               {mode === "config" && (
@@ -243,6 +264,7 @@ function SortableFieldCard({
                   value={field.enumValues ?? ""}
                   onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
                   className="flex-1 min-w-[100px] h-7 text-xs"
+                  disabled={readOnly}
                 />
               )}
             </>

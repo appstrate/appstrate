@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, type VersionListItem } from "../hooks/use-packages";
 import { packageDetailPath } from "../lib/package-paths";
 import {

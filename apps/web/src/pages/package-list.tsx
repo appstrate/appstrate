@@ -2,7 +2,7 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";

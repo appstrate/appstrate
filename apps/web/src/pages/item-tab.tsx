@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ImportModal } from "../components/import-modal";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { type CardItem, PackageTab } from "./package-list";
 import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";

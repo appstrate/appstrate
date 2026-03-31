@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { VersionSelector } from "../version-selector";
 import { packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
