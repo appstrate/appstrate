@@ -152,12 +152,12 @@ export function gone(code: string, detail: string): ApiError {
   });
 }
 
-export function internalError(detail = "An internal error occurred"): ApiError {
+export function internalError(): ApiError {
   return new ApiError({
     status: 500,
     code: "internal_error",
     title: "Internal Error",
-    detail,
+    detail: "An internal error occurred",
   });
 }
 

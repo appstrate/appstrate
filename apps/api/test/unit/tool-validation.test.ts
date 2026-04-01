@@ -165,10 +165,10 @@ describe("validateToolSource", () => {
     expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 
-  it("rejects unbalanced braces", () => {
+  it("does not reject unbalanced braces (naive check removed — false positives)", () => {
     const result = validateToolSource(UNBALANCED_BRACES);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("braces"))).toBe(true);
+    // Brace counting was removed: it produced false positives on template literals and strings
+    expect(result.valid).toBe(true);
   });
 
   it("handles complex TS types without false positives on param count", () => {

@@ -58,10 +58,10 @@ profileRouter.patch("/profile", async (c) => {
       userId: user.id,
       error: err instanceof Error ? err.message : String(err),
     });
-    throw internalError("Failed to update profile");
+    throw internalError();
   }
 
-  return c.json({ ok: true, ...(language && { language }), ...(displayName && { displayName }) });
+  return c.json({ ok: true, language: language ?? null, displayName: displayName ?? null });
 });
 
 // POST /api/profiles/batch — batch lookup display names by user IDs

@@ -68,7 +68,7 @@ export function createProviderKeysRouter() {
       logger.error("Provider key create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create provider key");
+      throw internalError();
     }
   });
 
@@ -97,7 +97,7 @@ export function createProviderKeysRouter() {
       logger.error("Provider key inline test failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Test failed");
+      throw internalError();
     }
   });
 
@@ -116,7 +116,7 @@ export function createProviderKeysRouter() {
         id,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Test failed");
+      throw internalError();
     }
   });
 
@@ -137,7 +137,7 @@ export function createProviderKeysRouter() {
         id,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to update provider key");
+      throw internalError();
     }
   });
 
@@ -156,7 +156,7 @@ export function createProviderKeysRouter() {
         id,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete provider key");
+      throw internalError();
     }
   });
 

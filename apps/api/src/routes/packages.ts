@@ -1259,7 +1259,7 @@ export function createPackagesRouter() {
     try {
       data = await downloadVersionZip(packageId, ver.version, ver.integrity);
     } catch {
-      throw internalError("Artifact integrity check failed");
+      throw internalError();
     }
     if (!data) {
       throw notFound("Artifact not found in storage");

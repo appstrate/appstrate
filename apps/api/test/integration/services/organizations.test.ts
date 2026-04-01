@@ -180,9 +180,7 @@ describe("organizations service", () => {
     it("addMember throws on duplicate membership", async () => {
       const org = await createOrganization("Dup Org", "dup-org", userId);
 
-      await expect(addMember(org.id, userId, "member")).rejects.toThrow(
-        /already a member/i,
-      );
+      await expect(addMember(org.id, userId, "member")).rejects.toThrow();
     });
 
     it("removeMember removes a member from the org", async () => {

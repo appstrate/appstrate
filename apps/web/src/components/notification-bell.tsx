@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "./badge";
+import { Badge } from "./status-badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";

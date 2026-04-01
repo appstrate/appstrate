@@ -65,7 +65,7 @@ export function createApiKeysRouter() {
       logger.error("API key creation failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create API key");
+      throw internalError();
     }
   });
 
@@ -86,7 +86,7 @@ export function createApiKeysRouter() {
         keyId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to revoke API key");
+      throw internalError();
     }
   });
 

@@ -556,7 +556,7 @@ export async function createSchedule(
     .returning();
 
   if (!row) {
-    throw internalError("Failed to create schedule: no row returned");
+    throw internalError();
   }
   const schedule = toSchedule(row);
 
@@ -605,7 +605,7 @@ export async function updateSchedule(
     .returning();
 
   if (!row) {
-    throw internalError(`Failed to update schedule ${id}: no row returned`);
+    throw internalError();
   }
   const schedule = toSchedule(row);
 
