@@ -625,6 +625,8 @@
   "orgProfiles.rename": "Rename",
   "orgProfiles.deleteBtn": "Delete",
   "orgProfiles.renameTitle": "Rename profile",
+  "orgProfiles.linkedFlows": "Linked flows",
+  "orgProfiles.noFlows": "No flows use this profile",
   "orgProfiles.linkedSchedules": "Linked schedules",
   "orgProfiles.noLinkedSchedules": "No schedules use this profile",
   "orgProfiles.noSchedules": "No linked schedules",

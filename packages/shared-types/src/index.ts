@@ -168,6 +168,10 @@ export interface ProviderStatus {
   scopesMissing?: string[];
   /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
   source?: ProviderProfileSource;
+  /** Name of the connection profile used for this provider. */
+  profileName?: string | null;
+  /** Name of the user who owns the connection profile. */
+  profileOwnerName?: string | null;
 }
 
 export interface FlowListItem {

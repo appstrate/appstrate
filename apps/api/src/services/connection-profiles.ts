@@ -6,7 +6,7 @@ import { eq, and, count, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
-  userPackageProfiles,
+  userFlowProviderProfiles,
   userProviderConnections,
   orgProfileProviderBindings,
 } from "@appstrate/db/schema";
@@ -292,75 +292,106 @@ export async function listOrgProfilesWithUserBindings(
   }));
 }
 
-// ─── Profile Resolution ─────────────────────────────────────
+// ─── Per-Provider Profile Overrides ──────────────────────────
 
-/**
- * Get the effective profile ID for an actor+package combination.
- * Returns the override if one exists, otherwise the default.
- */
-export async function getEffectiveProfileId(actor: Actor, packageId?: string): Promise<string> {
-  if (packageId) {
-    const [override] = await db
-      .select({ profileId: userPackageProfiles.profileId })
-      .from(userPackageProfiles)
-      .where(
-        and(
-          actorFilter(actor, {
-            userId: userPackageProfiles.userId,
-            endUserId: userPackageProfiles.endUserId,
-          }),
-          eq(userPackageProfiles.packageId, packageId),
-        ),
-      )
-      .limit(1);
-
-    if (override) return override.profileId;
-  }
-
-  return (await ensureDefaultProfile(actor)).id;
-}
-
-export async function setPackageProfileOverride(
+/** Get all per-provider profile overrides for an actor+flow combination. */
+export async function getUserFlowProviderOverrides(
   actor: Actor,
   packageId: string,
-  profileId: string,
-): Promise<void> {
-  const [existing] = await db
-    .select({ id: userPackageProfiles.id })
-    .from(userPackageProfiles)
+): Promise<Record<string, string>> {
+  const rows = await db
+    .select({
+      providerId: userFlowProviderProfiles.providerId,
+      profileId: userFlowProviderProfiles.profileId,
+    })
+    .from(userFlowProviderProfiles)
     .where(
       and(
         actorFilter(actor, {
-          userId: userPackageProfiles.userId,
-          endUserId: userPackageProfiles.endUserId,
+          userId: userFlowProviderProfiles.userId,
+          endUserId: userFlowProviderProfiles.endUserId,
         }),
-        eq(userPackageProfiles.packageId, packageId),
+        eq(userFlowProviderProfiles.packageId, packageId),
+      ),
+    );
+
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    map[row.providerId] = row.profileId;
+  }
+  return map;
+}
+
+/** Set a per-provider profile override (upsert). */
+export async function setUserFlowProviderOverride(
+  actor: Actor,
+  packageId: string,
+  providerId: string,
+  profileId: string,
+): Promise<void> {
+  // Use raw SQL upsert since Drizzle partial unique indexes need manual conflict handling
+  const actorValues = actorInsert(actor);
+  const existing = await db
+    .select({ rowid: userFlowProviderProfiles.packageId })
+    .from(userFlowProviderProfiles)
+    .where(
+      and(
+        actorFilter(actor, {
+          userId: userFlowProviderProfiles.userId,
+          endUserId: userFlowProviderProfiles.endUserId,
+        }),
+        eq(userFlowProviderProfiles.packageId, packageId),
+        eq(userFlowProviderProfiles.providerId, providerId),
       ),
     )
     .limit(1);
 
-  if (existing) {
+  if (existing.length > 0) {
     await db
-      .update(userPackageProfiles)
+      .update(userFlowProviderProfiles)
       .set({ profileId, updatedAt: new Date() })
-      .where(eq(userPackageProfiles.id, existing.id));
+      .where(
+        and(
+          actorFilter(actor, {
+            userId: userFlowProviderProfiles.userId,
+            endUserId: userFlowProviderProfiles.endUserId,
+          }),
+          eq(userFlowProviderProfiles.packageId, packageId),
+          eq(userFlowProviderProfiles.providerId, providerId),
+        ),
+      );
   } else {
-    await db
-      .insert(userPackageProfiles)
-      .values({ ...actorInsert(actor), packageId, profileId, updatedAt: new Date() });
+    await db.insert(userFlowProviderProfiles).values({
+      ...actorValues,
+      packageId,
+      providerId,
+      profileId,
+      updatedAt: new Date(),
+    });
   }
 }
 
-export async function removePackageProfileOverride(actor: Actor, packageId: string): Promise<void> {
-  await db.delete(userPackageProfiles).where(
+/** Remove a per-provider profile override (revert to default). */
+export async function removeUserFlowProviderOverride(
+  actor: Actor,
+  packageId: string,
+  providerId: string,
+): Promise<void> {
+  await db.delete(userFlowProviderProfiles).where(
     and(
       actorFilter(actor, {
-        userId: userPackageProfiles.userId,
-        endUserId: userPackageProfiles.endUserId,
+        userId: userFlowProviderProfiles.userId,
+        endUserId: userFlowProviderProfiles.endUserId,
       }),
-      eq(userPackageProfiles.packageId, packageId),
+      eq(userFlowProviderProfiles.packageId, packageId),
+      eq(userFlowProviderProfiles.providerId, providerId),
     ),
   );
+}
+
+/** Get the default profile ID for an actor. */
+export async function getDefaultProfileId(actor: Actor): Promise<string> {
+  return (await ensureDefaultProfile(actor)).id;
 }
 
 /**
@@ -381,17 +412,18 @@ export async function getProfileById(profileId: string): Promise<ConnectionProfi
 /**
  * Resolve profile IDs for each provider in a package.
  *
- * Two-layer resolution:
- * - orgProfileId (optional overlay): bound providers use their org binding source profile.
- * - userProfileId: all other providers use this profile directly.
+ * Three-layer resolution (highest priority first):
+ * 1. orgProfileId binding → source: "org_binding"
+ * 2. Per-provider user override → source: "user_profile"
+ * 3. Default user profile → source: "user_profile"
  *
- * For schedules (single profile): pass the schedule's connectionProfileId as userProfileId
- * with no orgProfileId — or pass it as orgProfileId with no userProfileId (all providers
- * must be bound).
+ * For schedules: pass the schedule's connectionProfileId as defaultUserProfileId
+ * with orgProfileId if the schedule uses an org profile. No per-provider overrides.
  */
 export async function resolveProviderProfiles(
   providers: FlowProviderRequirement[],
-  userProfileId: string,
+  defaultUserProfileId: string,
+  userProviderOverrides?: Record<string, string>,
   orgProfileId?: string | null,
 ): Promise<ProviderProfileMap> {
   const map: ProviderProfileMap = {};
@@ -407,7 +439,11 @@ export async function resolveProviderProfiles(
     if (orgBinding) {
       map[svc.id] = { profileId: orgBinding, source: "org_binding" };
     } else {
-      map[svc.id] = { profileId: userProfileId, source: "user_profile" };
+      const overrideProfileId = userProviderOverrides?.[svc.id];
+      map[svc.id] = {
+        profileId: overrideProfileId ?? defaultUserProfileId,
+        source: "user_profile",
+      };
     }
   }
 

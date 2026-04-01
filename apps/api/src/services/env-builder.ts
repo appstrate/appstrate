@@ -39,14 +39,21 @@ export async function resolvePreflightContext(params: {
   flow: LoadedPackage;
   packageId: string;
   orgId: string;
-  userProfileId: string;
+  defaultUserProfileId: string;
+  userProviderOverrides?: Record<string, string>;
   orgProfileId?: string | null;
 }): Promise<{ providerProfiles: ProviderProfileMap; config: Record<string, unknown> }> {
-  const { flow, packageId, orgId, userProfileId, orgProfileId } = params;
+  const { flow, packageId, orgId, defaultUserProfileId, userProviderOverrides, orgProfileId } =
+    params;
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
   const [providerProfiles, config] = await Promise.all([
-    resolveProviderProfiles(manifestProviders, userProfileId, orgProfileId),
+    resolveProviderProfiles(
+      manifestProviders,
+      defaultUserProfileId,
+      userProviderOverrides,
+      orgProfileId,
+    ),
     getPackageConfig(orgId, packageId),
   ]);
 

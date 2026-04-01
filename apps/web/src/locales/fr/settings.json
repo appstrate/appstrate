@@ -625,6 +625,8 @@
   "orgProfiles.rename": "Renommer",
   "orgProfiles.deleteBtn": "Supprimer",
   "orgProfiles.renameTitle": "Renommer le profil",
+  "orgProfiles.linkedFlows": "Flows liés",
+  "orgProfiles.noFlows": "Aucun flow n'utilise ce profil",
   "orgProfiles.linkedSchedules": "Planifications liées",
   "orgProfiles.noLinkedSchedules": "Aucune planification utilise ce profil",
   "orgProfiles.noSchedules": "Aucune planification liée",

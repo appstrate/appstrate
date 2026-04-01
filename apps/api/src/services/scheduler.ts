@@ -233,7 +233,7 @@ async function triggerScheduledExecution(
         flow,
         packageId,
         orgId,
-        userProfileId: connectionProfileId,
+        defaultUserProfileId: connectionProfileId,
         orgProfileId: isOrgProfile ? connectionProfileId : null,
       }));
     } catch (err) {
@@ -418,7 +418,8 @@ async function computeScheduleReadiness(
   const isOrgProfile = !!profile.orgId;
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    isOrgProfile ? schedule.connectionProfileId : schedule.connectionProfileId,
+    schedule.connectionProfileId,
+    undefined, // no per-provider overrides for schedules
     isOrgProfile ? schedule.connectionProfileId : null,
   );
 

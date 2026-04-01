@@ -204,6 +204,7 @@ export function useBindOrgProvider() {
       qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
       qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
       qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
     onError: onMutationError,
   });
@@ -220,6 +221,7 @@ export function useUnbindOrgProvider() {
       qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
       qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
       qc.invalidateQueries({ queryKey: ["my-org-bindings"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
     onError: onMutationError,
   });
@@ -237,6 +239,70 @@ export function useSetFlowOrgProfile(packageId: string) {
       });
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+    },
+    onError: onMutationError,
+  });
+}
+
+// ─── Org Profile Linked Flows ────────────────────────────
+
+export function useOrgProfileFlows(profileId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["org-profile-flows", orgId, profileId],
+    queryFn: () =>
+      api<{ flows: { id: string; displayName: string }[] }>(
+        `/connection-profiles/org/${profileId}/flows`,
+      ).then((r) => r.flows),
+    enabled: !!profileId,
+    staleTime: 30_000,
+  });
+}
+
+// ─── Per-Provider Profile Overrides ──────────────────────
+
+export function useFlowProviderProfiles(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["flow-provider-profiles", orgId, packageId],
+    queryFn: () =>
+      api<{ overrides: Record<string, string> }>(`/flows/${packageId}/provider-profiles`).then(
+        (r) => r.overrides,
+      ),
+    enabled: !!packageId,
+    staleTime: 30_000,
+  });
+}
+
+export function useSetFlowProviderProfile(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ providerId, profileId }: { providerId: string; profileId: string }) => {
+      return api(`/flows/${packageId}/provider-profiles`, {
+        method: "PUT",
+        body: JSON.stringify({ providerId, profileId }),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
+      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+    },
+    onError: onMutationError,
+  });
+}
+
+export function useRemoveFlowProviderProfile(packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (providerId: string) => {
+      return api(`/flows/${packageId}/provider-profiles`, {
+        method: "DELETE",
+        body: JSON.stringify({ providerId }),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
       qc.invalidateQueries({ queryKey: ["packages", "flow"] });
     },
     onError: onMutationError,
