@@ -218,6 +218,7 @@ export interface FlowDetail {
   callbackUrl?: string;
   /** Admin-forced org profile ID (null = none). When set, users cannot override. */
   forcedOrgProfileId?: string | null;
+  forcedOrgProfileName?: string | null;
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
