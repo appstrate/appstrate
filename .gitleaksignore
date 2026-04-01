@@ -1,0 +1,9 @@
+# False positives — dev defaults, test fixtures, documentation examples
+921f3a99a387eee137d43bba6f0bc41ed34c518f:.env.example:generic-api-key:27
+4a46742a9c39399ee0e3d64e5e629a8a0b19b4da:apps/api/test/setup/preload.ts:generic-api-key:32
+e94796a5ada7030bf2cb5d6b8aa26c6cb7a1aba5:apps/api/test/setup/preload.ts:generic-api-key:32
+2ca26c725bdc85b9face401a5ad71dc8f3cfdeb3:data/providers.json:generic-api-key:7
+2ca26c725bdc85b9face401a5ad71dc8f3cfdeb3:data/providers.json:generic-api-key:32
+2ca26c725bdc85b9face401a5ad71dc8f3cfdeb3:data/providers.json:generic-api-key:58
+b0dfaf739539807c427832ce5993275f7ad33830:SECURITY.md:generic-api-key:486
+e8e09f188ca0bfde3bf928748e8d209cede2ba67:SECURITY.md:generic-api-key:486
