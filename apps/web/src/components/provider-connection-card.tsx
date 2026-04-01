@@ -67,6 +67,8 @@ export function ProviderConnectionCard({
   const binding = bindings?.find((b) => b.providerId === providerId);
   const isBound = !!binding;
   const isBoundButDisconnected = isBound && binding?.connected === false;
+  // A binding that lost its source connection is treated as "needs binding" for action purposes
+  const isEffectivelyBound = isBound && !isBoundButDisconnected;
 
   // Mutations
   const connectMutation = useConnect();
@@ -204,8 +206,8 @@ export function ProviderConnectionCard({
 
         <div className="flex-1" />
 
-        {/* Profile selector — shown when multiple profiles and not yet bound */}
-        {!readOnly && hasMultipleProfiles && !isBound && (
+        {/* Profile selector — shown when multiple profiles and not yet effectively bound */}
+        {!readOnly && hasMultipleProfiles && !isEffectivelyBound && (
           <Select value={effectiveProfileId ?? ""} onValueChange={setSelectedProfileId}>
             <SelectTrigger className="h-7 w-32 text-xs">
               <SelectValue />
@@ -260,7 +262,7 @@ export function ProviderConnectionCard({
               </Button>
             )}
 
-            {isConnected && orgProfileId && !isBound && (
+            {isConnected && orgProfileId && !isEffectivelyBound && (
               <Button
                 variant="outline"
                 size="sm"
@@ -273,7 +275,7 @@ export function ProviderConnectionCard({
               </Button>
             )}
 
-            {isConnected && orgProfileId && isBound && (
+            {isConnected && orgProfileId && isEffectivelyBound && (
               <Button
                 variant="outline"
                 size="sm"
