@@ -6,7 +6,6 @@ export interface ProviderEntry {
   id: string;
   version: string;
   scopes: string[];
-  connectionMode: "user" | "admin";
 }
 
 export interface FlowEditorState {
