@@ -15,6 +15,6 @@
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
-    "drizzle-orm": "^0.39.3"
+    "drizzle-orm": "^0.45.2"
   }
 }
