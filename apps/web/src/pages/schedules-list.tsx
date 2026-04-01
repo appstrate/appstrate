@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Calendar } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
@@ -10,6 +11,7 @@ import { ScheduleCard } from "../components/schedule-card";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isMember } = usePermissions();
   const navigate = useNavigate();
   const { data: schedules, isLoading, error } = useAllSchedules();
   const { data: flows } = useFlows();
@@ -30,13 +32,17 @@ export function SchedulesListPage() {
           { label: t("schedules.title") },
         ]}
         actions={
-          <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+          isMember ? (
+            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+          ) : undefined
         }
       />
 
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
-          <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+          {isMember && (
+            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+          )}
         </EmptyState>
       ) : (
         <div className="space-y-2">

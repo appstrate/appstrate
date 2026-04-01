@@ -10,6 +10,7 @@ import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { usePermissions } from "../hooks/use-permissions";
 
 export interface CardItem {
   id: string;
@@ -95,6 +96,7 @@ export function PackageList() {
   const { t } = useTranslation(["flows", "common"]);
   const { data: flows, isLoading, error } = useFlows();
   const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { isAdmin } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
 
   const items: CardItem[] | undefined = flows?.map((f) => ({
@@ -125,14 +127,16 @@ export function PackageList() {
         emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
         emptyIcon={Layers}
         extraActions={
-          <>
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              {t("nav.import", { ns: "common" })}
-            </Button>
-            <Link to="/flows/new">
-              <Button>{t("list.create")}</Button>
-            </Link>
-          </>
+          isAdmin ? (
+            <>
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                {t("nav.import", { ns: "common" })}
+              </Button>
+              <Link to="/flows/new">
+                <Button>{t("list.create")}</Button>
+              </Link>
+            </>
+          ) : undefined
         }
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />

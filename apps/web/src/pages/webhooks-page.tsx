@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Webhook } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,6 +23,7 @@ type ScopeTab = "all" | "organization" | "application";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const { data: applications } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const [scopeTab, setScopeTab] = useState<ScopeTab>("all");
@@ -37,6 +39,7 @@ export function WebhooksPage() {
     error,
   } = useWebhooks(Object.keys(filters).length > 0 ? filters : undefined);
 
+  if (!isAdmin) return null;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 

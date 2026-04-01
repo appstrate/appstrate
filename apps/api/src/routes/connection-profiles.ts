@@ -5,7 +5,7 @@ import { db } from "@appstrate/db/client";
 import { packages, packageConfigs } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listProfiles,
@@ -30,6 +30,7 @@ import {
   getOrgProfileBindingsEnriched,
   bindOrgProfileProvider,
   unbindOrgProfileProvider,
+  getBindingOwner,
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
 
@@ -187,6 +188,15 @@ export function createConnectionProfilesRouter() {
         throw invalidRequest("Source profile not found or does not belong to you");
       }
 
+      // Ownership check: can't overwrite another user's binding without org-profiles:write
+      const existingOwner = await getBindingOwner(profileId, data.providerId);
+      if (existingOwner && existingOwner !== userId) {
+        const perms = c.get("permissions");
+        if (!perms?.has("org-profiles:write")) {
+          throw forbidden("Cannot overwrite a binding created by another member");
+        }
+      }
+
       // Verify the source profile has a connection for this provider
       const conn = await getConnectionStatus(data.providerId, data.sourceProfileId, orgId);
       if (conn.status !== "connected") {
@@ -204,9 +214,20 @@ export function createConnectionProfilesRouter() {
     requirePermission("org-profiles", "bind"),
     async (c) => {
       const orgId = c.get("orgId");
+      const userId = c.get("user").id;
       const profileId = c.req.param("id")!;
       const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
       await requireOrgProfile(profileId, orgId);
+
+      // Ownership check: can't unbind another user's binding without org-profiles:write
+      const existingOwner = await getBindingOwner(profileId, providerId);
+      if (existingOwner && existingOwner !== userId) {
+        const perms = c.get("permissions");
+        if (!perms?.has("org-profiles:write")) {
+          throw forbidden("Cannot unbind a connection bound by another member");
+        }
+      }
+
       await unbindOrgProfileProvider(profileId, providerId);
       return c.json({ unbound: true });
     },

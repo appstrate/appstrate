@@ -11,6 +11,7 @@ import { useRunFlow } from "../hooks/use-mutations";
 import { api } from "../api";
 import { hasDisconnectedProviders } from "../lib/provider-status";
 import { packageDetailPath } from "../lib/package-paths";
+import { usePermissions } from "../hooks/use-permissions";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 interface RunFlowButtonProps {
@@ -39,6 +40,7 @@ export function RunFlowButton({
 }: RunFlowButtonProps) {
   const { t } = useTranslation(["flows"]);
   const navigate = useNavigate();
+  const { isMember } = usePermissions();
   const runFlow = useRunFlow(packageId);
   const [fetchedDetail, setFetchedDetail] = useState<FlowDetail | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -127,6 +129,8 @@ export function RunFlowButton({
 
   const isPending = fetching || runFlow.isPending;
   const isDisabled = disabled || isPending;
+
+  if (!isMember) return null;
 
   return (
     <>
