@@ -80,13 +80,7 @@ export function ExecutionList({
 
   if (executions.length === 0) {
     if (emptyState) return <>{emptyState}</>;
-    return (
-      <EmptyState
-        message={t("detail.emptyExec")}
-        icon={PlayCircle}
-        compact
-      />
-    );
+    return <EmptyState message={t("detail.emptyExec")} icon={PlayCircle} compact />;
   }
 
   const resolveFlowName = (exec: (typeof executions)[0]) => {
