@@ -13,6 +13,15 @@ const statusVariantMap: Record<string, BadgeProps["variant"]> = {
   cancelled: "cancelled",
 };
 
+const statusColorMap: Record<string, string> = {
+  success: "text-success",
+  failed: "text-destructive",
+  running: "text-primary",
+  pending: "text-muted-foreground",
+  timeout: "text-warning",
+  cancelled: "text-muted-foreground",
+};
+
 const statusIconMap: Record<string, React.ReactNode> = {
   running: <Spinner className="h-3 w-3" />,
   pending: <Spinner className="h-3 w-3" />,
@@ -22,14 +31,44 @@ const statusIconMap: Record<string, React.ReactNode> = {
   cancelled: <Ban className="h-3 w-3" />,
 };
 
-export function Badge({ status }: { status: string }) {
+export function Badge({
+  status,
+  compact,
+  unread,
+}: {
+  status: string;
+  compact?: boolean;
+  unread?: boolean;
+}) {
   const { t } = useTranslation();
   const variant = statusVariantMap[status] || "pending";
   const icon = statusIconMap[status];
+  const dot = unread && (
+    <span className="absolute -top-1 -right-1 size-2 rounded-full bg-destructive" />
+  );
+
+  if (!compact) {
+    return (
+      <span className="relative shrink-0">
+        <UIBadge variant={variant} className="gap-1">
+          {icon}
+          {t(`status.${status}`, status)}
+        </UIBadge>
+        {dot}
+      </span>
+    );
+  }
+
   return (
-    <UIBadge variant={variant} className="gap-1">
-      {icon}
-      {t(`status.${status}`, status)}
-    </UIBadge>
+    <span className="relative shrink-0">
+      {/* Mobile: bare icon with status color */}
+      <span className={`sm:hidden [&_svg]:h-4 [&_svg]:w-4 ${statusColorMap[status] ?? "text-muted-foreground"}`}>{icon}</span>
+      {/* Desktop: full badge */}
+      <UIBadge variant={variant} className="gap-1 hidden sm:inline-flex">
+        {icon}
+        {t(`status.${status}`, status)}
+      </UIBadge>
+      {dot}
+    </span>
   );
 }

@@ -21,19 +21,21 @@ export function NextExecutionPreview({
   const { t } = useTranslation(["flows"]);
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 text-sm opacity-50 ${className ?? ""}`}>
+    <div
+      className={`flex items-center gap-2 px-3 py-2 text-sm opacity-50 ${className ?? ""}`}
+    >
       <div className="flex flex-1 items-center gap-2 min-w-0">
-        <span className="text-muted-foreground font-mono text-xs">#{executionNumber}</span>
-        {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
-        <UIBadge variant="secondary" className="gap-1">
+        <span className="text-muted-foreground font-mono text-xs shrink-0">#{executionNumber}</span>
+        {flowName && <span className="font-medium truncate">{flowName}</span>}
+        <UIBadge variant="secondary" className="gap-1 shrink-0">
           <Clock className="size-3" />
           {t("schedule.scheduled")}
         </UIBadge>
-        <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+        <span className="hidden sm:inline-flex items-center gap-1 text-muted-foreground text-xs shrink-0">
           <Calendar className="size-3" />
-          {scheduleName}
+          <span className="truncate max-w-[150px]">{scheduleName}</span>
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="text-muted-foreground text-xs">{formatDateField(nextRunAt)}</span>
         </div>
       </div>

@@ -38,37 +38,42 @@ export function ExecutionRow({
   return (
     <Link
       className={cn(
-        "flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors",
+        "flex items-center gap-2 px-3 py-3 sm:py-2 text-sm hover:bg-muted/50 transition-colors",
       )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber: execution.executionNumber }}
     >
       <div className="flex flex-1 items-center gap-2 min-w-0">
         {execution.executionNumber != null && (
-          <span className="text-muted-foreground font-mono text-xs">
+          <span className="text-muted-foreground font-mono text-xs shrink-0">
             #{execution.executionNumber}
           </span>
         )}
-        {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
-        <Badge status={execution.status} />
-        {isUnread && <span className="size-2 rounded-full bg-destructive shrink-0" />}
+        {flowName && <span className="font-medium truncate">{flowName}</span>}
+        <Badge status={execution.status} compact unread={isUnread} />
 
-        {/* Trigger: schedule or user */}
+        {/* Trigger: icon only on mobile, icon + text on desktop */}
         {execution.scheduleId ? (
-          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
-            <Calendar size={12} />
-            {scheduleName || execution.scheduleId}
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs min-w-0">
+            <Calendar size={12} className="shrink-0" />
+            <span className="truncate">{scheduleName || execution.scheduleId}</span>
           </span>
         ) : userName ? (
-          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
-            <User size={12} />
-            {userName}
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs min-w-0">
+            <User size={12} className="shrink-0" />
+            <span className="truncate">{userName}</span>
           </span>
         ) : null}
 
-        {execution.proxyLabel && <Shield size={12} className="text-muted-foreground" />}
-        <div className="ml-auto flex items-center gap-2">
-          {duration && <span className="text-muted-foreground text-xs font-mono">{duration}</span>}
+        {execution.proxyLabel && (
+          <Shield size={12} className="text-muted-foreground shrink-0 hidden sm:block" />
+        )}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {duration && (
+            <span className="text-muted-foreground text-xs font-mono hidden sm:inline">
+              {duration}
+            </span>
+          )}
           <span className="text-muted-foreground text-xs">{date}</span>
         </div>
       </div>
