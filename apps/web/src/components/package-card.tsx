@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/shared-types";
 import { ShieldCheck } from "lucide-react";
@@ -45,6 +45,7 @@ export function PackageCard({
 }: PackageCardProps) {
   const { t } = useTranslation(["flows", "settings", "common"]);
   const href = packageDetailPath(type, id);
+  const navigate = useNavigate();
   const { data: providersData } = useProviders();
 
   const resolvedProviders = useMemo(() => {
@@ -55,10 +56,21 @@ export function PackageCard({
       .filter((p): p is NonNullable<typeof p> => p != null);
   }, [providerIds, providersData]);
 
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (window.getSelection()?.toString()) return;
+    if (e.metaKey || e.ctrlKey) {
+      window.open(href, "_blank");
+    } else {
+      navigate(href);
+    }
+  };
+
   return (
-    <div className="flex flex-col w-full rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50 h-full relative">
-      <Link to={href} className="absolute inset-0 z-0" aria-label={displayName} />
-      <div className="flex items-center justify-between gap-2 relative z-10">
+    <div
+      className="flex flex-col w-full rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50 h-full cursor-pointer"
+      onClick={handleCardClick}
+    >
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {iconUrl && <ProviderIcon src={iconUrl} className="h-5 w-5" />}
           <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
@@ -84,12 +96,7 @@ export function PackageCard({
             <Badge status="running" />
           )}
           {type === "flow" && (
-            <div
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-            >
+            <div onClick={(e) => e.stopPropagation()}>
               <RunFlowButton
                 packageId={id}
                 variant="ghost"
@@ -132,11 +139,8 @@ export function PackageCard({
       </ScrollArea>
       {actions && (
         <div
-          className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2 relative z-10"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
+          className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2"
+          onClick={(e) => e.stopPropagation()}
         >
           {actions}
         </div>
