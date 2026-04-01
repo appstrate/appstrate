@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
   setPackageConfig,
-  getPackageConfigFull,
+  getPackageConfig,
   setFlowOverride,
   getRunningExecutionsCounts,
   getPackageMemories,
@@ -122,7 +122,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const { proxyId } = await getPackageConfigFull(orgId, flow.id);
+    const { proxyId } = await getPackageConfig(orgId, flow.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -143,7 +143,7 @@ export function createFlowsRouter() {
   router.get("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
     const flow = c.get("flow");
     const orgId = c.get("orgId");
-    const { modelId } = await getPackageConfigFull(orgId, flow.id);
+    const { modelId } = await getPackageConfig(orgId, flow.id);
 
     return c.json({ modelId });
   });

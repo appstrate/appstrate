@@ -44,7 +44,7 @@ const ALL_TABLES = [
   // Core tables
   "packages",
   "applications",
-  "organization_members",
+  "org_members",
   "organizations",
   "profiles",
   "verification",

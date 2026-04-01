@@ -78,6 +78,13 @@
       "when": 1774810000000,
       "tag": "0010_user_flow_provider_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1774900000000,
+      "tag": "0011_schema_cleanup",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,8 @@ import {
   userProviderConnections,
 } from "@appstrate/db/schema";
 import { user } from "@appstrate/db/schema";
+import type { EnrichedBinding } from "@appstrate/shared-types";
+export type { EnrichedBinding };
 
 /**
  * Get all bindings for an org profile: { providerId → sourceProfileId }.
@@ -29,15 +31,6 @@ export async function getOrgProfileBindings(orgProfileId: string): Promise<Recor
     result[row.providerId] = row.sourceProfileId;
   }
   return result;
-}
-
-export interface EnrichedBinding {
-  providerId: string;
-  sourceProfileId: string;
-  sourceProfileName: string;
-  boundByUserName: string | null;
-  /** Whether the source user still has an active connection for this provider. */
-  connected: boolean;
 }
 
 /**

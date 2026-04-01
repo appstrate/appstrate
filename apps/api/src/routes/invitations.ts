@@ -15,11 +15,9 @@ import { addMember } from "../services/organizations.ts";
 
 const router = new Hono();
 
-// GET /invite/:token/info — public metadata for invitation
-router.get("/:token/info", async (c) => {
-  const token = c.req.param("token");
-  const invitation = await getInvitationByToken(token);
-
+function assertInvitationExists(
+  invitation: Awaited<ReturnType<typeof getInvitationByToken>>,
+): asserts invitation is NonNullable<typeof invitation> {
   if (!invitation) {
     throw new ApiError({
       status: 404,
@@ -28,7 +26,9 @@ router.get("/:token/info", async (c) => {
       detail: "Invitation not found",
     });
   }
+}
 
+function assertInvitationUsable(invitation: { status: string; expiresAt: Date }): void {
   if (invitation.status === "accepted") {
     throw gone("invitation_accepted", "Invitation already accepted");
   }
@@ -38,6 +38,14 @@ router.get("/:token/info", async (c) => {
   if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
     throw gone("invitation_expired", "Invitation expired");
   }
+}
+
+// GET /invite/:token/info — public metadata for invitation
+router.get("/:token/info", async (c) => {
+  const token = c.req.param("token");
+  const invitation = await getInvitationByToken(token);
+  assertInvitationExists(invitation);
+  assertInvitationUsable(invitation);
 
   const [orgName, inviterName, [existingUser]] = await Promise.all([
     getOrgName(invitation.orgId),
@@ -59,25 +67,8 @@ router.get("/:token/info", async (c) => {
 router.post("/:token/accept", async (c) => {
   const token = c.req.param("token");
   const invitation = await getInvitationByToken(token);
-
-  if (!invitation) {
-    throw new ApiError({
-      status: 404,
-      code: "invitation_not_found",
-      title: "Not Found",
-      detail: "Invitation not found",
-    });
-  }
-
-  if (invitation.status === "accepted") {
-    throw gone("invitation_accepted", "Invitation already accepted");
-  }
-  if (invitation.status === "cancelled") {
-    throw gone("invitation_cancelled", "Invitation cancelled");
-  }
-  if (invitation.status === "expired" || invitation.expiresAt < new Date()) {
-    throw gone("invitation_expired", "Invitation expired");
-  }
+  assertInvitationExists(invitation);
+  assertInvitationUsable(invitation);
 
   // Check if user already exists
   const [existingUser] = await db

@@ -13,7 +13,8 @@ import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";
 import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { getRedisConnection } from "../lib/redis.ts";
-import { getEnv } from "@appstrate/env";
+import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
+import { prefixedId } from "../lib/ids.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -54,19 +55,11 @@ interface DeliveryJobData {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function generateWebhookId(): string {
-  return `wh_${crypto.randomUUID()}`;
-}
-
 function generateSecret(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const base64 = Buffer.from(bytes).toString("base64url");
   return `whsec_${base64}`;
-}
-
-function generateEventId(): string {
-  return `evt_${crypto.randomUUID()}`;
 }
 
 function toWebhookResponse(row: {
@@ -107,21 +100,9 @@ export function validateWebhookUrl(url: string): void {
     throw invalidRequest("Malformed URL", "url");
   }
 
-  const isDev = (() => {
-    try {
-      return ["localhost", "127.0.0.1"].includes(new URL(getEnv().APP_URL).hostname);
-    } catch {
-      return false;
-    }
-  })();
-
   if (parsed.protocol !== "https:") {
     if (
-      !(
-        parsed.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(parsed.hostname) &&
-        isDev
-      )
+      !(parsed.protocol === "http:" && LOCALHOST_HOSTS.has(parsed.hostname) && isDevEnvironment())
     ) {
       throw invalidRequest("Only https:// URLs are allowed", "url");
     }
@@ -213,7 +194,7 @@ export async function createWebhook(
   validateWebhookUrl(params.url);
   const validatedEvents = validateEvents(params.events);
 
-  const id = generateWebhookId();
+  const id = prefixedId("wh");
   const secret = generateSecret();
 
   const [created] = await db
@@ -397,7 +378,7 @@ export function buildEventEnvelope(params: {
   execution: Record<string, unknown>;
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
-  const eventId = generateEventId();
+  const eventId = prefixedId("evt");
   const now = Math.floor(Date.now() / 1000);
 
   const execObj: Record<string, unknown> = { ...params.execution, object: "execution" };
