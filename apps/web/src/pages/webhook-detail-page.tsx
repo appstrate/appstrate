@@ -26,6 +26,7 @@ export function WebhookDetailPage() {
         title={webhook.url}
         emoji="🪝"
         breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("settings:webhooks.pageTitle"), href: "/webhooks" },
           { label: webhook.url },
         ]}

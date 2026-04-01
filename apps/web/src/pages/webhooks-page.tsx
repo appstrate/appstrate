@@ -59,7 +59,10 @@ export function WebhooksPage() {
       <PageHeader
         title={t("settings:webhooks.pageTitle")}
         emoji="🪝"
-        breadcrumbs={[{ label: t("settings:webhooks.pageTitle") }]}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("settings:webhooks.pageTitle") },
+        ]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
         }
