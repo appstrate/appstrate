@@ -9,6 +9,7 @@ import {
   Puzzle,
   Plug,
   Settings,
+  Webhook,
   Loader2,
 } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -94,18 +95,32 @@ export function NavOrg() {
           )}
         </SidebarMenuItem>
         {isOrgAdmin && (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={location.pathname.startsWith("/org-settings")}
-              tooltip={t("nav.settings")}
-            >
-              <Link to="/org-settings">
-                <Settings />
-                <span>{t("nav.settings")}</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          <>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                isActive={location.pathname.startsWith("/webhooks")}
+                tooltip={t("nav.webhooks")}
+              >
+                <Link to="/webhooks">
+                  <Webhook />
+                  <span>{t("nav.webhooks")}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                isActive={location.pathname.startsWith("/org-settings")}
+                tooltip={t("nav.settings")}
+              >
+                <Link to="/org-settings">
+                  <Settings />
+                  <span>{t("nav.settings")}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </>
         )}
       </SidebarMenu>
     </SidebarGroup>

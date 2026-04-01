@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users, KeyRound, Webhook, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
+import { Users, KeyRound, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
@@ -36,7 +36,6 @@ export function NavApp() {
   const items = [
     { path: "/end-users", label: t("nav.endUsers"), icon: Users },
     { path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound },
-    { path: "/webhooks", label: t("nav.webhooks"), icon: Webhook },
   ];
 
   return (

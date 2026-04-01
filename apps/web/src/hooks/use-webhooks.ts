@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
 import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
 
@@ -13,16 +12,19 @@ export const WEBHOOK_EVENTS = [
   "execution.cancelled",
 ] as const;
 
-export function useWebhooks() {
+export function useWebhooks(filters?: { scope?: string; applicationId?: string }) {
   const orgId = useCurrentOrgId();
-  const appId = useCurrentApplicationId();
+  const params = new URLSearchParams();
+  if (filters?.scope) params.set("scope", filters.scope);
+  if (filters?.applicationId) params.set("applicationId", filters.applicationId);
+  const qs = params.toString();
   return useQuery({
-    queryKey: ["webhooks", orgId, appId],
+    queryKey: ["webhooks", orgId, filters?.scope ?? "all", filters?.applicationId ?? "all"],
     queryFn: () =>
-      api<{ object: "list"; data: WebhookInfo[] }>(
-        `/webhooks${appId ? `?applicationId=${appId}` : ""}`,
-      ).then((d) => d.data),
-    enabled: !!orgId && !!appId,
+      api<{ object: "list"; data: WebhookInfo[] }>(`/webhooks${qs ? `?${qs}` : ""}`).then(
+        (d) => d.data,
+      ),
+    enabled: !!orgId,
   });
 }
 
@@ -37,9 +39,10 @@ export function useWebhook(webhookId: string) {
 
 export function useCreateWebhook() {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
   return useMutation({
     mutationFn: async (data: {
+      scope: "organization" | "application";
+      applicationId?: string;
       url: string;
       events: string[];
       packageId?: string | null;
@@ -48,7 +51,7 @@ export function useCreateWebhook() {
     }) => {
       return api<WebhookCreateResponse>("/webhooks", {
         method: "POST",
-        body: JSON.stringify({ ...data, applicationId: appId }),
+        body: JSON.stringify(data),
       });
     },
     onSuccess: () => {

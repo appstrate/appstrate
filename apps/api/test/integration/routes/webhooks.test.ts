@@ -22,6 +22,7 @@ describe("Webhooks API", () => {
 
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
+      scope: "application",
       applicationId: ctx.defaultAppId,
       url: "https://example.com/webhook",
       events: ["execution.completed"],
