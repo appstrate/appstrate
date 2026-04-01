@@ -14,17 +14,7 @@ import {
 } from "../lib/api-versions.ts";
 import { ApiError } from "../lib/errors.ts";
 
-/**
- * Optional dependency: resolve pinned version from org settings.
- * Injected to allow unit testing without DB access.
- */
-export interface ApiVersionDeps {
-  getOrgApiVersion?: (orgId: string) => Promise<string | null>;
-}
-
-const defaultDeps: ApiVersionDeps = {};
-
-export function apiVersion(deps: ApiVersionDeps = defaultDeps) {
+export function apiVersion(getOrgApiVersion?: (orgId: string) => Promise<string | null>) {
   return async (c: Context<AppEnv>, next: Next) => {
     let version = c.req.header("Appstrate-Version");
 
@@ -50,8 +40,8 @@ export function apiVersion(deps: ApiVersionDeps = defaultDeps) {
     } else {
       // Try org-pinned version
       const orgId = c.get("orgId");
-      if (orgId && deps.getOrgApiVersion) {
-        const pinned = await deps.getOrgApiVersion(orgId);
+      if (orgId && getOrgApiVersion) {
+        const pinned = await getOrgApiVersion(orgId);
         if (pinned && isVersionSupported(pinned)) {
           version = pinned;
         }

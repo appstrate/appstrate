@@ -3,6 +3,7 @@ import { db } from "@appstrate/db/client";
 import { apiKeys, user as userTable, profiles, organizations } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 const API_KEY_PREFIX = "ask_";
 
@@ -156,10 +157,10 @@ export async function listApiKeys(orgId: string, applicationId?: string): Promis
     scopes: r.scopes ?? [],
     createdBy: r.createdBy,
     createdByName: r.displayName || r.userName || undefined,
-    expiresAt: r.expiresAt?.toISOString() ?? null,
-    lastUsedAt: r.lastUsedAt?.toISOString() ?? null,
-    revokedAt: r.revokedAt?.toISOString() ?? null,
-    createdAt: r.createdAt?.toISOString() ?? "",
+    expiresAt: toISO(r.expiresAt),
+    lastUsedAt: toISO(r.lastUsedAt),
+    revokedAt: toISO(r.revokedAt),
+    createdAt: toISORequired(r.createdAt),
   }));
 }
 

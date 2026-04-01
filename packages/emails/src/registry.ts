@@ -27,6 +27,13 @@ export function registerEmailOverrides(
 }
 
 /**
+ * Reset registry to OSS defaults. Test-only.
+ */
+export function resetEmailRegistry(): void {
+  registry = { ...defaultRenderers };
+}
+
+/**
  * Render an email by type. Type-safe: props must match the email type.
  */
 export function renderEmail<T extends EmailType>(type: T, props: EmailPropsMap[T]): RenderedEmail {

@@ -16,6 +16,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { JsonView } from "../components/json-view";
 import { ExecutionRow } from "../components/execution-row";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
+import { OrgProfileProvidersBlock } from "../components/org-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -26,6 +27,7 @@ import {
 } from "../hooks/use-schedules";
 import { usePackageDetail, useFlows } from "../hooks/use-packages";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
+import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
 import {
   User,
@@ -252,20 +254,33 @@ function ScheduleProviders({
 }) {
   const { t } = useTranslation(["flows"]);
   const { flowProviders } = useScheduleProviderReadiness(schedule);
+  const { data: userProfiles } = useConnectionProfiles();
 
   const isOrgProfile = schedule.profileType === "org";
   const orgProfileId = isOrgProfile ? schedule.connectionProfileId : undefined;
-  const ProfileIcon = isOrgProfile ? Building2 : User;
+
+  // For user profile schedules, only the profile owner can connect/disconnect
+  const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
 
   if (flowProviders.length === 0) {
     return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
   }
 
+  if (isOrgProfile && orgProfileId) {
+    return (
+      <OrgProfileProvidersBlock
+        orgProfileId={orgProfileId}
+        orgProfileName={schedule.profileName ?? "-"}
+        providerIds={flowProviders}
+      />
+    );
+  }
+
+  // User profile schedule — show provider cards directly
   return (
     <div className="rounded-lg border border-border bg-card">
-      {/* Profile header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <ProfileIcon className="size-4 text-muted-foreground" />
+        <User className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">
           {schedule.profileOwnerName && schedule.profileName
             ? `${schedule.profileOwnerName} — ${schedule.profileName}`
@@ -274,20 +289,14 @@ function ScheduleProviders({
         <UIBadge variant="outline" className="text-[10px] px-1 py-0">
           {schedule.profileType}
         </UIBadge>
-        {isOrgProfile && (
-          <span className="text-xs text-muted-foreground ml-auto">
-            {t("schedule.providersOrgHint")}
-          </span>
-        )}
       </div>
-
-      {/* Provider list */}
       <div className="p-2 space-y-2">
         {flowProviders.map((providerId) => (
           <ProviderConnectionCard
             key={providerId}
             providerId={providerId}
-            orgProfileId={orgProfileId}
+            readOnly={!isProfileOwner}
+            viewProfileId={schedule.connectionProfileId}
           />
         ))}
       </div>
@@ -372,7 +381,12 @@ function ScheduleHistory({
         </div>
       ) : (
         executions.map((exec: Execution) => (
-          <ExecutionRow key={exec.id} execution={exec} flowName={flowName} />
+          <ExecutionRow
+            key={exec.id}
+            execution={exec}
+            flowName={flowName}
+            scheduleName={schedule.name}
+          />
         ))
       )}
     </div>

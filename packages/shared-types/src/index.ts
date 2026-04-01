@@ -129,6 +129,16 @@ export function findMissingDependencies(
 
 export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
 
+// --- Org Profile Binding Types ---
+
+export interface EnrichedBinding {
+  providerId: string;
+  sourceProfileId: string;
+  sourceProfileName: string;
+  boundByUserName: string | null;
+  connected: boolean;
+}
+
 // --- User Connection Types ---
 
 export interface UserConnectionEntry {
@@ -152,6 +162,8 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
+export type ProviderProfileSource = "org_binding" | "user_profile";
+
 export interface ProviderStatus {
   id: string;
   name?: string;
@@ -164,6 +176,12 @@ export interface ProviderStatus {
   scopesGranted?: string[];
   scopesSufficient?: boolean;
   scopesMissing?: string[];
+  /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
+  source: ProviderProfileSource | null;
+  /** Name of the connection profile used for this provider. */
+  profileName: string | null;
+  /** Name of the user who owns the connection profile. */
+  profileOwnerName: string | null;
 }
 
 export interface FlowListItem {
@@ -180,10 +198,10 @@ export interface FlowListItem {
   };
   runningExecutions: number;
   source: "system" | "local";
-  scope?: string | null;
-  version?: string | null;
+  scope: string | null;
+  version: string | null;
   type: PackageType;
-  forkedFrom?: string | null;
+  forkedFrom: string | null;
 }
 
 export interface FlowDetail {
@@ -203,37 +221,40 @@ export interface FlowDetail {
   };
   runningExecutions: number;
   lastExecution: Partial<import("@appstrate/db/schema").Execution> | null;
-  updatedAt?: string | null;
-  lockVersion?: number;
+  updatedAt: string | null;
+  lockVersion: number;
   prompt?: string;
-  scope?: string | null;
-  version?: string | null;
+  scope: string | null;
+  version: string | null;
   manifest?: Record<string, unknown>; // Raw manifest from DB (user flows only)
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
+  /** Org profile ID configured for this flow. Used for per-provider org bindings. */
+  flowOrgProfileId: string | null;
+  flowOrgProfileName: string | null;
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
   hasUnpublishedChanges?: boolean;
-  forkedFrom?: string | null;
+  forkedFrom: string | null;
 }
 
 // --- Organization Package Types ---
 
 export interface OrgPackageItem {
   id: string;
-  name?: string | null;
-  description?: string | null;
-  source?: "system" | "local";
-  createdBy?: string | null;
-  createdByName?: string;
+  name: string | null;
+  description: string | null;
+  source: "system" | "local";
+  createdBy: string | null;
+  createdByName: string | null;
   createdAt: string;
   updatedAt: string;
-  usedByFlows?: number;
-  version?: string | null;
-  autoInstalled?: boolean;
-  forkedFrom?: string | null;
+  usedByFlows: number;
+  version: string | null;
+  autoInstalled: boolean;
+  forkedFrom: string | null;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {

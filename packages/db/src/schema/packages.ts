@@ -16,6 +16,7 @@ import { sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
+import { connectionProfiles } from "./connections.ts";
 
 export const packageConfigs = pgTable(
   "package_configs",
@@ -29,12 +30,16 @@ export const packageConfigs = pgTable(
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    orgProfileId: uuid("org_profile_id").references(() => connectionProfiles.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.packageId] }),
     index("idx_package_configs_org_id").on(table.orgId),
+    index("idx_package_configs_org_profile_id").on(table.orgProfileId),
   ],
 );
 
@@ -49,8 +54,8 @@ export const packages = pgTable(
     draftContent: text("draft_content"),
     autoInstalled: boolean("auto_installed").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
     lockVersion: integer("lock_version").notNull().default(1),
     forkedFrom: text("forked_from"),
   },
@@ -76,7 +81,7 @@ export const packageVersions = pgTable(
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
@@ -94,7 +99,7 @@ export const packageDistTags = pgTable(
     versionId: integer("version_id")
       .notNull()
       .references(() => packageVersions.id, { onDelete: "cascade" }),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.packageId, table.tag] })],
 );

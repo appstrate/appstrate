@@ -45,6 +45,20 @@ export const HOP_BY_HOP_HEADERS = new Set([
   "te", "trailer", "upgrade", "proxy-authorization",
 ]);
 
+/** Strip host, content-length, and hop-by-hop headers. Optionally skip additional header names (lowercase). */
+export function filterHeaders(
+  headers: Record<string, string>,
+  extraSkip?: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (lower === "host" || lower === "content-length" || HOP_BY_HOP_HEADERS.has(lower) || extraSkip?.has(lower)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
   return patterns.some((pattern) => {
     if (pattern.endsWith("*")) {

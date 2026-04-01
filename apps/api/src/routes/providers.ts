@@ -30,6 +30,73 @@ import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
+/** Build the nested definition object for a provider manifest from flat request data. */
+function buildProviderDefinition(data: {
+  authMode: string;
+  authorizedUris?: string[];
+  allowAllUris?: boolean;
+  availableScopes?: { value: string; label: string }[];
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  refreshUrl?: string;
+  defaultScopes?: string[];
+  scopeSeparator?: string;
+  pkceEnabled?: boolean;
+  tokenAuthMethod?: string;
+  authorizationParams?: Record<string, string>;
+  tokenParams?: Record<string, string>;
+  requestTokenUrl?: string;
+  accessTokenUrl?: string;
+  credentialSchema?: unknown;
+  credentialFieldName?: string;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+}): Record<string, unknown> {
+  const definition: Record<string, unknown> = {
+    authMode: data.authMode,
+    authorizedUris: data.authorizedUris ?? [],
+    allowAllUris: data.allowAllUris ?? false,
+    availableScopes: data.availableScopes ?? [],
+  };
+
+  if (data.authMode === "oauth2") {
+    definition.oauth2 = {
+      authorizationUrl: data.authorizationUrl,
+      tokenUrl: data.tokenUrl,
+      refreshUrl: data.refreshUrl,
+      defaultScopes: data.defaultScopes ?? [],
+      scopeSeparator: data.scopeSeparator ?? " ",
+      pkceEnabled: data.pkceEnabled ?? true,
+      tokenAuthMethod: data.tokenAuthMethod,
+      authorizationParams: data.authorizationParams ?? {},
+      tokenParams: data.tokenParams ?? {},
+    };
+  } else if (data.authMode === "oauth1") {
+    definition.oauth1 = {
+      requestTokenUrl: data.requestTokenUrl,
+      accessTokenUrl: data.accessTokenUrl,
+      authorizationUrl: data.authorizationUrl,
+      authorizationParams: data.authorizationParams ?? {},
+    };
+  }
+
+  if (data.authMode === "api_key" || data.authMode === "basic" || data.authMode === "custom") {
+    definition.credentials = {
+      schema: data.credentialSchema,
+      fieldName: data.credentialFieldName,
+    };
+  }
+
+  if (data.credentialHeaderName !== undefined) {
+    definition.credentialHeaderName = data.credentialHeaderName;
+  }
+  if (data.credentialHeaderPrefix !== undefined) {
+    definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
+  }
+
+  return definition;
+}
+
 /** Check if a provider is a system provider via the DB source column. */
 async function isSystemProviderInDb(providerId: string): Promise<boolean> {
   const [pkg] = await db
@@ -164,50 +231,7 @@ export function createProvidersRouter() {
       });
     }
 
-    // Build the nested definition object for manifest.definition
-    const definition: Record<string, unknown> = {
-      authMode: data.authMode,
-      authorizedUris: data.authorizedUris ?? [],
-      allowAllUris: data.allowAllUris ?? false,
-      availableScopes: data.availableScopes ?? [],
-    };
-
-    // Auth-mode-specific sub-objects
-    if (data.authMode === "oauth2") {
-      definition.oauth2 = {
-        authorizationUrl: data.authorizationUrl,
-        tokenUrl: data.tokenUrl,
-        refreshUrl: data.refreshUrl,
-        defaultScopes: data.defaultScopes ?? [],
-        scopeSeparator: data.scopeSeparator ?? " ",
-        pkceEnabled: data.pkceEnabled ?? true,
-        tokenAuthMethod: data.tokenAuthMethod,
-        authorizationParams: data.authorizationParams ?? {},
-        tokenParams: data.tokenParams ?? {},
-      };
-    } else if (data.authMode === "oauth1") {
-      definition.oauth1 = {
-        requestTokenUrl: data.requestTokenUrl,
-        accessTokenUrl: data.accessTokenUrl,
-        authorizationUrl: data.authorizationUrl,
-        authorizationParams: data.authorizationParams ?? {},
-      };
-    }
-
-    if (data.authMode === "api_key" || data.authMode === "basic" || data.authMode === "custom") {
-      definition.credentials = {
-        schema: data.credentialSchema,
-        fieldName: data.credentialFieldName,
-      };
-    }
-
-    // Cross-cutting transport fields (implementation-specific)
-    if (data.credentialHeaderName !== undefined) {
-      definition.credentialHeaderName = data.credentialHeaderName;
-    }
-    if (data.credentialHeaderPrefix !== undefined) {
-      definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
-    }
+    const definition = buildProviderDefinition(data);
 
     try {
       await db.transaction(async (tx) => {
@@ -263,7 +287,7 @@ export function createProvidersRouter() {
       logger.error("Provider create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create provider");
+      throw internalError();
     }
 
     // Create initial version (non-fatal)
@@ -328,50 +352,7 @@ export function createProvidersRouter() {
       throw notFound(`Provider '${providerId}' not found`);
     }
 
-    // Build complete definition from request (no merge with old values)
-    const definition: Record<string, unknown> = {
-      authMode: data.authMode,
-      authorizedUris: data.authorizedUris ?? [],
-      allowAllUris: data.allowAllUris ?? false,
-      availableScopes: data.availableScopes ?? [],
-    };
-
-    // Auth-mode-specific sub-objects
-    if (data.authMode === "oauth2") {
-      definition.oauth2 = {
-        authorizationUrl: data.authorizationUrl,
-        tokenUrl: data.tokenUrl,
-        refreshUrl: data.refreshUrl,
-        defaultScopes: data.defaultScopes ?? [],
-        scopeSeparator: data.scopeSeparator ?? " ",
-        pkceEnabled: data.pkceEnabled ?? true,
-        tokenAuthMethod: data.tokenAuthMethod,
-        authorizationParams: data.authorizationParams ?? {},
-        tokenParams: data.tokenParams ?? {},
-      };
-    } else if (data.authMode === "oauth1") {
-      definition.oauth1 = {
-        requestTokenUrl: data.requestTokenUrl,
-        accessTokenUrl: data.accessTokenUrl,
-        authorizationUrl: data.authorizationUrl,
-        authorizationParams: data.authorizationParams ?? {},
-      };
-    }
-
-    if (data.authMode === "api_key" || data.authMode === "basic" || data.authMode === "custom") {
-      definition.credentials = {
-        schema: data.credentialSchema,
-        fieldName: data.credentialFieldName,
-      };
-    }
-
-    // Cross-cutting transport fields (implementation-specific)
-    if (data.credentialHeaderName !== undefined) {
-      definition.credentialHeaderName = data.credentialHeaderName;
-    }
-    if (data.credentialHeaderPrefix !== undefined) {
-      definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
-    }
+    const definition = buildProviderDefinition(data);
 
     try {
       await db.transaction(async (tx) => {
@@ -420,7 +401,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to update provider");
+      throw internalError();
     }
 
     return c.json({ id: providerId });
@@ -542,7 +523,7 @@ export function createProvidersRouter() {
         providerId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete provider");
+      throw internalError();
     }
 
     return c.body(null, 204);

@@ -4,12 +4,7 @@ import type { AppEnv } from "../../src/types/index.ts";
 import { idempotency } from "../../src/middleware/idempotency.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
-import {
-  _setIdempotencyMemoryForTesting,
-  _resetIdempotencyForTesting,
-} from "../../src/lib/idempotency.ts";
-
-_setIdempotencyMemoryForTesting(true);
+import { flushRedis } from "../helpers/redis.ts";
 
 let callCount = 0;
 
@@ -45,8 +40,8 @@ function post(app: Hono<AppEnv>, path: string, body: object, idempotencyKey?: st
 }
 
 describe("idempotency middleware", () => {
-  beforeEach(() => {
-    _resetIdempotencyForTesting();
+  beforeEach(async () => {
+    await flushRedis();
     callCount = 0;
   });
 

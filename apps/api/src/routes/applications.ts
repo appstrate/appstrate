@@ -64,7 +64,7 @@ export function createApplicationsRouter() {
       logger.error("Application creation failed", {
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to create application");
+      throw internalError();
     }
   });
 
@@ -82,7 +82,7 @@ export function createApplicationsRouter() {
         appId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to get application");
+      throw internalError();
     }
   });
 
@@ -107,7 +107,7 @@ export function createApplicationsRouter() {
         appId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to update application");
+      throw internalError();
     }
   });
 
@@ -125,7 +125,7 @@ export function createApplicationsRouter() {
         appId,
         error: err instanceof Error ? err.message : String(err),
       });
-      throw internalError("Failed to delete application");
+      throw internalError();
     }
   });
 

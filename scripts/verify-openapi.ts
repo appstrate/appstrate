@@ -89,6 +89,7 @@ const expectedEndpoints = [
   "POST /api/connection-profiles/org",
   "PUT /api/connection-profiles/org/{id}",
   "DELETE /api/connection-profiles/org/{id}",
+  "GET /api/connection-profiles/org/{id}/flows",
   "GET /api/connection-profiles/org/{id}/bindings",
   "POST /api/connection-profiles/org/{id}/bind",
   "DELETE /api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}",
@@ -96,9 +97,13 @@ const expectedEndpoints = [
   "DELETE /api/connection-profiles/{id}",
   "GET /api/connection-profiles/{id}/connections",
 
-  // Flow Profile Override
-  "PUT /api/flows/{scope}/{name}/profile",
-  "DELETE /api/flows/{scope}/{name}/profile",
+  // Flow Provider Profiles
+  "GET /api/flows/{scope}/{name}/provider-profiles",
+  "PUT /api/flows/{scope}/{name}/provider-profiles",
+  "DELETE /api/flows/{scope}/{name}/provider-profiles",
+
+  // Flow Org Profile
+  "PUT /api/flows/{scope}/{name}/org-profile",
 
   // Flow Proxy
   "GET /api/flows/{scope}/{name}/proxy",
@@ -306,7 +311,8 @@ console.log(`  --------------------------------------------------`);
 try {
   // Deep-clone to avoid mutation by the parser (it dereferences $refs in-place)
   const specCopy = JSON.parse(JSON.stringify(openApiSpec));
-  await validateOpenAPI(specCopy);
+  // Skip external $ref resolution (AFPS schema URLs) — validated separately by afps-spec repo
+  await validateOpenAPI(specCopy, { resolve: { external: false } });
   console.log(`  OK — valid OpenAPI ${openApiSpec.openapi} document.`);
 } catch (err: unknown) {
   exitCode = 1;

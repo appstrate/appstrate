@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, AlertTriangle, Link2, Unlink, Plug } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -13,91 +12,73 @@ import {
 import { ProviderIcon } from "./provider-icon";
 import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
-import {
-  useConnect,
-  useConnectApiKey,
-  useConnectCredentials,
-  useDisconnect,
-} from "../hooks/use-mutations";
 import { useProviders } from "../hooks/use-providers";
-import {
-  useConnectionProfiles,
-  useProfileConnections,
-  useOrgProfileBindings,
-  useBindOrgProvider,
-  useUnbindOrgProvider,
-} from "../hooks/use-connection-profiles";
+import { useProviderConnection } from "../hooks/use-provider-connection";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
   providerId: string;
+  /** Flow package ID — enables per-provider profile persistence. */
+  packageId?: string;
+  /** Org profile ID — enables the org binding section. */
   orgProfileId?: string;
+  /** Org profile display name — shown in the bind button. */
+  orgProfileName?: string;
+  /** When true, hide all action buttons — card becomes purely informational. */
+  readOnly?: boolean;
+  /** Profile ID to check connection status for (e.g. schedule owner's profile). */
+  viewProfileId?: string;
 }
 
-export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderConnectionCardProps) {
+export function ProviderConnectionCard({
+  providerId,
+  packageId,
+  orgProfileId,
+  orgProfileName,
+  readOnly: readOnlyProp,
+  viewProfileId,
+}: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
-  const qc = useQueryClient();
 
-  // User profiles
-  const { data: userProfiles } = useConnectionProfiles();
-  const defaultProfile = userProfiles?.find((p) => p.isDefault);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const effectiveProfileId = selectedProfileId ?? defaultProfile?.id ?? null;
-  const hasMultipleProfiles = (userProfiles?.length ?? 0) > 1;
+  const {
+    isOrgAdmin,
+    userProfiles,
+    hasMultipleProfiles,
+    effectiveProfileId,
+    isConnected,
+    binding,
+    isBoundButDisconnected,
+    isEffectivelyBound,
+    connectMutation,
+    connectApiKeyMutation,
+    connectCredentialsMutation,
+    disconnectMutation,
+    isPending,
+    profileParam,
+    handleProfileChange,
+    doBind,
+    handleUnbind,
+    readOnly,
+  } = useProviderConnection({
+    providerId,
+    packageId,
+    orgProfileId,
+    readOnly: readOnlyProp,
+    viewProfileId,
+  });
 
   // Provider metadata
   const { data: providersData } = useProviders();
   const provider = providersData?.providers?.find((p) => p.id === providerId);
 
-  // Connection status — scoped to the selected profile
-  const { data: profileConnections } = useProfileConnections(effectiveProfileId);
-  const isConnected = profileConnections?.some((c) => c.providerId === providerId) ?? false;
-
-  // Binding status (only when orgProfileId is provided)
-  const { data: bindings } = useOrgProfileBindings(orgProfileId);
-  const binding = bindings?.find((b) => b.providerId === providerId);
-  const isBound = !!binding;
-
-  // Mutations
-  const connectMutation = useConnect();
-  const connectApiKeyMutation = useConnectApiKey();
-  const connectCredentialsMutation = useConnectCredentials();
-  const disconnectMutation = useDisconnect();
-  const bindMutation = useBindOrgProvider();
-  const unbindMutation = useUnbindOrgProvider();
-
   // Modal state
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [customCredOpen, setCustomCredOpen] = useState(false);
-
-  const isPending =
-    connectMutation.isPending ||
-    connectApiKeyMutation.isPending ||
-    connectCredentialsMutation.isPending ||
-    disconnectMutation.isPending ||
-    bindMutation.isPending ||
-    unbindMutation.isPending;
 
   const displayName = provider?.displayName ?? providerId;
   const iconUrl = provider?.iconUrl;
   const authMode = provider?.authMode;
   const credentialSchema = provider?.credentialSchema as JSONSchemaObject | undefined;
-
-  const profileParam = effectiveProfileId ? { profileId: effectiveProfileId } : {};
-
-  const invalidateConnections = () => {
-    qc.invalidateQueries({ queryKey: ["profile-connections"] });
-    qc.invalidateQueries({ queryKey: ["available-providers"] });
-  };
-
-  const doBind = () => {
-    if (!orgProfileId || !effectiveProfileId) return;
-    bindMutation.mutate({
-      profileId: orgProfileId,
-      providerId,
-      sourceProfileId: effectiveProfileId,
-    });
-  };
 
   const handleConnect = () => {
     if (authMode === "api_key") {
@@ -105,46 +86,17 @@ export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderCon
     } else if (authMode === "custom" && credentialSchema) {
       setCustomCredOpen(true);
     } else {
-      connectMutation.mutate(
-        { provider: providerId, ...profileParam },
-        {
-          onSuccess: () => invalidateConnections(),
-        },
-      );
+      connectMutation.mutate({ provider: providerId, ...profileParam });
     }
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate(
-      { provider: providerId, ...profileParam },
-      {
-        onSuccess: () => invalidateConnections(),
-      },
-    );
+    disconnectMutation.mutate({ provider: providerId, ...profileParam });
   };
 
-  const handleConnectAndBind = () => {
-    if (authMode === "api_key") {
-      setApiKeyOpen(true);
-    } else if (authMode === "custom" && credentialSchema) {
-      setCustomCredOpen(true);
-    } else {
-      connectMutation.mutate(
-        { provider: providerId, ...profileParam },
-        {
-          onSuccess: () => {
-            invalidateConnections();
-            doBind();
-          },
-        },
-      );
-    }
-  };
+  // ─── Determine active mode: org-bound or user-managed ────
 
-  const handleUnbind = () => {
-    if (!orgProfileId) return;
-    unbindMutation.mutate({ profileId: orgProfileId, providerId });
-  };
+  const isOrgMode = isEffectivelyBound || isBoundButDisconnected;
 
   return (
     <>
@@ -159,111 +111,112 @@ export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderCon
           <span className="text-sm font-medium truncate">{displayName}</span>
         </div>
 
-        {/* Status */}
-        {orgProfileId ? (
-          isBound && binding ? (
-            <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
-              <Link2 className="size-3" />
-              {binding.boundByUserName
-                ? `${binding.boundByUserName} — ${binding.sourceProfileName}`
-                : binding.sourceProfileName}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-xs text-warning shrink-0">
-              <AlertTriangle className="size-3" />
-              {t("providerCard.notBound")}
-            </span>
-          )
-        ) : isConnected ? (
-          <span className="inline-flex items-center gap-1 text-xs text-success shrink-0">
-            <CheckCircle2 className="size-3" />
-            {t("providers.connected")}
-          </span>
-        ) : null}
-
         <div className="flex-1" />
 
-        {/* Profile selector — shown when multiple profiles and not yet bound */}
-        {hasMultipleProfiles && !isBound && (
-          <Select value={effectiveProfileId ?? ""} onValueChange={setSelectedProfileId}>
-            <SelectTrigger className="h-7 w-32 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {userProfiles?.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                  {p.isDefault ? ` (${t("providerCard.default")})` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {isOrgMode ? (
+          /* ─── Org-bound mode: show binding info ──────────── */
+          <>
+            {isBoundButDisconnected ? (
+              <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
+                <AlertTriangle className="size-3" />
+                {!isOrgAdmin
+                  ? t("providerCard.boundDisconnectedUser")
+                  : t("providerCard.boundDisconnected")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
+                <Building2 className="size-3" />
+                {binding?.boundByUserName
+                  ? `${binding.boundByUserName} — ${binding.sourceProfileName}`
+                  : binding?.sourceProfileName}
+              </span>
+            )}
+            {!readOnly && isOrgAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleUnbind}
+                disabled={isPending}
+              >
+                <Unlink className="size-3 mr-1" />
+                {t("providerCard.unbind")}
+              </Button>
+            )}
+          </>
+        ) : (
+          /* ─── User-managed mode: profile selector + connect/disconnect ── */
+          <>
+            {isConnected ? (
+              <span className="inline-flex items-center gap-1 text-xs text-success shrink-0">
+                <CheckCircle2 className="size-3" />
+                {t("providers.connected")}
+              </span>
+            ) : readOnly ? (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                <AlertTriangle className="size-3" />
+                {t("services.notConnected")}
+              </span>
+            ) : null}
+
+            {!readOnly && hasMultipleProfiles && (
+              <Select value={effectiveProfileId ?? ""} onValueChange={handleProfileChange}>
+                <SelectTrigger className="h-7 w-32 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {userProfiles?.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                      {p.isDefault ? ` (${t("providerCard.default")})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {!readOnly && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {!isConnected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleConnect}
+                    disabled={isPending || !provider?.enabled || !effectiveProfileId}
+                  >
+                    {t("providerCard.connect")}
+                  </Button>
+                )}
+                {isConnected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleDisconnect}
+                    disabled={isPending}
+                  >
+                    {t("providerCard.disconnect")}
+                  </Button>
+                )}
+                {isConnected && orgProfileId && isOrgAdmin && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={doBind}
+                    disabled={isPending || !effectiveProfileId}
+                  >
+                    <Building2 className="size-3 mr-1" />
+                    {orgProfileName
+                      ? t("providerCard.bindTo", { name: orgProfileName })
+                      : t("providerCard.bind")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
         )}
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {!isConnected && !orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleConnect}
-              disabled={isPending || !provider?.enabled || !effectiveProfileId}
-            >
-              {t("providerCard.connect")}
-            </Button>
-          )}
-
-          {!isConnected && orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleConnectAndBind}
-              disabled={isPending || !provider?.enabled || !effectiveProfileId}
-            >
-              {t("providerCard.connectAndBind")}
-            </Button>
-          )}
-
-          {isConnected && !orgProfileId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleDisconnect}
-              disabled={isPending}
-            >
-              {t("providerCard.disconnect")}
-            </Button>
-          )}
-
-          {isConnected && orgProfileId && !isBound && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={doBind}
-              disabled={isPending || !effectiveProfileId}
-            >
-              <Link2 className="size-3 mr-1" />
-              {t("providerCard.bind")}
-            </Button>
-          )}
-
-          {isConnected && orgProfileId && isBound && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={handleUnbind}
-              disabled={isPending}
-            >
-              <Unlink className="size-3 mr-1" />
-              {t("providerCard.unbind")}
-            </Button>
-          )}
-        </div>
       </div>
 
       <ApiKeyModal
@@ -274,13 +227,7 @@ export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderCon
         onSubmit={(apiKey) => {
           connectApiKeyMutation.mutate(
             { provider: providerId, apiKey, ...profileParam },
-            {
-              onSuccess: () => {
-                setApiKeyOpen(false);
-                invalidateConnections();
-                if (orgProfileId) doBind();
-              },
-            },
+            { onSuccess: () => setApiKeyOpen(false) },
           );
         }}
       />
@@ -296,13 +243,7 @@ export function ProviderConnectionCard({ providerId, orgProfileId }: ProviderCon
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(
               { provider: providerId, credentials, ...profileParam },
-              {
-                onSuccess: () => {
-                  setCustomCredOpen(false);
-                  invalidateConnections();
-                  if (orgProfileId) doBind();
-                },
-              },
+              { onSuccess: () => setCustomCredOpen(false) },
             );
           }}
         />

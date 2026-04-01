@@ -14,8 +14,8 @@ async function fetchProfile(): Promise<Profile | null> {
       id: data.id,
       displayName: data.displayName,
       language,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
     if (profile.language && profile.language !== i18n.language) {
       i18n.changeLanguage(profile.language);
@@ -120,33 +120,36 @@ export function useAuth() {
     if (result.error) throw new Error(result.error.message);
   }, []);
 
-  const signInWithGoogle = useCallback(async (callbackURL?: string) => {
-    await authClient.signIn.social({
-      provider: "google",
-      callbackURL: callbackURL ?? "/",
-    });
-  }, []);
+  const signInWithSocial = useCallback(
+    async (provider: "google" | "github", callbackURL?: string) => {
+      await authClient.signIn.social({
+        provider,
+        callbackURL: callbackURL ?? "/",
+      });
+    },
+    [],
+  );
 
-  const signInWithGithub = useCallback(async (callbackURL?: string) => {
-    await authClient.signIn.social({
-      provider: "github",
-      callbackURL: callbackURL ?? "/",
-    });
-  }, []);
-
-  const linkGoogle = useCallback(async () => {
+  const linkSocial = useCallback(async (provider: "google" | "github") => {
     await authClient.linkSocial({
-      provider: "google",
+      provider,
       callbackURL: "/preferences",
     });
   }, []);
 
-  const linkGithub = useCallback(async () => {
-    await authClient.linkSocial({
-      provider: "github",
-      callbackURL: "/preferences",
-    });
-  }, []);
+  const signInWithGoogle = useCallback(
+    (callbackURL?: string) => signInWithSocial("google", callbackURL),
+    [signInWithSocial],
+  );
+
+  const signInWithGithub = useCallback(
+    (callbackURL?: string) => signInWithSocial("github", callbackURL),
+    [signInWithSocial],
+  );
+
+  const linkGoogle = useCallback(() => linkSocial("google"), [linkSocial]);
+
+  const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
 
   const unlinkAccount = useCallback(async (providerId: string) => {
     const result = await authClient.unlinkAccount({ providerId });
@@ -166,8 +169,10 @@ export function useAuth() {
     signup,
     logout,
     updatePassword,
+    signInWithSocial,
     signInWithGoogle,
     signInWithGithub,
+    linkSocial,
     linkGoogle,
     linkGithub,
     unlinkAccount,

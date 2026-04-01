@@ -268,6 +268,7 @@ export const auth = betterAuth({
           await db.insert(profiles).values({
             id: user.id,
             displayName: user.name || user.email,
+            language: "fr",
           });
         },
       },

@@ -4,6 +4,7 @@ import i18n from "../i18n";
 import { api, apiFetch, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
+import { invalidateConnectionRelated } from "./invalidation";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -41,11 +42,10 @@ export function useRunFlow(packageId: string) {
     mutationFn: async (params?: {
       input?: Record<string, unknown>;
       files?: Record<string, File[]>;
-      profileId?: string;
       version?: string;
     }) => {
-      const { input, files, profileId, version } = params ?? {};
-      const qs = buildQs({ profileId, version });
+      const { input, files, version } = params ?? {};
+      const qs = buildQs({ version });
 
       // If files are present, use FormData
       const hasFiles = files && Object.values(files).some((f) => f.length > 0);
@@ -74,14 +74,6 @@ export function useRunFlow(packageId: string) {
     },
     onError: onMutationError,
   });
-}
-
-function invalidateProviderRelated(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["available-providers"] });
-  qc.invalidateQueries({ queryKey: ["user-connections"] });
-  // Invalidate all flow detail queries (service status may have changed)
-  qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-  qc.invalidateQueries({ queryKey: ["flows"] });
 }
 
 export function useConnect() {
@@ -120,7 +112,7 @@ export function useConnect() {
         }, 500);
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -142,7 +134,7 @@ export function useConnectApiKey() {
         body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -162,7 +154,7 @@ export function useDisconnect() {
       });
       return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -172,7 +164,7 @@ export function useDeleteAllConnections() {
   return useMutation({
     mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
     onSuccess: () => {
-      invalidateProviderRelated(qc);
+      invalidateConnectionRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
     },
     onError: onMutationError,
@@ -247,7 +239,7 @@ export function useConnectCredentials() {
         body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateProviderRelated(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }

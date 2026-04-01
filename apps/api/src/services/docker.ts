@@ -10,6 +10,16 @@ const DOCKER_API_TIMEOUT_MS = 30_000;
 // Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
 const DOCKER_TCP = DOCKER_SOCKET.startsWith("http://") || DOCKER_SOCKET.startsWith("https://");
 
+async function assertDockerOk(
+  res: Response,
+  operation: string,
+  allowedStatuses: number[] = [],
+): Promise<void> {
+  if (res.ok || allowedStatuses.includes(res.status)) return;
+  const body = await res.text();
+  throw new Error(`Docker ${operation} failed: ${res.status} ${body}`);
+}
+
 async function dockerFetch(
   path: string,
   options: RequestInit = {},
@@ -44,10 +54,7 @@ export async function pullImage(image: string): Promise<void> {
     120_000, // pulls can be slow
   );
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to pull image ${image}: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, `pull image ${image}`);
 
   // Consume the stream fully — Docker streams JSON progress lines.
   // The API always returns 200; errors (e.g. "manifest unknown") arrive as {"error":"..."} in the stream.
@@ -148,10 +155,7 @@ export async function createContainer(
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to create ${options.adapterName} container: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, `create ${options.adapterName} container`);
 
   const data = (await res.json()) as { Id: string };
   return data.Id;
@@ -162,18 +166,8 @@ export async function startContainer(containerId: string): Promise<void> {
     method: "POST",
   });
 
-  if (!res.ok && res.status !== 304) {
-    // 304 = already started
-    const error = await res.text();
-    throw new Error(`Failed to start container: ${res.status} ${error}`);
-  }
-}
-
-function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a, 0);
-  result.set(b, a.length);
-  return result;
+  // 304 = already started
+  await assertDockerOk(res, "start container", [304]);
 }
 
 export async function* streamLogs(
@@ -188,10 +182,7 @@ export async function* streamLogs(
     false, // Long-running streaming — no timeout
   );
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to stream logs: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "stream logs");
 
   if (!res.body) return;
 
@@ -222,7 +213,10 @@ export async function* streamLogs(
       // Prepend any leftover bytes from the previous chunk
       let raw: Uint8Array;
       if (remainder.length > 0) {
-        raw = concatUint8Arrays(remainder, value);
+        const combined = new Uint8Array(remainder.length + value.length);
+        combined.set(remainder, 0);
+        combined.set(value, remainder.length);
+        raw = combined;
         remainder = new Uint8Array(0);
       } else {
         raw = value;
@@ -283,10 +277,7 @@ export async function waitForExit(containerId: string): Promise<number> {
     false, // Long-running — blocks until container exits
   );
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to wait for container: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "wait for container");
 
   const data = (await res.json()) as { StatusCode: number };
   return data.StatusCode;
@@ -297,10 +288,7 @@ export async function removeContainer(containerId: string): Promise<void> {
     method: "DELETE",
   });
 
-  if (!res.ok && res.status !== 404) {
-    const error = await res.text();
-    throw new Error(`Failed to remove container: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "remove container", [404]);
 }
 
 /**
@@ -325,10 +313,7 @@ export async function injectFiles(
     },
   );
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to inject files into container: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "inject files into container");
 }
 
 /** Create a tar header for a single file entry. */
@@ -373,10 +358,7 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
     method: "POST",
   });
 
-  if (!res.ok && res.status !== 304 && res.status !== 404) {
-    const error = await res.text();
-    throw new Error(`Failed to stop container: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "stop container", [304, 404]);
 }
 
 /**
@@ -414,10 +396,7 @@ export async function createNetwork(
     }),
   });
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to create network ${name}: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, `create network ${name}`);
 
   const data = (await res.json()) as { Id: string };
   return data.Id;
@@ -439,10 +418,7 @@ export async function connectContainerToNetwork(
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to connect container to network: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "connect container to network");
 }
 
 /**
@@ -472,10 +448,7 @@ export async function removeNetwork(networkId: string): Promise<void> {
     method: "DELETE",
   });
 
-  if (!res.ok && res.status !== 404) {
-    const error = await res.text();
-    throw new Error(`Failed to remove network: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "remove network", [404]);
 }
 
 // --- Orphaned container cleanup ---
@@ -488,10 +461,7 @@ export async function cleanupOrphanedContainers(): Promise<{
   const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
   const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Failed to list managed containers: ${res.status} ${error}`);
-  }
+  await assertDockerOk(res, "list managed containers");
 
   const containers = (await res.json()) as Array<{
     Id: string;

@@ -177,12 +177,14 @@ describe("organizations service", () => {
   // ── addMember / removeMember / updateMemberRole ───────────
 
   describe("member management", () => {
-    it("addMember throws on duplicate membership", async () => {
+    it("addMember is idempotent for duplicate membership", async () => {
       const org = await createOrganization("Dup Org", "dup-org", userId);
 
-      await expect(addMember(org.id, userId, "member")).rejects.toThrow(
-        /already a member/i,
-      );
+      // Should not throw — duplicate is silently ignored
+      await addMember(org.id, userId, "member");
+
+      const members = await getOrgMembers(org.id);
+      expect(members.filter((m) => m.userId === userId)).toHaveLength(1);
     });
 
     it("removeMember removes a member from the org", async () => {

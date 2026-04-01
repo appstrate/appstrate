@@ -5,14 +5,11 @@ import {
   rateLimit,
   rateLimitByIp,
   rateLimitByBearer,
-  _setMemoryBackendForTesting,
-  _resetBucketsForTesting,
+  resetRateLimiters,
 } from "../../src/middleware/rate-limit.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
-
-// Use in-memory backend for all tests
-_setMemoryBackendForTesting(true);
+import { flushRedis } from "../helpers/redis.ts";
 
 function createApp() {
   const app = new Hono<AppEnv>();
@@ -22,8 +19,9 @@ function createApp() {
 }
 
 describe("rateLimit (authenticated)", () => {
-  beforeEach(() => {
-    _resetBucketsForTesting();
+  beforeEach(async () => {
+    resetRateLimiters();
+    await flushRedis();
   });
 
   it("allows requests within the limit", async () => {
@@ -134,8 +132,9 @@ describe("rateLimit (authenticated)", () => {
 });
 
 describe("rateLimitByIp", () => {
-  beforeEach(() => {
-    _resetBucketsForTesting();
+  beforeEach(async () => {
+    resetRateLimiters();
+    await flushRedis();
   });
 
   it("allows requests within the limit", async () => {
@@ -209,8 +208,9 @@ describe("rateLimitByIp", () => {
 });
 
 describe("rateLimitByBearer", () => {
-  beforeEach(() => {
-    _resetBucketsForTesting();
+  beforeEach(async () => {
+    resetRateLimiters();
+    await flushRedis();
   });
 
   it("allows requests within limit", async () => {

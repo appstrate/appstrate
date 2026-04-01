@@ -11,7 +11,11 @@ import {
   getLastExecution,
   getRunningExecutionsForPackage,
 } from "../services/state/index.ts";
-import { resolveProviderProfiles } from "../services/connection-profiles.ts";
+import {
+  resolveProviderProfiles,
+  resolveActorProfileContext,
+  getFlowOrgProfile,
+} from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -40,16 +44,25 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
   }
 
   const m = flow.manifest;
-  const queryProfileId = c.req.query("profileId");
 
-  // Build providerProfiles map via shared resolution (org → bindings, user → direct)
+  // Load org profile, actor profile context, and package config in parallel
+  const [flowOrgProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
+    await Promise.all([
+      getFlowOrgProfile(orgId, flow.id),
+      resolveActorProfileContext(actor, flow.id),
+      getPackageConfig(orgId, flow.id),
+    ]);
+  const flowOrgProfileId = flowOrgProfile?.id ?? null;
+  const flowOrgProfileName = flowOrgProfile?.name ?? null;
+
+  // Build providerProfiles map: org bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
-    actor,
-    flow.id,
+    defaultUserProfileId,
+    userProviderOverrides,
+    flowOrgProfileId,
     orgId,
-    queryProfileId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
@@ -103,14 +116,13 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
     );
   }
 
-  const [currentConfig, lastExec, runningCount] = await Promise.all([
-    getPackageConfig(orgId, flow.id),
+  const [lastExec, runningCount] = await Promise.all([
     getLastExecution(flow.id, null, orgId),
     getRunningExecutionsForPackage(flow.id),
   ]);
 
   const configWithDefaults = m.config?.schema
-    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), currentConfig)
+    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), packageConfig.config)
     : {};
 
   const parsed = parseScopedName(m.name);
@@ -145,32 +157,11 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
           ...(e.description ? { description: e.description } : {}),
         })),
       },
-      ...(m.input
-        ? {
-            input: {
-              schema: m.input.schema,
-              ...(m.input.propertyOrder ? { propertyOrder: m.input.propertyOrder } : {}),
-              ...(m.input.fileConstraints ? { fileConstraints: m.input.fileConstraints } : {}),
-              ...(m.input.uiHints ? { uiHints: m.input.uiHints } : {}),
-            },
-          }
-        : {}),
-      ...(m.output
-        ? {
-            output: {
-              schema: m.output.schema,
-              ...(m.output.propertyOrder ? { propertyOrder: m.output.propertyOrder } : {}),
-              ...(m.output.fileConstraints ? { fileConstraints: m.output.fileConstraints } : {}),
-              ...(m.output.uiHints ? { uiHints: m.output.uiHints } : {}),
-            },
-          }
-        : {}),
+      ...(m.input ? { input: m.input } : {}),
+      ...(m.output ? { output: m.output } : {}),
       config: {
-        schema: m.config?.schema ?? { type: "object", properties: {} },
+        ...(m.config ?? { schema: { type: "object", properties: {} } }),
         current: configWithDefaults,
-        ...(m.config?.propertyOrder ? { propertyOrder: m.config.propertyOrder } : {}),
-        ...(m.config?.fileConstraints ? { fileConstraints: m.config.fileConstraints } : {}),
-        ...(m.config?.uiHints ? { uiHints: m.config.uiHints } : {}),
       },
       runningExecutions: runningCount,
       lastExecution: lastExec
@@ -185,6 +176,8 @@ export async function flowDetailHandler(c: Context<AppEnv>) {
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnpublishedChanges,
+      flowOrgProfileId,
+      flowOrgProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(flow.source !== "system" && rawItem
         ? {

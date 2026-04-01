@@ -38,7 +38,7 @@ describe("getProviderEntries / setProviderEntries", () => {
     const m = {
       dependencies: { providers: { "@org/gmail": "1.0.0", "@org/slack": "2.0.0" } },
       providersConfiguration: {
-        "@org/gmail": { scopes: ["gmail.readonly"], connectionMode: "admin" },
+        "@org/gmail": { scopes: ["gmail.readonly"] },
       },
     };
     const entries = getProviderEntries(m);
@@ -47,13 +47,11 @@ describe("getProviderEntries / setProviderEntries", () => {
       id: "@org/gmail",
       version: "1.0.0",
       scopes: ["gmail.readonly"],
-      connectionMode: "admin",
     });
     expect(entries[1]).toEqual({
       id: "@org/slack",
       version: "2.0.0",
       scopes: [],
-      connectionMode: "user",
     });
   });
 
@@ -63,9 +61,8 @@ describe("getProviderEntries / setProviderEntries", () => {
         id: "@org/gmail",
         version: "1.0.0",
         scopes: ["gmail.send"],
-        connectionMode: "admin" as const,
       },
-      { id: "@org/slack", version: "*", scopes: [], connectionMode: "user" as const },
+      { id: "@org/slack", version: "*", scopes: [] },
     ];
     const m: Record<string, unknown> = { dependencies: { providers: {} } };
     setProviderEntries(m, entries);
@@ -76,17 +73,15 @@ describe("getProviderEntries / setProviderEntries", () => {
   it("filters empty ids", () => {
     const m: Record<string, unknown> = { dependencies: { providers: {} } };
     setProviderEntries(m, [
-      { id: "", version: "*", scopes: [], connectionMode: "user" },
-      { id: "@org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" },
+      { id: "", version: "*", scopes: [] },
+      { id: "@org/gmail", version: "1.0.0", scopes: [] },
     ]);
     expect(getProviderEntries(m)).toHaveLength(1);
   });
 
   it("cleans up providersConfiguration when no config needed", () => {
     const m: Record<string, unknown> = { dependencies: { providers: {} } };
-    setProviderEntries(m, [
-      { id: "@org/gmail", version: "1.0.0", scopes: [], connectionMode: "user" },
-    ]);
+    setProviderEntries(m, [{ id: "@org/gmail", version: "1.0.0", scopes: [] }]);
     expect(m.providersConfiguration).toBeUndefined();
   });
 });

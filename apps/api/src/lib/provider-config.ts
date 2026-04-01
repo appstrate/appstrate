@@ -22,7 +22,9 @@ export function packageToProviderConfig(
   const explicitSchema = def.adminCredentialSchema as JSONSchemaObject | undefined;
   const adminCredentialSchema =
     explicitSchema ??
-    (getDefaultAdminCredentialSchema(resolved.authMode) as JSONSchemaObject | undefined) ??
+    (resolved.authMode
+      ? (getDefaultAdminCredentialSchema(resolved.authMode) as JSONSchemaObject | undefined)
+      : undefined) ??
     undefined;
   const credentials = (def.credentials as Record<string, unknown>) ?? {};
   return {

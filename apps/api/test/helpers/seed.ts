@@ -27,7 +27,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 // ─── Packages / Flows ─────────────────────────────────────
 
 type PackageInsert = Partial<InferInsertModel<typeof packages>> & {
-  orgId: string;
+  orgId: string | null;
 };
 
 export async function seedPackage(
@@ -330,6 +330,7 @@ export async function seedInvitation(
     .values({
       token: crypto.randomUUID(),
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 48), // 48h
+      role: "member",
       ...overrides,
     })
     .returning();

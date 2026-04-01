@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
+import { CombinedProfileSelect } from "./combined-profile-select";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -100,7 +101,10 @@ export function ScheduleForm({
 
   const { data: userProfiles } = useConnectionProfiles();
   const { data: orgProfiles } = useOrgProfiles();
-  const allProfiles = [...(userProfiles ?? []), ...(orgProfiles ?? [])];
+  const allProfiles = useMemo(
+    () => [...(userProfiles ?? []), ...(orgProfiles ?? [])],
+    [userProfiles, orgProfiles],
+  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -134,6 +138,13 @@ export function ScheduleForm({
     control,
     name: ["connectionProfileId", "cronExpression", "timezone", "enabled"],
   });
+
+  // When profiles load after form init, set the default if still empty
+  useEffect(() => {
+    if (!connectionProfileId && allProfiles.length > 0) {
+      setValue("connectionProfileId", allProfiles[0]!.id);
+    }
+  }, [connectionProfileId, allProfiles, setValue]);
 
   const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? buildPayload(schema, inputValues) : undefined;
@@ -183,37 +194,18 @@ export function ScheduleForm({
       )}
 
       {/* Connection profile */}
-      {allProfiles.length > 0 && (
+      {allProfiles.length > 1 && (
         <div className="space-y-3">
           <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
-          <Select
+          <CombinedProfileSelect
             value={connectionProfileId}
-            onValueChange={(v) => setValue("connectionProfileId", v)}
-          >
-            <SelectTrigger id="sched-profile">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {userProfiles?.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                  {p.isDefault ? ` (${t("schedule.profileDefault")})` : ""}
-                </SelectItem>
-              ))}
-              {orgProfiles && orgProfiles.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                    {t("schedule.orgProfiles")}
-                  </div>
-                  {orgProfiles.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-            </SelectContent>
-          </Select>
+            onChange={(v) => {
+              if (v != null) setValue("connectionProfileId", v);
+              else if (allProfiles.length > 0) setValue("connectionProfileId", allProfiles[0]!.id);
+            }}
+            triggerClassName="w-full"
+            id="sched-profile"
+          />
         </div>
       )}
 
@@ -355,7 +347,7 @@ export function ScheduleForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending || allProfiles.length === 0}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>

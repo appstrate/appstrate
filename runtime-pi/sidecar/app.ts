@@ -7,7 +7,7 @@ import {
   MAX_SUBSTITUTE_BODY_SIZE,
   OUTBOUND_TIMEOUT_MS,
   LLM_PROXY_TIMEOUT_MS,
-  HOP_BY_HOP_HEADERS,
+  filterHeaders,
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUri,
@@ -27,6 +27,38 @@ export interface AppDeps {
   isReady?: () => boolean;       // default: () => true — controls /health
   configSecret?: string;         // One-time config secret (from CONFIG_SECRET env var)
   preConfigured?: boolean;       // true when credentials come via env vars (fresh sidecar)
+}
+
+const CREDENTIAL_PROXY_SKIP = new Set(["x-provider", "x-target", "x-substitute-body"]);
+
+type FetchResult =
+  | { ok: true; response: Response }
+  | { ok: false; errorResponse: Response };
+
+/**
+ * Wrapper around fetch that converts network/timeout errors into a 502 JSON response.
+ * Callers check `result.ok` to distinguish success from a pre-built error response.
+ */
+async function fetchOrError(
+  c: { json: (body: unknown, status: number) => Response },
+  fetchFn: typeof fetch,
+  label: string,
+  url: string,
+  init: RequestInit & Record<string, unknown>,
+): Promise<FetchResult> {
+  try {
+    return { ok: true, response: await fetchFn(url, init) };
+  } catch (err) {
+    const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+    let domain: string | undefined;
+    try { domain = new URL(url).hostname; } catch {}
+    const suffix = code ? `: ${code}` : "";
+    const domainHint = domain ? ` (${domain})` : "";
+    return {
+      ok: false,
+      errorResponse: c.json({ error: `${label}${suffix}${domainHint}` }, 502),
+    };
+  }
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -97,24 +129,17 @@ export function createApp(deps: AppDeps): Hono {
 
   // Execution history proxy
   app.get("/execution-history", async (c) => {
-    const qs = c.req.url.split("?")[1] || "";
-    const url = `${config.platformApiUrl}/internal/execution-history${qs ? `?${qs}` : ""}`;
+    const qs = new URL(c.req.url).search;
+    const url = `${config.platformApiUrl}/internal/execution-history${qs}`;
 
-    let res: Response;
-    try {
-      res = await fetchFn(url, {
-        headers: { Authorization: `Bearer ${config.executionToken}` },
-      });
-    } catch (err) {
-      return c.json(
-        { error: `Execution history fetch failed: ${err instanceof Error ? err.message : String(err)}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "Execution history fetch failed", url, {
+      headers: { Authorization: `Bearer ${config.executionToken}` },
+    });
+    if (!result.ok) return result.errorResponse;
 
-    const body = await res.text();
-    return c.body(body, res.status, {
-      "Content-Type": res.headers.get("Content-Type") || "application/json",
+    const body = await result.response.text();
+    return c.body(body, result.response.status, {
+      "Content-Type": result.response.headers.get("Content-Type") || "application/json",
     });
   });
 
@@ -135,16 +160,13 @@ export function createApp(deps: AppDeps): Hono {
 
     // Extract path after /llm (e.g. /llm/v1/messages → /v1/messages)
     const path = c.req.path.slice("/llm".length) || "/";
-    const qs = c.req.url.split("?")[1] || "";
-    const targetUrl = `${baseUrl}${path}${qs ? `?${qs}` : ""}`;
+    const qs = new URL(c.req.url).search;
+    const targetUrl = `${baseUrl}${path}${qs}`;
 
     // Forward headers — replace placeholder with real key, strip hop-by-hop
+    const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(c.req.header())) {
-      const lower = key.toLowerCase();
-      if (lower === "host" || lower === "content-length" || HOP_BY_HOP_HEADERS.has(lower)) {
-        continue;
-      }
+    for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = value.includes(config.llm.placeholder)
         ? value.replace(config.llm.placeholder, config.llm.apiKey)
         : value;
@@ -156,29 +178,22 @@ export function createApp(deps: AppDeps): Hono {
       ? (c.req.raw.body ?? undefined)
       : undefined;
 
-    let targetRes: Response;
-    try {
-      targetRes = await fetchFn(targetUrl, {
-        method,
-        headers: forwardedHeaders,
-        body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-        // @ts-expect-error - Bun supports duplex for streaming request bodies
-        duplex: body instanceof ReadableStream ? "half" : undefined,
-      });
-    } catch (err) {
-      return c.json(
-        { error: `LLM request failed: ${err instanceof Error ? err.message : String(err)}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "LLM request failed", targetUrl, {
+      method,
+      headers: forwardedHeaders,
+      body,
+      signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+      // @ts-expect-error - Bun supports duplex for streaming request bodies
+      duplex: body instanceof ReadableStream ? "half" : undefined,
+    });
+    if (!result.ok) return result.errorResponse;
 
     // Stream-through response (zero-copy — no buffering/truncation)
     const responseHeaders: Record<string, string> = {};
-    const ct = targetRes.headers.get("content-type");
+    const ct = result.response.headers.get("content-type");
     if (ct) responseHeaders["Content-Type"] = ct;
 
-    return c.body(targetRes.body, targetRes.status, responseHeaders);
+    return c.body(result.response.body, result.response.status, responseHeaders);
   });
 
   // Transparent credential-injecting proxy
@@ -216,7 +231,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // 3b. Check for unresolved placeholders in URL
     const unresolvedInUrl = findUnresolvedPlaceholders(resolvedUrl);
-    if (unresolvedInUrl.length > 0) {
+    if (unresolvedInUrl.length) {
       return c.json(
         { error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}` },
         400,
@@ -232,7 +247,7 @@ export function createApp(deps: AppDeps): Hono {
           403,
         );
       }
-    } else if (creds.authorizedUris && creds.authorizedUris.length > 0) {
+    } else if (creds.authorizedUris && creds.authorizedUris.length) {
       if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
         return c.json(
           {
@@ -252,19 +267,9 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 5. Build forwarded headers (remove routing + hop-by-hop headers)
+    const filtered = filterHeaders(c.req.header(), CREDENTIAL_PROXY_SKIP);
     const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(c.req.header())) {
-      const lower = key.toLowerCase();
-      if (
-        lower === "x-provider" ||
-        lower === "x-target" ||
-        lower === "x-substitute-body" ||
-        lower === "host" ||
-        lower === "content-length" ||
-        HOP_BY_HOP_HEADERS.has(lower)
-      ) {
-        continue;
-      }
+    for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = substituteVars(value, creds.credentials);
     }
 
@@ -274,7 +279,7 @@ export function createApp(deps: AppDeps): Hono {
     // 5b. Check for unresolved placeholders in headers
     for (const [key, value] of Object.entries(forwardedHeaders)) {
       const unresolved = findUnresolvedPlaceholders(value);
-      if (unresolved.length > 0) {
+      if (unresolved.length) {
         return c.json(
           { error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}` },
           400,
@@ -284,7 +289,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // 5c. Inject stored cookies from cookie jar
     const storedCookies = cookieJar.get(providerId);
-    if (storedCookies && storedCookies.length > 0) {
+    if (storedCookies && storedCookies.length) {
       const existing = forwardedHeaders["cookie"] || "";
       const merged = existing
         ? `${existing}; ${storedCookies.join("; ")}`
@@ -311,7 +316,7 @@ export function createApp(deps: AppDeps): Hono {
         body = substituteVars(rawBody, creds.credentials);
         // Check for unresolved placeholders in body
         const unresolvedInBody = findUnresolvedPlaceholders(body);
-        if (unresolvedInBody.length > 0) {
+        if (unresolvedInBody.length) {
           return c.json(
             { error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}` },
             400,
@@ -324,31 +329,22 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 7. Make the request to the target (with timeout)
-    let targetRes: Response;
-    try {
-      targetRes = await fetchFn(resolvedUrl, {
-        method,
-        headers: forwardedHeaders,
-        body,
-        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        // @ts-expect-error - Bun supports proxy option natively
-        proxy: resolvedProxy || undefined,
-        // @ts-expect-error - Bun supports duplex for streaming request bodies
-        duplex: body instanceof ReadableStream ? "half" : undefined,
-      });
-    } catch (err) {
-      const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-      let domain: string | undefined;
-      try { domain = new URL(resolvedUrl).hostname; } catch {}
-      return c.json(
-        { error: `Upstream request failed${code ? `: ${code}` : ""}${domain ? ` (${domain})` : ""}` },
-        502,
-      );
-    }
+    const result = await fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
+      method,
+      headers: forwardedHeaders,
+      body,
+      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      // @ts-expect-error - Bun supports proxy option natively
+      proxy: resolvedProxy || undefined,
+      // @ts-expect-error - Bun supports duplex for streaming request bodies
+      duplex: body instanceof ReadableStream ? "half" : undefined,
+    });
+    if (!result.ok) return result.errorResponse;
+    const targetRes = result.response;
 
     // 8. Capture Set-Cookie headers into cookie jar
     const setCookieHeaders = targetRes.headers.getSetCookie();
-    if (setCookieHeaders.length > 0) {
+    if (setCookieHeaders.length) {
       // Extract cookie name=value pairs (strip attributes like Path, Expires, etc.)
       const cookieValues = setCookieHeaders.map((h) => h.split(";")[0]!.trim());
       // Merge with existing jar: update by cookie name, keep others

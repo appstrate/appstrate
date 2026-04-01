@@ -1,24 +1,11 @@
-import { RateLimiterRedis, RateLimiterMemory } from "rate-limiter-flexible";
+import { RateLimiterRedis } from "rate-limiter-flexible";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { ApiError } from "../lib/errors.ts";
 
-/**
- * Creates a rate limiter — Redis-backed in production, in-memory for tests.
- * The `_useMemoryForTesting` flag lets tests run without Redis.
- */
-let _useMemoryForTesting = false;
-
-export function _setMemoryBackendForTesting(value: boolean): void {
-  _useMemoryForTesting = value;
-}
-
 function createLimiter(points: number, duration: number, keyPrefix: string): RateLimiterAbstract {
-  if (_useMemoryForTesting) {
-    return new RateLimiterMemory({ points, duration, keyPrefix });
-  }
   return new RateLimiterRedis({
     storeClient: getRedisConnection(),
     points,
@@ -27,14 +14,12 @@ function createLimiter(points: number, duration: number, keyPrefix: string): Rat
   });
 }
 
-let authLimiters = new Map<string, RateLimiterAbstract>();
-let bearerLimiters = new Map<string, RateLimiterAbstract>();
-let ipLimiters = new Map<string, RateLimiterAbstract>();
+/** Limiter cache keyed by category + maxPerMinute. */
+let limiters = new Map<string, RateLimiterAbstract>();
 
-export function _resetBucketsForTesting(): void {
-  authLimiters = new Map();
-  bearerLimiters = new Map();
-  ipLimiters = new Map();
+/** Reset all limiter instances — used by tests to get fresh limiters between test cases. */
+export function resetRateLimiters(): void {
+  limiters = new Map();
 }
 
 /** Extract retryAfter (seconds) from rate-limiter-flexible rejection. */
@@ -72,82 +57,85 @@ function setRateLimitHeaders(
   c.header("RateLimit-Policy", `${maxPerMinute};w=60`);
 }
 
+interface RateLimiterConfig {
+  /** Category prefix for limiter cache and Redis key prefix (e.g. "auth", "bearer", "ip"). */
+  category: string;
+  /** Extract the identity key from the request context. */
+  extractKey: (c: Context<AppEnv>) => string;
+  /** Whether to set rate-limit response headers on success. */
+  emitHeaders: boolean;
+}
+
+/**
+ * Internal factory — creates a rate-limiting middleware from a configuration.
+ * Handles limiter caching, consumption, headers, and 429 responses.
+ */
+function createRateLimitMiddleware(config: RateLimiterConfig) {
+  return (maxPerMinute: number) => {
+    return async (c: Context<AppEnv>, next: Next) => {
+      const cacheKey = `${config.category}:${maxPerMinute}`;
+      let limiter = limiters.get(cacheKey);
+      if (!limiter) {
+        limiter = createLimiter(maxPerMinute, 60, `rl:${config.category}:`);
+        limiters.set(cacheKey, limiter);
+      }
+
+      const key = config.extractKey(c);
+
+      try {
+        const res = await limiter.consume(key);
+        if (config.emitHeaders) {
+          setRateLimitHeaders(
+            c,
+            maxPerMinute,
+            res.remainingPoints,
+            Math.ceil(res.msBeforeNext / 1000),
+          );
+        }
+        return next();
+      } catch (rej) {
+        throwRateLimited(maxPerMinute, extractRetryAfter(rej));
+      }
+    };
+  };
+}
+
 /**
  * Authenticated rate limiter keyed by user ID or API key.
  */
-export function rateLimit(maxPerMinute: number) {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const limiterKey = `auth:${maxPerMinute}`;
-    let limiter = authLimiters.get(limiterKey);
-    if (!limiter) {
-      limiter = createLimiter(maxPerMinute, 60, "rl:auth:");
-      authLimiters.set(limiterKey, limiter);
-    }
-
+export const rateLimit = createRateLimitMiddleware({
+  category: "auth",
+  extractKey: (c) => {
     const user = c.get("user");
     const apiKeyId = c.get("apiKeyId");
     const identity = apiKeyId ? `apikey:${apiKeyId}` : user.id;
-    const key = `${c.req.method}:${c.req.path}:${identity}`;
-
-    try {
-      const res = await limiter.consume(key);
-      setRateLimitHeaders(c, maxPerMinute, res.remainingPoints, Math.ceil(res.msBeforeNext / 1000));
-      return next();
-    } catch (rej) {
-      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
-    }
-  };
-}
+    return `${c.req.method}:${c.req.path}:${identity}`;
+  },
+  emitHeaders: true,
+});
 
 /** Bearer token-based rate limiter for internal container routes. */
-export function rateLimitByBearer(maxPerMinute: number) {
-  return async (c: Context, next: Next) => {
-    const limiterKey = `bearer:${maxPerMinute}`;
-    let limiter = bearerLimiters.get(limiterKey);
-    if (!limiter) {
-      limiter = createLimiter(maxPerMinute, 60, "rl:bearer:");
-      bearerLimiters.set(limiterKey, limiter);
-    }
-
+export const rateLimitByBearer = createRateLimitMiddleware({
+  category: "bearer",
+  extractKey: (c) => {
     const auth = c.req.header("Authorization") ?? "";
-    // Extract executionId portion (before the HMAC dot) for unique-per-execution keying
     const token = auth.startsWith("Bearer ")
       ? (auth.slice(7).split(".")[0] ?? "unknown")
       : "unknown";
-    const key = `internal:${c.req.path}:${token}`;
-
-    try {
-      await limiter.consume(key);
-      // Bearer routes are internal — no rate-limit headers needed.
-      return next();
-    } catch (rej) {
-      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
-    }
-  };
-}
+    return `internal:${c.req.path}:${token}`;
+  },
+  emitHeaders: false,
+});
 
 /** IP-based rate limiter for public (unauthenticated) routes. */
-export function rateLimitByIp(maxPerMinute: number) {
-  return async (c: Context, next: Next) => {
-    const limiterKey = `ip:${maxPerMinute}`;
-    let limiter = ipLimiters.get(limiterKey);
-    if (!limiter) {
-      limiter = createLimiter(maxPerMinute, 60, "rl:ip:");
-      ipLimiters.set(limiterKey, limiter);
-    }
-
+export const rateLimitByIp = createRateLimitMiddleware({
+  category: "ip",
+  extractKey: (c) => {
     const ip =
       c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
       c.req.header("x-real-ip") ||
       "unknown";
-    const key = `ip:${c.req.method}:${c.req.path}:${ip}`;
-
-    try {
-      const res = await limiter.consume(key);
-      setRateLimitHeaders(c, maxPerMinute, res.remainingPoints, Math.ceil(res.msBeforeNext / 1000));
-      return next();
-    } catch (rej) {
-      throwRateLimited(maxPerMinute, extractRetryAfter(rej));
-    }
-  };
-}
+    return `ip:${c.req.method}:${c.req.path}:${ip}`;
+  },
+  emitHeaders: true,
+});

@@ -1,6 +1,8 @@
 // Only re-export types actually imported through this path (backend-only consumers).
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";
+import type { ProviderProfileSource } from "@appstrate/shared-types";
+export type { ProviderProfileSource };
 
 // --- Flow Manifest Types ---
 // Re-exported from @appstrate/validation. The FlowManifest type is Zod-inferred
@@ -18,6 +20,22 @@ export interface FlowProviderRequirement {
   scopes?: string[];
 }
 
+/**
+ * Resolved profile entry for a provider — carries both the profile ID and how it was resolved.
+ *
+ * Resolution order (highest priority first):
+ * 1. Org profile binding (`source: "org_binding"`) — admin-configured via org_profile_provider_bindings
+ * 2. Per-provider user override (`source: "user_profile"`) — user-selected via user_flow_provider_profiles
+ * 3. Default user profile (`source: "user_profile"`) — actor's default connection profile
+ */
+export interface ProviderProfileEntry {
+  profileId: string;
+  source: ProviderProfileSource;
+}
+
+/** Map of providerId → resolved profile entry. Built by resolveProviderProfiles(). */
+export type ProviderProfileMap = Record<string, ProviderProfileEntry>;
+
 // --- Loaded Package (manifest + prompt from DB) ---
 
 export interface LoadedPackage {
@@ -33,14 +51,14 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: { id: string; applicationId: string; name?: string | null; email?: string | null };
+    endUser?: { id: string; applicationId: string; name: string | null; email: string | null };
     flow: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
-    authMethod?: "session" | "api_key";
-    apiKeyId?: string;
-    applicationId?: string;
+    authMethod: "session" | "api_key";
+    apiKeyId: string | null;
+    applicationId: string | null;
     requestId: string;
     apiVersion: string;
   };

@@ -5,7 +5,6 @@
  * Each end-user gets a default connection profile on creation.
  */
 
-import { z } from "zod";
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
@@ -13,25 +12,9 @@ import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { getDefaultApplication } from "./applications.ts";
-
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-export const endUserMetadataSchema = z
-  .record(
-    z.string().min(1).max(40),
-    z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
-  )
-  .refine((obj) => Object.keys(obj).length <= 50, "Maximum 50 metadata keys");
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function generateEndUserId(): string {
-  return `eu_${crypto.randomUUID()}`;
-}
+import { prefixedId } from "../lib/ids.ts";
+import { buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -47,26 +30,13 @@ function toEndUserResponse(row: {
     id: row.id,
     object: "end_user",
     applicationId: row.applicationId,
-    name: row.name ?? null,
-    email: row.email ?? null,
-    externalId: row.externalId ?? null,
-    metadata: (row.metadata as Record<string, unknown>) ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    name: row.name,
+    email: row.email,
+    externalId: row.externalId,
+    metadata: row.metadata as Record<string, unknown> | null,
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
   };
-}
-
-export function validateMetadata(
-  metadata: unknown,
-): { valid: true; data: Record<string, unknown> } | { valid: false; message: string } {
-  if (metadata === null || metadata === undefined) {
-    return { valid: true, data: {} };
-  }
-  const result = endUserMetadataSchema.safeParse(metadata);
-  if (!result.success) {
-    return { valid: false, message: result.error.issues[0]?.message ?? "Invalid metadata" };
-  }
-  return { valid: true, data: result.data };
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +53,7 @@ export async function createEndUser(
     metadata?: Record<string, unknown>;
   },
 ): Promise<EndUserInfo> {
-  const endUserId = generateEndUserId();
+  const endUserId = prefixedId("eu");
   const now = new Date();
 
   // Resolve application: use provided or fall back to default
@@ -251,21 +221,18 @@ export async function updateEndUser(
   }
 
   // Build update set — merge metadata (Stripe pattern)
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (params.name !== undefined) updates.name = params.name;
-  if (params.email !== undefined) updates.email = params.email;
-  if (params.externalId !== undefined) updates.externalId = params.externalId;
-  if (params.metadata !== undefined) {
+  const { metadata, ...rest } = params;
+  const updates = buildUpdateSet(rest);
+  if (metadata !== undefined) {
     const [current] = await db
       .select({ metadata: endUsers.metadata })
       .from(endUsers)
       .where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)))
       .limit(1);
-    const merged = {
+    updates.metadata = {
       ...((current?.metadata as Record<string, unknown>) ?? {}),
-      ...params.metadata,
+      ...metadata,
     };
-    updates.metadata = merged;
   }
 
   const [updated] = await db
@@ -301,19 +268,6 @@ export async function findByExternalId(
     .where(and(eq(endUsers.applicationId, applicationId), eq(endUsers.externalId, externalId)))
     .limit(1);
   return row ?? null;
-}
-
-/**
- * Resolve the applicationId for an end-user. Returns null if not found.
- * Used when we need the application context but only have an end-user ID.
- */
-export async function getEndUserApplicationId(endUserId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ applicationId: endUsers.applicationId })
-    .from(endUsers)
-    .where(eq(endUsers.id, endUserId))
-    .limit(1);
-  return row?.applicationId ?? null;
 }
 
 /**

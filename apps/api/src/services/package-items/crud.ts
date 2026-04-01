@@ -9,6 +9,7 @@ import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
 import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -199,8 +200,8 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       description: m.description ?? null,
       source: row.source ?? "local",
       createdBy: row.createdBy,
-      createdAt: row.createdAt?.toISOString() ?? "",
-      updatedAt: row.updatedAt?.toISOString() ?? "",
+      createdAt: toISORequired(row.createdAt),
+      updatedAt: toISORequired(row.updatedAt),
       usedByFlows: countMap.get(row.id) ?? 0,
       version: typeof m.version === "string" ? m.version : null,
       autoInstalled: row.autoInstalled,
@@ -232,8 +233,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     content: data.draftContent,
     source: data.source ?? "local",
     createdBy: data.createdBy,
-    createdAt: data.createdAt?.toISOString() ?? "",
-    updatedAt: data.updatedAt?.toISOString() ?? "",
+    createdAt: toISORequired(data.createdAt),
+    updatedAt: toISORequired(data.updatedAt),
     autoInstalled: data.autoInstalled,
     version: typeof m.version === "string" ? m.version : null,
     manifestName: typeof m.name === "string" ? m.name : null,

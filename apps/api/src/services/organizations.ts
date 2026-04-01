@@ -1,5 +1,6 @@
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
 import {
   organizations,
   organizationMembers,
@@ -30,8 +31,8 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     name: row.name,
     slug: row.slug,
     createdBy: row.createdBy ?? "",
-    createdAt: row.createdAt?.toISOString() ?? "",
-    updatedAt: row.updatedAt?.toISOString() ?? "",
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
   };
 }
 
@@ -193,9 +194,10 @@ export async function addMember(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("duplicate key") || message.includes("unique constraint")) {
-      throw new Error("This user is already a member of this organization", { cause: err });
+      // User is already a member — idempotent, silently ignore
+      return;
     }
-    throw new Error(`Failed to add member: ${message}`, { cause: err });
+    throw err;
   }
 }
 
@@ -258,7 +260,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     await tx.delete(packages).where(eq(packages.orgId, orgId));
     // userProviderConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
-    // organization_members cascades from organizations (onDelete: "cascade")
+    // org_members cascades from organizations (onDelete: "cascade")
 
     const deleted = await tx
       .delete(organizations)

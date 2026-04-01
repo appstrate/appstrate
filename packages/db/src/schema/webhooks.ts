@@ -15,7 +15,7 @@ export const webhooks = pgTable(
     }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["execution.completed", "execution.failed"]
-    packageId: text("flow_id"), // null = all packages (column kept as flow_id for existing migrations)
+    packageId: text("package_id"), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     active: boolean("active").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)

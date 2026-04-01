@@ -2,32 +2,38 @@ import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageSchedules, user } from "@appstrate/db/schema";
+import {
+  packageSchedules,
+  connectionProfiles as connectionProfilesTable,
+  userProviderConnections,
+} from "@appstrate/db/schema";
+import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createExecution } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import {
-  buildExecutionContext,
-  resolvePreflightContext,
-  ModelNotConfiguredError,
-} from "./env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
+import { getPackageConfig } from "./state/index.ts";
+import { validateFlowReadiness } from "./flow-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
-import { getProfileById, resolveProviderProfiles } from "./connection-profiles.ts";
-import type { LoadedPackage } from "../types/index.ts";
+import {
+  getProfileByIdUnsafe,
+  resolveProviderProfiles,
+  getFlowOrgProfile,
+} from "./connection-profiles.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { getConnection } from "@appstrate/connect";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningExecutionCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -209,7 +215,7 @@ async function triggerScheduledExecution(
     }
 
     // Resolve actor from connection profile (null for org profiles)
-    const profile = await getProfileById(connectionProfileId);
+    const profile = await getProfileByIdUnsafe(connectionProfileId);
     if (!profile) {
       logger.warn("Connection profile not found, skipping schedule", {
         scheduleId,
@@ -218,23 +224,44 @@ async function triggerScheduledExecution(
       return;
     }
 
-    const actor: Actor | null = profile.userId
-      ? { type: "member", id: profile.userId }
-      : profile.endUserId
-        ? { type: "end_user", id: profile.endUserId }
-        : null;
+    const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Resolve provider profiles, config, and validate readiness
-    let providerProfiles: Record<string, string>;
+    // Load the flow's admin-configured org profile (validates it still exists)
+    const flowOrgProfile = await getFlowOrgProfile(orgId, packageId);
+    const flowOrgProfileId = flowOrgProfile?.id ?? null;
+
+    // Resolve provider profiles, config, and validate readiness (inlined preflight).
+    // Schedules don't support per-provider overrides — the schedule's connectionProfileId
+    // is used as the default for all unbound providers.
+    let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
+    let preflightModelId: string | null;
+    let preflightProxyId: string | null;
     try {
-      ({ providerProfiles, config } = await resolvePreflightContext({
+      const manifestProviders = resolveManifestProviders(flow.manifest);
+
+      const [resolvedProfiles, packageConfig] = await Promise.all([
+        resolveProviderProfiles(
+          manifestProviders,
+          connectionProfileId,
+          undefined,
+          flowOrgProfileId,
+          orgId,
+        ),
+        getPackageConfig(orgId, packageId),
+      ]);
+
+      await validateFlowReadiness({
         flow,
-        actor,
-        packageId,
+        providerProfiles: resolvedProfiles,
         orgId,
-        profileIdOverride: connectionProfileId,
-      }));
+        config: packageConfig.config,
+      });
+
+      providerProfiles = resolvedProfiles;
+      config = packageConfig.config;
+      preflightModelId = packageConfig.modelId;
+      preflightProxyId = packageConfig.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Flow readiness check failed, skipping schedule", {
@@ -280,6 +307,8 @@ async function triggerScheduledExecution(
           actor,
           input,
           config,
+          modelId: preflightModelId,
+          proxyId: preflightProxyId,
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {
@@ -313,6 +342,11 @@ async function triggerScheduledExecution(
       }
     }
 
+    // Extract just the profileId map (strip source field)
+    const profileIdMap = Object.fromEntries(
+      Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+    );
+
     // Create execution record with schedule_id and version
     await createExecution(
       executionId,
@@ -325,6 +359,8 @@ async function triggerScheduledExecution(
       connectionProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      undefined,
+      profileIdMap,
     );
 
     logger.info("Triggering scheduled execution", {
@@ -336,14 +372,12 @@ async function triggerScheduledExecution(
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, actor, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in scheduled execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(executionId, orgId, flow, promptContext, flowPackage).catch((err) => {
+      logger.error("Unhandled error in scheduled execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
@@ -412,22 +446,48 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
+  // Schedule profile: if org profile, all providers must be bound (no user fallback).
+  // If user profile, all providers use it directly.
+  const isOrgProfile = !!profile.orgId;
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    null,
-    schedule.packageId,
+    isOrgProfile ? null : schedule.connectionProfileId, // org profiles have no user fallback
+    undefined, // no per-provider overrides for schedules
+    isOrgProfile ? schedule.connectionProfileId : null,
     orgId,
-    schedule.connectionProfileId,
   );
 
-  const results = await Promise.all(
-    providers.map(async (p) => {
-      const sourceProfileId = providerProfiles[p.id];
-      if (!sourceProfileId) return { id: p.id, connected: false };
-      const conn = await getConnection(db, sourceProfileId, p.id, orgId);
-      return { id: p.id, connected: !!conn };
-    }),
-  );
+  // Batch-fetch all connections for resolved profile IDs in one query
+  const resolvedProfileIds = [
+    ...new Set(
+      providers.map((p) => providerProfiles[p.id]?.profileId).filter((id): id is string => !!id),
+    ),
+  ];
+
+  const connectionMap = new Map<string, boolean>();
+  if (resolvedProfileIds.length > 0) {
+    const connRows = await db
+      .select({
+        profileId: userProviderConnections.profileId,
+        providerId: userProviderConnections.providerId,
+      })
+      .from(userProviderConnections)
+      .where(
+        and(
+          inArray(userProviderConnections.profileId, resolvedProfileIds),
+          eq(userProviderConnections.orgId, orgId),
+        ),
+      );
+    for (const row of connRows) {
+      connectionMap.set(`${row.profileId}:${row.providerId}`, true);
+    }
+  }
+
+  const results = providers.map((p) => {
+    const sourceProfileId = providerProfiles[p.id]?.profileId;
+    if (!sourceProfileId) return { id: p.id, connected: false };
+    return { id: p.id, connected: connectionMap.has(`${sourceProfileId}:${p.id}`) };
+  });
 
   const missing = results.filter((r) => !r.connected).map((r) => r.id);
   const connected = results.filter((r) => r.connected).length;
@@ -447,23 +507,19 @@ async function computeScheduleReadiness(
 async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
-  // Batch load unique profiles
+  // Batch load unique profiles in one query
   const profileIds = [...new Set(schedules.map((s) => s.connectionProfileId))];
-  const profiles = await Promise.all(profileIds.map((id) => getProfileById(id)));
-  const profileMap = new Map(profileIds.map((id, i) => [id, profiles[i] ?? null]));
+  const profileRows = await db
+    .select()
+    .from(connectionProfilesTable)
+    .where(inArray(connectionProfilesTable.id, profileIds));
+  const profileMap = new Map<string, ConnectionProfile | null>(
+    profileIds.map((id) => [id, profileRows.find((r) => r.id === id) ?? null]),
+  );
 
   // Batch load user names for user-owned profiles
-  const userIds = [...new Set(profiles.filter((p) => p?.userId).map((p) => p!.userId!))];
-  const userNameMap = new Map<string, string>();
-  if (userIds.length > 0) {
-    const userRows = await db
-      .select({ id: user.id, name: user.name })
-      .from(user)
-      .where(inArray(user.id, userIds));
-    for (const u of userRows) {
-      if (u.name) userNameMap.set(u.id, u.name);
-    }
-  }
+  const userIds = [...new Set(profileRows.filter((p) => p.userId).map((p) => p.userId!))];
+  const userNameMap = await batchLoadUserNames(userIds);
 
   // Batch load unique flows
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
@@ -486,7 +542,12 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
         }
       }
 
-      const readiness = await computeScheduleReadiness(schedule, profile ?? null, flow ?? null, orgId);
+      const readiness = await computeScheduleReadiness(
+        schedule,
+        profile ?? null,
+        flow ?? null,
+        orgId,
+      );
       return { ...schedule, profileName, profileType, profileOwnerName, readiness };
     }),
   );
@@ -526,7 +587,7 @@ export async function createSchedule(
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create schedule: no row returned");
+    throw internalError();
   }
   const schedule = toSchedule(row);
 
@@ -554,7 +615,7 @@ export async function updateSchedule(
   const enabled = data.enabled ?? existing.enabled;
 
   // Compute next run (cron parsing only)
-  const nextRun = enabled ? computeNextRun(cronExpr, tz) : null;
+  const nextRun = enabled ? computeNextRun(cronExpr, tz ?? "UTC") : null;
 
   const payload: Record<string, unknown> = {
     cronExpression: cronExpr,
@@ -575,7 +636,7 @@ export async function updateSchedule(
     .returning();
 
   if (!row) {
-    throw new Error(`Failed to update schedule ${id}: no row returned`);
+    throw internalError();
   }
   const schedule = toSchedule(row);
 

@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq, and, sql } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { packages, packageConfigs } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
@@ -15,6 +18,7 @@ import {
   renameOrgProfile,
   deleteOrgProfile,
   listOrgProfilesWithUserBindings,
+  getOrgMemberProfile,
 } from "../services/connection-profiles.ts";
 import {
   listAllActorConnections,
@@ -28,10 +32,16 @@ import {
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections } from "@appstrate/connect";
-import { db } from "@appstrate/db/client";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+
+async function requireOrgProfile(profileId: string, orgId: string) {
+  const profile = await getOrgProfile(profileId, orgId);
+  if (!profile) throw notFound("Profile not found");
+  return profile;
+}
 
 export function createConnectionProfilesRouter() {
   const router = new Hono<AppEnv>();
@@ -44,7 +54,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles — create a new profile
-  router.post("/", async (c) => {
+  router.post("/", rateLimit(10), async (c) => {
     const actor = getActor(c);
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -84,7 +94,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org — create an org profile (admin only)
-  router.post("/org", requireAdmin(), async (c) => {
+  router.post("/org", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -122,27 +132,39 @@ export function createConnectionProfilesRouter() {
     }
   });
 
+  // GET /api/connection-profiles/org/:id/flows — list flows using this org profile
+  router.get("/org/:id/flows", async (c) => {
+    const orgId = c.get("orgId");
+    const profileId = c.req.param("id")!;
+    await requireOrgProfile(profileId, orgId);
+
+    const rows = await db
+      .select({
+        id: packages.id,
+        displayName: sql<string>`${packages.draftManifest}->>'displayName'`,
+      })
+      .from(packageConfigs)
+      .innerJoin(packages, eq(packages.id, packageConfigs.packageId))
+      .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.orgProfileId, profileId)));
+
+    return c.json({ flows: rows });
+  });
+
   // GET /api/connection-profiles/org/:id/bindings — list provider bindings for an org profile
   router.get("/org/:id/bindings", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
-    const bindings = await getOrgProfileBindingsEnriched(profileId);
+    await requireOrgProfile(profileId, orgId);
+    const bindings = await getOrgProfileBindingsEnriched(profileId, orgId);
     return c.json({ bindings });
   });
 
   // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
-  router.post("/org/:id/bind", async (c) => {
+  router.post("/org/:id/bind", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
 
     const body = await c.req.json();
     const data = parseBody(
@@ -171,14 +193,11 @@ export function createConnectionProfilesRouter() {
   });
 
   // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
-  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", async (c) => {
+  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-    const profile = await getOrgProfile(profileId, orgId);
-    if (!profile) {
-      throw notFound("Profile not found");
-    }
+    await requireOrgProfile(profileId, orgId);
     await unbindOrgProfileProvider(profileId, providerId);
     return c.json({ unbound: true });
   });
@@ -219,10 +238,12 @@ export function createConnectionProfilesRouter() {
   router.get("/:id/connections", async (c) => {
     const actor = getActor(c);
     const profileId = c.req.param("id")!;
-    // Verify the profile belongs to the authenticated actor or the org
     const orgId = c.get("orgId");
+    // Allow access if: own profile, org profile, or profile of another org member (read-only view)
     const profile =
-      (await getProfileForActor(profileId, actor)) ?? (await getOrgProfile(profileId, orgId));
+      (await getProfileForActor(profileId, actor)) ??
+      (await getOrgProfile(profileId, orgId)) ??
+      (await getOrgMemberProfile(profileId, orgId));
     if (!profile) {
       throw notFound("Profile not found");
     }

@@ -29,7 +29,7 @@ import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
-import connectionsRouter from "./routes/connections.ts";
+import { createConnectionsRouter } from "./routes/connections.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -217,11 +217,9 @@ app.use("*", async (c, next) => {
 });
 
 // API versioning: resolve Appstrate-Version header > org setting > default
-const apiVersionMiddleware = apiVersion({
-  getOrgApiVersion: async (orgId) => {
-    const settings = await getOrgSettings(orgId);
-    return settings.apiVersion ?? null;
-  },
+const apiVersionMiddleware = apiVersion(async (orgId) => {
+  const settings = await getOrgSettings(orgId);
+  return settings.apiVersion ?? null;
 });
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path)) return next();
@@ -268,7 +266,7 @@ app.route("/api/applications", createApplicationsRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
-app.route("/api/connections", connectionsRouter);
+app.route("/api/connections", createConnectionsRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);

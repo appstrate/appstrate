@@ -2,40 +2,26 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { modelCostSchema, type ModelCost } from "./adapters/types.ts";
+import type { ModelCost } from "./adapters/types.ts";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
-
-function parseStringArray(val: unknown): string[] | null {
-  if (val === null || val === undefined) return null;
-  if (Array.isArray(val) && val.every((v) => typeof v === "string")) return val;
-  return null;
-}
-
-function parseModelCost(val: unknown): ModelCost | null {
-  if (val === null || val === undefined) return null;
-  const result = modelCostSchema.safeParse(val);
-  return result.success ? result.data : null;
-}
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
 
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
-  const result: OrgModelInfo[] = [];
-
-  // DB models for this org
   const rows = await db.select().from(orgModels).where(eq(orgModels.orgId, orgId));
-
-  // Check if org has its own default set
   const orgHasDefault = rows.some((r) => r.isDefault);
+  const now = toISORequired(new Date());
 
-  // System models first
-  const now = new Date().toISOString();
-  for (const [id, def] of system) {
-    result.push({
+  return mergeSystemAndDb({
+    system,
+    rows,
+    mapSystem: (id, def) => ({
       id,
       label: def.label,
       api: def.api,
@@ -48,41 +34,34 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       cost: def.cost ?? null,
       enabled: def.enabled !== false,
       isDefault: !orgHasDefault && def.isDefault === true,
-      source: "built-in",
+      source: "built-in" as const,
       providerKeyId: def.providerKeyId,
       providerKeyLabel: null,
       createdBy: null,
       createdAt: now,
       updatedAt: now,
-    });
-  }
-
-  // DB models (skip if ID conflicts with system model)
-  for (const row of rows) {
-    if (system.has(row.id)) continue;
-    result.push({
+    }),
+    mapRow: (row) => ({
       id: row.id,
       label: row.label,
       api: row.api,
       baseUrl: row.baseUrl,
       modelId: row.modelId,
-      input: parseStringArray(row.input),
+      input: row.input as string[] | null,
       contextWindow: row.contextWindow,
       maxTokens: row.maxTokens,
       reasoning: row.reasoning,
-      cost: parseModelCost(row.cost) ?? null,
+      cost: row.cost as ModelCost | null,
       enabled: row.enabled,
       isDefault: row.isDefault,
-      source: row.source === "built-in" || row.source === "custom" ? row.source : "custom",
+      source: row.source as "custom" | "built-in",
       providerKeyId: row.providerKeyId,
       providerKeyLabel: null,
       createdBy: row.createdBy,
-      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
-      updatedAt: row.updatedAt?.toISOString() ?? new Date().toISOString(),
-    });
-  }
-
-  return result;
+      createdAt: toISORequired(row.createdAt),
+      updatedAt: toISORequired(row.updatedAt),
+    }),
+  });
 }
 
 // --- CRUD (DB models only) ---
@@ -154,18 +133,7 @@ export async function updateOrgModel(
     throw new Error("Cannot modify built-in model");
   }
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (data.label !== undefined) updates.label = data.label;
-  if (data.api !== undefined) updates.api = data.api;
-  if (data.baseUrl !== undefined) updates.baseUrl = data.baseUrl;
-  if (data.modelId !== undefined) updates.modelId = data.modelId;
-  if (data.providerKeyId !== undefined) updates.providerKeyId = data.providerKeyId;
-  if (data.enabled !== undefined) updates.enabled = data.enabled;
-  if (data.input !== undefined) updates.input = data.input;
-  if (data.contextWindow !== undefined) updates.contextWindow = data.contextWindow;
-  if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens;
-  if (data.reasoning !== undefined) updates.reasoning = data.reasoning;
-  if (data.cost !== undefined) updates.cost = data.cost;
+  const updates = buildUpdateSet(data);
 
   await db
     .update(orgModels)
@@ -261,11 +229,11 @@ export async function resolveModel(
         modelId: dbDefault.modelId,
         apiKey: creds.apiKey,
         label: dbDefault.label,
-        input: parseStringArray(dbDefault.input),
+        input: dbDefault.input as string[] | null,
         contextWindow: dbDefault.contextWindow,
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
-        cost: parseModelCost(dbDefault.cost) ?? null,
+        cost: dbDefault.cost as ModelCost | null,
       };
     }
   }
@@ -320,11 +288,11 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     modelId: row.modelId,
     apiKey: creds.apiKey,
     label: row.label,
-    input: parseStringArray(row.input),
+    input: row.input as string[] | null,
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
-    cost: parseModelCost(row.cost) ?? null,
+    cost: row.cost as ModelCost | null,
   };
 }
 

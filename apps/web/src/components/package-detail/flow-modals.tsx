@@ -1,7 +1,6 @@
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";
-import { useCurrentProfileId, profileIdParam } from "../../hooks/use-current-profile";
 import { useFlowDetailUI } from "../../stores/flow-detail-ui-store";
 import { ApiKeyModal } from "../api-key-modal";
 import { CustomCredentialsModal } from "../custom-credentials-modal";
@@ -9,8 +8,6 @@ import { CustomCredentialsModal } from "../custom-credentials-modal";
 export function FlowModals({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("flow", packageId);
   const populatedProviders = detail?.populatedProviders;
-  const profileId = useCurrentProfileId();
-  const pParam = profileIdParam(profileId);
 
   const apiKeyMutation = useConnectApiKey();
   const credentialsMutation = useConnectCredentials();
@@ -23,8 +20,7 @@ export function FlowModals({ packageId }: { packageId: string }) {
   const customCredProviderDef = customCredService
     ? populatedProviders?.[customCredService.provider]
     : undefined;
-  const customCredSchema =
-    (customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined) ?? undefined;
+  const customCredSchema = customCredProviderDef?.credentialSchema as JSONSchemaObject | undefined;
 
   return (
     <>
@@ -36,7 +32,7 @@ export function FlowModals({ packageId }: { packageId: string }) {
         onSubmit={(apiKey) => {
           if (apiKeyService) {
             apiKeyMutation.mutate(
-              { provider: apiKeyService.provider, apiKey, ...pParam },
+              { provider: apiKeyService.provider, apiKey },
               { onSuccess: () => setApiKeyService(null) },
             );
           }
@@ -52,7 +48,7 @@ export function FlowModals({ packageId }: { packageId: string }) {
           isPending={credentialsMutation.isPending}
           onSubmit={(credentials) => {
             credentialsMutation.mutate(
-              { provider: customCredService.provider, credentials, ...pParam },
+              { provider: customCredService.provider, credentials },
               { onSuccess: () => setCustomCredService(null) },
             );
           }}

@@ -45,6 +45,6 @@
     "runtime-pi/sidecar"
   ],
   "dependencies": {
-    "@appstrate/core": "2.9.5"
+    "@appstrate/core": "2.9.7"
   }
 }

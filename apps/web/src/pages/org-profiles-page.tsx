@@ -44,6 +44,7 @@ export function OrgProfilesPage() {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder={t("orgProfiles.namePlaceholder")}
+                aria-label={t("orgProfiles.namePlaceholder")}
                 className="h-9 w-48"
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
