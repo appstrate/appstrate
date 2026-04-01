@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,6 +33,7 @@ import { MoreHorizontal, Pencil, Trash2, Play, Pause, Calendar, Clock } from "lu
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
+  const { isMember } = usePermissions();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -72,32 +74,34 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <MoreHorizontal size={16} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
-                    <Pencil size={14} />
-                    {t("schedule.edit")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
-                    {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-                    {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() => setConfirmOpen(true)}
-                    disabled={deleteSchedule.isPending}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("schedule.delete")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {isMember && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon">
+                      <MoreHorizontal size={16} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
+                      <Pencil size={14} />
+                      {t("schedule.edit")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
+                      {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+                      {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => setConfirmOpen(true)}
+                      disabled={deleteSchedule.isPending}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 size={14} />
+                      {t("schedule.delete")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </>
           }
         >

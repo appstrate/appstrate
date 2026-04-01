@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
@@ -9,6 +10,7 @@ import { isFileField } from "@appstrate/core/form";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["flows", "common"]);
+  const { isMember } = usePermissions();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
@@ -17,6 +19,7 @@ export function ScheduleEditPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
+  if (!isMember) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
 

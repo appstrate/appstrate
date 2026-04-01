@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Users, KeyRound, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
+import { usePermissions } from "../hooks/use-permissions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,9 +28,10 @@ export function NavApp() {
   const location = useLocation();
   const { isMobile } = useSidebar();
 
+  const { isAdmin } = usePermissions();
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
 
-  if (!currentApp) return null;
+  if (!currentApp || !isAdmin) return null;
 
   const items = [
     { path: "/end-users", label: t("nav.endUsers"), icon: Users },

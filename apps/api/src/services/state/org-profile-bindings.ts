@@ -119,6 +119,24 @@ export async function bindOrgProfileProvider(
     });
 }
 
+/** Get the userId who created a binding (null if no binding exists). */
+export async function getBindingOwner(
+  orgProfileId: string,
+  providerId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ boundByUserId: orgProfileProviderBindings.boundByUserId })
+    .from(orgProfileProviderBindings)
+    .where(
+      and(
+        eq(orgProfileProviderBindings.orgProfileId, orgProfileId),
+        eq(orgProfileProviderBindings.providerId, providerId),
+      ),
+    )
+    .limit(1);
+  return row?.boundByUserId ?? null;
+}
+
 /** Unbind a provider from an org profile. */
 export async function unbindOrgProfileProvider(
   orgProfileId: string,

@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, Users } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
@@ -13,6 +14,7 @@ import { EndUserDetailModal } from "../components/end-user-detail-modal";
 
 export function EndUsersPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const appId = useCurrentApplicationId();
 
   const [search, setSearch] = useState("");
@@ -41,6 +43,7 @@ export function EndUsersPage() {
     );
   }, [endUsers, search]);
 
+  if (!isAdmin) return null;
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
   if (error) return <ErrorState message={error.message} />;
 

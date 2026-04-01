@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { usePermissions } from "../hooks/use-permissions";
 import { useFlows, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
@@ -10,6 +11,7 @@ import { isFileField } from "@appstrate/core/form";
 
 export function ScheduleCreatePage() {
   const { t } = useTranslation(["flows", "common"]);
+  const { isMember } = usePermissions();
   const navigate = useNavigate();
 
   const { data: flows, isLoading: flowsLoading } = useFlows();
@@ -20,6 +22,7 @@ export function ScheduleCreatePage() {
   const { data: flowDetail } = usePackageDetail("flow", effectiveFlowId || undefined);
   const createSchedule = useCreateSchedule(effectiveFlowId);
 
+  if (!isMember) return null;
   if (flowsLoading) return <LoadingState />;
 
   const inputSchema = flowDetail?.input?.schema;

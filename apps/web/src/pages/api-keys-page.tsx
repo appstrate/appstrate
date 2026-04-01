@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +28,14 @@ function isExpired(expiresAt: string | null): boolean {
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const appId = useCurrentApplicationId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const revokeApiKeyMutation = useRevokeApiKey();
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
+  if (!isAdmin) return null;
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;

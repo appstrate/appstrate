@@ -23,6 +23,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "../modal";
 import { JsonView } from "../json-view";
 import { packageEditPath } from "../../lib/package-paths";
+import { usePermissions } from "../../hooks/use-permissions";
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -80,10 +81,11 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["flows", "common", "settings"]);
   const navigate = useNavigate();
+  const { isAdmin, isMember } = usePermissions();
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
   const isFlow = type === "flow";
-  const isMutable = !isBuiltIn && !isHistoricalVersion && isOwned;
+  const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
 
   if (!isFlow && !manifest) return null;
 
@@ -132,7 +134,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Fork (non-owned packages, including system) ── */}
-          {!isOwned && onFork && (
+          {isMember && !isOwned && onFork && (
             <DropdownMenuItem onSelect={onFork}>
               <GitFork size={14} />
               {t("fork.button")}
@@ -143,13 +145,13 @@ export function PackageActionsDropdown({
           {isFlow && (
             <>
               <DropdownMenuSeparator />
-              {!hasFileInput && onAddSchedule && (
+              {isMember && !hasFileInput && onAddSchedule && (
                 <DropdownMenuItem onSelect={onAddSchedule}>
                   <CalendarPlus size={14} />
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {hasExecutions && onDeleteExecutions && (
+              {isAdmin && hasExecutions && onDeleteExecutions && (
                 <DropdownMenuItem
                   onSelect={onDeleteExecutions}
                   disabled={runningExecutions > 0}
@@ -159,7 +161,7 @@ export function PackageActionsDropdown({
                   {t("detail.clearExec")}
                 </DropdownMenuItem>
               )}
-              {hasMemories && onDeleteMemories && (
+              {isAdmin && hasMemories && onDeleteMemories && (
                 <DropdownMenuItem
                   onSelect={onDeleteMemories}
                   className="text-destructive focus:text-destructive"
@@ -172,7 +174,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete credentials (provider-only) ── */}
-          {type === "provider" && hasCredentials && onDeleteCredentials && (
+          {isAdmin && type === "provider" && hasCredentials && onDeleteCredentials && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -186,7 +188,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete ── */}
-          {!isBuiltIn && isOwned && (
+          {isAdmin && !isBuiltIn && isOwned && (
             <>
               <DropdownMenuSeparator />
               {isFlow && onDeleteFlow && (

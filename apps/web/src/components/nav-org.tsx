@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useFlows } from "../hooks/use-packages";
+import { usePermissions } from "../hooks/use-permissions";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -28,6 +29,7 @@ export function NavOrg() {
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: flows } = useFlows();
+  const { isAdmin } = usePermissions();
 
   const hasRunning = flows?.some((f) => f.runningExecutions > 0) ?? false;
   const unread = unreadCount ?? 0;
@@ -92,30 +94,34 @@ export function NavOrg() {
             </>
           )}
         </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            asChild
-            isActive={location.pathname.startsWith("/webhooks")}
-            tooltip={t("nav.webhooks")}
-          >
-            <Link to="/webhooks">
-              <Webhook />
-              <span>{t("nav.webhooks")}</span>
-            </Link>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            asChild
-            isActive={location.pathname.startsWith("/org-settings")}
-            tooltip={t("nav.settings")}
-          >
-            <Link to="/org-settings">
-              <Settings />
-              <span>{t("nav.settings")}</span>
-            </Link>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+        {isAdmin && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={location.pathname.startsWith("/webhooks")}
+              tooltip={t("nav.webhooks")}
+            >
+              <Link to="/webhooks">
+                <Webhook />
+                <span>{t("nav.webhooks")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
+        {isAdmin && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={location.pathname.startsWith("/org-settings")}
+              tooltip={t("nav.settings")}
+            >
+              <Link to="/org-settings">
+                <Settings />
+                <span>{t("nav.settings")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
       </SidebarMenu>
     </SidebarGroup>
   );

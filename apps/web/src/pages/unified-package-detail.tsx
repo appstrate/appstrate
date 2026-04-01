@@ -13,6 +13,7 @@ import {
 import type { FlowDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageOwnership } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
@@ -139,6 +140,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
   const { isOwned } = usePackageOwnership(packageId);
+  const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
   const resetUI = useFlowDetailUI((s) => s.reset);
 
@@ -272,7 +274,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   );
   // Override showConfigTab for historical versions with their own config schema
   const effectiveShowConfigTab =
-    type === "flow" && (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
+    isAdmin &&
+    type === "flow" &&
+    (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
@@ -333,7 +337,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
-    ...(type === "provider"
+    ...(isAdmin && type === "provider"
       ? [
           {
             id: "configuration" as DetailTab,

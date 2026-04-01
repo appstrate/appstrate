@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { AppWindow, Plus, X } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ interface SettingsFormData {
 
 export function AppSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const navigate = useNavigate();
   const appId = useCurrentApplicationId();
 
@@ -40,6 +42,7 @@ export function AppSettingsPage() {
     values: { name: application?.name ?? "" },
   });
 
+  if (!isAdmin) return null;
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;

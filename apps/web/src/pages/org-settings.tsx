@@ -81,8 +81,8 @@ export function OrgSettingsPage() {
     "general",
     "members",
     "profiles",
-    ...(features.models ? ["models" as const] : []),
-    "proxies",
+    ...(isAdmin && features.models ? ["models" as const] : []),
+    ...(isAdmin ? ["proxies" as const] : []),
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
   type Tab = "general" | "members" | "profiles" | "models" | "proxies" | "billing";
@@ -262,6 +262,8 @@ export function OrgSettingsPage() {
 
   // --- Guards ---
 
+  if (!isAdmin) return null;
+
   if (!currentOrg) {
     return <EmptyState message={t("orgSettings.noOrg")} icon={Building} />;
   }
@@ -310,8 +312,10 @@ export function OrgSettingsPage() {
               {t("orgSettings.tabMembers", { count: members.length })}
             </TabsTrigger>
             <TabsTrigger value="profiles">{t("orgSettings.tabProfiles")}</TabsTrigger>
-            {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
-            <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
+            {isAdmin && features.models && (
+              <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>
+            )}
+            {isAdmin && <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>}
             {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
           </TabsList>
         </Tabs>
@@ -394,45 +398,47 @@ export function OrgSettingsPage() {
       {tab === "members" && (
         <>
           {/* Add member form */}
-          <form
-            onSubmit={inviteForm.handleSubmit(handleInvite)}
-            className="flex gap-2 mb-4 items-start"
-          >
-            <div className="flex-1">
-              <div className="flex gap-2">
-                <Input
-                  type="email"
-                  {...inviteForm.register("email", { required: true })}
-                  placeholder="email@example.com"
-                />
-                <Select
-                  value={inviteRole}
-                  onValueChange={(v) =>
-                    inviteForm.setValue("role", v as "viewer" | "member" | "admin")
-                  }
-                >
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INVITE_ROLES.map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {t(roleI18nKey(r))}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          {isAdmin && (
+            <form
+              onSubmit={inviteForm.handleSubmit(handleInvite)}
+              className="flex gap-2 mb-4 items-start"
+            >
+              <div className="flex-1">
+                <div className="flex gap-2">
+                  <Input
+                    type="email"
+                    {...inviteForm.register("email", { required: true })}
+                    placeholder="email@example.com"
+                  />
+                  <Select
+                    value={inviteRole}
+                    onValueChange={(v) =>
+                      inviteForm.setValue("role", v as "viewer" | "member" | "admin")
+                    }
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INVITE_ROLES.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {t(roleI18nKey(r))}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {inviteForm.formState.errors.root && (
+                  <p className="text-sm text-destructive mt-1">
+                    {inviteForm.formState.errors.root.message}
+                  </p>
+                )}
               </div>
-              {inviteForm.formState.errors.root && (
-                <p className="text-sm text-destructive mt-1">
-                  {inviteForm.formState.errors.root.message}
-                </p>
-              )}
-            </div>
-            <Button type="submit" disabled={addMemberMutation.isPending}>
-              {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
-            </Button>
-          </form>
+              <Button type="submit" disabled={addMemberMutation.isPending}>
+                {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
+              </Button>
+            </form>
+          )}
 
           {/* Member list */}
           <div className="flex flex-col gap-3">
@@ -538,15 +544,17 @@ export function OrgSettingsPage() {
                         </Select>
                       )}
                       <CopyLinkButton token={inv.token} />
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="ml-auto"
-                        onClick={() => cancelInvitationMutation.mutate(inv.id)}
-                        disabled={cancelInvitationMutation.isPending}
-                      >
-                        {t("btn.cancel")}
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="ml-auto"
+                          onClick={() => cancelInvitationMutation.mutate(inv.id)}
+                          disabled={cancelInvitationMutation.isPending}
+                        >
+                          {t("btn.cancel")}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

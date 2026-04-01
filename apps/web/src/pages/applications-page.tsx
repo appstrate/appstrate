@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
 import { AppWindow, Settings } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApplications } from "../hooks/use-applications";
@@ -13,9 +14,12 @@ import { ApplicationCreateModal } from "../components/application-create-modal";
 
 export function ApplicationsPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const { data: applications, isLoading, error } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
+
+  if (!isAdmin) return null;
 
   const handleAppClick = (appId: string) => {
     setCurrentApplicationId(appId);
