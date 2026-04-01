@@ -18,6 +18,15 @@ export interface FlowProviderRequirement {
   scopes?: string[];
 }
 
+/** Resolved profile entry for a provider — carries both the profile ID and how it was resolved. */
+export interface ProviderProfileEntry {
+  profileId: string;
+  source: "org_binding" | "user_profile";
+}
+
+/** Map of providerId → resolved profile entry. */
+export type ProviderProfileMap = Record<string, ProviderProfileEntry>;
+
 // --- Loaded Package (manifest + prompt from DB) ---
 
 export interface LoadedPackage {

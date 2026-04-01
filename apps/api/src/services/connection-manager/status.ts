@@ -1,5 +1,5 @@
 import { db } from "@appstrate/db/client";
-import type { FlowProviderRequirement } from "../../types/index.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
 import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
 import { getConnection, validateScopes } from "@appstrate/connect";
 import { getProviderAuthMode } from "./providers.ts";
@@ -56,7 +56,7 @@ function buildScopeInfo(
  */
 export async function resolveProviderStatuses(
   providers: FlowProviderRequirement[],
-  providerProfiles: Record<string, string>,
+  providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<ProviderStatus[]> {
   return Promise.all(
@@ -70,9 +70,9 @@ export async function resolveProviderStatuses(
       const authMode = await getProviderAuthMode(svc.id, orgId);
       const label = authModeLabel(authMode);
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
-      const profileId = providerProfiles[svc.id];
+      const entry = providerProfiles[svc.id];
 
-      if (!profileId) {
+      if (!entry) {
         return {
           ...base,
           status: "not_connected" as const,
@@ -81,12 +81,13 @@ export async function resolveProviderStatuses(
         };
       }
 
-      const conn = await getConnectionStatus(svc.id, profileId, orgId);
+      const conn = await getConnectionStatus(svc.id, entry.profileId, orgId);
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {
         ...base,
         status: conn.status,
         authMode: label,
+        source: entry.source,
         ...buildScopeInfo(connScopesGranted, scopesRequired, conn.status === "connected"),
       };
     }),

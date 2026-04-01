@@ -17,7 +17,7 @@ import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { getProfileById, resolveProviderProfiles } from "./connection-profiles.ts";
-import type { LoadedPackage } from "../types/index.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { getConnection } from "@appstrate/connect";
 import { ApiError } from "../lib/errors.ts";
@@ -225,7 +225,7 @@ async function triggerScheduledExecution(
         : null;
 
     // Resolve provider profiles, config, and validate readiness
-    let providerProfiles: Record<string, string>;
+    let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     try {
       ({ providerProfiles, config } = await resolvePreflightContext({
@@ -422,7 +422,7 @@ async function computeScheduleReadiness(
 
   const results = await Promise.all(
     providers.map(async (p) => {
-      const sourceProfileId = providerProfiles[p.id];
+      const sourceProfileId = providerProfiles[p.id]?.profileId;
       if (!sourceProfileId) return { id: p.id, connected: false };
       const conn = await getConnection(db, sourceProfileId, p.id, orgId);
       return { id: p.id, connected: !!conn };
@@ -486,7 +486,12 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
         }
       }
 
-      const readiness = await computeScheduleReadiness(schedule, profile ?? null, flow ?? null, orgId);
+      const readiness = await computeScheduleReadiness(
+        schedule,
+        profile ?? null,
+        flow ?? null,
+        orgId,
+      );
       return { ...schedule, profileName, profileType, profileOwnerName, readiness };
     }),
   );

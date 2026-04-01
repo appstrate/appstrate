@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { useStore } from "zustand";
 import { profileStore } from "../stores/profile-store";
-import { useConnectionProfiles } from "./use-connection-profiles";
+import { useConnectionProfiles, useOrgProfiles } from "./use-connection-profiles";
 import { useAutoSelect } from "./use-auto-select";
 
 export function setCurrentProfileId(profileId: string | null) {
@@ -15,12 +16,23 @@ export function useCurrentProfileId(): string | null {
 /**
  * Auto-selects default profile when profiles load and nothing is stored
  * (or stored profile no longer exists). Call once near the app root.
+ * Includes org profiles so selecting an org profile doesn't trigger a reset.
  */
 export function useProfileAutoSelect() {
-  const { data: profiles } = useConnectionProfiles();
+  const { data: userProfiles } = useConnectionProfiles();
+  const { data: orgProfiles } = useOrgProfiles();
   const currentProfileId = useCurrentProfileId();
 
-  useAutoSelect(profiles, currentProfileId, setCurrentProfileId, (items) =>
+  // Merge user + org profiles into a single list for existence checking.
+  // Only `id` and `isDefault` are needed by useAutoSelect.
+  const allProfiles = useMemo(() => {
+    if (!userProfiles) return undefined;
+    const merged: Array<{ id: string; isDefault: boolean }> = [...userProfiles];
+    if (orgProfiles) merged.push(...orgProfiles);
+    return merged;
+  }, [userProfiles, orgProfiles]);
+
+  useAutoSelect(allProfiles, currentProfileId, setCurrentProfileId, (items) =>
     items.find((p) => p.isDefault),
   );
 }

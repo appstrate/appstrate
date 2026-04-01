@@ -1,9 +1,19 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../src/lib/errors.ts";
 import {
   validateFlowDependencies,
   type DependencyValidationDeps,
 } from "../../src/services/dependency-validation.ts";
+import type { ProviderProfileMap } from "../../src/types/index.ts";
+
+/** Helper to build a ProviderProfileMap from simple id → profileId pairs. */
+function profileMap(entries: Record<string, string>): ProviderProfileMap {
+  const map: ProviderProfileMap = {};
+  for (const [id, profileId] of Object.entries(entries)) {
+    map[id] = { profileId, source: "user_profile" };
+  }
+  return map;
+}
 
 function createMockDeps(overrides?: Partial<DependencyValidationDeps>): DependencyValidationDeps {
   return {
@@ -25,7 +35,7 @@ describe("validateFlowDependencies", () => {
       { id: "@test/gmail", scopes: ["read"] },
       { id: "@test/clickup" },
     ];
-    const profiles = { "@test/gmail": "profile-1", "@test/clickup": "profile-2" };
+    const profiles = profileMap({ "@test/gmail": "profile-1", "@test/clickup": "profile-2" });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
   });
@@ -33,7 +43,7 @@ describe("validateFlowDependencies", () => {
   it("throws when provider is not enabled", async () => {
     const deps = createMockDeps({ isProviderEnabled: async () => false });
     const providers = [{ id: "@test/gmail" }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
       await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -46,25 +56,10 @@ describe("validateFlowDependencies", () => {
     }
   });
 
-  it("throws when profile is missing for user-mode provider", async () => {
+  it("throws when profile is missing for provider", async () => {
     const deps = createMockDeps();
     const providers = [{ id: "@test/gmail" }];
-    const profiles = {};
-
-    try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).code).toBe("dependency_not_satisfied");
-      expect((err as ApiError).message).toContain("not connected");
-    }
-  });
-
-  it("throws when profile is missing regardless of connectionMode", async () => {
-    const deps = createMockDeps();
-    const providers = [{ id: "@test/service", connectionMode: "admin" as const }];
-    const profiles = {};
+    const profiles: ProviderProfileMap = {};
 
     try {
       await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -84,7 +79,7 @@ describe("validateFlowDependencies", () => {
       }),
     });
     const providers = [{ id: "@test/gmail" }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
       await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -105,7 +100,7 @@ describe("validateFlowDependencies", () => {
       }),
     });
     const providers = [{ id: "@test/gmail" }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
       await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -121,7 +116,7 @@ describe("validateFlowDependencies", () => {
       validateScopes: () => ({ sufficient: false }),
     });
     const providers = [{ id: "@test/gmail", scopes: ["read", "write"] }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
       await validateFlowDependencies(providers, profiles, "org-1", deps);
@@ -141,7 +136,7 @@ describe("validateFlowDependencies", () => {
       },
     });
     const providers = [{ id: "@test/gmail" }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
     expect(scopesCalled).toBe(false);
@@ -156,7 +151,7 @@ describe("validateFlowDependencies", () => {
       },
     });
     const providers = [{ id: "@test/gmail", scopes: [] }];
-    const profiles = { "@test/gmail": "profile-1" };
+    const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
     expect(scopesCalled).toBe(false);
@@ -171,7 +166,11 @@ describe("validateFlowDependencies", () => {
       },
     });
     const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }, { id: "@test/stripe" }];
-    const profiles = { "@test/gmail": "p1", "@test/clickup": "p2", "@test/stripe": "p3" };
+    const profiles = profileMap({
+      "@test/gmail": "p1",
+      "@test/clickup": "p2",
+      "@test/stripe": "p3",
+    });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
     expect(statusCallCount).toBe(3);
@@ -185,9 +184,8 @@ describe("validateFlowDependencies", () => {
         return true;
       },
     });
-    // Two providers with different IDs → 2 enabled checks (no dedup needed)
     const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }];
-    const profiles = { "@test/gmail": "p1", "@test/clickup": "p2" };
+    const profiles = profileMap({ "@test/gmail": "p1", "@test/clickup": "p2" });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);
     expect(enabledCallCount).toBe(2);
@@ -196,5 +194,16 @@ describe("validateFlowDependencies", () => {
   it("succeeds with empty providers list", async () => {
     const deps = createMockDeps();
     await validateFlowDependencies([], {}, "org-1", deps);
+  });
+
+  it("works with org_binding source entries", async () => {
+    const deps = createMockDeps();
+    const providers = [{ id: "@test/gmail" }, { id: "@test/gdrive" }];
+    const profiles: ProviderProfileMap = {
+      "@test/gmail": { profileId: "user-profile-1", source: "user_profile" },
+      "@test/gdrive": { profileId: "admin-profile-1", source: "org_binding" },
+    };
+
+    await validateFlowDependencies(providers, profiles, "org-1", deps);
   });
 });

@@ -6,7 +6,7 @@
 import { getCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
-import type { FlowProviderRequirement } from "../types/index.ts";
+import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 
 /**
  * Sentinel value for providers that have credentials but no standard token field
@@ -26,14 +26,14 @@ const CONNECTED_SENTINEL = "__connected__";
  */
 export async function buildProviderTokens(
   providers: FlowProviderRequirement[],
-  providerProfiles: Record<string, string>,
+  providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<Record<string, string>> {
   const entries = await Promise.all(
     providers
       .filter((svc) => providerProfiles[svc.id])
       .map(async (svc) => {
-        const connectionProfileId = providerProfiles[svc.id]!;
+        const connectionProfileId = providerProfiles[svc.id]!.profileId;
 
         const result = await getCredentials(db, connectionProfileId, svc.id, orgId);
         const token = result
