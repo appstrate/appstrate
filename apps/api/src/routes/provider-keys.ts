@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemProviderKey } from "../services/model-registry.ts";
 import {
   listOrgProviderKeys,
@@ -45,14 +46,14 @@ const testInlineSchema = z.object({
 export function createProviderKeysRouter() {
   const router = new Hono<AppEnv>();
   // GET /api/provider-keys
-  router.get("/", async (c) => {
+  router.get("/", requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const keys = await listOrgProviderKeys(orgId);
     return c.json({ keys });
   });
 
   // POST /api/provider-keys
-  router.post("/", async (c) => {
+  router.post("/", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
@@ -70,7 +71,7 @@ export function createProviderKeysRouter() {
   });
 
   // POST /api/provider-keys/test — inline test (before saving)
-  router.post("/test", rateLimit(5), async (c) => {
+  router.post("/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(testInlineSchema, body);
@@ -99,7 +100,7 @@ export function createProviderKeysRouter() {
   });
 
   // POST /api/provider-keys/:id/test
-  router.post("/:id/test", rateLimit(5), async (c) => {
+  router.post("/:id/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     try {
@@ -118,7 +119,7 @@ export function createProviderKeysRouter() {
   });
 
   // PUT /api/provider-keys/:id
-  router.put("/:id", async (c) => {
+  router.put("/:id", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemProviderKey(id)) {
@@ -139,7 +140,7 @@ export function createProviderKeysRouter() {
   });
 
   // DELETE /api/provider-keys/:id
-  router.delete("/:id", async (c) => {
+  router.delete("/:id", requirePermission("provider-keys", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
     if (isSystemProviderKey(id)) {

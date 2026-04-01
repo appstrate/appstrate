@@ -8,6 +8,7 @@ import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { checkScopeMatch } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -199,8 +200,8 @@ export function createProvidersRouter() {
     return c.json({ providers, callbackUrl });
   });
 
-  // POST /api/providers — create a custom provider (admin only)
-  router.post("/", async (c) => {
+  // POST /api/providers — create a custom provider
+  router.post("/", requirePermission("providers", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(createProviderSchema, body);
@@ -327,8 +328,8 @@ export function createProvidersRouter() {
     return c.json({ id: data.id }, 201);
   });
 
-  // PUT /api/providers/:scope/:name — update a provider (admin only, custom only)
-  router.put("/:scope{@[^/]+}/:name", async (c) => {
+  // PUT /api/providers/:scope/:name — update a provider
+  router.put("/:scope{@[^/]+}/:name", requirePermission("providers", "write"), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
@@ -407,88 +408,96 @@ export function createProvidersRouter() {
     return c.json({ id: providerId });
   });
 
-  // PUT /api/providers/credentials/:scope/:name — configure credentials (admin only)
-  router.put("/credentials/:scope{@[^/]+}/:name", async (c) => {
-    const orgId = c.get("orgId");
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const body = await c.req.json();
+  // PUT /api/providers/credentials/:scope/:name — configure credentials
+  router.put(
+    "/credentials/:scope{@[^/]+}/:name",
+    requirePermission("providers", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const body = await c.req.json();
 
-    const credSchema = z.object({
-      credentials: z.record(z.string(), z.string().min(1)).optional(),
-      enabled: z.boolean().optional(),
-    });
-    const data = parseBody(credSchema, body);
+      const credSchema = z.object({
+        credentials: z.record(z.string(), z.string().min(1)).optional(),
+        enabled: z.boolean().optional(),
+      });
+      const data = parseBody(credSchema, body);
 
-    // Verify the provider exists and get its admin credential schema
-    const [pkg] = await db
-      .select({ id: packages.id, draftManifest: packages.draftManifest })
-      .from(packages)
-      .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
-      .limit(1);
+      // Verify the provider exists and get its admin credential schema
+      const [pkg] = await db
+        .select({ id: packages.id, draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
+        .limit(1);
 
-    if (!pkg) {
-      throw notFound("Provider not found");
-    }
+      if (!pkg) {
+        throw notFound("Provider not found");
+      }
 
-    const hasCredentials = data.credentials && Object.keys(data.credentials).length > 0;
+      const hasCredentials = data.credentials && Object.keys(data.credentials).length > 0;
 
-    // Validate required fields against admin credential schema only when credentials are provided
-    if (hasCredentials) {
-      const manifest = asRecord(pkg.draftManifest);
-      const def = asRecord(manifest.definition);
-      const authMode = (def.authMode as string) ?? "oauth2";
-      const adminSchema =
-        (def.adminCredentialSchema as JSONSchemaObject) ??
-        (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | null);
-      if (adminSchema?.required) {
-        const missing = adminSchema.required.filter((k) => !data.credentials![k]);
-        if (missing.length > 0) {
-          throw invalidRequest(`Missing required fields: ${missing.join(", ")}`);
+      // Validate required fields against admin credential schema only when credentials are provided
+      if (hasCredentials) {
+        const manifest = asRecord(pkg.draftManifest);
+        const def = asRecord(manifest.definition);
+        const authMode = (def.authMode as string) ?? "oauth2";
+        const adminSchema =
+          (def.adminCredentialSchema as JSONSchemaObject) ??
+          (getDefaultAdminCredentialSchema(authMode) as JSONSchemaObject | null);
+        if (adminSchema?.required) {
+          const missing = adminSchema.required.filter((k) => !data.credentials![k]);
+          if (missing.length > 0) {
+            throw invalidRequest(`Missing required fields: ${missing.join(", ")}`);
+          }
         }
       }
-    }
 
-    const setClause: Record<string, unknown> = { updatedAt: new Date() };
-    if (hasCredentials) {
-      setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
-    }
-    if (data.enabled !== undefined) {
-      setClause.enabled = data.enabled;
-    }
+      const setClause: Record<string, unknown> = { updatedAt: new Date() };
+      if (hasCredentials) {
+        setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
+      }
+      if (data.enabled !== undefined) {
+        setClause.enabled = data.enabled;
+      }
 
-    await db
-      .insert(providerCredentials)
-      .values({
-        providerId,
-        orgId,
-        credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
-        enabled: data.enabled ?? false,
-      })
-      .onConflictDoUpdate({
-        target: [providerCredentials.providerId, providerCredentials.orgId],
-        set: setClause,
-      });
+      await db
+        .insert(providerCredentials)
+        .values({
+          providerId,
+          orgId,
+          credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
+          enabled: data.enabled ?? false,
+        })
+        .onConflictDoUpdate({
+          target: [providerCredentials.providerId, providerCredentials.orgId],
+          set: setClause,
+        });
 
-    return c.json({ configured: true });
-  });
+      return c.json({ configured: true });
+    },
+  );
 
-  // DELETE /api/providers/credentials/:scope/:name — delete credentials (admin only)
-  router.delete("/credentials/:scope{@[^/]+}/:name", async (c) => {
-    const orgId = c.get("orgId");
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+  // DELETE /api/providers/credentials/:scope/:name — delete credentials
+  router.delete(
+    "/credentials/:scope{@[^/]+}/:name",
+    requirePermission("providers", "delete"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
-    await db
-      .update(providerCredentials)
-      .set({ credentialsEncrypted: null, enabled: false, updatedAt: new Date() })
-      .where(
-        and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
-      );
+      await db
+        .update(providerCredentials)
+        .set({ credentialsEncrypted: null, enabled: false, updatedAt: new Date() })
+        .where(
+          and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+        );
 
-    return c.json({ configured: false });
-  });
+      return c.json({ configured: false });
+    },
+  );
 
-  // DELETE /api/providers/:scope/:name — delete provider (admin only, custom only)
-  router.delete("/:scope{@[^/]+}/:name", async (c) => {
+  // DELETE /api/providers/:scope/:name — delete provider
+  router.delete("/:scope{@[^/]+}/:name", requirePermission("providers", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 

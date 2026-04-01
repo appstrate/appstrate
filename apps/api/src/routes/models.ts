@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel } from "../services/model-registry.ts";
 import { modelCostSchema } from "../services/adapters/types.ts";
 import {
@@ -74,7 +75,7 @@ export function createModelsRouter() {
   });
 
   // POST /api/models — create a custom model
-  router.post("/", async (c) => {
+  router.post("/", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
@@ -111,7 +112,7 @@ export function createModelsRouter() {
 
   // PUT /api/models/default — set the org default model
   // MUST be registered before PUT /:id
-  router.put("/default", async (c) => {
+  router.put("/default", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(setDefaultSchema, body);
@@ -274,9 +275,9 @@ export function createModelsRouter() {
   });
 
   // PUT /api/models/:id — update a custom model
-  router.put("/:id", async (c) => {
+  router.put("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const modelId = c.req.param("id");
+    const modelId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(updateModelSchema, body);
 
@@ -297,9 +298,9 @@ export function createModelsRouter() {
   });
 
   // DELETE /api/models/:id — delete a custom model
-  router.delete("/:id", async (c) => {
+  router.delete("/:id", requirePermission("models", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const modelId = c.req.param("id");
+    const modelId = c.req.param("id")!;
 
     if (isSystemModel(modelId)) {
       throw systemEntityForbidden("model", modelId, "delete");

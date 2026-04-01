@@ -7,6 +7,10 @@ import { sendEmail } from "./email.ts";
 import { auth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 
+/** Roles assignable via invitation (excludes owner — transferred, not invited). */
+export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
+export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
+
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 }
@@ -20,7 +24,7 @@ export async function createInvitation({
 }: {
   email: string;
   orgId: string;
-  role: "member" | "admin";
+  role: AssignableRole;
   invitedBy: string;
   skipEmail?: boolean;
 }) {
@@ -112,7 +116,7 @@ export async function cancelInvitation(invitationId: string, orgId: string) {
 export async function updateInvitationRole(
   invitationId: string,
   orgId: string,
-  role: "member" | "admin",
+  role: AssignableRole,
 ) {
   const [updated] = await db
     .update(orgInvitations)

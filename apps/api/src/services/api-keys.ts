@@ -1,8 +1,15 @@
 import { eq, and, isNull, lt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { apiKeys, user as userTable, profiles, organizations } from "@appstrate/db/schema";
+import {
+  apiKeys,
+  user as userTable,
+  profiles,
+  organizations,
+  organizationMembers,
+} from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
+import type { OrgRole } from "../types/index.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 const API_KEY_PREFIX = "ask_";
@@ -39,6 +46,8 @@ export interface ValidatedApiKey {
   orgId: string;
   orgSlug: string;
   applicationId: string;
+  scopes: string[];
+  creatorRole: OrgRole;
 }
 
 /**
@@ -56,15 +65,24 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
       orgId: apiKeys.orgId,
       applicationId: apiKeys.applicationId,
       createdBy: apiKeys.createdBy,
+      scopes: apiKeys.scopes,
       expiresAt: apiKeys.expiresAt,
       revokedAt: apiKeys.revokedAt,
       userName: userTable.name,
       userEmail: userTable.email,
       orgSlug: organizations.slug,
+      creatorRole: organizationMembers.role,
     })
     .from(apiKeys)
     .innerJoin(userTable, eq(apiKeys.createdBy, userTable.id))
     .innerJoin(organizations, eq(organizations.id, apiKeys.orgId))
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.orgId, apiKeys.orgId),
+        eq(organizationMembers.userId, apiKeys.createdBy),
+      ),
+    )
     .where(eq(apiKeys.keyHash, hash))
     .limit(1);
 
@@ -96,6 +114,8 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     orgId: row.orgId,
     orgSlug: row.orgSlug,
     applicationId: row.applicationId,
+    scopes: row.scopes,
+    creatorRole: row.creatorRole as OrgRole,
   };
 }
 
@@ -108,6 +128,7 @@ export async function createApiKeyRecord(params: {
   keyPrefix: string;
   createdBy: string;
   expiresAt: Date | null;
+  scopes?: string[];
 }): Promise<string> {
   const id = crypto.randomUUID();
   await db.insert(apiKeys).values({
@@ -119,6 +140,7 @@ export async function createApiKeyRecord(params: {
     keyPrefix: params.keyPrefix,
     createdBy: params.createdBy,
     expiresAt: params.expiresAt,
+    scopes: params.scopes ?? [],
   });
   return id;
 }
@@ -154,7 +176,7 @@ export async function listApiKeys(orgId: string, applicationId?: string): Promis
     id: r.id,
     name: r.name,
     keyPrefix: r.keyPrefix,
-    scopes: r.scopes ?? [],
+    scopes: r.scopes,
     createdBy: r.createdBy,
     createdByName: r.displayName || r.userName || undefined,
     expiresAt: toISO(r.expiresAt),

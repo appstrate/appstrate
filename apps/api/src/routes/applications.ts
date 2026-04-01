@@ -12,6 +12,7 @@ import {
   appSettingsSchema,
 } from "../services/applications.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 
 const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
@@ -41,7 +42,7 @@ export function createApplicationsRouter() {
   });
 
   // POST /api/applications — create a new application
-  router.post("/", async (c) => {
+  router.post("/", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
@@ -83,9 +84,9 @@ export function createApplicationsRouter() {
   });
 
   // PATCH /api/applications/:id — update application
-  router.patch("/:id", async (c) => {
+  router.patch("/:id", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("id");
+    const appId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(updateApplicationSchema, body);
 
@@ -108,9 +109,9 @@ export function createApplicationsRouter() {
   });
 
   // DELETE /api/applications/:id — delete application
-  router.delete("/:id", async (c) => {
+  router.delete("/:id", requirePermission("applications", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.req.param("id");
+    const appId = c.req.param("id")!;
 
     try {
       await deleteApplication(orgId, appId);

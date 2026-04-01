@@ -81,6 +81,7 @@
   "orgSettings.roleOwner": "Propriétaire",
   "orgSettings.roleAdmin": "Admin",
   "orgSettings.roleMember": "Membre",
+  "orgSettings.roleViewer": "Lecteur",
   "orgSettings.removeMember": "Retirer {{name}} de l'organisation ?",
   "orgSettings.noMembers": "Aucun membre.",
   "orgSettings.noMembersHint": "Ajoutez des membres par email.",

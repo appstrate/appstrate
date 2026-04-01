@@ -152,7 +152,7 @@ export async function createTestOrg(
 export async function addOrgMember(
   orgId: string,
   userId: string,
-  role: "owner" | "admin" | "member" = "member",
+  role: "owner" | "admin" | "member" | "viewer" = "member",
 ): Promise<void> {
   await db.insert(organizationMembers).values({ orgId, userId, role });
 }

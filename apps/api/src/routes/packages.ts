@@ -48,6 +48,7 @@ import {
 import { flowDetailHandler } from "./flow-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "../lib/safe-json.ts";
@@ -923,10 +924,15 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Package CRUD routes (skills, tools, flows) ---
+  // --- Package CRUD routes (skills, tools, flows, providers) ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
+    // Permission resource matches the route path (e.g. "skills", "tools", "flows", "providers")
+    const resource = path as import("../lib/permissions.ts").Resource;
+    const writeGuard = requirePermission(resource, "write");
+    const deleteGuard = requirePermission(resource, "delete");
+
     router.get(`/${path}`, makeListHandler(rcfg));
-    router.post(`/${path}`, makeCreateHandler(rcfg));
+    router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(`/${path}/:scope{@[^/]+}/:name/versions`, makeListVersionsHandler(rcfg));
     // Version info + create version + restore — BEFORE :version param to avoid matching
@@ -934,31 +940,44 @@ export function createPackagesRouter() {
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions`,
       requireOwnedPackage(),
+      writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
       requireOwnedPackage(),
+      writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name/versions/:version`,
       requireOwnedPackage(),
+      deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:scope{@[^/]+}/:name`, requireOwnedPackage(), makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:scope{@[^/]+}/:name`, requireOwnedPackage(), makeDeleteHandler(rcfg));
+    router.put(
+      `/${path}/:scope{@[^/]+}/:name`,
+      requireOwnedPackage(),
+      writeGuard,
+      makeUpdateHandler(rcfg),
+    );
+    router.delete(
+      `/${path}/:scope{@[^/]+}/:name`,
+      requireOwnedPackage(),
+      deleteGuard,
+      makeDeleteHandler(rcfg),
+    );
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requireOwnedPackage(), makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireOwnedPackage(), makeDeleteHandler(rcfg));
+    router.put(`/${path}/:id`, requireOwnedPackage(), writeGuard, makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requireOwnedPackage(), deleteGuard, makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---
-  router.post("/:scope{@[^/]+}/:name/fork", async (c) => {
+  router.post("/:scope{@[^/]+}/:name/fork", requirePermission("flows", "write"), async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1187,7 +1206,7 @@ export function createPackagesRouter() {
   }
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), async (c) => {
+  router.post("/import", rateLimit(10), requirePermission("flows", "write"), async (c) => {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
@@ -1206,7 +1225,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), async (c) => {
+  router.post("/import-github", rateLimit(10), requirePermission("flows", "write"), async (c) => {
     const body = await c.req.json();
     const data = parseBody(githubImportSchema, body, "url");
 

@@ -56,6 +56,7 @@ export type AppEnv = {
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
+    permissions?: Set<string>;
     authMethod: "session" | "api_key";
     apiKeyId: string | null;
     applicationId: string | null;

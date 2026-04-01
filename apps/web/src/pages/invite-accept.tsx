@@ -9,6 +9,7 @@ import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
+import { roleI18nKey } from "../hooks/use-permissions";
 
 interface InviteInfo {
   email: string;
@@ -144,9 +145,7 @@ export function InviteAcceptPage() {
         <div className="text-xs text-muted-foreground">{t("invite.emailLabel")}</div>
         <div className="text-sm font-medium">{info.email}</div>
         <div className="text-xs text-muted-foreground mt-2">{t("invite.roleLabel")}</div>
-        <div className="text-sm font-medium">
-          {info.role === "admin" ? t("orgSettings.roleAdmin") : t("orgSettings.roleMember")}
-        </div>
+        <div className="text-sm font-medium">{t(roleI18nKey(info.role))}</div>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
 import { ApiError, unauthorized } from "../../src/lib/errors.ts";
+import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/permissions.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { logger } from "../../src/lib/logger.ts";
@@ -123,7 +124,8 @@ export function getTestApp(): Hono<AppEnv> {
       c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
       c.set("orgId", keyInfo.orgId);
       c.set("orgSlug", keyInfo.orgSlug);
-      c.set("orgRole", "admin");
+      c.set("orgRole", keyInfo.creatorRole);
+      c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
       c.set("applicationId", keyInfo.applicationId);
@@ -194,6 +196,16 @@ export function getTestApp(): Hono<AppEnv> {
     if (c.get("authMethod") === "api_key") return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
+  });
+
+  // Permission resolution for session auth (after org context sets orgRole)
+  app.use("*", async (c, next) => {
+    if (c.get("authMethod") === "api_key") return next();
+    const orgRole = c.get("orgRole");
+    if (orgRole) {
+      c.set("permissions", resolvePermissions(orgRole));
+    }
+    return next();
   });
 
   // API versioning
