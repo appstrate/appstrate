@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +48,6 @@ export function ProviderConnectionCard({
   orgProfileName,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
-  const qc = useQueryClient();
   const { isOrgAdmin } = useOrg();
 
   // User profiles
@@ -111,12 +109,6 @@ export function ProviderConnectionCard({
 
   const profileParam = effectiveProfileId ? { profileId: effectiveProfileId } : {};
 
-  const invalidateConnections = () => {
-    qc.invalidateQueries({ queryKey: ["profile-connections"] });
-    qc.invalidateQueries({ queryKey: ["available-providers"] });
-    qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-  };
-
   const doBind = () => {
     if (!orgProfileId || !effectiveProfileId) return;
     bindMutation.mutate({
@@ -132,18 +124,12 @@ export function ProviderConnectionCard({
     } else if (authMode === "custom" && credentialSchema) {
       setCustomCredOpen(true);
     } else {
-      connectMutation.mutate(
-        { provider: providerId, ...profileParam },
-        { onSuccess: () => invalidateConnections() },
-      );
+      connectMutation.mutate({ provider: providerId, ...profileParam });
     }
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate(
-      { provider: providerId, ...profileParam },
-      { onSuccess: () => invalidateConnections() },
-    );
+    disconnectMutation.mutate({ provider: providerId, ...profileParam });
   };
 
   const handleUnbind = () => {
@@ -277,12 +263,7 @@ export function ProviderConnectionCard({
         onSubmit={(apiKey) => {
           connectApiKeyMutation.mutate(
             { provider: providerId, apiKey, ...profileParam },
-            {
-              onSuccess: () => {
-                setApiKeyOpen(false);
-                invalidateConnections();
-              },
-            },
+            { onSuccess: () => setApiKeyOpen(false) },
           );
         }}
       />
@@ -298,12 +279,7 @@ export function ProviderConnectionCard({
           onSubmit={(credentials) => {
             connectCredentialsMutation.mutate(
               { provider: providerId, credentials, ...profileParam },
-              {
-                onSuccess: () => {
-                  setCustomCredOpen(false);
-                  invalidateConnections();
-                },
-              },
+              { onSuccess: () => setCustomCredOpen(false) },
             );
           }}
         />
