@@ -9,6 +9,7 @@ import {
   userFlowProviderProfiles,
   userProviderConnections,
   orgProfileProviderBindings,
+  organizationMembers,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
@@ -84,6 +85,29 @@ export async function getProfileForActor(
     .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Get a user profile whose owner is a member of the given org.
+ * Used for read-only access (e.g. viewing schedule provider status).
+ */
+export async function getOrgMemberProfile(
+  profileId: string,
+  orgId: string,
+): Promise<ConnectionProfile | null> {
+  const [row] = await db
+    .select({ profile: connectionProfiles })
+    .from(connectionProfiles)
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.userId, connectionProfiles.userId),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .where(eq(connectionProfiles.id, profileId))
+    .limit(1);
+  return row?.profile ?? null;
 }
 
 export async function createProfile(actor: Actor, name: string): Promise<ConnectionProfile> {
