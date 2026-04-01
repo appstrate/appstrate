@@ -20,12 +20,14 @@ interface UseProviderConnectionParams {
   providerId: string;
   packageId?: string;
   orgProfileId?: string;
+  readOnly?: boolean;
 }
 
 export function useProviderConnection({
   providerId,
   packageId,
   orgProfileId,
+  readOnly: readOnlyParam,
 }: UseProviderConnectionParams) {
   const { isOrgAdmin } = useOrg();
 
@@ -110,5 +112,6 @@ export function useProviderConnection({
     handleProfileChange,
     doBind,
     handleUnbind,
+    readOnly: readOnlyParam ?? false,
   };
 }
