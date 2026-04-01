@@ -1,5 +1,6 @@
 {
   "name": "appstrate",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@mariozechner/pi-ai": "^0.52.12",
