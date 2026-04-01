@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, AlertTriangle, Link2, Unlink, Plug } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -31,9 +31,12 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
   providerId: string;
+  /** Org profile ID — enables the org binding section (admin-only). */
   orgProfileId?: string;
-  /** When false, connecting does NOT auto-bind — user can bind separately. Default: true. */
-  bindOnConnect?: boolean;
+  /** Org profile display name — shown in the bind button. */
+  orgProfileName?: string;
+  /** User profile ID to use for connections. When omitted, uses the user's default profile. */
+  profileId?: string | null;
   /** When true, hide all action buttons — display-only mode for non-admin users. */
   readOnly?: boolean;
 }
@@ -41,24 +44,25 @@ interface ProviderConnectionCardProps {
 export function ProviderConnectionCard({
   providerId,
   orgProfileId,
-  bindOnConnect = true,
+  orgProfileName,
+  profileId: profileIdProp,
   readOnly = false,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
   const qc = useQueryClient();
 
-  // User profiles
+  // User profile: local selection, prop override, or default
   const { data: userProfiles } = useConnectionProfiles();
   const defaultProfile = userProfiles?.find((p) => p.isDefault);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const effectiveProfileId = selectedProfileId ?? defaultProfile?.id ?? null;
+  const effectiveProfileId = profileIdProp ?? selectedProfileId ?? defaultProfile?.id ?? null;
   const hasMultipleProfiles = (userProfiles?.length ?? 0) > 1;
 
   // Provider metadata
   const { data: providersData } = useProviders();
   const provider = providersData?.providers?.find((p) => p.id === providerId);
 
-  // Connection status — scoped to the selected profile
+  // Connection status — scoped to the user's profile
   const { data: profileConnections } = useProfileConnections(effectiveProfileId);
   const isConnected = profileConnections?.some((c) => c.providerId === providerId) ?? false;
 
@@ -67,7 +71,6 @@ export function ProviderConnectionCard({
   const binding = bindings?.find((b) => b.providerId === providerId);
   const isBound = !!binding;
   const isBoundButDisconnected = isBound && binding?.connected === false;
-  // A binding that lost its source connection is treated as "needs binding" for action purposes
   const isEffectivelyBound = isBound && !isBoundButDisconnected;
 
   // Mutations
@@ -119,9 +122,7 @@ export function ProviderConnectionCard({
     } else {
       connectMutation.mutate(
         { provider: providerId, ...profileParam },
-        {
-          onSuccess: () => invalidateConnections(),
-        },
+        { onSuccess: () => invalidateConnections() },
       );
     }
   };
@@ -129,34 +130,105 @@ export function ProviderConnectionCard({
   const handleDisconnect = () => {
     disconnectMutation.mutate(
       { provider: providerId, ...profileParam },
-      {
-        onSuccess: () => invalidateConnections(),
-      },
+      { onSuccess: () => invalidateConnections() },
     );
-  };
-
-  const handleConnectAndBind = () => {
-    if (authMode === "api_key") {
-      setApiKeyOpen(true);
-    } else if (authMode === "custom" && credentialSchema) {
-      setCustomCredOpen(true);
-    } else {
-      connectMutation.mutate(
-        { provider: providerId, ...profileParam },
-        {
-          onSuccess: () => {
-            invalidateConnections();
-            doBind();
-          },
-        },
-      );
-    }
   };
 
   const handleUnbind = () => {
     if (!orgProfileId) return;
     unbindMutation.mutate({ profileId: orgProfileId, providerId });
   };
+
+  // ─── Org binding status (right side) ─────────────────────
+
+  let orgSection: React.ReactNode = null;
+  if (orgProfileId && !readOnly) {
+    // Admin view: show binding status + actions
+    if (isBoundButDisconnected) {
+      orgSection = (
+        <div className="flex items-center gap-1.5 shrink-0 border-l border-border pl-3 ml-1">
+          <span className="inline-flex items-center gap-1 text-xs text-destructive">
+            <AlertTriangle className="size-3" />
+            {t("providerCard.boundDisconnected", {
+              defaultValue: "Org binding broken",
+            })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={handleUnbind}
+            disabled={isPending}
+          >
+            <Unlink className="size-3 mr-1" />
+            {t("providerCard.unbind")}
+          </Button>
+        </div>
+      );
+    } else if (isEffectivelyBound) {
+      orgSection = (
+        <div className="flex items-center gap-1.5 shrink-0 border-l border-border pl-3 ml-1">
+          <span className="inline-flex items-center gap-1 text-xs text-primary">
+            <Building2 className="size-3" />
+            {binding!.boundByUserName
+              ? `${binding!.boundByUserName} — ${binding!.sourceProfileName}`
+              : binding!.sourceProfileName}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={handleUnbind}
+            disabled={isPending}
+          >
+            <Unlink className="size-3 mr-1" />
+            {t("providerCard.unbind")}
+          </Button>
+        </div>
+      );
+    } else if (isConnected) {
+      orgSection = (
+        <div className="flex items-center gap-1.5 shrink-0 border-l border-border pl-3 ml-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={doBind}
+            disabled={isPending || !effectiveProfileId}
+          >
+            <Building2 className="size-3 mr-1" />
+            {orgProfileName
+              ? t("providerCard.bindTo", {
+                  defaultValue: "Share with {{name}}",
+                  name: orgProfileName,
+                })
+              : t("providerCard.bind", { defaultValue: "Share with org" })}
+          </Button>
+        </div>
+      );
+    }
+  } else if (orgProfileId && readOnly) {
+    // User view: read-only binding info
+    if (isBoundButDisconnected) {
+      orgSection = (
+        <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
+          <AlertTriangle className="size-3" />
+          {t("providerCard.boundDisconnectedUser", {
+            defaultValue: "Org connection unavailable — contact your administrator",
+          })}
+        </span>
+      );
+    } else if (isEffectivelyBound) {
+      orgSection = (
+        <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
+          <Building2 className="size-3" />
+          {binding!.boundByUserName
+            ? `${binding!.boundByUserName} — ${binding!.sourceProfileName}`
+            : binding!.sourceProfileName}
+        </span>
+      );
+    }
+  }
 
   return (
     <>
@@ -171,33 +243,8 @@ export function ProviderConnectionCard({
           <span className="text-sm font-medium truncate">{displayName}</span>
         </div>
 
-        {/* Status */}
-        {orgProfileId ? (
-          isBoundButDisconnected ? (
-            <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
-              <AlertTriangle className="size-3" />
-              {readOnly
-                ? t("providerCard.boundDisconnectedUser", {
-                    defaultValue: "Connection unavailable — contact your administrator",
-                  })
-                : t("providerCard.boundDisconnected", {
-                    defaultValue: "Source connection deleted — rebind required",
-                  })}
-            </span>
-          ) : isBound && binding ? (
-            <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
-              <Link2 className="size-3" />
-              {binding.boundByUserName
-                ? `${binding.boundByUserName} — ${binding.sourceProfileName}`
-                : binding.sourceProfileName}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-xs text-warning shrink-0">
-              <AlertTriangle className="size-3" />
-              {t("providerCard.notBound")}
-            </span>
-          )
-        ) : isConnected ? (
+        {/* Personal connection status */}
+        {isConnected ? (
           <span className="inline-flex items-center gap-1 text-xs text-success shrink-0">
             <CheckCircle2 className="size-3" />
             {t("providers.connected")}
@@ -206,8 +253,8 @@ export function ProviderConnectionCard({
 
         <div className="flex-1" />
 
-        {/* Profile selector — shown when multiple profiles and not yet effectively bound */}
-        {!readOnly && hasMultipleProfiles && !isEffectivelyBound && (
+        {/* Profile selector — shown when user has multiple profiles */}
+        {!readOnly && hasMultipleProfiles && (
           <Select value={effectiveProfileId ?? ""} onValueChange={setSelectedProfileId}>
             <SelectTrigger className="h-7 w-32 text-xs">
               <SelectValue />
@@ -223,10 +270,10 @@ export function ProviderConnectionCard({
           </Select>
         )}
 
-        {/* Action buttons (hidden in read-only mode) */}
+        {/* Personal connection actions */}
         {!readOnly && (
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isConnected && !orgProfileId && (
+            {!isConnected && (
               <Button
                 variant="outline"
                 size="sm"
@@ -237,20 +284,7 @@ export function ProviderConnectionCard({
                 {t("providerCard.connect")}
               </Button>
             )}
-
-            {!isConnected && orgProfileId && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={bindOnConnect ? handleConnectAndBind : handleConnect}
-                disabled={isPending || !provider?.enabled || !effectiveProfileId}
-              >
-                {bindOnConnect ? t("providerCard.connectAndBind") : t("providerCard.connect")}
-              </Button>
-            )}
-
-            {isConnected && !orgProfileId && (
+            {isConnected && (
               <Button
                 variant="outline"
                 size="sm"
@@ -261,34 +295,11 @@ export function ProviderConnectionCard({
                 {t("providerCard.disconnect")}
               </Button>
             )}
-
-            {isConnected && orgProfileId && !isEffectivelyBound && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={doBind}
-                disabled={isPending || !effectiveProfileId}
-              >
-                <Link2 className="size-3 mr-1" />
-                {t("providerCard.bind")}
-              </Button>
-            )}
-
-            {isConnected && orgProfileId && isEffectivelyBound && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleUnbind}
-                disabled={isPending}
-              >
-                <Unlink className="size-3 mr-1" />
-                {t("providerCard.unbind")}
-              </Button>
-            )}
           </div>
         )}
+
+        {/* Org binding section (separated visually) */}
+        {orgSection}
       </div>
 
       {!readOnly && (
@@ -305,7 +316,6 @@ export function ProviderConnectionCard({
                   onSuccess: () => {
                     setApiKeyOpen(false);
                     invalidateConnections();
-                    if (orgProfileId) doBind();
                   },
                 },
               );
@@ -327,7 +337,6 @@ export function ProviderConnectionCard({
                     onSuccess: () => {
                       setCustomCredOpen(false);
                       invalidateConnections();
-                      if (orgProfileId) doBind();
                     },
                   },
                 );

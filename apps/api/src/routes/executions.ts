@@ -418,8 +418,8 @@ export function createExecutionsRouter() {
         };
       }
 
-      // Load admin-configured org profile from flow config
-      const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, packageId);
+      // Load admin-configured org profile
+      const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(orgId, packageId);
 
       // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
       const resolvedUserProfileId =
@@ -430,7 +430,7 @@ export function createExecutionsRouter() {
           packageId,
           orgId,
           userProfileId: resolvedUserProfileId,
-          orgProfileId: forcedOrgProfileId,
+          orgProfileId: flowOrgProfileId,
         }),
         parseRequestInput(
           c,

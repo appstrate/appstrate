@@ -10,11 +10,8 @@ import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentExecutions } from "../services/state/index.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
-import {
-  resolveProviderProfiles,
-  getProfileById,
-  getEffectiveProfileId,
-} from "../services/connection-profiles.ts";
+import { resolveProviderProfiles, getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { getPackageConfigFull } from "../services/state/package-config.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -168,12 +165,6 @@ export function createInternalRouter() {
     }
 
     try {
-      // Resolve the credential-holding profile for this provider.
-      // If execution used an org profile, detect it and resolve with fallback to user profile.
-      const storedProfileId = execution.connectionProfileId;
-      const storedProfile = storedProfileId ? await getProfileById(storedProfileId) : null;
-      const isOrgProfile = !!storedProfile?.orgId;
-
       // Derive user profile: actor's effective profile for the package
       const actor: Actor | null = execution.endUserId
         ? { type: "end_user", id: execution.endUserId }
@@ -182,13 +173,15 @@ export function createInternalRouter() {
           : null;
       const userProfileId = actor
         ? await getEffectiveProfileId(actor, execution.packageId)
-        : storedProfileId!;
+        : execution.connectionProfileId!;
 
-      const profileMap = await resolveProviderProfiles(
-        [provider],
-        userProfileId,
-        isOrgProfile ? storedProfileId : null,
+      // Load admin-configured org profile
+      const { orgProfileId: flowOrgProfileId } = await getPackageConfigFull(
+        execution.orgId,
+        execution.packageId,
       );
+
+      const profileMap = await resolveProviderProfiles([provider], userProfileId, flowOrgProfileId);
 
       const entry = profileMap[providerId];
       if (!entry) {
