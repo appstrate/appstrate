@@ -153,7 +153,7 @@ export function createConnectionProfilesRouter() {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     await requireOrgProfile(profileId, orgId);
-    const bindings = await getOrgProfileBindingsEnriched(profileId);
+    const bindings = await getOrgProfileBindingsEnriched(profileId, orgId);
     return c.json({ bindings });
   });
 

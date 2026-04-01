@@ -32,14 +32,14 @@ describe("org-profile-bindings", () => {
 
   describe("getOrgProfileBindings", () => {
     it("returns empty map when no bindings exist", async () => {
-      const bindings = await getOrgProfileBindings(orgProfileId);
+      const bindings = await getOrgProfileBindings(orgProfileId, orgId);
       expect(bindings).toEqual({});
     });
 
     it("returns providerId to sourceProfileId map", async () => {
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", userProfileId, userId);
 
-      const bindings = await getOrgProfileBindings(orgProfileId);
+      const bindings = await getOrgProfileBindings(orgProfileId, orgId);
       expect(bindings).toEqual({ "@test/gmail": userProfileId });
     });
   });
@@ -51,7 +51,7 @@ describe("org-profile-bindings", () => {
         access_token: "tok",
       });
 
-      const enriched = await getOrgProfileBindingsEnriched(orgProfileId);
+      const enriched = await getOrgProfileBindingsEnriched(orgProfileId, orgId);
       expect(enriched).toHaveLength(1);
       const e0 = enriched[0]!;
       expect(e0.providerId).toBe("@test/gmail");
@@ -64,13 +64,13 @@ describe("org-profile-bindings", () => {
     it("returns connected false when source user has no connection", async () => {
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", userProfileId, userId);
 
-      const enriched = await getOrgProfileBindingsEnriched(orgProfileId);
+      const enriched = await getOrgProfileBindingsEnriched(orgProfileId, orgId);
       expect(enriched).toHaveLength(1);
       expect(enriched[0]!.connected).toBe(false);
     });
 
     it("returns empty array when no bindings exist", async () => {
-      const enriched = await getOrgProfileBindingsEnriched(orgProfileId);
+      const enriched = await getOrgProfileBindingsEnriched(orgProfileId, orgId);
       expect(enriched).toEqual([]);
     });
   });
@@ -82,7 +82,7 @@ describe("org-profile-bindings", () => {
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", userProfileId, userId);
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", profile2.id, userId);
 
-      const bindings = await getOrgProfileBindings(orgProfileId);
+      const bindings = await getOrgProfileBindings(orgProfileId, orgId);
       expect(bindings["@test/gmail"]).toBe(profile2.id);
     });
   });
@@ -92,7 +92,7 @@ describe("org-profile-bindings", () => {
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", userProfileId, userId);
       await unbindOrgProfileProvider(orgProfileId, "@test/gmail");
 
-      const bindings = await getOrgProfileBindings(orgProfileId);
+      const bindings = await getOrgProfileBindings(orgProfileId, orgId);
       expect(bindings).toEqual({});
     });
 

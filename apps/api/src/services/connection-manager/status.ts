@@ -166,6 +166,9 @@ export async function resolveProviderStatuses(
           ...base,
           status: "not_connected" as const,
           authMode: label,
+          source: null,
+          profileName: null,
+          profileOwnerName: null,
           ...(scopesRequired ? { scopesRequired } : {}),
         };
       }

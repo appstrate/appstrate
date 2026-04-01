@@ -8,14 +8,12 @@ import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createExecution } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
-import {
-  buildExecutionContext,
-  resolvePreflightContext,
-  ModelNotConfiguredError,
-} from "./env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
+import { getPackageConfig } from "./state/index.ts";
+import { validateFlowReadiness } from "./flow-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
@@ -229,7 +227,7 @@ async function triggerScheduledExecution(
     const flowOrgProfile = await getFlowOrgProfile(orgId, packageId);
     const flowOrgProfileId = flowOrgProfile?.id ?? null;
 
-    // Resolve provider profiles, config, and validate readiness.
+    // Resolve provider profiles, config, and validate readiness (inlined preflight).
     // Schedules don't support per-provider overrides — the schedule's connectionProfileId
     // is used as the default for all unbound providers.
     let providerProfiles: ProviderProfileMap;
@@ -237,18 +235,30 @@ async function triggerScheduledExecution(
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
     try {
-      ({
-        providerProfiles,
-        config,
-        modelId: preflightModelId,
-        proxyId: preflightProxyId,
-      } = await resolvePreflightContext({
+      const manifestProviders = resolveManifestProviders(flow.manifest);
+
+      const [resolvedProfiles, packageConfig] = await Promise.all([
+        resolveProviderProfiles(
+          manifestProviders,
+          connectionProfileId,
+          undefined,
+          flowOrgProfileId,
+          orgId,
+        ),
+        getPackageConfig(orgId, packageId),
+      ]);
+
+      await validateFlowReadiness({
         flow,
-        packageId,
+        providerProfiles: resolvedProfiles,
         orgId,
-        defaultUserProfileId: connectionProfileId,
-        orgProfileId: flowOrgProfileId,
-      }));
+        config: packageConfig.config,
+      });
+
+      providerProfiles = resolvedProfiles;
+      config = packageConfig.config;
+      preflightModelId = packageConfig.modelId;
+      preflightProxyId = packageConfig.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Flow readiness check failed, skipping schedule", {
@@ -329,6 +339,11 @@ async function triggerScheduledExecution(
       }
     }
 
+    // Extract just the profileId map (strip source field)
+    const profileIdMap = Object.fromEntries(
+      Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+    );
+
     // Create execution record with schedule_id and version
     await createExecution(
       executionId,
@@ -341,6 +356,8 @@ async function triggerScheduledExecution(
       connectionProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      undefined,
+      profileIdMap,
     );
 
     logger.info("Triggering scheduled execution", {
@@ -352,14 +369,12 @@ async function triggerScheduledExecution(
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, actor, orgId, flow, promptContext, flowPackage).catch(
-      (err) => {
-        logger.error("Unhandled error in scheduled execution", {
-          executionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    executeFlowInBackground(executionId, orgId, flow, promptContext, flowPackage).catch((err) => {
+      logger.error("Unhandled error in scheduled execution", {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   } catch (err) {
     logger.error("Failed to trigger schedule", {
       scheduleId,
@@ -433,9 +448,10 @@ async function computeScheduleReadiness(
   const isOrgProfile = !!profile.orgId;
   const providerProfiles = await resolveProviderProfiles(
     providers,
-    isOrgProfile ? "" : schedule.connectionProfileId, // org profiles have no user fallback
+    isOrgProfile ? null : schedule.connectionProfileId, // org profiles have no user fallback
     undefined, // no per-provider overrides for schedules
     isOrgProfile ? schedule.connectionProfileId : null,
+    orgId,
   );
 
   const results = await Promise.all(

@@ -15,56 +15,13 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
-import { validateFlowReadiness } from "./flow-readiness.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
     super("No LLM model configured for this organization");
     this.name = "ModelNotConfiguredError";
   }
-}
-
-/**
- * Resolve provider profiles, config, and validate flow readiness.
- * Shared preflight logic for all execution paths (manual run, scheduled).
- */
-export async function resolvePreflightContext(params: {
-  flow: LoadedPackage;
-  packageId: string;
-  orgId: string;
-  defaultUserProfileId: string;
-  userProviderOverrides?: Record<string, string>;
-  orgProfileId?: string | null;
-}): Promise<{
-  providerProfiles: ProviderProfileMap;
-  config: Record<string, unknown>;
-  modelId: string | null;
-  proxyId: string | null;
-}> {
-  const { flow, packageId, orgId, defaultUserProfileId, userProviderOverrides, orgProfileId } =
-    params;
-  const manifestProviders = resolveManifestProviders(flow.manifest);
-
-  const [providerProfiles, packageConfig] = await Promise.all([
-    resolveProviderProfiles(
-      manifestProviders,
-      defaultUserProfileId,
-      userProviderOverrides,
-      orgProfileId,
-    ),
-    getPackageConfig(orgId, packageId),
-  ]);
-
-  await validateFlowReadiness({ flow, providerProfiles, orgId, config: packageConfig.config });
-
-  return {
-    providerProfiles,
-    config: packageConfig.config,
-    modelId: packageConfig.modelId,
-    proxyId: packageConfig.proxyId,
-  };
 }
 
 /**
@@ -233,7 +190,7 @@ async function resolveModelAndProxy(params: {
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
-  const modelLabel = modelResult.label ?? null;
+  const modelLabel = modelResult.label;
   const llmConfig: PromptContext["llmConfig"] = {
     api: modelResult.api,
     baseUrl: modelResult.baseUrl,

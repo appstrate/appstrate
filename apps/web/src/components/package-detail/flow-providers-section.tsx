@@ -3,10 +3,22 @@ import { Unplug } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { ProviderConnectionCard } from "../provider-connection-card";
+import type { FlowDetail } from "@appstrate/shared-types";
 
-export function FlowProvidersSection({ packageId }: { packageId: string }) {
+interface FlowProvidersSectionProps {
+  packageId: string;
+  /** When provided, skips the redundant fetch (detail already loaded by parent). */
+  detail?: FlowDetail;
+}
+
+export function FlowProvidersSection({
+  packageId,
+  detail: providedDetail,
+}: FlowProvidersSectionProps) {
   const { t } = useTranslation(["flows"]);
-  const { data: detail } = usePackageDetail("flow", packageId);
+  const { data: fetchedDetail } = usePackageDetail("flow", packageId);
+
+  const detail = providedDetail ?? fetchedDetail;
 
   if (!detail) return null;
 

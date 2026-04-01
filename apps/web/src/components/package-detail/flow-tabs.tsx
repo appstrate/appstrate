@@ -106,8 +106,14 @@ export function FlowSchedulesTab({ packageId }: { packageId: string }) {
   );
 }
 
-export function FlowConnectorsTab({ packageId }: { packageId: string }) {
-  return <FlowProvidersSection packageId={packageId} />;
+export function FlowConnectorsTab({
+  packageId,
+  detail,
+}: {
+  packageId: string;
+  detail?: import("@appstrate/shared-types").FlowDetail;
+}) {
+  return <FlowProvidersSection packageId={packageId} detail={detail} />;
 }
 
 export function FlowMemoriesTab({

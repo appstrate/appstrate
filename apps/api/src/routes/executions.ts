@@ -15,16 +15,19 @@ import {
   listScheduleExecutions,
   listExecutionLogs,
   addPackageMemories,
+  getPackageConfig,
 } from "../services/state/index.ts";
-import { resolveActorProfileContext, getFlowOrgProfile } from "../services/connection-profiles.ts";
+import {
+  resolveActorProfileContext,
+  getFlowOrgProfile,
+  resolveProviderProfiles,
+} from "../services/connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateFlowReadiness } from "../services/flow-readiness.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import {
-  buildExecutionContext,
-  resolvePreflightContext,
-  ModelNotConfiguredError,
-} from "../services/env-builder.ts";
+import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -37,7 +40,7 @@ import { requireFlow, requireAdmin, isAdminRole } from "../middleware/guards.ts"
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchWebhookEvents } from "../services/webhooks.ts";
-import { type Actor, getActor } from "../lib/actor.ts";
+import { getActor } from "../lib/actor.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
@@ -75,7 +78,6 @@ function dispatchWebhooks(
 
 export async function executeFlowInBackground(
   executionId: string,
-  _actor: Actor | null,
   orgId: string,
   flow: LoadedPackage,
   promptContext: PromptContext,
@@ -422,16 +424,18 @@ export function createExecutionsRouter() {
       ]);
       const flowOrgProfileId = flowOrgProfile?.id ?? null;
 
-      // Run independent pre-flight operations in parallel
-      const [preflightResult, inputResult] = await Promise.all([
-        resolvePreflightContext({
-          flow: effectiveFlow,
-          packageId,
-          orgId,
+      // Resolve provider profiles, config, and validate flow readiness (inlined preflight)
+      const manifestProviders = resolveManifestProviders(effectiveFlow.manifest);
+
+      const [providerProfiles, packageConfig, inputResult] = await Promise.all([
+        resolveProviderProfiles(
+          manifestProviders,
           defaultUserProfileId,
           userProviderOverrides,
-          orgProfileId: flowOrgProfileId,
-        }),
+          flowOrgProfileId,
+          orgId,
+        ),
+        getPackageConfig(orgId, packageId),
         parseRequestInput(
           c,
           effectiveFlow.manifest.input?.schema
@@ -440,12 +444,17 @@ export function createExecutionsRouter() {
           effectiveFlow.manifest.input?.fileConstraints,
         ),
       ]);
-      const {
+
+      await validateFlowReadiness({
+        flow: effectiveFlow,
         providerProfiles,
-        config,
-        modelId: preflightModelId,
-        proxyId: preflightProxyId,
-      } = preflightResult;
+        orgId,
+        config: packageConfig.config,
+      });
+
+      const config = packageConfig.config;
+      const preflightModelId = packageConfig.modelId;
+      const preflightProxyId = packageConfig.proxyId;
 
       const {
         input: parsedInput,
@@ -516,6 +525,11 @@ export function createExecutionsRouter() {
         }
       }
 
+      // Extract just the profileId map (strip source field)
+      const profileIdMap = Object.fromEntries(
+        Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+      );
+
       // Create execution record
       await createExecution(
         executionId,
@@ -525,16 +539,16 @@ export function createExecutionsRouter() {
         parsedInput ?? null,
         undefined,
         packageVersionId ?? undefined,
-        defaultUserProfileId,
+        defaultUserProfileId ?? undefined,
         proxyLabel ?? undefined,
         modelLabel ?? undefined,
         c.get("applicationId") ?? null,
+        profileIdMap,
       );
 
       // Fire-and-forget background execution
       executeFlowInBackground(
         executionId,
-        actor,
         orgId,
         effectiveFlow,
         promptContext,

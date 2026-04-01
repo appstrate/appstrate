@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -136,6 +136,13 @@ export function ScheduleForm({
     name: ["connectionProfileId", "cronExpression", "timezone", "enabled"],
   });
 
+  // When profiles load after form init, set the default if still empty
+  useEffect(() => {
+    if (!connectionProfileId && allProfiles.length > 0) {
+      setValue("connectionProfileId", allProfiles[0]!.id);
+    }
+  }, [connectionProfileId, allProfiles, setValue]);
+
   const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? buildPayload(schema, inputValues) : undefined;
 
@@ -184,7 +191,7 @@ export function ScheduleForm({
       )}
 
       {/* Connection profile */}
-      {allProfiles.length > 0 && (
+      {allProfiles.length > 1 && (
         <div className="space-y-3">
           <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
           <CombinedProfileSelect

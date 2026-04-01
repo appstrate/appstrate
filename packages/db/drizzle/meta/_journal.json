@@ -85,6 +85,13 @@
       "when": 1774900000000,
       "tag": "0011_schema_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1774910000000,
+      "tag": "0012_execution_provider_profiles",
+      "breakpoints": true
     }
   ]
 }

@@ -33,8 +33,8 @@ export const packageConfigs = pgTable(
     orgProfileId: uuid("org_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.packageId] }),
@@ -54,8 +54,8 @@ export const packages = pgTable(
     draftContent: text("draft_content"),
     autoInstalled: boolean("auto_installed").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
     lockVersion: integer("lock_version").notNull().default(1),
     forkedFrom: text("forked_from"),
   },
@@ -81,7 +81,7 @@ export const packageVersions = pgTable(
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
@@ -99,7 +99,7 @@ export const packageDistTags = pgTable(
     versionId: integer("version_id")
       .notNull()
       .references(() => packageVersions.id, { onDelete: "cascade" }),
-    updatedAt: timestamp("updated_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.packageId, table.tag] })],
 );

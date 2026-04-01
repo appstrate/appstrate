@@ -18,6 +18,7 @@ export async function createExecution(
   proxyLabel?: string,
   modelLabel?: string,
   applicationId?: string | null,
+  providerProfileIds?: Record<string, string>,
 ): Promise<void> {
   const [maxRow] = await db
     .select({ maxNum: max(executions.executionNumber) })
@@ -39,6 +40,7 @@ export async function createExecution(
     proxyLabel: proxyLabel ?? null,
     modelLabel: modelLabel ?? null,
     applicationId: applicationId ?? null,
+    providerProfileIds: providerProfileIds ?? null,
     executionNumber,
   });
 }
