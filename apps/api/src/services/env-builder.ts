@@ -37,7 +37,12 @@ export async function resolvePreflightContext(params: {
   defaultUserProfileId: string;
   userProviderOverrides?: Record<string, string>;
   orgProfileId?: string | null;
-}): Promise<{ providerProfiles: ProviderProfileMap; config: Record<string, unknown> }> {
+}): Promise<{
+  providerProfiles: ProviderProfileMap;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+}> {
   const { flow, packageId, orgId, defaultUserProfileId, userProviderOverrides, orgProfileId } =
     params;
   const manifestProviders = resolveManifestProviders(flow.manifest);
@@ -54,7 +59,12 @@ export async function resolvePreflightContext(params: {
 
   await validateFlowReadiness({ flow, providerProfiles, orgId, config: packageConfig.config });
 
-  return { providerProfiles, config: packageConfig.config };
+  return {
+    providerProfiles,
+    config: packageConfig.config,
+    modelId: packageConfig.modelId,
+    proxyId: packageConfig.proxyId,
+  };
 }
 
 /**
@@ -178,6 +188,10 @@ export async function buildExecutionContext(params: {
 
   const manifestProviders = resolveManifestProviders(flow.manifest);
 
+  // Skip getPackageConfig when all values are already provided by the caller (from preflight)
+  const skipConfigFetch =
+    params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
+
   // Step 1: load config + overrides and independent data in parallel
   const [
     tokens,
@@ -189,7 +203,7 @@ export async function buildExecutionContext(params: {
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    getPackageConfig(orgId, flow.id),
+    skipConfigFetch ? null : getPackageConfig(orgId, flow.id),
     getLastExecutionState(flow.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
     buildFlowPackage(flow, orgId),
@@ -201,13 +215,13 @@ export async function buildExecutionContext(params: {
     getPackageMemories(flow.id, orgId),
   ]);
 
-  const config = params.config ?? configFull.config;
+  const config = params.config ?? configFull?.config ?? {};
   const flowPackage = flowPackageResult.zip;
   const { toolDocs } = flowPackageResult;
 
   // Step 2: resolve model and proxy with cascade (request override → flow column → org/system default)
-  const effectiveModelId = params.modelId ?? configFull.modelId;
-  const effectiveProxyId = params.proxyId ?? configFull.proxyId;
+  const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
+  const effectiveProxyId = params.proxyId ?? configFull?.proxyId ?? null;
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, flow.id, effectiveProxyId),

@@ -29,7 +29,7 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
   let connectedCount = 0;
   for (const pid of flowProviders) {
     if (isOrgProfile) {
-      if (bindings?.find((b) => b.providerId === pid)) connectedCount++;
+      if (bindings?.find((b) => b.providerId === pid && b.connected)) connectedCount++;
     } else {
       if (profileConnections?.some((c) => c.providerId === pid)) connectedCount++;
     }

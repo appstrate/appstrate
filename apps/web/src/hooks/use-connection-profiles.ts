@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { onMutationError } from "./use-mutations";
+import { invalidateConnectionRelated } from "./invalidation";
 import type {
   ConnectionProfile,
   UserConnectionProviderGroup,
@@ -169,13 +170,6 @@ export function useOrgProfileBindings(profileId: string | undefined) {
   });
 }
 
-function invalidateOrgBindingCaches(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
-  qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
-  qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-  qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-}
-
 export function useBindOrgProvider() {
   const qc = useQueryClient();
   return useMutation({
@@ -192,7 +186,7 @@ export function useBindOrgProvider() {
         method: "POST",
         body: JSON.stringify({ providerId, sourceProfileId }),
       }),
-    onSuccess: () => invalidateOrgBindingCaches(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
@@ -204,7 +198,7 @@ export function useUnbindOrgProvider() {
       api(`/connection-profiles/org/${profileId}/bind/${providerId}`, {
         method: "DELETE",
       }),
-    onSuccess: () => invalidateOrgBindingCaches(qc),
+    onSuccess: () => invalidateConnectionRelated(qc),
     onError: onMutationError,
   });
 }
