@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemProxy } from "../services/proxy-registry.ts";
 import {
   listOrgProxies,
@@ -46,7 +47,7 @@ export function createProxiesRouter() {
   });
 
   // POST /api/proxies — create a custom proxy
-  router.post("/", async (c) => {
+  router.post("/", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
@@ -67,7 +68,7 @@ export function createProxiesRouter() {
 
   // PUT /api/proxies/default — set the org default proxy
   // MUST be registered before PUT /:id
-  router.put("/default", async (c) => {
+  router.put("/default", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(setDefaultSchema, body);
@@ -103,9 +104,9 @@ export function createProxiesRouter() {
   });
 
   // PUT /api/proxies/:id — update a custom proxy
-  router.put("/:id", async (c) => {
+  router.put("/:id", requirePermission("proxies", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const proxyId = c.req.param("id");
+    const proxyId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(updateProxySchema, body);
 
@@ -127,9 +128,9 @@ export function createProxiesRouter() {
   });
 
   // DELETE /api/proxies/:id — delete a custom proxy
-  router.delete("/:id", async (c) => {
+  router.delete("/:id", requirePermission("proxies", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const proxyId = c.req.param("id");
+    const proxyId = c.req.param("id")!;
 
     if (isSystemProxy(proxyId)) {
       throw systemEntityForbidden("proxy", proxyId, "delete");

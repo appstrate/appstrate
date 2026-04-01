@@ -38,6 +38,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
 import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
+import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
@@ -123,7 +124,8 @@ app.use("*", async (c, next) => {
     c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
     c.set("orgId", keyInfo.orgId);
     c.set("orgSlug", keyInfo.orgSlug);
-    c.set("orgRole", "admin");
+    c.set("orgRole", keyInfo.creatorRole);
+    c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);
     c.set("applicationId", keyInfo.applicationId);
@@ -210,10 +212,20 @@ app.use("*", async (c, next) => {
   const path = c.req.path;
   if (skipAuth(path)) return next(); // public paths also skip org context
   if (!c.get("user")) return next(); // no auth resolved — nothing to do
-  if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId
+  if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId + permissions
   if (skipOrgContext(path)) return next();
 
   return requireOrgContext()(c, next);
+});
+
+// Permission resolution for session auth (after org context sets orgRole)
+app.use("*", async (c, next) => {
+  if (c.get("authMethod") === "api_key") return next(); // already resolved
+  const orgRole = c.get("orgRole");
+  if (orgRole) {
+    c.set("permissions", resolvePermissions(orgRole));
+  }
+  return next();
 });
 
 // API versioning: resolve Appstrate-Version header > org setting > default

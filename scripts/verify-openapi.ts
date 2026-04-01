@@ -136,6 +136,7 @@ const expectedEndpoints = [
   "POST /api/proxies/{id}/test",
 
   // API Keys
+  "GET /api/api-keys/available-scopes",
   "GET /api/api-keys",
   "POST /api/api-keys",
   "DELETE /api/api-keys/{id}",

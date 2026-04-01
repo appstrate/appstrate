@@ -1,4 +1,39 @@
 export const apiKeysPaths = {
+  "/api/api-keys/available-scopes": {
+    get: {
+      operationId: "listAvailableScopes",
+      tags: ["API Keys"],
+      summary: "List available scopes",
+      description:
+        "List permission scopes available for API key creation, based on the current user's role.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      responses: {
+        "200": {
+          description: "Available scopes",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  scopes: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Permission scopes the current user can assign to API keys",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/api-keys": {
     get: {
       operationId: "listApiKeys",
@@ -58,6 +93,12 @@ export const apiKeysPaths = {
                   description:
                     "Expiration date (must be in the future). Null or omitted for a key that never expires.",
                 },
+                scopes: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Permission scopes for the key (e.g. `flows:read`, `flows:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered.",
+                },
               },
             },
           },
@@ -84,6 +125,11 @@ export const apiKeysPaths = {
                   keyPrefix: {
                     type: "string",
                     description: "First 8 characters for identification",
+                  },
+                  scopes: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Validated scopes granted to the key. Empty = full role access.",
                   },
                 },
               },

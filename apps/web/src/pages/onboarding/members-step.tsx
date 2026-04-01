@@ -19,6 +19,7 @@ import {
 } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { api } from "../../api";
+import { roleI18nKey, INVITE_ROLES } from "../../hooks/use-permissions";
 import { Spinner } from "../../components/spinner";
 import type { OrgInvitation } from "@appstrate/shared-types";
 
@@ -30,7 +31,7 @@ export function OnboardingMembersStep() {
   const { nextRoute, prevRoute } = useOnboardingNav("members");
 
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"member" | "admin">("member");
+  const [role, setRole] = useState<"viewer" | "member" | "admin">("member");
   const [error, setError] = useState<string | null>(null);
 
   const { data: orgData } = useQuery({
@@ -42,7 +43,7 @@ export function OnboardingMembersStep() {
   const invitations = orgData?.invitations ?? [];
 
   const addMemberMutation = useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: "member" | "admin" }) => {
+    mutationFn: async ({ email, role }: { email: string; role: "viewer" | "member" | "admin" }) => {
       return api<{ invited?: boolean; added?: boolean; token?: string }>(`/orgs/${orgId}/members`, {
         method: "POST",
         body: JSON.stringify({ email, role }),
@@ -94,13 +95,19 @@ export function OnboardingMembersStep() {
                 placeholder="email@example.com"
                 required
               />
-              <Select value={role} onValueChange={(v) => setRole(v as "member" | "admin")}>
+              <Select
+                value={role}
+                onValueChange={(v) => setRole(v as "viewer" | "member" | "admin")}
+              >
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="member">{t("orgSettings.roleMember")}</SelectItem>
-                  <SelectItem value="admin">{t("orgSettings.roleAdmin")}</SelectItem>
+                  {INVITE_ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {t(roleI18nKey(r))}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -124,11 +131,7 @@ export function OnboardingMembersStep() {
                     <span className="text-sm font-medium block truncate">{inv.email}</span>
                   </div>
                   <CopyLinkButton token={inv.token} />
-                  <Badge variant="pending">
-                    {inv.role === "admin"
-                      ? t("orgSettings.roleAdmin")
-                      : t("orgSettings.roleMember")}
-                  </Badge>
+                  <Badge variant="pending">{t(roleI18nKey(inv.role))}</Badge>
                 </div>
               </div>
             ))}

@@ -6,6 +6,7 @@ import { packages, packageConfigs } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listProfiles,
   createProfile,
@@ -93,8 +94,8 @@ export function createConnectionProfilesRouter() {
     return c.json({ profiles });
   });
 
-  // POST /api/connection-profiles/org — create an org profile (admin only)
-  router.post("/org", rateLimit(10), async (c) => {
+  // POST /api/connection-profiles/org — create an org profile
+  router.post("/org", rateLimit(10), requirePermission("org-profiles", "write"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -102,8 +103,8 @@ export function createConnectionProfilesRouter() {
     return c.json({ profile }, 201);
   });
 
-  // PUT /api/connection-profiles/org/:id — rename an org profile (admin only)
-  router.put("/org/:id", async (c) => {
+  // PUT /api/connection-profiles/org/:id — rename an org profile
+  router.put("/org/:id", requirePermission("org-profiles", "write"), async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const body = await c.req.json();
@@ -118,8 +119,8 @@ export function createConnectionProfilesRouter() {
     }
   });
 
-  // DELETE /api/connection-profiles/org/:id — delete an org profile (admin only)
-  router.delete("/org/:id", async (c) => {
+  // DELETE /api/connection-profiles/org/:id — delete an org profile
+  router.delete("/org/:id", requirePermission("org-profiles", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     try {
@@ -160,47 +161,56 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
-  router.post("/org/:id/bind", rateLimit(10), async (c) => {
-    const orgId = c.get("orgId");
-    const userId = c.get("user").id;
-    const profileId = c.req.param("id")!;
-    await requireOrgProfile(profileId, orgId);
+  router.post(
+    "/org/:id/bind",
+    rateLimit(10),
+    requirePermission("org-profiles", "bind"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const userId = c.get("user").id;
+      const profileId = c.req.param("id")!;
+      await requireOrgProfile(profileId, orgId);
 
-    const body = await c.req.json();
-    const data = parseBody(
-      z.object({
-        providerId: z.string().min(1),
-        sourceProfileId: z.uuid(),
-      }),
-      body,
-    );
+      const body = await c.req.json();
+      const data = parseBody(
+        z.object({
+          providerId: z.string().min(1),
+          sourceProfileId: z.uuid(),
+        }),
+        body,
+      );
 
-    // Verify source profile belongs to the requesting user
-    const actor = getActor(c);
-    const sourceProfile = await getProfileForActor(data.sourceProfileId, actor);
-    if (!sourceProfile) {
-      throw invalidRequest("Source profile not found or does not belong to you");
-    }
+      // Verify source profile belongs to the requesting user
+      const actor = getActor(c);
+      const sourceProfile = await getProfileForActor(data.sourceProfileId, actor);
+      if (!sourceProfile) {
+        throw invalidRequest("Source profile not found or does not belong to you");
+      }
 
-    // Verify the source profile has a connection for this provider
-    const conn = await getConnectionStatus(data.providerId, data.sourceProfileId, orgId);
-    if (conn.status !== "connected") {
-      throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
-    }
+      // Verify the source profile has a connection for this provider
+      const conn = await getConnectionStatus(data.providerId, data.sourceProfileId, orgId);
+      if (conn.status !== "connected") {
+        throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
+      }
 
-    await bindOrgProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
-    return c.json({ bound: true });
-  });
+      await bindOrgProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
+      return c.json({ bound: true });
+    },
+  );
 
   // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
-  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", async (c) => {
-    const orgId = c.get("orgId");
-    const profileId = c.req.param("id")!;
-    const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-    await requireOrgProfile(profileId, orgId);
-    await unbindOrgProfileProvider(profileId, providerId);
-    return c.json({ unbound: true });
-  });
+  router.delete(
+    "/org/:id/bind/:providerScope{@[^/]+}/:providerName",
+    requirePermission("org-profiles", "bind"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const profileId = c.req.param("id")!;
+      const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
+      await requireOrgProfile(profileId, orgId);
+      await unbindOrgProfileProvider(profileId, providerId);
+      return c.json({ unbound: true });
+    },
+  );
 
   // ─── User Profile Routes (/:id params after static routes) ──
 

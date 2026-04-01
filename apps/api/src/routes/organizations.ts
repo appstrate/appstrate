@@ -26,6 +26,7 @@ import {
   getOrgInvitations,
   cancelInvitation,
   updateInvitationRole,
+  ASSIGNABLE_ROLES,
 } from "../services/invitations.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
@@ -51,11 +52,11 @@ const updateOrgSchema = z.object({
 
 const addMemberSchema = z.object({
   email: z.string().email("Email is required"),
-  role: z.enum(["member", "admin"]).default("member"),
+  role: z.enum(ASSIGNABLE_ROLES).default("member"),
 });
 
 const updateRoleSchema = z.object({
-  role: z.enum(["member", "admin"]),
+  role: z.enum(ASSIGNABLE_ROLES),
 });
 
 async function requireOrgRole(
@@ -187,7 +188,7 @@ router.get("/:orgId", async (c) => {
   });
 });
 
-// PUT /api/orgs/:orgId — update name/slug (owner only)
+// PUT /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
 router.put("/:orgId", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
@@ -243,10 +244,17 @@ router.delete("/:orgId", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/orgs/:orgId/members — add a member by email
+// POST /api/orgs/:orgId/members — invite a member (admin+)
 router.post("/:orgId/members", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
+
+  await requireOrgRole(
+    orgId,
+    user.id,
+    ["owner", "admin"],
+    "Admin access required to invite members",
+  );
 
   const body = await c.req.json();
   const data = parseBody(addMemberSchema, body);
@@ -302,11 +310,13 @@ router.post("/:orgId/members", async (c) => {
   }
 });
 
-// DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation
+// DELETE /api/orgs/:orgId/invitations/:invitationId — cancel an invitation (admin+)
 router.delete("/:orgId/invitations/:invitationId", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
+  await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
   await cancelInvitation(invitationId, orgId);
   return c.json({ ok: true });
 });
@@ -330,10 +340,18 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
   return c.json({ id: updated.id, role: updated.role });
 });
 
-// DELETE /api/orgs/:orgId/members/:userId — remove a member
+// DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
 router.delete("/:orgId/members/:userId", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
+
+  await requireOrgRole(
+    orgId,
+    user.id,
+    ["owner", "admin"],
+    "Admin access required to remove members",
+  );
 
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
@@ -375,9 +393,17 @@ router.get("/:orgId/settings", async (c) => {
   return c.json(settings);
 });
 
-// PUT /api/orgs/:orgId/settings — update org settings (merge)
+// PUT /api/orgs/:orgId/settings — update org settings (owner/admin)
 router.put("/:orgId/settings", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
+
+  await requireOrgRole(
+    orgId,
+    user.id,
+    ["owner", "admin"],
+    "Admin access required to update settings",
+  );
 
   const raw = await c.req.json();
   const data = parseBody(orgSettingsSchema.partial(), raw);

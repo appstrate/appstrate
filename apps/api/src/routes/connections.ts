@@ -4,6 +4,7 @@ import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listActorConnections,
   initiateConnection,
@@ -55,117 +56,129 @@ export function createConnectionsRouter() {
   });
 
   // POST /api/connections/connect/:provider — initiate OAuth or return authUrl
-  router.post("/connect/:scope{@[^/]+}/:name", async (c) => {
-    const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const actor = getActor(c);
-    const orgId = c.get("orgId");
+  router.post(
+    "/connect/:scope{@[^/]+}/:name",
+    requirePermission("connections", "connect"),
+    async (c) => {
+      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const actor = getActor(c);
+      const orgId = c.get("orgId");
 
-    if (!(await isProviderEnabled(db, orgId, provider))) {
-      throw forbidden(`Provider '${provider}' is not configured`);
-    }
-
-    try {
-      const body = parseBody(
-        z.object({
-          scopes: z.array(z.string()).optional(),
-          profileId: z.uuid().optional(),
-        }),
-        await c.req.json(),
-      );
-      const { scopes, profileId } = body;
-
-      const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
-
-      // Validate ownership — user can use their own profiles or org profiles
-      const profile = await getAccessibleProfile(effectiveProfileId, actor, orgId);
-      if (!profile) {
-        throw forbidden("Cannot connect on a profile you do not own");
+      if (!(await isProviderEnabled(db, orgId, provider))) {
+        throw forbidden(`Provider '${provider}' is not configured`);
       }
 
-      const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
-      return c.json({ authUrl: result.authUrl, state: result.state });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) throw err;
-      throw internalError();
-    }
-  });
+      try {
+        const body = parseBody(
+          z.object({
+            scopes: z.array(z.string()).optional(),
+            profileId: z.uuid().optional(),
+          }),
+          await c.req.json(),
+        );
+        const { scopes, profileId } = body;
+
+        const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
+
+        // Validate ownership — user can use their own profiles or org profiles
+        const profile = await getAccessibleProfile(effectiveProfileId, actor, orgId);
+        if (!profile) {
+          throw forbidden("Cannot connect on a profile you do not own");
+        }
+
+        const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
+        return c.json({ authUrl: result.authUrl, state: result.state });
+      } catch (err: unknown) {
+        if (err instanceof ApiError) throw err;
+        throw internalError();
+      }
+    },
+  );
 
   // POST /api/connections/connect/:provider/api-key — create an API key connection
-  router.post("/connect/:scope{@[^/]+}/:name/api-key", async (c) => {
-    const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const actor = getActor(c);
-    const orgId = c.get("orgId");
+  router.post(
+    "/connect/:scope{@[^/]+}/:name/api-key",
+    requirePermission("connections", "connect"),
+    async (c) => {
+      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const actor = getActor(c);
+      const orgId = c.get("orgId");
 
-    if (!(await isProviderEnabled(db, orgId, provider))) {
-      throw forbidden(`Provider '${provider}' is not configured`);
-    }
-
-    try {
-      const body = await c.req.json();
-      const data = parseBody(
-        z.object({
-          apiKey: z.string().min(1, "API key is required"),
-          profileId: z.uuid().optional(),
-        }),
-        body,
-        "apiKey",
-      );
-      const profileId = data.profileId ?? (await getDefaultProfileId(actor));
-
-      // Validate ownership — user can use their own profiles or org profiles
-      const ownedProfile = await getAccessibleProfile(profileId, actor, orgId);
-      if (!ownedProfile) {
-        throw forbidden("Cannot connect on a profile you do not own");
+      if (!(await isProviderEnabled(db, orgId, provider))) {
+        throw forbidden(`Provider '${provider}' is not configured`);
       }
 
-      await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId);
-      return c.json({ success: true });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) throw err;
-      throw internalError();
-    }
-  });
+      try {
+        const body = await c.req.json();
+        const data = parseBody(
+          z.object({
+            apiKey: z.string().min(1, "API key is required"),
+            profileId: z.uuid().optional(),
+          }),
+          body,
+          "apiKey",
+        );
+        const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+
+        // Validate ownership — user can use their own profiles or org profiles
+        const ownedProfile = await getAccessibleProfile(profileId, actor, orgId);
+        if (!ownedProfile) {
+          throw forbidden("Cannot connect on a profile you do not own");
+        }
+
+        await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId);
+        return c.json({ success: true });
+      } catch (err: unknown) {
+        if (err instanceof ApiError) throw err;
+        throw internalError();
+      }
+    },
+  );
 
   // POST /api/connections/connect/:provider/credentials — save generic credentials (basic/custom providers)
-  router.post("/connect/:scope{@[^/]+}/:name/credentials", async (c) => {
-    const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const actor = getActor(c);
-    const orgId = c.get("orgId");
+  router.post(
+    "/connect/:scope{@[^/]+}/:name/credentials",
+    requirePermission("connections", "connect"),
+    async (c) => {
+      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const actor = getActor(c);
+      const orgId = c.get("orgId");
 
-    if (!(await isProviderEnabled(db, orgId, provider))) {
-      throw forbidden(`Provider '${provider}' is not configured`);
-    }
-
-    try {
-      const body = await c.req.json();
-      const data = parseBody(
-        z.object({
-          credentials: z.record(z.string(), z.string()),
-          profileId: z.uuid().optional(),
-        }),
-        body,
-        "credentials",
-      );
-
-      // Resolve the auth mode from the provider
-      const authMode = await getProviderAuthMode(provider, orgId);
-      const mode = authMode === "basic" ? "basic" : "custom";
-
-      const profileId = data.profileId ?? (await getDefaultProfileId(actor));
-
-      // Validate ownership — user can use their own profiles or org profiles
-      const ownedProfile = await getAccessibleProfile(profileId, actor, orgId);
-      if (!ownedProfile) {
-        throw forbidden("Cannot connect on a profile you do not own");
+      if (!(await isProviderEnabled(db, orgId, provider))) {
+        throw forbidden(`Provider '${provider}' is not configured`);
       }
 
-      await saveCredentialsConnection(provider, mode, data.credentials, profileId, orgId);
-      return c.json({ success: true });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) throw err;
-      throw internalError();
-    }
-  });
+      try {
+        const body = await c.req.json();
+        const data = parseBody(
+          z.object({
+            credentials: z.record(z.string(), z.string()),
+            profileId: z.uuid().optional(),
+          }),
+          body,
+          "credentials",
+        );
+
+        // Resolve the auth mode from the provider
+        const authMode = await getProviderAuthMode(provider, orgId);
+        const mode = authMode === "basic" ? "basic" : "custom";
+
+        const profileId = data.profileId ?? (await getDefaultProfileId(actor));
+
+        // Validate ownership — user can use their own profiles or org profiles
+        const ownedProfile = await getAccessibleProfile(profileId, actor, orgId);
+        if (!ownedProfile) {
+          throw forbidden("Cannot connect on a profile you do not own");
+        }
+
+        await saveCredentialsConnection(provider, mode, data.credentials, profileId, orgId);
+        return c.json({ success: true });
+      } catch (err: unknown) {
+        if (err instanceof ApiError) throw err;
+        throw internalError();
+      }
+    },
+  );
 
   // GET /api/connections/callback — OAuth2/OAuth1 callback (detects flow type, exchanges for token, closes popup)
   router.get("/callback", async (c) => {
@@ -240,30 +253,34 @@ export function createConnectionsRouter() {
   // DELETE /api/connections/:provider — disconnect a provider for current actor
   // If ?connectionId is provided, deletes only that specific connection.
   // Otherwise, deletes ALL connections for the provider on the profile.
-  router.delete("/:scope{@[^/]+}/:name", async (c) => {
-    const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
-    const actor = getActor(c);
-    const connectionId = c.req.query("connectionId");
-    try {
-      if (connectionId) {
-        await disconnectConnectionById(connectionId, actor);
-      } else {
-        const profileId = await resolveProfileId(c, actor);
+  router.delete(
+    "/:scope{@[^/]+}/:name",
+    requirePermission("connections", "disconnect"),
+    async (c) => {
+      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const actor = getActor(c);
+      const connectionId = c.req.query("connectionId");
+      try {
+        if (connectionId) {
+          await disconnectConnectionById(connectionId, actor);
+        } else {
+          const profileId = await resolveProfileId(c, actor);
 
-        // Validate ownership — user can use their own profiles or org profiles
-        const orgId = c.get("orgId");
-        const profile = await getAccessibleProfile(profileId, actor, orgId);
-        if (!profile) {
-          throw forbidden("Cannot disconnect from a profile you do not own");
+          // Validate ownership — user can use their own profiles or org profiles
+          const orgId = c.get("orgId");
+          const profile = await getAccessibleProfile(profileId, actor, orgId);
+          if (!profile) {
+            throw forbidden("Cannot disconnect from a profile you do not own");
+          }
+          await disconnectProvider(provider, profileId, orgId);
         }
-        await disconnectProvider(provider, profileId, orgId);
+        return c.json({ success: true });
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        throw internalError();
       }
-      return c.json({ success: true });
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      throw internalError();
-    }
-  });
+    },
+  );
 
   return router;
 }

@@ -15,6 +15,7 @@ import {
   deleteEndUser,
 } from "../services/end-users.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 
 const createEndUserSchema = z.object({
   applicationId: z.string().optional(),
@@ -47,19 +48,25 @@ export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/end-users — create an end-user
-  router.post("/", rateLimit(60), idempotency(), async (c) => {
-    const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(createEndUserSchema, body);
+  router.post(
+    "/",
+    rateLimit(60),
+    idempotency(),
+    requirePermission("end-users", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const body = await c.req.json();
+      const data = parseBody(createEndUserSchema, body);
 
-    const created = await createEndUser(orgId, data.applicationId ?? null, {
-      name: data.name,
-      email: data.email,
-      externalId: data.externalId,
-      metadata: data.metadata,
-    });
-    return c.json(created, 201);
-  });
+      const created = await createEndUser(orgId, data.applicationId ?? null, {
+        name: data.name,
+        email: data.email,
+        externalId: data.externalId,
+        metadata: data.metadata,
+      });
+      return c.json(created, 201);
+    },
+  );
 
   // GET /api/end-users — list end-users in the org (cursor-based pagination)
   router.get("/", rateLimit(300), async (c) => {
@@ -96,7 +103,7 @@ export function createEndUsersRouter() {
   });
 
   // PATCH /api/end-users/:id — update an end-user
-  router.patch("/:id", rateLimit(60), async (c) => {
+  router.patch("/:id", rateLimit(60), requirePermission("end-users", "write"), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     const body = await c.req.json();
@@ -107,7 +114,7 @@ export function createEndUsersRouter() {
   });
 
   // DELETE /api/end-users/:id — delete an end-user and all connections
-  router.delete("/:id", rateLimit(60), async (c) => {
+  router.delete("/:id", rateLimit(60), requirePermission("end-users", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     await deleteEndUser(orgId, endUserId);

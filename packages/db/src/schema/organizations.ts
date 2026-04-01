@@ -86,6 +86,7 @@ export const apiKeys = pgTable(
     keyPrefix: text("key_prefix").notNull(),
     scopes: text("scopes")
       .array()
+      .notNull()
       .default(sql`'{}'::text[]`),
     createdBy: text("created_by").references(() => user.id),
     expiresAt: timestamp("expires_at"),

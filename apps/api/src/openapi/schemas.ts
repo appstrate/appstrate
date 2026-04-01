@@ -548,7 +548,7 @@ export const schemas = {
       scopes: {
         type: "array",
         items: { type: "string" },
-        description: "Currently empty (admin access). Future: granular permissions.",
+        description: "Permission scopes granted to this API key.",
       },
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },

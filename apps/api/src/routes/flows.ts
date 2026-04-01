@@ -12,6 +12,7 @@ import {
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireFlow } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   setUserFlowProviderOverride,
@@ -66,28 +67,33 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/config — save flow configuration (admin-only)
-  router.put("/:scope{@[^/]+}/:name/config", requireFlow(), async (c) => {
-    const flow = c.get("flow");
+  router.put(
+    "/:scope{@[^/]+}/:name/config",
+    requireFlow(),
+    requirePermission("flows", "configure"),
+    async (c) => {
+      const flow = c.get("flow");
 
-    const body = await c.req.json<Record<string, unknown>>();
-    const schema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
+      const body = await c.req.json<Record<string, unknown>>();
+      const schema = flow.manifest.config?.schema ?? { type: "object" as const, properties: {} };
 
-    // Validate config with AJV
-    const validation = validateConfig(body, asJSONSchemaObject(schema));
-    if (!validation.valid) {
-      throw invalidRequest("Invalid configuration");
-    }
+      // Validate config with AJV
+      const validation = validateConfig(body, asJSONSchemaObject(schema));
+      if (!validation.valid) {
+        throw invalidRequest("Invalid configuration");
+      }
 
-    const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
+      const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
-    const orgId = c.get("orgId");
-    await setPackageConfig(orgId, flow.id, config);
+      const orgId = c.get("orgId");
+      await setPackageConfig(orgId, flow.id, config);
 
-    return c.json({
-      config,
-      validation: { valid: true },
-    });
-  });
+      return c.json({
+        config,
+        validation: { valid: true },
+      });
+    },
+  );
 
   // GET /api/flows/:scope/:name/provider-profiles — get per-provider profile overrides
   router.get("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
@@ -99,32 +105,45 @@ export function createFlowsRouter() {
 
   // PUT /api/flows/:scope/:name/provider-profiles — set per-provider override
   // Provider ID passed in body (scoped IDs contain slashes, can't be in URL)
-  router.put("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const actor = getActor(c);
-    const body = await c.req.json();
-    const data = parseBody(z.object({ providerId: z.string().min(1), profileId: z.uuid() }), body);
+  router.put(
+    "/:scope{@[^/]+}/:name/provider-profiles",
+    requireFlow(),
+    requirePermission("flows", "run"),
+    async (c) => {
+      const flow = c.get("flow");
+      const actor = getActor(c);
+      const body = await c.req.json();
+      const data = parseBody(
+        z.object({ providerId: z.string().min(1), profileId: z.uuid() }),
+        body,
+      );
 
-    // Validate ownership — user can only set overrides to their own profiles
-    const profile = await getAccessibleProfile(data.profileId, actor, c.get("orgId"));
-    if (!profile) {
-      throw forbidden("Cannot use a profile you do not own");
-    }
+      // Validate ownership — user can only set overrides to their own profiles
+      const profile = await getAccessibleProfile(data.profileId, actor, c.get("orgId"));
+      if (!profile) {
+        throw forbidden("Cannot use a profile you do not own");
+      }
 
-    await setUserFlowProviderOverride(actor, flow.id, data.providerId, data.profileId);
-    return c.json({ success: true });
-  });
+      await setUserFlowProviderOverride(actor, flow.id, data.providerId, data.profileId);
+      return c.json({ success: true });
+    },
+  );
 
   // DELETE /api/flows/:scope/:name/provider-profiles — remove per-provider override
   // Provider ID passed in body
-  router.delete("/:scope{@[^/]+}/:name/provider-profiles", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const actor = getActor(c);
-    const body = await c.req.json();
-    const data = parseBody(z.object({ providerId: z.string().min(1) }), body);
-    await removeUserFlowProviderOverride(actor, flow.id, data.providerId);
-    return c.json({ success: true });
-  });
+  router.delete(
+    "/:scope{@[^/]+}/:name/provider-profiles",
+    requireFlow(),
+    requirePermission("flows", "run"),
+    async (c) => {
+      const flow = c.get("flow");
+      const actor = getActor(c);
+      const body = await c.req.json();
+      const data = parseBody(z.object({ providerId: z.string().min(1) }), body);
+      await removeUserFlowProviderOverride(actor, flow.id, data.providerId);
+      return c.json({ success: true });
+    },
+  );
 
   // GET /api/flows/:scope/:name/proxy — get flow proxy configuration
   router.get("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
@@ -136,16 +155,21 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/proxy — set flow proxy override (admin-only)
-  router.put("/:scope{@[^/]+}/:name/proxy", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(proxyIdSchema, body);
+  router.put(
+    "/:scope{@[^/]+}/:name/proxy",
+    requireFlow(),
+    requirePermission("flows", "configure"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const body = await c.req.json();
+      const data = parseBody(proxyIdSchema, body);
 
-    await setFlowOverride(orgId, flow.id, "proxyId", data.proxyId);
+      await setFlowOverride(orgId, flow.id, "proxyId", data.proxyId);
 
-    return c.json({ success: true });
-  });
+      return c.json({ success: true });
+    },
+  );
 
   // GET /api/flows/:scope/:name/model — get flow model configuration
   router.get("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
@@ -157,28 +181,38 @@ export function createFlowsRouter() {
   });
 
   // PUT /api/flows/:scope/:name/model — set flow model override (admin-only)
-  router.put("/:scope{@[^/]+}/:name/model", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(modelIdSchema, body);
+  router.put(
+    "/:scope{@[^/]+}/:name/model",
+    requireFlow(),
+    requirePermission("flows", "configure"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const body = await c.req.json();
+      const data = parseBody(modelIdSchema, body);
 
-    await setFlowOverride(orgId, flow.id, "modelId", data.modelId);
+      await setFlowOverride(orgId, flow.id, "modelId", data.modelId);
 
-    return c.json({ success: true });
-  });
+      return c.json({ success: true });
+    },
+  );
 
   // PUT /api/flows/:scope/:name/org-profile — set org profile for this flow (admin-only)
-  router.put("/:scope{@[^/]+}/:name/org-profile", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const data = parseBody(orgProfileIdSchema, body);
+  router.put(
+    "/:scope{@[^/]+}/:name/org-profile",
+    requireFlow(),
+    requirePermission("flows", "configure"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const body = await c.req.json();
+      const data = parseBody(orgProfileIdSchema, body);
 
-    await setFlowOverride(orgId, flow.id, "orgProfileId", data.orgProfileId);
+      await setFlowOverride(orgId, flow.id, "orgProfileId", data.orgProfileId);
 
-    return c.json({ success: true });
-  });
+      return c.json({ success: true });
+    },
+  );
 
   // GET /api/flows/:scope/:name/memories — list flow memories
   router.get("/:scope{@[^/]+}/:name/memories", requireFlow(), async (c) => {
@@ -196,28 +230,38 @@ export function createFlowsRouter() {
   });
 
   // DELETE /api/flows/:scope/:name/memories — delete all memories (admin only)
-  router.delete("/:scope{@[^/]+}/:name/memories", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const deleted = await deleteAllPackageMemories(flow.id, orgId);
-    return c.json({ deleted });
-  });
+  router.delete(
+    "/:scope{@[^/]+}/:name/memories",
+    requireFlow(),
+    requirePermission("memories", "delete"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const deleted = await deleteAllPackageMemories(flow.id, orgId);
+      return c.json({ deleted });
+    },
+  );
 
   // DELETE /api/flows/:scope/:name/memories/:memoryId — delete single memory (admin only)
-  router.delete("/:scope{@[^/]+}/:name/memories/:memoryId", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
-    const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
-    if (!result.success) {
-      throw invalidRequest("Invalid memory ID", "memoryId");
-    }
-    const memoryId = result.data;
-    const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
-    if (!deleted) {
-      throw notFound("Memory not found");
-    }
-    return c.json({ deleted: true });
-  });
+  router.delete(
+    "/:scope{@[^/]+}/:name/memories/:memoryId",
+    requireFlow(),
+    requirePermission("memories", "delete"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
+      const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
+      if (!result.success) {
+        throw invalidRequest("Invalid memory ID", "memoryId");
+      }
+      const memoryId = result.data;
+      const deleted = await deletePackageMemory(memoryId, flow.id, orgId);
+      if (!deleted) {
+        throw notFound("Memory not found");
+      }
+      return c.json({ deleted: true });
+    },
+  );
 
   return router;
 }

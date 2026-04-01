@@ -37,6 +37,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
 import { requireFlow } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchWebhookEvents } from "../services/webhooks.ts";
@@ -391,6 +392,7 @@ export function createExecutionsRouter() {
     rateLimit(20),
     idempotency(),
     requireFlow(),
+    requirePermission("flows", "run"),
     async (c) => {
       const flow = c.get("flow");
       const orgId = c.get("orgId");
@@ -648,8 +650,8 @@ export function createExecutionsRouter() {
   });
 
   // POST /api/executions/:id/cancel — cancel a running/pending execution
-  router.post("/executions/:id/cancel", async (c) => {
-    const execId = c.req.param("id");
+  router.post("/executions/:id/cancel", requirePermission("executions", "cancel"), async (c) => {
+    const execId = c.req.param("id")!;
     const orgId = c.get("orgId");
 
     const execution = await getExecution(execId);
@@ -709,18 +711,23 @@ export function createExecutionsRouter() {
   });
 
   // DELETE /api/flows/:scope/:name/executions — delete all executions for a flow
-  router.delete("/flows/:scope{@[^/]+}/:name/executions", requireFlow(), async (c) => {
-    const flow = c.get("flow");
-    const orgId = c.get("orgId");
+  router.delete(
+    "/flows/:scope{@[^/]+}/:name/executions",
+    requireFlow(),
+    requirePermission("executions", "delete"),
+    async (c) => {
+      const flow = c.get("flow");
+      const orgId = c.get("orgId");
 
-    const running = await getRunningExecutionsForPackage(flow.id);
-    if (running > 0) {
-      throw conflict("execution_in_progress", `${running} execution(s) still running`);
-    }
+      const running = await getRunningExecutionsForPackage(flow.id);
+      if (running > 0) {
+        throw conflict("execution_in_progress", `${running} execution(s) still running`);
+      }
 
-    const deleted = await deletePackageExecutions(flow.id, orgId);
-    return c.json({ deleted });
-  });
+      const deleted = await deletePackageExecutions(flow.id, orgId);
+      return c.json({ deleted });
+    },
+  );
 
   return router;
 }
