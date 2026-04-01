@@ -62,7 +62,11 @@ export function Badge({
   return (
     <span className="relative shrink-0">
       {/* Mobile: bare icon with status color */}
-      <span className={`sm:hidden [&_svg]:h-4 [&_svg]:w-4 ${statusColorMap[status] ?? "text-muted-foreground"}`}>{icon}</span>
+      <span
+        className={`sm:hidden [&_svg]:h-4 [&_svg]:w-4 ${statusColorMap[status] ?? "text-muted-foreground"}`}
+      >
+        {icon}
+      </span>
       {/* Desktop: full badge */}
       <UIBadge variant={variant} className="gap-1 hidden sm:inline-flex">
         {icon}

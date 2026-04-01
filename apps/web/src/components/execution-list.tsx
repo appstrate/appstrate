@@ -26,6 +26,8 @@ interface ExecutionListProps {
   emptyState?: React.ReactNode;
   /** Preview row shown above the first page (e.g. scheduled next-run) */
   firstPageBanner?: React.ReactNode;
+  /** Filter executions by user — "me" for current user only */
+  user?: "me";
 }
 
 export function ExecutionList({
@@ -38,6 +40,7 @@ export function ExecutionList({
   hideFlowName = false,
   emptyState,
   firstPageBanner,
+  user,
 }: ExecutionListProps) {
   const { t } = useTranslation(["flows"]);
   const [page, setPage] = useState(0);
@@ -45,6 +48,7 @@ export function ExecutionList({
   const { data, isLoading } = usePaginatedExecutions({
     packageId,
     scheduleId,
+    user,
     limit: pageSize,
     offset: page * pageSize,
   });

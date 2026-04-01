@@ -1,6 +1,7 @@
-import { eq, and, or, isNotNull, isNull, desc, count, type SQL } from "drizzle-orm";
+import { eq, and, or, isNotNull, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { executions, packageVersions } from "@appstrate/db/schema";
+import { executions } from "@appstrate/db/schema";
+import { listExecutionsWithFilter } from "./executions.ts";
 
 // --- Notifications ---
 
@@ -106,34 +107,23 @@ export async function getUnreadCountsByFlow(
   return result;
 }
 
+export async function listOrgExecutions(
+  orgId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  const { limit = 20, offset = 0 } = options;
+  return listExecutionsWithFilter(eq(executions.orgId, orgId), limit, offset);
+}
+
 export async function listUserExecutions(
   actorId: string,
   orgId: string,
   options: { limit?: number; offset?: number } = {},
-): Promise<{ executions: Record<string, unknown>[]; total: number }> {
-  const limit = options.limit ?? 20;
-  const offset = options.offset ?? 0;
-
-  const [countRow] = await db
-    .select({ count: count() })
-    .from(executions)
-    .where(and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId)));
-
-  const rows = await db
-    .select({
-      execution: executions,
-      packageVersion: packageVersions.version,
-    })
-    .from(executions)
-    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId)))
-    .orderBy(desc(executions.startedAt))
-    .limit(limit)
-    .offset(offset);
-
-  const mapped = rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
-  return {
-    executions: mapped as unknown as Record<string, unknown>[],
-    total: countRow?.count ?? 0,
-  };
+) {
+  const { limit = 20, offset = 0 } = options;
+  return listExecutionsWithFilter(
+    and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId))!,
+    limit,
+    offset,
+  );
 }

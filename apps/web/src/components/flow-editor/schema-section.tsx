@@ -126,7 +126,9 @@ function SortableFieldCard({
         />
         <Select
           value={field.type}
-          onValueChange={(v) => onUpdate(index, { type: v, ...(v !== "string" ? { isFile: false } : {}) })}
+          onValueChange={(v) =>
+            onUpdate(index, { type: v, ...(v !== "string" ? { isFile: false } : {}) })
+          }
           disabled={readOnly}
         >
           <SelectTrigger className="h-7 w-[100px] text-xs">

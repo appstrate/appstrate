@@ -207,7 +207,7 @@ export function schemaToFields(
     const isInputFile = mode === "input" && fileField;
     const constraints = wrapper?.fileConstraints?.[key];
     const hint = wrapper?.uiHints?.[key];
-    const type = isInputFile ? "string" : (typeof prop.type === "string" ? prop.type : "string");
+    const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
     return {
       _id: crypto.randomUUID(),
       key,

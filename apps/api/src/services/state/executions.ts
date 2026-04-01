@@ -325,7 +325,7 @@ export async function deletePackageExecutions(packageId: string, orgId: string):
   return deleted.length;
 }
 
-async function listExecutionsWithFilter(
+export async function listExecutionsWithFilter(
   filter: SQL,
   limit: number,
   offset = 0,

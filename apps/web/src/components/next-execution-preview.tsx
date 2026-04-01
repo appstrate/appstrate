@@ -21,9 +21,7 @@ export function NextExecutionPreview({
   const { t } = useTranslation(["flows"]);
 
   return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 text-sm opacity-50 ${className ?? ""}`}
-    >
+    <div className={`flex items-center gap-2 px-3 py-2 text-sm opacity-50 ${className ?? ""}`}>
       <div className="flex flex-1 items-center gap-2 min-w-0">
         <span className="text-muted-foreground font-mono text-xs shrink-0">#{executionNumber}</span>
         {flowName && <span className="font-medium truncate">{flowName}</span>}

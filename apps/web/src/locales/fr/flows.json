@@ -64,6 +64,8 @@
   "executions.colTokens": "Tokens",
   "executions.colVersion": "Version",
   "executions.colInput": "Entrée",
+  "executions.filterAll": "Toutes",
+  "executions.filterMine": "Mes exécutions",
   "exec.rerun": "Relancer",
   "exec.tabLogs": "Logs",
   "exec.tabResultGroup": "Résultat",

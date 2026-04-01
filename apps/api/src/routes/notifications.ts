@@ -8,6 +8,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   listUserExecutions,
+  listOrgExecutions,
 } from "../services/state/index.ts";
 
 export function createNotificationsRouter() {
@@ -46,7 +47,7 @@ export function createNotificationsRouter() {
     return c.json({ updated });
   });
 
-  // GET /api/executions (all user executions across flows)
+  // GET /api/executions (org executions, optionally filtered by ?user=me)
   router.get("/executions", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
@@ -63,7 +64,14 @@ export function createNotificationsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listUserExecutions(actor.id, orgId, { limit, offset });
+    const userFilter = c.req.query("user");
+    const endUser = c.get("endUser");
+
+    // End-users always see only their own executions
+    const result =
+      userFilter === "me" || endUser
+        ? await listUserExecutions(actor.id, orgId, { limit, offset })
+        : await listOrgExecutions(orgId, { limit, offset });
     return c.json(result);
   });
 
