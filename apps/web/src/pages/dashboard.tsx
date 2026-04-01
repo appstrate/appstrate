@@ -64,12 +64,15 @@ export function DashboardPage() {
   }
 
   // Deduplicate executions by packageId (keep first = most recent), limit to 8
+  // Only include flows that still exist (flowMap lookup)
   const recentFlowIds: string[] = [];
   const seen = new Set<string>();
   for (const exec of executions) {
     if (!exec.packageId || seen.has(exec.packageId)) continue;
     seen.add(exec.packageId);
-    recentFlowIds.push(exec.packageId);
+    if (flowMap.has(exec.packageId)) {
+      recentFlowIds.push(exec.packageId);
+    }
     if (recentFlowIds.length >= 8) break;
   }
 
