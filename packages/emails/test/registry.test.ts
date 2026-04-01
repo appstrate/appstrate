@@ -1,8 +1,12 @@
-import { describe, it, expect } from "bun:test";
-import { renderEmail, registerEmailOverrides } from "../src/index.ts";
+import { describe, it, expect, afterAll } from "bun:test";
+import { renderEmail, registerEmailOverrides, resetEmailRegistry } from "../src/index.ts";
 import type { EmailRenderer } from "../src/index.ts";
 
 describe("email registry", () => {
+  afterAll(() => {
+    resetEmailRegistry();
+  });
+
   it("renders default verification template", () => {
     const result = renderEmail("verification", {
       user: { name: "Test", email: "test@example.com" },
