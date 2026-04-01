@@ -8,7 +8,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedConnectionProfile, seedFlow } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -214,6 +214,64 @@ describe("Connection Profiles API", () => {
 
       // Should fail because the profile doesn't belong to ctx's org
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe("GET /api/connection-profiles/org/:id/flows", () => {
+    it("returns flows configured with the org profile", async () => {
+      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Profile" });
+      await seedFlow({
+        id: "@testorg/linked-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@testorg/linked-flow",
+          version: "0.1.0",
+          type: "flow",
+          description: "Test",
+          displayName: "Linked Flow",
+        },
+      });
+
+      // Set org profile on the flow
+      const setRes = await app.request("/api/flows/@testorg/linked-flow/org-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgProfileId: orgProfile.id }),
+      });
+      expect(setRes.status).toBe(200);
+
+      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/flows`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.flows).toBeArray();
+      expect(body.flows).toHaveLength(1);
+      expect(body.flows[0].id).toBe("@testorg/linked-flow");
+      expect(body.flows[0].displayName).toBe("Linked Flow");
+    });
+
+    it("returns empty array when no flows use the profile", async () => {
+      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Unused" });
+
+      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/flows`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.flows).toHaveLength(0);
+    });
+
+    it("returns 404 for non-existent profile", async () => {
+      const res = await app.request(
+        "/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/flows",
+        { headers: authHeaders(ctx) },
+      );
+
+      expect(res.status).toBe(404);
     });
   });
 
