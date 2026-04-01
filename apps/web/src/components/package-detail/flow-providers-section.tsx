@@ -65,6 +65,7 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
 
   const summary = computeProvidersSummary(detail.dependencies.providers, t);
   const flowProviderIds = detail.dependencies.providers.map((p) => p.id);
+  const forcedOrgProfileId = detail.forcedOrgProfileId ?? null;
 
   return (
     <>
@@ -84,7 +85,10 @@ export function FlowProvidersSection({ packageId }: { packageId: string }) {
           )}
         </div>
         <div className="flex items-center gap-3">
-          <OrgProfileSelector flowProviderIds={flowProviderIds} />
+          <OrgProfileSelector
+            flowProviderIds={flowProviderIds}
+            forcedOrgProfileId={forcedOrgProfileId}
+          />
           <ProfileSelector />
         </div>
       </div>

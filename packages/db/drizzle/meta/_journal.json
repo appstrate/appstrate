@@ -64,6 +64,13 @@
       "when": 1774760354394,
       "tag": "0008_aspiring_squadron_supreme",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774798857626,
+      "tag": "0009_next_power_pack",
+      "breakpoints": true
     }
   ]
 }
