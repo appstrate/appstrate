@@ -7,7 +7,14 @@ import {
 } from "@appstrate/db/schema";
 import { user } from "@appstrate/db/schema";
 
-/** Get all bindings for an org profile: { providerId → sourceProfileId } */
+/**
+ * Get all bindings for an org profile: { providerId → sourceProfileId }.
+ *
+ * CALLER CONTRACT: The caller must verify that orgProfileId belongs to the
+ * requesting org (via getOrgProfile(id, orgId)) before calling this function.
+ * This function does not filter by orgId for performance — the orgProfileId
+ * foreign key implicitly scopes to a single org.
+ */
 export async function getOrgProfileBindings(orgProfileId: string): Promise<Record<string, string>> {
   const rows = await db
     .select({
@@ -33,7 +40,11 @@ export interface EnrichedBinding {
   connected: boolean;
 }
 
-/** Get all bindings for an org profile with profile name, user name, and connection status. */
+/**
+ * Get all bindings for an org profile with profile name, user name, and connection status.
+ *
+ * CALLER CONTRACT: Same as getOrgProfileBindings — caller must validate org ownership first.
+ */
 export async function getOrgProfileBindingsEnriched(
   orgProfileId: string,
 ): Promise<EnrichedBinding[]> {

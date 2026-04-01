@@ -14,6 +14,7 @@ import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import { notFound, invalidRequest } from "../lib/errors.ts";
 
 // ─── Profile CRUD ─────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export async function renameProfile(profileId: string, actor: Actor, name: strin
     )
     .returning({ id: connectionProfiles.id });
 
-  if (!updated) throw new Error("Profile not found");
+  if (!updated) throw notFound("Profile not found");
 }
 
 export async function deleteProfile(profileId: string, actor: Actor): Promise<void> {
@@ -142,8 +143,8 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
     )
     .limit(1);
 
-  if (!profile) throw new Error("Profile not found");
-  if (profile.isDefault) throw new Error("Cannot delete the default profile");
+  if (!profile) throw notFound("Profile not found");
+  if (profile.isDefault) throw invalidRequest("Cannot delete the default profile");
 
   await db.delete(connectionProfiles).where(
     and(
@@ -224,7 +225,7 @@ export async function renameOrgProfile(
     .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
     .returning({ id: connectionProfiles.id });
 
-  if (!updated) throw new Error("Profile not found");
+  if (!updated) throw notFound("Profile not found");
 }
 
 export async function deleteOrgProfile(profileId: string, orgId: string): Promise<void> {
@@ -234,7 +235,7 @@ export async function deleteOrgProfile(profileId: string, orgId: string): Promis
     .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
     .limit(1);
 
-  if (!profile) throw new Error("Profile not found");
+  if (!profile) throw notFound("Profile not found");
 
   await db
     .delete(connectionProfiles)
@@ -409,6 +410,15 @@ export async function getProfileById(profileId: string): Promise<ConnectionProfi
 
 // ─── Provider Profile Resolution ────────────────────────────
 
+/** Dependencies for resolveProviderProfiles — injectable for testing. */
+export interface ResolveProviderProfilesDeps {
+  getOrgProfileBindings: (orgProfileId: string) => Promise<Record<string, string>>;
+}
+
+const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
+  getOrgProfileBindings,
+};
+
 /**
  * Resolve profile IDs for each provider in a package.
  *
@@ -425,13 +435,14 @@ export async function resolveProviderProfiles(
   defaultUserProfileId: string,
   userProviderOverrides?: Record<string, string>,
   orgProfileId?: string | null,
+  deps: ResolveProviderProfilesDeps = defaultResolveProviderProfilesDeps,
 ): Promise<ProviderProfileMap> {
   const map: ProviderProfileMap = {};
 
   // Load org bindings if an org profile is provided
   let bindings: Record<string, string> = {};
   if (orgProfileId) {
-    bindings = await getOrgProfileBindings(orgProfileId);
+    bindings = await deps.getOrgProfileBindings(orgProfileId);
   }
 
   for (const svc of providers) {

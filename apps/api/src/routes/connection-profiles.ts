@@ -158,7 +158,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
-  router.post("/org/:id/bind", async (c) => {
+  router.post("/org/:id/bind", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;
@@ -194,7 +194,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
-  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", async (c) => {
+  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;

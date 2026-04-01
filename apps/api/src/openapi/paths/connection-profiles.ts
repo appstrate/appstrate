@@ -455,6 +455,50 @@ export const connectionProfilesPaths = {
     },
   },
 
+  "/api/connection-profiles/org/{id}/flows": {
+    get: {
+      operationId: "listOrgProfileFlows",
+      tags: ["Connection Profiles"],
+      summary: "List flows using an org profile",
+      description:
+        "List all flows that are configured to use a specific org-level connection profile.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+      responses: {
+        "200": {
+          description: "Flow list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  flows: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        displayName: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+
   "/api/connection-profiles/org/{id}/bindings": {
     get: {
       operationId: "listOrgProfileBindings",

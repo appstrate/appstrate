@@ -81,9 +81,7 @@ describe("getProviderEntries / setProviderEntries", () => {
 
   it("cleans up providersConfiguration when no config needed", () => {
     const m: Record<string, unknown> = { dependencies: { providers: {} } };
-    setProviderEntries(m, [
-      { id: "@org/gmail", version: "1.0.0", scopes: [] },
-    ]);
+    setProviderEntries(m, [{ id: "@org/gmail", version: "1.0.0", scopes: [] }]);
     expect(m.providersConfiguration).toBeUndefined();
   });
 });
