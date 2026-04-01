@@ -254,21 +254,6 @@ export function ExecutionDetailPage() {
               {cancelExecution.isPending && <Spinner />} {t("btn.cancel")}
             </Button>
           )}
-          {!isRunning && flow && (
-            <Button
-              onClick={() => {
-                const hasInput = flow.input?.schema && Object.keys(flow.input.schema).length > 0;
-                if (hasInput) {
-                  setInputOpen(true);
-                } else {
-                  runFlow.mutate(undefined);
-                }
-              }}
-              disabled={runFlow.isPending}
-            >
-              {t("exec.rerun")}
-            </Button>
-          )}
         </div>
       </div>
 
