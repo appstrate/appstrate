@@ -376,8 +376,37 @@ export async function getDefaultProfileId(actor: Actor): Promise<string> {
 }
 
 /**
- * Get a profile by ID without actor scoping. Used by scheduler to load the
+ * Resolve actor profile context for a flow: default profile + per-provider overrides.
+ * Used by execution, flow-detail, and internal (sidecar credential proxy) routes.
+ *
+ * When actor is null (e.g. sidecar with no user), pass fallbackProfileId to skip
+ * ensureDefaultProfile and per-provider overrides.
+ */
+export async function resolveActorProfileContext(
+  actor: Actor | null,
+  packageId: string,
+  fallbackProfileId?: string,
+): Promise<{ defaultUserProfileId: string; userProviderOverrides: Record<string, string> }> {
+  if (!actor) {
+    return {
+      defaultUserProfileId: fallbackProfileId!,
+      userProviderOverrides: {},
+    };
+  }
+  const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
+    getDefaultProfileId(actor),
+    getUserFlowProviderOverrides(actor, packageId),
+  ]);
+  return { defaultUserProfileId, userProviderOverrides };
+}
+
+/**
+ * Get a profile by ID without actor/org scoping. Used by scheduler to load the
  * profile referenced by a schedule's connectionProfileId.
+ *
+ * No orgId filter: user/end-user profiles have orgId=null on the row, so filtering
+ * by orgId would miss them. The caller (scheduler) already validates the schedule
+ * belongs to the requesting org.
  */
 export async function getProfileById(profileId: string): Promise<ConnectionProfile | null> {
   const [row] = await db

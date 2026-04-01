@@ -114,6 +114,7 @@ export function ProviderConnectionCard({
   const invalidateConnections = () => {
     qc.invalidateQueries({ queryKey: ["profile-connections"] });
     qc.invalidateQueries({ queryKey: ["available-providers"] });
+    qc.invalidateQueries({ queryKey: ["packages", "flow"] });
   };
 
   const doBind = () => {

@@ -1,6 +1,7 @@
-import { inArray } from "drizzle-orm";
+import { inArray, and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionProfiles, user } from "@appstrate/db/schema";
+import { connectionProfiles, userProviderConnections } from "@appstrate/db/schema";
+import { batchLoadUserNames } from "../../lib/user-helpers.ts";
 import type { FlowProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
 import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
 import { getConnection, validateScopes } from "@appstrate/connect";
@@ -51,7 +52,13 @@ function buildScopeInfo(
   };
 }
 
-/** Batch-fetch profile name + owner name for a set of profile IDs. */
+/**
+ * Batch-fetch profile name + owner name for a set of profile IDs.
+ *
+ * No orgId filter: profileIds come from resolveProviderProfiles() which resolves
+ * them from org-scoped queries (org bindings, actor profiles). User-owned profiles
+ * have orgId=null on the row, so filtering by orgId would miss them.
+ */
 async function buildProfileInfoMap(
   profileIds: string[],
 ): Promise<Map<string, { profileName: string | null; profileOwnerName: string | null }>> {
@@ -69,22 +76,52 @@ async function buildProfileInfoMap(
     .where(inArray(connectionProfiles.id, profileIds));
 
   const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
-  const userRows =
-    userIds.length > 0
-      ? await db
-          .select({ id: user.id, name: user.name })
-          .from(user)
-          .where(inArray(user.id, userIds))
-      : [];
+  const userNameMap = await batchLoadUserNames(userIds);
 
   return new Map(
     profileRows.map((row) => {
-      const ownerName = row.userId
-        ? (userRows.find((u) => u.id === row.userId)?.name ?? null)
-        : null;
+      const ownerName = row.userId ? (userNameMap.get(row.userId) ?? null) : null;
       return [row.id, { profileName: row.name, profileOwnerName: ownerName }];
     }),
   );
+}
+
+/**
+ * Batch-fetch connection statuses for all (profileId, orgId) pairs in a single query.
+ * Returns a Map keyed by "profileId:providerId" → connection row.
+ */
+async function batchGetConnectionStatuses(
+  profileIds: string[],
+  orgId: string,
+): Promise<Map<string, { id: string; createdAt: string; scopesGranted: string[] | null }>> {
+  if (profileIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      id: userProviderConnections.id,
+      profileId: userProviderConnections.profileId,
+      providerId: userProviderConnections.providerId,
+      createdAt: userProviderConnections.createdAt,
+      scopesGranted: userProviderConnections.scopesGranted,
+    })
+    .from(userProviderConnections)
+    .where(
+      and(
+        inArray(userProviderConnections.profileId, profileIds),
+        eq(userProviderConnections.orgId, orgId),
+      ),
+    );
+
+  const map = new Map<string, { id: string; createdAt: string; scopesGranted: string[] | null }>();
+  for (const row of rows) {
+    const key = `${row.profileId}:${row.providerId}`;
+    map.set(key, {
+      id: row.id,
+      createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
+      scopesGranted: row.scopesGranted,
+    });
+  }
+  return map;
 }
 
 /**
@@ -97,7 +134,6 @@ export async function resolveProviderStatuses(
   providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<ProviderStatus[]> {
-  // Batch-fetch all profile info in 1-2 queries instead of N
   const profileIds = [
     ...new Set(
       Object.values(providerProfiles)
@@ -106,7 +142,11 @@ export async function resolveProviderStatuses(
     ),
   ];
 
-  const profileInfoMap = await buildProfileInfoMap(profileIds);
+  // Batch-fetch profile info + connection statuses in parallel (2-3 queries total instead of N+2)
+  const [profileInfoMap, connectionMap] = await Promise.all([
+    buildProfileInfoMap(profileIds),
+    batchGetConnectionStatuses(profileIds, orgId),
+  ]);
 
   return Promise.all(
     providers.map(async (svc) => {
@@ -130,20 +170,24 @@ export async function resolveProviderStatuses(
         };
       }
 
-      const conn = await getConnectionStatus(svc.id, entry.profileId, orgId);
+      // Look up connection from batch-fetched map
+      const connKey = `${entry.profileId}:${svc.id}`;
+      const conn = connectionMap.get(connKey);
+      const connStatus: ConnectionStatusValue = conn ? "connected" : "not_connected";
+
       const profileInfo = profileInfoMap.get(entry.profileId) ?? {
         profileName: null,
         profileOwnerName: null,
       };
-      const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
+      const connScopesGranted = conn?.scopesGranted ?? undefined;
       return {
         ...base,
-        status: conn.status,
+        status: connStatus,
         authMode: label,
         source: entry.source,
         profileName: profileInfo.profileName,
         profileOwnerName: profileInfo.profileOwnerName,
-        ...buildScopeInfo(connScopesGranted, scopesRequired, conn.status === "connected"),
+        ...buildScopeInfo(connScopesGranted, scopesRequired, connStatus === "connected"),
       };
     }),
   );

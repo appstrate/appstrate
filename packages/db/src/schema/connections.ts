@@ -77,6 +77,7 @@ export const userFlowProviderProfiles = pgTable(
       .on(table.endUserId, table.packageId, table.providerId)
       .where(sql`${table.endUserId} IS NOT NULL`),
     index("idx_ufpp_package_id").on(table.packageId),
+    index("idx_ufpp_profile_id").on(table.profileId),
     check(
       "ufpp_exactly_one_actor",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
