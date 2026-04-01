@@ -1,24 +1,11 @@
-import { RateLimiterRedis, RateLimiterMemory } from "rate-limiter-flexible";
+import { RateLimiterRedis } from "rate-limiter-flexible";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getRedisConnection } from "../lib/redis.ts";
 import { ApiError } from "../lib/errors.ts";
 
-/**
- * Creates a rate limiter — Redis-backed in production, in-memory for tests.
- * The `_useMemoryForTesting` flag lets tests run without Redis.
- */
-let _useMemoryForTesting = false;
-
-export function _setMemoryBackendForTesting(value: boolean): void {
-  _useMemoryForTesting = value;
-}
-
 function createLimiter(points: number, duration: number, keyPrefix: string): RateLimiterAbstract {
-  if (_useMemoryForTesting) {
-    return new RateLimiterMemory({ points, duration, keyPrefix });
-  }
   return new RateLimiterRedis({
     storeClient: getRedisConnection(),
     points,
@@ -31,7 +18,8 @@ let authLimiters = new Map<string, RateLimiterAbstract>();
 let bearerLimiters = new Map<string, RateLimiterAbstract>();
 let ipLimiters = new Map<string, RateLimiterAbstract>();
 
-export function _resetBucketsForTesting(): void {
+/** Reset all limiter instances — used by tests to get fresh limiters between test cases. */
+export function resetRateLimiters(): void {
   authLimiters = new Map();
   bearerLimiters = new Map();
   ipLimiters = new Map();

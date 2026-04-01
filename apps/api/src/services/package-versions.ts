@@ -21,7 +21,6 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
 import { buildDependencies } from "./package-items/dependencies.ts";
-import { prepareManifestForPublish } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "../lib/safe-json.ts";
@@ -610,9 +609,17 @@ export async function createVersionFromDraft(params: {
   // matches what would be published to the registry (same integrity).
   const deps = await buildDependencies(packageId);
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
-  const finalManifest = parsed
-    ? prepareManifestForPublish(manifest, parsed.scope, parsed.name, version, deps)
-    : manifest;
+  let finalManifest: Record<string, unknown>;
+  if (parsed) {
+    finalManifest = { ...manifest, name: `@${parsed.scope}/${parsed.name}`, version };
+    if (deps) {
+      finalManifest.dependencies = deps;
+    } else {
+      delete finalManifest.dependencies;
+    }
+  } else {
+    finalManifest = manifest;
+  }
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;

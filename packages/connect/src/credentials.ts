@@ -199,15 +199,19 @@ export async function saveConnection(
 ): Promise<void> {
   const encrypted = encryptCredentials(credentials);
 
+  const connectionData = {
+    credentialsEncrypted: encrypted,
+    scopesGranted: options?.scopesGranted ?? [],
+    expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+  };
+
   await db
     .insert(userProviderConnections)
     .values({
       profileId,
       providerId,
       orgId,
-      credentialsEncrypted: encrypted,
-      scopesGranted: options?.scopesGranted ?? [],
-      expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+      ...connectionData,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -217,9 +221,7 @@ export async function saveConnection(
         userProviderConnections.orgId,
       ],
       set: {
-        credentialsEncrypted: encrypted,
-        scopesGranted: options?.scopesGranted ?? [],
-        expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+        ...connectionData,
         updatedAt: new Date(),
       },
     });

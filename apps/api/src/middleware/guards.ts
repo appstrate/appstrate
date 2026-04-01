@@ -3,7 +3,7 @@ import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/flow-service.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
-import { ApiError, forbidden, conflict } from "../lib/errors.ts";
+import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Check if a role grants admin/owner access. */
 export function isAdminRole(role: string): boolean {
@@ -61,7 +61,9 @@ export function requireOwnedPackage() {
     const id = c.req.param("id");
     // Route pattern `:scope{@[^/]+}` includes the @ prefix
     const packageId = scope && name ? `${scope}/${name}` : id;
-    if (!packageId) return next();
+    if (!packageId) {
+      throw invalidRequest("Package ID is required");
+    }
 
     const orgSlug = c.get("orgSlug");
     if (!isOwnedByOrg(packageId, orgSlug)) {

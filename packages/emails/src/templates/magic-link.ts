@@ -1,7 +1,7 @@
-import type { EmailPropsMap, RenderedEmail, SupportedLocale } from "../types.ts";
-import { escapeHtml } from "./layout.ts";
+import type { EmailPropsMap, RenderedEmail } from "../types.ts";
+import { createSimpleEmailRenderer } from "./simple-email.ts";
 
-const strings = {
+const render = createSimpleEmailRenderer({
   fr: {
     subject: "Votre lien de connexion",
     body: "Cliquez sur le lien ci-dessous pour vous connecter :",
@@ -12,17 +12,8 @@ const strings = {
     body: "Click the link below to sign in:",
     footer: "If you didn't request this link, you can safely ignore this email.",
   },
-} satisfies Record<SupportedLocale, Record<string, string>>;
+});
 
 export function renderMagicLinkEmail(props: EmailPropsMap["magic-link"]): RenderedEmail {
-  const { url, locale } = props;
-  const s = strings[locale] ?? strings.fr;
-
-  const subject = s.subject;
-
-  const html = `<p>${s.body}</p>
-<p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
-<p>${s.footer}</p>`;
-
-  return { subject, html };
+  return render(props);
 }

@@ -56,8 +56,8 @@ export function createFlowsRouter() {
         runningExecutions: runningCounts[f.id] ?? 0,
         source: f.source,
         scope: parsed?.scope ?? null,
-        version: f.manifest.version ?? null,
-        type: f.manifest.type ?? "flow",
+        version: f.manifest.version,
+        type: f.manifest.type,
       };
     });
 

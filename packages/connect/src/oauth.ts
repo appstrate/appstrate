@@ -6,7 +6,7 @@ import type { OAuthStateRecord } from "./types.ts";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
 import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { extractErrorMessage, actorFromRow, actorToColumns } from "./utils.ts";
 
 /**
  * Generate a cryptographically random base64url string.
@@ -61,14 +61,10 @@ export async function initiateOAuth(
 
   // Store OAuth state in DB
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  const actorCols =
-    actor.type === "end_user"
-      ? { userId: null as string | null, endUserId: actor.id }
-      : { userId: actor.id, endUserId: null as string | null };
   await db.insert(oauthStates).values({
     state,
     orgId,
-    ...actorCols,
+    ...actorToColumns(actor),
     profileId,
     providerId,
     codeVerifier,
@@ -134,9 +130,7 @@ export async function handleOAuthCallback(
   const rawRow = rows[0]!;
 
   // Reconstruct actor from the stored columns
-  const actor: Actor = rawRow.endUserId
-    ? { type: "end_user", id: rawRow.endUserId }
-    : { type: "member", id: rawRow.userId! };
+  const actor = actorFromRow(rawRow);
 
   // Map to OAuthStateRecord
   const stateRow: OAuthStateRecord = {

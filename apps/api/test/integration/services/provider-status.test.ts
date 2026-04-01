@@ -109,7 +109,8 @@ describe("resolveProviderStatuses", () => {
     const statuses = await resolveProviderStatuses(providers, profiles, orgId);
     const s0 = statuses[0]!;
     expect(s0.status).toBe("not_connected");
-    expect(s0.source).toBeUndefined();
-    expect((s0 as any).profileName).toBeUndefined();
+    expect(s0.source).toBeNull();
+    expect(s0.profileName).toBeNull();
+    expect(s0.profileOwnerName).toBeNull();
   });
 });
