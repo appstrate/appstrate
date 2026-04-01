@@ -1,8 +1,12 @@
 import { Queue, Worker } from "bullmq";
 import type { Job, ConnectionOptions } from "bullmq";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageSchedules } from "@appstrate/db/schema";
+import {
+  packageSchedules,
+  connectionProfiles as connectionProfilesTable,
+  userProviderConnections,
+} from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
@@ -22,7 +26,6 @@ import {
 } from "./connection-profiles.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { getConnection } from "@appstrate/connect";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -454,14 +457,39 @@ async function computeScheduleReadiness(
     orgId,
   );
 
-  const results = await Promise.all(
-    providers.map(async (p) => {
-      const sourceProfileId = providerProfiles[p.id]?.profileId;
-      if (!sourceProfileId) return { id: p.id, connected: false };
-      const conn = await getConnection(db, sourceProfileId, p.id, orgId);
-      return { id: p.id, connected: !!conn };
-    }),
-  );
+  // Batch-fetch all connections for resolved profile IDs in one query
+  const resolvedProfileIds = [
+    ...new Set(
+      providers
+        .map((p) => providerProfiles[p.id]?.profileId)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+
+  const connectionMap = new Map<string, boolean>();
+  if (resolvedProfileIds.length > 0) {
+    const connRows = await db
+      .select({
+        profileId: userProviderConnections.profileId,
+        providerId: userProviderConnections.providerId,
+      })
+      .from(userProviderConnections)
+      .where(
+        and(
+          inArray(userProviderConnections.profileId, resolvedProfileIds),
+          eq(userProviderConnections.orgId, orgId),
+        ),
+      );
+    for (const row of connRows) {
+      connectionMap.set(`${row.profileId}:${row.providerId}`, true);
+    }
+  }
+
+  const results = providers.map((p) => {
+    const sourceProfileId = providerProfiles[p.id]?.profileId;
+    if (!sourceProfileId) return { id: p.id, connected: false };
+    return { id: p.id, connected: connectionMap.has(`${sourceProfileId}:${p.id}`) };
+  });
 
   const missing = results.filter((r) => !r.connected).map((r) => r.id);
   const connected = results.filter((r) => r.connected).length;
@@ -481,13 +509,18 @@ async function computeScheduleReadiness(
 async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
-  // Batch load unique profiles
+  // Batch load unique profiles in one query
   const profileIds = [...new Set(schedules.map((s) => s.connectionProfileId))];
-  const profiles = await Promise.all(profileIds.map((id) => getProfileByIdUnsafe(id)));
-  const profileMap = new Map(profileIds.map((id, i) => [id, profiles[i] ?? null]));
+  const profileRows = await db
+    .select()
+    .from(connectionProfilesTable)
+    .where(inArray(connectionProfilesTable.id, profileIds));
+  const profileMap = new Map<string, ConnectionProfile | null>(
+    profileIds.map((id) => [id, profileRows.find((r) => r.id === id) ?? null]),
+  );
 
   // Batch load user names for user-owned profiles
-  const userIds = [...new Set(profiles.filter((p) => p?.userId).map((p) => p!.userId!))];
+  const userIds = [...new Set(profileRows.filter((p) => p.userId).map((p) => p.userId!))];
   const userNameMap = await batchLoadUserNames(userIds);
 
   // Batch load unique flows
