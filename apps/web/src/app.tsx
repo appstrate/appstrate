@@ -45,7 +45,7 @@ import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
-import { useProfileAutoSelect, useOrgProfileAutoCleanup } from "./hooks/use-current-profile";
+import { useProfileAutoSelect } from "./hooks/use-current-profile";
 import { useApplicationResolver } from "./hooks/use-current-application";
 import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
@@ -91,7 +91,6 @@ function MainLayout() {
 function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
   useGlobalExecutionSync();
   useProfileAutoSelect();
-  useOrgProfileAutoCleanup();
   return <>{children}</>;
 }
 

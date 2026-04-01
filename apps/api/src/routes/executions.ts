@@ -396,7 +396,6 @@ export function createExecutionsRouter() {
       const actor = getActor(c);
       const packageId = flow.id;
       const profileIdOverride = c.req.query("profileId");
-      const orgProfileIdOverride = c.req.query("orgProfileId");
 
       // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
       const versionOverride = c.req.query("version");
@@ -419,9 +418,8 @@ export function createExecutionsRouter() {
         };
       }
 
-      // Load admin-forced org profile (takes priority over user override)
+      // Load admin-configured org profile from flow config
       const { orgProfileId: forcedOrgProfileId } = await getPackageConfigFull(orgId, packageId);
-      const effectiveOrgProfileId = forcedOrgProfileId ?? orgProfileIdOverride ?? null;
 
       // Run independent pre-flight operations in parallel (using effectiveFlow for version-aware validation)
       const resolvedUserProfileId =
@@ -432,7 +430,7 @@ export function createExecutionsRouter() {
           packageId,
           orgId,
           userProfileId: resolvedUserProfileId,
-          orgProfileId: effectiveOrgProfileId,
+          orgProfileId: forcedOrgProfileId,
         }),
         parseRequestInput(
           c,

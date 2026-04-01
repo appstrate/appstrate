@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { InputModal } from "./input-modal";
 import { useRunFlow } from "../hooks/use-mutations";
-import { useCurrentProfileId, useCurrentOrgProfileId } from "../hooks/use-current-profile";
+import { useCurrentProfileId } from "../hooks/use-current-profile";
 import { api } from "../api";
 import type { FlowDetail } from "@appstrate/shared-types";
 
@@ -35,7 +35,6 @@ export function RunFlowButton({
 }: RunFlowButtonProps) {
   const { t } = useTranslation(["flows"]);
   const profileId = useCurrentProfileId();
-  const orgProfileId = useCurrentOrgProfileId();
   const runFlow = useRunFlow(packageId);
   const [fetchedDetail, setFetchedDetail] = useState<FlowDetail | null>(null);
   const [inputOpen, setInputOpen] = useState(false);
@@ -51,11 +50,7 @@ export function RunFlowButton({
     if (hasInputSchema) {
       setInputOpen(true);
     } else {
-      runFlow.mutate({
-        profileId: profileId ?? undefined,
-        orgProfileId: orgProfileId ?? undefined,
-        version,
-      });
+      runFlow.mutate({ profileId: profileId ?? undefined, version });
     }
   };
 
@@ -71,10 +66,7 @@ export function RunFlowButton({
     // Lazy fetch for list page
     setFetching(true);
     try {
-      const qsParts: string[] = [];
-      if (profileId) qsParts.push(`profileId=${profileId}`);
-      if (orgProfileId) qsParts.push(`orgProfileId=${orgProfileId}`);
-      const qs = qsParts.length > 0 ? `?${qsParts.join("&")}` : "";
+      const qs = profileId ? `?profileId=${profileId}` : "";
       const data = await api<{ flow: FlowDetail }>(`/packages/flows/${packageId}${qs}`);
       const flowDetail = data.flow;
       setFetchedDetail(flowDetail);
@@ -87,10 +79,7 @@ export function RunFlowButton({
       if (needsInput) {
         setInputOpen(true);
       } else {
-        runFlow.mutate({
-          profileId: profileId ?? undefined,
-          orgProfileId: orgProfileId ?? undefined,
-        });
+        runFlow.mutate({ profileId: profileId ?? undefined });
       }
     } catch {
       // Fetch errors are silent — user can retry
@@ -131,13 +120,7 @@ export function RunFlowButton({
           onClose={() => setInputOpen(false)}
           flow={detail}
           onSubmit={(input, files) =>
-            runFlow.mutate({
-              input,
-              files,
-              profileId: profileId ?? undefined,
-              orgProfileId: orgProfileId ?? undefined,
-              version,
-            })
+            runFlow.mutate({ input, files, profileId: profileId ?? undefined, version })
           }
           isPending={runFlow.isPending}
         />
