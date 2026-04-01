@@ -66,6 +66,7 @@ export function ProviderConnectionCard({
   const { data: bindings } = useOrgProfileBindings(orgProfileId);
   const binding = bindings?.find((b) => b.providerId === providerId);
   const isBound = !!binding;
+  const isBoundButDisconnected = isBound && binding?.connected === false;
 
   // Mutations
   const connectMutation = useConnect();
@@ -170,7 +171,18 @@ export function ProviderConnectionCard({
 
         {/* Status */}
         {orgProfileId ? (
-          isBound && binding ? (
+          isBoundButDisconnected ? (
+            <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
+              <AlertTriangle className="size-3" />
+              {readOnly
+                ? t("providerCard.boundDisconnectedUser", {
+                    defaultValue: "Connection unavailable — contact your administrator",
+                  })
+                : t("providerCard.boundDisconnected", {
+                    defaultValue: "Source connection deleted — rebind required",
+                  })}
+            </span>
+          ) : isBound && binding ? (
             <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
               <Link2 className="size-3" />
               {binding.boundByUserName

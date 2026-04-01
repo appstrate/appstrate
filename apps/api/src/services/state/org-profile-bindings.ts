@@ -1,6 +1,10 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgProfileProviderBindings, connectionProfiles } from "@appstrate/db/schema";
+import {
+  orgProfileProviderBindings,
+  connectionProfiles,
+  userProviderConnections,
+} from "@appstrate/db/schema";
 import { user } from "@appstrate/db/schema";
 
 /** Get all bindings for an org profile: { providerId → sourceProfileId } */
@@ -25,9 +29,11 @@ export interface EnrichedBinding {
   sourceProfileId: string;
   sourceProfileName: string;
   boundByUserName: string | null;
+  /** Whether the source user still has an active connection for this provider. */
+  connected: boolean;
 }
 
-/** Get all bindings for an org profile with profile name and user name. */
+/** Get all bindings for an org profile with profile name, user name, and connection status. */
 export async function getOrgProfileBindingsEnriched(
   orgProfileId: string,
 ): Promise<EnrichedBinding[]> {
@@ -37,6 +43,7 @@ export async function getOrgProfileBindingsEnriched(
       sourceProfileId: orgProfileProviderBindings.sourceProfileId,
       sourceProfileName: connectionProfiles.name,
       boundByUserName: user.name,
+      connectionId: userProviderConnections.id,
     })
     .from(orgProfileProviderBindings)
     .innerJoin(
@@ -44,6 +51,13 @@ export async function getOrgProfileBindingsEnriched(
       eq(connectionProfiles.id, orgProfileProviderBindings.sourceProfileId),
     )
     .leftJoin(user, eq(user.id, orgProfileProviderBindings.boundByUserId))
+    .leftJoin(
+      userProviderConnections,
+      and(
+        eq(userProviderConnections.profileId, orgProfileProviderBindings.sourceProfileId),
+        eq(userProviderConnections.providerId, orgProfileProviderBindings.providerId),
+      ),
+    )
     .where(eq(orgProfileProviderBindings.orgProfileId, orgProfileId));
 
   return rows.map((r) => ({
@@ -51,6 +65,7 @@ export async function getOrgProfileBindingsEnriched(
     sourceProfileId: r.sourceProfileId,
     sourceProfileName: r.sourceProfileName,
     boundByUserName: r.boundByUserName,
+    connected: r.connectionId != null,
   }));
 }
 

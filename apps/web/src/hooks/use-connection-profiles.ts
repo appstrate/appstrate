@@ -168,6 +168,7 @@ export interface EnrichedBinding {
   sourceProfileId: string;
   sourceProfileName: string;
   boundByUserName: string | null;
+  connected: boolean;
 }
 
 export function useOrgProfileBindings(profileId: string | undefined) {
