@@ -18,7 +18,11 @@ import { getPackageConfig } from "../../../src/services/state/index.ts";
 import { validateFlowReadiness } from "../../../src/services/flow-readiness.ts";
 import { getPackage } from "../../../src/services/flow-service.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
-import type { FlowProviderRequirement, LoadedPackage, ProviderProfileMap } from "../../../src/types/index.ts";
+import type {
+  FlowProviderRequirement,
+  LoadedPackage,
+  ProviderProfileMap,
+} from "../../../src/types/index.ts";
 
 describe("Execution with provider profiles", () => {
   let userId: string;
@@ -39,7 +43,7 @@ describe("Execution with provider profiles", () => {
     // Seed provider packages + enable them for the org
     for (const pid of providerIds) {
       await seedPackage({
-        orgId: null as unknown as string,
+        orgId: null,
         id: pid,
         type: "provider",
         source: "system",
@@ -102,7 +106,14 @@ describe("Execution with provider profiles", () => {
     modelId: string | null;
     proxyId: string | null;
   }> {
-    const { flow, packageId, orgId: oid, defaultUserProfileId, userProviderOverrides, orgProfileId } = params;
+    const {
+      flow,
+      packageId,
+      orgId: oid,
+      defaultUserProfileId,
+      userProviderOverrides,
+      orgProfileId,
+    } = params;
     const manifestProviders = resolveManifestProviders(flow.manifest);
 
     const [providerProfiles, packageConfig] = await Promise.all([
@@ -116,7 +127,12 @@ describe("Execution with provider profiles", () => {
       getPackageConfig(oid, packageId),
     ]);
 
-    await validateFlowReadiness({ flow, providerProfiles, orgId: oid, config: packageConfig.config });
+    await validateFlowReadiness({
+      flow,
+      providerProfiles,
+      orgId: oid,
+      config: packageConfig.config,
+    });
 
     return {
       providerProfiles,
@@ -175,7 +191,13 @@ describe("Execution with provider profiles", () => {
     it("falls back to default user profile when no overrides and no org profile", async () => {
       const providers = makeProviders(providerIds);
 
-      const map = await resolveProviderProfiles(providers, defaultProfileId, undefined, undefined, orgId);
+      const map = await resolveProviderProfiles(
+        providers,
+        defaultProfileId,
+        undefined,
+        undefined,
+        orgId,
+      );
 
       for (const pid of providerIds) {
         expect(map[pid]!.profileId).toBe(defaultProfileId);

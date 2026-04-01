@@ -5,9 +5,31 @@
  * race conditions with ensureDefaultProfile.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 
-process.on("unhandledRejection", () => {});
+// Scoped unhandledRejection handler — only swallows BullMQ-related rejections
+let unhandledRejectionHandler: (reason: unknown) => void;
+
+beforeAll(() => {
+  unhandledRejectionHandler = (reason: unknown) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    if (
+      message.includes("bullmq") ||
+      message.includes("Missing lock") ||
+      message.includes("Connection is closed") ||
+      message.includes("ensureDefaultProfile")
+    ) {
+      return; // Swallow BullMQ-related rejections
+    }
+    // Re-throw non-BullMQ rejections so they are not silently ignored
+    throw reason;
+  };
+  process.on("unhandledRejection", unhandledRejectionHandler);
+});
+
+afterAll(() => {
+  process.removeListener("unhandledRejection", unhandledRejectionHandler);
+});
 
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -15,10 +37,7 @@ import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { saveConnection } from "@appstrate/connect";
 import { providerCredentials } from "@appstrate/db/schema";
-import {
-  createSchedule,
-  listSchedules,
-} from "../../../src/services/scheduler.ts";
+import { createSchedule, listSchedules } from "../../../src/services/scheduler.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import { ensureDefaultProfile } from "../../../src/services/connection-profiles.ts";
 
@@ -49,7 +68,7 @@ describe("scheduler org-profile readiness", () => {
 
   async function seedProviderPackage(id: string) {
     await seedPackage({
-      orgId: null as unknown as string,
+      orgId: null,
       id,
       type: "provider",
       source: "system",

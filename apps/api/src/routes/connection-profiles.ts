@@ -32,6 +32,7 @@ import {
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
 import { requireAdmin } from "../middleware/guards.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections } from "@appstrate/connect";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
@@ -53,7 +54,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles — create a new profile
-  router.post("/", async (c) => {
+  router.post("/", rateLimit(10), async (c) => {
     const actor = getActor(c);
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -93,7 +94,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org — create an org profile (admin only)
-  router.post("/org", requireAdmin(), async (c) => {
+  router.post("/org", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -159,7 +160,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
-  router.post("/org/:id/bind", requireAdmin(), async (c) => {
+  router.post("/org/:id/bind", rateLimit(10), requireAdmin(), async (c) => {
     const orgId = c.get("orgId");
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;

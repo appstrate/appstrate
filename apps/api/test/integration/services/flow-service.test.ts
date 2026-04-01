@@ -25,12 +25,22 @@ describe("flow-service", () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/flow-a`,
-        draftManifest: { name: `@${orgSlug}/flow-a`, version: "0.1.0", type: "flow", description: "Flow A" },
+        draftManifest: {
+          name: `@${orgSlug}/flow-a`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow A",
+        },
       });
       await seedPackage({
         orgId,
         id: `@${orgSlug}/flow-b`,
-        draftManifest: { name: `@${orgSlug}/flow-b`, version: "0.1.0", type: "flow", description: "Flow B" },
+        draftManifest: {
+          name: `@${orgSlug}/flow-b`,
+          version: "0.1.0",
+          type: "flow",
+          description: "Flow B",
+        },
       });
 
       const flows = await listPackages(orgId);
@@ -43,15 +53,25 @@ describe("flow-service", () => {
 
     it("includes system packages (orgId: null) alongside org packages", async () => {
       await seedPackage({
-        orgId: null as unknown as string,
+        orgId: null,
         id: "@system/sys-flow",
         source: "system",
-        draftManifest: { name: "@system/sys-flow", version: "1.0.0", type: "flow", description: "System" },
+        draftManifest: {
+          name: "@system/sys-flow",
+          version: "1.0.0",
+          type: "flow",
+          description: "System",
+        },
       });
       await seedPackage({
         orgId,
         id: `@${orgSlug}/user-flow`,
-        draftManifest: { name: `@${orgSlug}/user-flow`, version: "0.1.0", type: "flow", description: "User" },
+        draftManifest: {
+          name: `@${orgSlug}/user-flow`,
+          version: "0.1.0",
+          type: "flow",
+          description: "User",
+        },
       });
 
       const flows = await listPackages(orgId);
@@ -67,7 +87,12 @@ describe("flow-service", () => {
       await seedPackage({
         orgId: otherOrg.id,
         id: "@otherorg/secret-flow",
-        draftManifest: { name: "@otherorg/secret-flow", version: "0.1.0", type: "flow", description: "Other" },
+        draftManifest: {
+          name: "@otherorg/secret-flow",
+          version: "0.1.0",
+          type: "flow",
+          description: "Other",
+        },
       });
 
       const flows = await listPackages(orgId);
@@ -80,13 +105,23 @@ describe("flow-service", () => {
         orgId,
         id: `@${orgSlug}/my-flow`,
         type: "flow",
-        draftManifest: { name: `@${orgSlug}/my-flow`, version: "0.1.0", type: "flow", description: "A flow" },
+        draftManifest: {
+          name: `@${orgSlug}/my-flow`,
+          version: "0.1.0",
+          type: "flow",
+          description: "A flow",
+        },
       });
       await seedPackage({
         orgId,
         id: `@${orgSlug}/my-skill`,
         type: "skill",
-        draftManifest: { name: `@${orgSlug}/my-skill`, version: "0.1.0", type: "skill", description: "A skill" },
+        draftManifest: {
+          name: `@${orgSlug}/my-skill`,
+          version: "0.1.0",
+          type: "skill",
+          description: "A skill",
+        },
       });
 
       const flows = await listPackages(orgId);
@@ -138,7 +173,12 @@ describe("flow-service", () => {
       await seedPackage({
         orgId: otherOrg.id,
         id: "@otherorg2/private-flow",
-        draftManifest: { name: "@otherorg2/private-flow", version: "0.1.0", type: "flow", description: "Private" },
+        draftManifest: {
+          name: "@otherorg2/private-flow",
+          version: "0.1.0",
+          type: "flow",
+          description: "Private",
+        },
       });
 
       const flow = await getPackage("@otherorg2/private-flow", orgId);
@@ -203,7 +243,7 @@ describe("flow-service", () => {
     it("resolves system tool dependencies", async () => {
       // System tools have orgId: null
       await seedPackage({
-        orgId: null as unknown as string,
+        orgId: null,
         id: "@appstrate/log",
         type: "tool",
         source: "system",

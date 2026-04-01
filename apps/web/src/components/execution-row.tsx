@@ -4,27 +4,22 @@ import { Shield, User, Calendar } from "lucide-react";
 import { Badge } from "./status-badge";
 import { cn } from "@/lib/utils";
 import { formatDateField } from "../lib/markdown";
-import { useAllSchedules } from "../hooks/use-schedules";
 import type { Execution } from "@appstrate/shared-types";
 
 export function ExecutionRow({
   execution,
   flowName,
   userName,
+  scheduleName,
 }: {
   execution: Execution;
   flowName?: string;
   userName?: string;
+  scheduleName?: string | null;
 }) {
   const isRunning = execution.status === "running" || execution.status === "pending";
   const isUnread = execution.notifiedAt != null && execution.readAt == null;
   const date = execution.startedAt ? formatDateField(execution.startedAt) : "";
-
-  // Resolve schedule name if triggered by a schedule
-  const { data: schedules } = useAllSchedules();
-  const scheduleName = execution.scheduleId
-    ? (schedules?.find((s) => s.id === execution.scheduleId)?.name ?? null)
-    : null;
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -33,7 +28,7 @@ export function ExecutionRow({
     const start = new Date(execution.startedAt).getTime();
     const tick = () => setElapsed(Date.now() - start);
     tick();
-    const id = setInterval(tick, 100);
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [isRunning, execution.startedAt]);
 

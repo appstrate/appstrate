@@ -37,7 +37,7 @@ describe("execution preflight — provider profile resolution", () => {
     // Seed provider packages + enable them
     for (const pid of providerIds) {
       await seedPackage({
-        orgId: null as unknown as string,
+        orgId: null,
         id: pid,
         type: "provider",
         source: "system",
@@ -101,7 +101,14 @@ describe("execution preflight — provider profile resolution", () => {
     modelId: string | null;
     proxyId: string | null;
   }> {
-    const { flow, packageId, orgId: oid, defaultUserProfileId, userProviderOverrides, orgProfileId } = params;
+    const {
+      flow,
+      packageId,
+      orgId: oid,
+      defaultUserProfileId,
+      userProviderOverrides,
+      orgProfileId,
+    } = params;
     const manifestProviders = resolveManifestProviders(flow.manifest);
 
     const [providerProfiles, packageConfig] = await Promise.all([
@@ -115,7 +122,12 @@ describe("execution preflight — provider profile resolution", () => {
       getPackageConfig(oid, packageId),
     ]);
 
-    await validateFlowReadiness({ flow, providerProfiles, orgId: oid, config: packageConfig.config });
+    await validateFlowReadiness({
+      flow,
+      providerProfiles,
+      orgId: oid,
+      config: packageConfig.config,
+    });
 
     return {
       providerProfiles,

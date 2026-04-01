@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Building2, User, AlertTriangle, CheckCircle2, Plug } from "lucide-react";
+import { Building2, User, AlertTriangle, AlertCircle, CheckCircle2, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { Modal } from "./modal";
@@ -100,7 +100,11 @@ export function ConnectionSummaryModal({
                 </span>
               )}
 
-              {isConnected && <CheckCircle2 className="size-3.5 text-success shrink-0" />}
+              {isConnected && svc.status === "needs_reconnection" ? (
+                <AlertCircle className="size-3.5 text-amber-500 shrink-0" />
+              ) : isConnected ? (
+                <CheckCircle2 className="size-3.5 text-success shrink-0" />
+              ) : null}
             </div>
           );
         })}

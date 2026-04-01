@@ -26,7 +26,6 @@ import {
   deleteSchedule,
 } from "../../../src/services/scheduler.ts";
 
-
 describe("scheduler service", () => {
   let userId: string;
   let orgId: string;
@@ -373,7 +372,7 @@ describe("scheduler service", () => {
   describe("listSchedules enrichment", () => {
     async function seedProviderPackage(id: string) {
       await seedPackage({
-        orgId: null as unknown as string,
+        orgId: null,
         id,
         type: "provider",
         source: "system",
