@@ -51,10 +51,14 @@ export function RunFlowButton({
   useEffect(() => {
     if (providedDetail || fetchedDetail) return;
     let cancelled = false;
-    api<{ flow: FlowDetail }>(`/packages/flows/${packageId}`).then((data) => {
-      if (!cancelled) setFetchedDetail(data.flow);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    api<{ flow: FlowDetail }>(`/packages/flows/${packageId}`)
+      .then((data) => {
+        if (!cancelled) setFetchedDetail(data.flow);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [packageId, providedDetail, fetchedDetail]);
 
   const providers = detail?.dependencies?.providers ?? [];
