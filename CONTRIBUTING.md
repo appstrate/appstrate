@@ -1,0 +1,122 @@
+# Contributing to Appstrate
+
+Thank you for your interest in contributing to Appstrate! This guide covers everything you need to get started.
+
+## Code of Conduct
+
+All participants are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+## Reporting Bugs
+
+Use the [bug report template](https://github.com/appstrate/appstrate/issues/new?template=bug_report.yml) on GitHub. Include steps to reproduce, expected vs. actual behavior, and your environment details (OS, Bun version, Docker version).
+
+## Suggesting Features
+
+Use the [feature request template](https://github.com/appstrate/appstrate/issues/new?template=feature_request.yml). Describe the problem you're solving, your proposed solution, and any alternatives you've considered.
+
+## Submitting Code
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) (v1.3+)
+- [Docker](https://docs.docker.com/get-docker/) (with Compose v2)
+- PostgreSQL 16 (via Docker Compose)
+- Redis 7+ (via Docker Compose)
+
+### Development Setup
+
+```sh
+# 1. Fork and clone
+git clone https://github.com/<your-username>/appstrate.git
+cd appstrate
+
+# 2. Start infrastructure
+cp docker-compose.override.example.yml docker-compose.override.yml
+docker compose up -d
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env — set BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, EXECUTION_TOKEN_SECRET
+
+# 4. Run migrations
+bun run db:migrate
+
+# 5. Build and start
+bun run build
+bun run dev         # API on :3000
+```
+
+### Useful Commands
+
+| Command | Description |
+|---|---|
+| `bun run dev` | Start API + web (turbo) |
+| `bun run check` | TypeScript + ESLint + Prettier + OpenAPI validation |
+| `bun test` | All tests (~1000) — requires Docker |
+| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB) |
+| `bun run verify:openapi` | OpenAPI spec validation |
+
+### Branch Naming
+
+- `feat/short-description` — New features
+- `fix/short-description` — Bug fixes
+- `docs/short-description` — Documentation
+- `refactor/short-description` — Refactoring
+
+### Commit Messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: add webhook retry configuration
+fix: prevent duplicate cron executions
+docs: update API overview table
+refactor: extract credential validation into service
+```
+
+### Code Style
+
+- **TypeScript**: Strict mode, ESLint flat config, Prettier (semi, doubleQuote, trailingComma: all, printWidth: 100)
+- **No `console.*`**: Use `@appstrate/core/logger` (pino JSON)
+- **Validation**: Zod 4 for request bodies, AJV for dynamic manifest schemas
+- **Testing**: `bun:test` with `it()` (not `test()`)
+- **Language**: French for user-facing text (i18next), English for code and comments
+
+### Commit Signing
+
+We recommend signing your commits with GPG or SSH keys. This is not currently required but may become mandatory for maintainers in the future.
+
+```sh
+# GPG
+git config commit.gpgsign true
+
+# SSH
+git config gpg.format ssh
+git config user.signingkey ~/.ssh/id_ed25519.pub
+git config commit.gpgsign true
+```
+
+### Pull Request Process
+
+1. Create a feature branch from `main`
+2. Make your changes with clear, focused commits
+3. Ensure `bun run check` and `bun test` pass
+4. Open a PR against `main` with a clear description
+5. Wait for CI checks and code review
+6. Squash and merge after approval
+
+### Review Criteria
+
+- Quality gate passes (`bun run check` + `bun test`)
+- Changes match the PR description
+- No unrelated changes bundled
+- New features include tests
+- API changes include OpenAPI spec updates
+
+## Contributor License Agreement (CLA)
+
+By submitting a pull request, you agree to the [CLA](https://cla-assistant.io/appstrate/appstrate). The CLA Assistant bot will guide you through the process on your first PR.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](./LICENSE).

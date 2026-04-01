@@ -51,9 +51,7 @@ export function NavOrg() {
         <SidebarMenuButton
           asChild
           isActive={
-            item.path === "/"
-              ? location.pathname === "/"
-              : location.pathname.startsWith(item.path)
+            item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
           }
           tooltip={item.label}
         >

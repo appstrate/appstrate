@@ -9,8 +9,7 @@ An open-source platform for executing one-shot AI flows in ephemeral Docker cont
 - **Ephemeral execution** — Containers are created, run, and destroyed per execution
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule flows with cron expressions, distributed lock prevents duplicates
-- **Marketplace** — Browse and install packages from the Appstrate [registry]
-- **Package import** — Import flows, skills, extensions, and providers from ZIP files
+- **Package import** — Import flows, skills, extensions, and providers from ZIP/AFPS files
 - **Skills & extensions** — Extend agent capabilities with SKILL.md instructions and TypeScript tool extensions
 - **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
@@ -65,8 +64,7 @@ appstrate/
 │   ├── db/                   # @appstrate/db — Drizzle ORM (30 tables, 6 enums) + Better Auth
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   ├── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
-│   └── registry-client/      # @appstrate/registry-client — HTTP client for Appstrate [registry]
+│   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 │
 ├── system-packages/           # System package ZIPs (providers, skills, extensions, flows — loaded at boot)
 │
@@ -97,7 +95,6 @@ The API is organized into 23 route domains with 158 documented endpoints:
 | **Proxies**             | Org-level and flow-level HTTP proxy config                |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                      |
 | **Packages**            | Organization skills/extensions CRUD, import, publish      |
-| **Marketplace**         | Browse/install packages from Appstrate [registry]         |
 | **Notifications**       | Execution notification management                         |
 | **Organizations**       | Org CRUD, members, invitations                            |
 | **Profile**             | User profile management                                   |
@@ -107,7 +104,6 @@ The API is organized into 23 route domains with 158 documented endpoints:
 | **Internal**            | Container-to-host routes (credentials, execution history) |
 | **Meta**                | OpenAPI spec + Swagger UI                                 |
 | **Models**              | Org-level LLM model configuration and testing             |
-| **Registry**            | Registry OAuth2 connection and scope management           |
 | **Health**              | Health check                                              |
 
 Full interactive docs: `GET /api/docs` (Swagger UI).
@@ -158,9 +154,6 @@ Key variables (see `.env.example` for full list):
 | `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                            |
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                          |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                     |
-| `REGISTRY_URL`              | No       | —                                             | Registry URL for marketplace features                 |
-| `REGISTRY_CLIENT_ID`        | No       | —                                             | Registry OAuth client ID                              |
-| `REGISTRY_CLIENT_SECRET`    | No       | —                                             | Registry OAuth client secret                          |
 
 ## Development
 
@@ -203,6 +196,10 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 - **Build**: Turborepo + Bun workspaces
 - **Code quality**: ESLint + Prettier + OpenAPI lint (`@redocly/openapi-core`)
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and pull request process.
+
 ## License
 
-MIT
+[Apache License 2.0](./LICENSE)
