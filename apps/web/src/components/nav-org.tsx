@@ -65,7 +65,7 @@ export function NavOrg() {
           </SidebarMenuItem>
         ))}
         {/* Executions — with unread badge + running indicator */}
-        <SidebarMenuItem>
+        <SidebarMenuItem className="relative">
           <SidebarMenuButton
             asChild
             isActive={location.pathname.startsWith("/executions")}
@@ -83,11 +83,14 @@ export function NavOrg() {
             </Link>
           </SidebarMenuButton>
           {unread > 0 && (
-            <SidebarMenuBadge>
-              <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
-                {unread > 99 ? "99+" : unread}
-              </span>
-            </SidebarMenuBadge>
+            <>
+              <SidebarMenuBadge>
+                <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              </SidebarMenuBadge>
+              <span className="pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ring-sidebar bg-destructive hidden group-data-[collapsible=icon]:block" />
+            </>
           )}
         </SidebarMenuItem>
         {isOrgAdmin && (
