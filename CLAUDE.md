@@ -39,18 +39,18 @@ bun test                          # All 1000+ tests across all packages
 
 ## Stack — Critical Constraints
 
-| Constraint     | Details                                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                |
-| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                        |
-| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                        |
-| DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                      |
-| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                         |
+| Constraint     | Details                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                                                                                                                                                                                                                                                        |
+| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                                                                                                                                                                                                                                                                |
+| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                                                                |
+| DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                                                                                                                                                                                                                                                              |
+| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                                                                                                                                                                                                                                                                 |
 | Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. Email/password + optional Google social login (opt-in via env vars). Optional email verification (opt-in via SMTP env vars). Account linking with trusted providers. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
-| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas    |
-| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                |
-| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state |
-| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                   |
+| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                                                                           |
+| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                                                                                                                                                                                                                                                        |
+| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state                                                                                                                                                                                                                                      |
+| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                                                                                                                                                                                                                                                         |
 
 ## Navigating the Codebase
 
@@ -65,7 +65,7 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (178 endpoints)
+│   │   └── paths/            # One file per route domain (181 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -78,7 +78,7 @@ appstrate/
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
-│   ├── schema.ts             # Full schema (34 tables, 5 enums, indexes) — barrel re-export from schema/
+│   ├── schema.ts             # Full schema (31 tables, 5 enums, indexes) — barrel re-export from schema/
 │   ├── client.ts             # db + listenClient (LISTEN/NOTIFY)
 │   └── auth.ts               # Better Auth config (email/password, Google social, email verification, account linking)
 │
@@ -272,16 +272,16 @@ packages/connect/test/     # Provider doc heuristic tests
 
 ### Conventions
 
-| Convention | Rule |
-|---|---|
-| Framework | `bun:test` — NOT vitest/jest |
-| Test function | `it()` — NOT `test()` (consistent across all packages) |
-| Import order | `import { describe, it, expect, beforeEach, mock } from "bun:test"` |
-| File naming | `*.test.ts` — NOT `*.spec.ts` |
-| Isolation | `beforeEach(async () => { await truncateAll(); })` for DB tests |
-| App testing | `app.request()` via Hono — NOT `Bun.serve()`, no port binding |
-| Auth in tests | Real Better Auth sign-up → session cookie (not mock auth) |
-| DB cleanup | `DELETE FROM` in FK-safe order (not `TRUNCATE` — avoids deadlocks) |
+| Convention    | Rule                                                                |
+| ------------- | ------------------------------------------------------------------- |
+| Framework     | `bun:test` — NOT vitest/jest                                        |
+| Test function | `it()` — NOT `test()` (consistent across all packages)              |
+| Import order  | `import { describe, it, expect, beforeEach, mock } from "bun:test"` |
+| File naming   | `*.test.ts` — NOT `*.spec.ts`                                       |
+| Isolation     | `beforeEach(async () => { await truncateAll(); })` for DB tests     |
+| App testing   | `app.request()` via Hono — NOT `Bun.serve()`, no port binding       |
+| Auth in tests | Real Better Auth sign-up → session cookie (not mock auth)           |
+| DB cleanup    | `DELETE FROM` in FK-safe order (not `TRUNCATE` — avoids deadlocks)  |
 
 ### Mocking Policy — No `mock.module()`
 
@@ -317,20 +317,21 @@ For testing middleware that calls services (e.g., `requireFlow` calls `getPackag
 
 ### Test Helpers (`apps/api/test/helpers/`)
 
-| Helper | Purpose |
-|---|---|
-| `app.ts` | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler) |
-| `auth.ts` | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
-| `db.ts` | `truncateAll()` — DELETE FROM all 34 tables in FK-safe order |
-| `seed.ts` | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
-| `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification |
-| `redis.ts` | `getRedis()`, `flushRedis()` — test Redis client |
-| `sse.ts` | SSE stream parsing utilities |
-| `oauth-server.ts` | Mock OAuth2 provider for connection tests |
+| Helper            | Purpose                                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)       |
+| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow     |
+| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                      |
+| `seed.ts`         | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
+| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                     |
+| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                                  |
+| `sse.ts`          | SSE stream parsing utilities                                                                                      |
+| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                         |
 
 ### Writing New Tests
 
 **Unit test** (no DB, fast):
+
 ```typescript
 import { describe, it, expect } from "bun:test";
 import { myFunction } from "../../src/services/my-service.ts";
@@ -343,6 +344,7 @@ describe("myFunction", () => {
 ```
 
 **Integration test** (real DB, real HTTP):
+
 ```typescript
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
@@ -375,7 +377,7 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 178 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 181 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
@@ -386,7 +388,7 @@ When working on API routes, always consult the corresponding OpenAPI path file i
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (34 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app_ prefix), `endUsers` (eu_ prefix), `webhooks` (wh_ prefix), `webhookDeliveries`.
+Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`.
 
 ## Environment Variables
 
@@ -394,7 +396,7 @@ Full schema: `packages/db/src/schema.ts` (34 tables + 5 enums, Drizzle ORM). Mig
 
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string (required for scheduler, rate limiting, cancel signaling, OAuth PKCE)               |
+| `REDIS_URL`                 | Yes      | —                                             | Redis connection string (required for scheduler, rate limiting, cancel signaling, OAuth PKCE)              |
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |

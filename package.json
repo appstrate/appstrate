@@ -63,6 +63,7 @@
     "build-sidecar": "docker build --platform linux/amd64 -t appstrate-sidecar ./runtime-pi/sidecar",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:migrate": "cd packages/db && bunx drizzle-kit migrate",
+    "preinstall": "node -e \"if(!process.env.BUN_INSTALL&&!process.versions.bun){console.error('\\x1b[31mThis project requires Bun. Install it: https://bun.sh\\x1b[0m');process.exit(1)}\"",
     "setup": "bun scripts/setup.ts",
     "docker:dev": "docker compose -f docker-compose.dev.yml up -d",
     "docker:dev:down": "docker compose -f docker-compose.dev.yml down",

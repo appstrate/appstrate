@@ -101,7 +101,7 @@ appstrate/
 
 ## API Overview
 
-The API is organized into 23 route domains with 181 documented endpoints:
+The API is organized into 25 route domains with 181 documented endpoints:
 
 | Domain                  | Description                                               |
 | ----------------------- | --------------------------------------------------------- |
@@ -127,6 +127,9 @@ The API is organized into 23 route domains with 181 documented endpoints:
 | **Meta**                | OpenAPI spec + Swagger UI                                 |
 | **Models**              | Org-level LLM model configuration and testing             |
 | **Health**              | Health check                                              |
+| **Applications**        | Developer application management (API key scoping)        |
+| **End-Users**           | External end-user management for headless API             |
+| **Webhooks**            | Execution event webhooks with HMAC signing                |
 
 ### API Documentation
 
@@ -158,13 +161,16 @@ Browser (React SPA)              Platform (Bun + Hono :3000)
 
 ## Environment Variables
 
-Key variables (see `.env.example` for full list):
+All variables are listed in `.env.example` with dev-ready defaults. The authoritative validation source is `packages/env/src/index.ts` (Zod schema).
 
 | Variable                    | Required | Default                                       | Description                                                        |
 | --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------------------ |
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                       |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                             |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials                       |
+| `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
+| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
+| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
 | `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret                                     |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
@@ -177,10 +183,19 @@ Key variables (see `.env.example` for full list):
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
 | `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                    |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
-| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
-| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
+| `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |
+| `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy                                 |
+| `COOKIE_DOMAIN`             | No       | —                                             | Cookie domain for cross-subdomain auth                             |
+| `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in)                    |
+| `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                         |
+| `GITHUB_CLIENT_ID`          | No       | —                                             | GitHub OAuth App client ID (enables GitHub sign-in)                |
+| `GITHUB_CLIENT_SECRET`      | No       | —                                             | GitHub OAuth App client secret                                     |
+| `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification)                      |
+| `SMTP_PORT`                 | No       | `587`                                         | SMTP server port                                                   |
+| `SMTP_USER`                 | No       | —                                             | SMTP authentication username                                       |
+| `SMTP_PASS`                 | No       | —                                             | SMTP authentication password                                       |
+| `SMTP_FROM`                 | No       | —                                             | Sender email address for verification emails                       |
 
 ## Development
 
@@ -217,7 +232,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 - **Styling**: Tailwind CSS 4 (`@tailwindcss/vite` plugin + `tailwind-merge`, dark theme via `@theme inline`)
 - **i18n**: i18next (fr default, en)
 - **Docker**: fetch() + unix socket (not dockerode)
-- **Scheduling**: croner (in-memory cron with distributed lock)
+- **Scheduling**: BullMQ (Redis-backed distributed cron) + cron-parser
 - **Validation**: AJV (config/input/output), Zod (env), `@appstrate/core` (manifests)
 - **Build**: Turborepo + Bun workspaces
 - **Code quality**: ESLint + Prettier + OpenAPI lint (`@redocly/openapi-core`)
