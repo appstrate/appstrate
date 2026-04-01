@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { isSystemModel } from "../services/model-registry.ts";
 import { modelCostSchema } from "../services/adapters/types.ts";
@@ -66,9 +65,6 @@ const testInlineSchema = z.object({
 
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
-
-  // All endpoints are admin-only
-  router.use("*", requireAdmin());
 
   // GET /api/models — list all models (system + DB)
   router.get("/", async (c) => {

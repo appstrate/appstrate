@@ -1,7 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, KeyRound, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
-import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
 import {
@@ -23,7 +22,6 @@ import {
 
 export function NavApp() {
   const { t } = useTranslation();
-  const { isOrgAdmin } = useOrg();
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
   const location = useLocation();
@@ -31,7 +29,7 @@ export function NavApp() {
 
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
 
-  if (!isOrgAdmin || !currentApp) return null;
+  if (!currentApp) return null;
 
   const items = [
     { path: "/end-users", label: t("nav.endUsers"), icon: Users },

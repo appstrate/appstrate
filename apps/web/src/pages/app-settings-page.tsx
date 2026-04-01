@@ -2,13 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
-import { AppWindow, Plus, ShieldAlert, X } from "lucide-react";
+import { AppWindow, Plus, X } from "lucide-react";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useOrg } from "../hooks/use-org";
 import {
   useApplication,
   useUpdateApplication,
@@ -26,7 +25,6 @@ interface SettingsFormData {
 export function AppSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
-  const { isOrgAdmin } = useOrg();
   const appId = useCurrentApplicationId();
 
   const { data: application, isLoading, error } = useApplication(appId ?? "");
@@ -41,10 +39,6 @@ export function AppSettingsPage() {
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
     values: { name: application?.name ?? "" },
   });
-
-  if (!isOrgAdmin) {
-    return <EmptyState message={t("applications.adminOnly")} icon={ShieldAlert} />;
-  }
 
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;

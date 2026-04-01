@@ -3,8 +3,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -93,25 +91,6 @@ describe("API Keys API", () => {
       expect(body.keyPrefix).toStartWith("ask_");
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const member = await createTestUser({ email: "member@test.com" });
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/api-keys", {
-        method: "POST",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: "Forbidden Key",
-          applicationId: ctx.defaultAppId,
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("DELETE /api/api-keys/:id", () => {

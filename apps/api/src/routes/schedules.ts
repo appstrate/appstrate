@@ -11,7 +11,7 @@ import {
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
-import { requireAdmin, requireFlow } from "../middleware/guards.ts";
+import { requireFlow } from "../middleware/guards.ts";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
@@ -54,53 +54,42 @@ export function createSchedulesRouter() {
   });
 
   // POST /api/flows/:scope/:name/schedules — create a schedule
-  router.post(
-    "/flows/:scope{@[^/]+}/:name/schedules",
-    rateLimit(10),
-    requireAdmin(),
-    requireFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-      const actor = getActor(c);
+  router.post("/flows/:scope{@[^/]+}/:name/schedules", rateLimit(10), requireFlow(), async (c) => {
+    const flow = c.get("flow");
+    const actor = getActor(c);
 
-      const body = await c.req.json();
-      const data = parseBody(createScheduleSchema, body);
+    const body = await c.req.json();
+    const data = parseBody(createScheduleSchema, body);
 
-      // Validate ownership — user can only schedule with their own profiles
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, c.get("orgId"));
-      if (!profile) {
-        throw forbidden("Cannot use a profile you do not own");
+    // Validate ownership — user can only schedule with their own profiles
+    const profile = await getAccessibleProfile(data.connectionProfileId, actor, c.get("orgId"));
+    if (!profile) {
+      throw forbidden("Cannot use a profile you do not own");
+    }
+
+    // Block scheduling for flows with file inputs
+    const inputSchema = flow.manifest.input?.schema;
+    if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
+      throw invalidRequest("Cannot schedule flows with file inputs");
+    }
+
+    // Validate cron expression
+    if (!isValidCron(data.cronExpression)) {
+      throw invalidRequest("Invalid cron expression", "cronExpression");
+    }
+
+    // Validate input against flow's input schema (catches missing required fields even when input is undefined)
+    if (inputSchema) {
+      const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
+      if (!inputValidation.valid) {
+        const first = inputValidation.errors[0]!;
+        throw invalidRequest(first.message, first.field);
       }
+    }
 
-      // Block scheduling for flows with file inputs
-      const inputSchema = flow.manifest.input?.schema;
-      if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
-        throw invalidRequest("Cannot schedule flows with file inputs");
-      }
-
-      // Validate cron expression
-      if (!isValidCron(data.cronExpression)) {
-        throw invalidRequest("Invalid cron expression", "cronExpression");
-      }
-
-      // Validate input against flow's input schema (catches missing required fields even when input is undefined)
-      if (inputSchema) {
-        const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
-        if (!inputValidation.valid) {
-          const first = inputValidation.errors[0]!;
-          throw invalidRequest(first.message, first.field);
-        }
-      }
-
-      const schedule = await createSchedule(
-        flow.id,
-        data.connectionProfileId,
-        c.get("orgId"),
-        data,
-      );
-      return c.json(schedule, 201);
-    },
-  );
+    const schedule = await createSchedule(flow.id, data.connectionProfileId, c.get("orgId"), data);
+    return c.json(schedule, 201);
+  });
 
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", async (c) => {
@@ -114,7 +103,7 @@ export function createSchedulesRouter() {
   });
 
   // PUT /api/schedules/:id — update a schedule
-  router.put("/schedules/:id", requireAdmin(), async (c) => {
+  router.put("/schedules/:id", async (c) => {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);
@@ -144,7 +133,7 @@ export function createSchedulesRouter() {
   });
 
   // DELETE /api/schedules/:id — delete a schedule
-  router.delete("/schedules/:id", requireAdmin(), async (c) => {
+  router.delete("/schedules/:id", async (c) => {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);

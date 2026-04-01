@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
 import {
@@ -30,9 +29,6 @@ const updateApplicationSchema = z.object({
 
 export function createApplicationsRouter() {
   const router = new Hono<AppEnv>();
-
-  // All endpoints are admin-only
-  router.use("*", requireAdmin());
 
   // GET /api/applications — list applications for the org
   router.get("/", async (c) => {

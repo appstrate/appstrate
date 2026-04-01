@@ -8,7 +8,6 @@ import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
-import { isAdminRole } from "../middleware/guards.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -153,7 +152,7 @@ export function createRealtimeRouter() {
       {
         executionId,
         orgId: validated.orgId,
-        isAdmin: isAdminRole(validated.role),
+        isAdmin: true,
       },
       verbose,
     );
@@ -174,7 +173,7 @@ export function createRealtimeRouter() {
       {
         packageId,
         orgId: validated.orgId,
-        isAdmin: isAdminRole(validated.role),
+        isAdmin: true,
       },
       verbose,
     );
@@ -193,7 +192,7 @@ export function createRealtimeRouter() {
       subId,
       {
         orgId: validated.orgId,
-        isAdmin: isAdminRole(validated.role),
+        isAdmin: true,
       },
       verbose,
     );

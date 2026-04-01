@@ -51,7 +51,6 @@ export function useOrg() {
     orgs,
     switchOrg,
     loading: isLoading,
-    isOrgAdmin: currentOrg?.role === "owner" || currentOrg?.role === "admin",
     isOrgOwner: currentOrg?.role === "owner",
   };
 }

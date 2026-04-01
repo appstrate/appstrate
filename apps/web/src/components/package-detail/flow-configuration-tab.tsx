@@ -11,7 +11,6 @@ import {
 import { InputFields } from "../input-fields";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
-import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useFlowModel, useSetFlowModel } from "../../hooks/use-models";
 import { useProxies, useFlowProxy, useSetFlowProxy } from "../../hooks/use-proxies";
@@ -79,9 +78,7 @@ function ModelSection({ packageId }: { packageId: string }) {
   const { data: orgModels } = useModels();
   const { data: flowModel } = useFlowModel(packageId);
   const setFlowModel = useSetFlowModel(packageId);
-  const { isOrgAdmin } = useOrg();
-
-  if (!features.models || !isOrgAdmin || !orgModels || orgModels.length === 0) return null;
+  if (!features.models || !orgModels || orgModels.length === 0) return null;
 
   const flowModelId = flowModel?.modelId;
   const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);
@@ -128,9 +125,7 @@ function ProxySection({ packageId }: { packageId: string }) {
   const { data: orgProxies } = useProxies();
   const { data: flowProxy } = useFlowProxy(packageId);
   const setFlowProxy = useSetFlowProxy(packageId);
-  const { isOrgAdmin } = useOrg();
-
-  if (!isOrgAdmin || !orgProxies || orgProxies.length === 0) return null;
+  if (!orgProxies || orgProxies.length === 0) return null;
 
   const flowProxyId = flowProxy?.proxyId;
   const orgDefaultProxy = orgProxies.find((p) => p.isDefault && p.enabled);
@@ -171,9 +166,7 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
   const { data: orgProfiles } = useOrgProfiles();
   const { data: detail } = usePackageDetail("flow", packageId);
   const setFlowOrgProfile = useSetFlowOrgProfile(packageId);
-  const { isOrgAdmin } = useOrg();
-
-  if (!isOrgAdmin || !orgProfiles || orgProfiles.length === 0) return null;
+  if (!orgProfiles || orgProfiles.length === 0) return null;
 
   const currentOrgProfileId = detail?.flowOrgProfileId;
 

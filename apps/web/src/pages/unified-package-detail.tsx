@@ -16,7 +16,7 @@ import type {
   OrgPackageItemDetail,
   PackageType,
 } from "@appstrate/shared-types";
-import { useOrg, usePackageOwnership } from "../hooks/use-org";
+import { usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
@@ -142,7 +142,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isOrgAdmin } = useOrg();
   const { isOwned } = usePackageOwnership(packageId);
   const isVersionView = !!versionParam;
   const resetUI = useFlowDetailUI((s) => s.reset);
@@ -219,8 +218,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const hasDraftConfigSchema = !!(
     draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
   );
-  const hasModelsAvailable = isOrgAdmin && !!orgModels && orgModels.length > 0;
-  const hasProxiesAvailable = isOrgAdmin && !!orgProxies && orgProxies.length > 0;
+  const hasModelsAvailable = !!orgModels && orgModels.length > 0;
+  const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
   const hasMissingRequiredConfig =
     type === "flow" &&
     hasDraftConfigSchema &&
@@ -380,7 +379,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   | Record<string, unknown>
                   | undefined
               }
-              isOrgAdmin={isOrgAdmin}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
               hasDraftChanges={hasDraftChanges}
@@ -391,47 +389,44 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             />
           ) : (
             <div className="flex items-center gap-2">
-              {isOrgAdmin && (
-                <PackageActionsDropdown
-                  packageId={packageId}
-                  type={type}
-                  manifest={
-                    (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
-                      | Record<string, unknown>
-                      | undefined
-                  }
-                  isOrgAdmin={isOrgAdmin}
-                  isOwned={isOwned}
-                  isBuiltIn={isBuiltIn}
-                  isHistoricalVersion={isHistoricalVersion}
-                  hasDraftChanges={hasDraftChanges}
-                  downloadVersion={downloadVersion}
-                  onDownload={downloadPackage}
-                  onCreateVersion={() => setCreateVersionOpen(true)}
-                  onFork={() => setForkOpen(true)}
-                  hasCredentials={providerConfig?.hasCredentials}
-                  onDeleteCredentials={() => {
-                    setConfirmAction({
-                      type: "deleteCredentials",
-                      description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
-                    });
-                  }}
-                  canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
-                  onDeletePackage={() => {
-                    if (!pkgDetail) return;
-                    const nameStr = pkgDetail.name || pkgDetail.id;
-                    const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                    setConfirmAction({
-                      type: "deletePackage",
-                      description: t("packages.deleteConfirm", {
-                        type: typeLabel,
-                        name: nameStr,
-                        ns: "settings",
-                      }),
-                    });
-                  }}
-                />
-              )}
+              <PackageActionsDropdown
+                packageId={packageId}
+                type={type}
+                manifest={
+                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest) as
+                    | Record<string, unknown>
+                    | undefined
+                }
+                isOwned={isOwned}
+                isBuiltIn={isBuiltIn}
+                isHistoricalVersion={isHistoricalVersion}
+                hasDraftChanges={hasDraftChanges}
+                downloadVersion={downloadVersion}
+                onDownload={downloadPackage}
+                onCreateVersion={() => setCreateVersionOpen(true)}
+                onFork={() => setForkOpen(true)}
+                hasCredentials={providerConfig?.hasCredentials}
+                onDeleteCredentials={() => {
+                  setConfirmAction({
+                    type: "deleteCredentials",
+                    description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
+                  });
+                }}
+                canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
+                onDeletePackage={() => {
+                  if (!pkgDetail) return;
+                  const nameStr = pkgDetail.name || pkgDetail.id;
+                  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+                  setConfirmAction({
+                    type: "deletePackage",
+                    description: t("packages.deleteConfirm", {
+                      type: typeLabel,
+                      name: nameStr,
+                      ns: "settings",
+                    }),
+                  });
+                }}
+              />
             </div>
           )
         }
@@ -518,12 +513,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         />
       )}
       {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
-      {type === "flow" && tab === "memories" && (
-        <FlowMemoriesTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
-      )}
-      {type === "flow" && tab === "api" && (
-        <FlowApiTab packageId={packageId} isOrgAdmin={isOrgAdmin} />
-      )}
+      {type === "flow" && tab === "memories" && <FlowMemoriesTab packageId={packageId} />}
+      {type === "flow" && tab === "api" && <FlowApiTab packageId={packageId} />}
 
       {type !== "flow" && tab === "content" && pkgDetail && (
         <div className="rounded-lg border border-border bg-card p-4">
@@ -537,28 +528,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {type === "provider" && tab === "configuration" && providerConfig && (
         <div className="rounded-lg border border-border bg-card p-4">
-          {isOrgAdmin ? (
-            <ProviderCredentialsForm
-              provider={providerConfig}
-              callbackUrl={callbackUrl}
-              footer={<ProviderConnectButton provider={providerConfig} />}
-            />
-          ) : (
-            <div className="flex items-center gap-2 py-2">
-              <span className="text-sm text-muted-foreground">
-                {t("providers.credentials", { ns: "settings" })}:
-              </span>
-              {providerConfig.enabled ? (
-                <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium px-2 py-0.5">
-                  {t("providers.configured", { ns: "settings" })}
-                </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-warning/10 text-warning text-xs font-medium px-2 py-0.5">
-                  {t("providers.notConfigured", { ns: "settings" })}
-                </span>
-              )}
-            </div>
-          )}
+          <ProviderCredentialsForm
+            provider={providerConfig}
+            callbackUrl={callbackUrl}
+            footer={<ProviderConnectButton provider={providerConfig} />}
+          />
         </div>
       )}
 
@@ -584,9 +558,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {tab === "versions" && (
-        <VersionHistory packageId={packageId} type={type} isAdmin={isOrgAdmin} isOwned={isOwned} />
-      )}
+      {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
 
       {tab === "changes" && hasDraftChanges && !isVersionView && latestVersionForDiff && (
         <>

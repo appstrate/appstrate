@@ -5,7 +5,7 @@ import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { requireAdmin, requireFlow, requireMutableFlow } from "../middleware/guards.ts";
+import { requireFlow, requireMutableFlow } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
 
@@ -47,60 +47,48 @@ export function createUserFlowsRouter() {
   const router = new Hono<AppEnv>();
 
   // PUT /api/flows/:scope/:name/skills — set skill references for a flow
-  router.put(
-    "/:scope{@[^/]+}/:name/skills",
-    requireFlow(),
-    requireAdmin(),
-    requireMutableFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-      const packageId = flow.id;
+  router.put("/:scope{@[^/]+}/:name/skills", requireFlow(), requireMutableFlow(), async (c) => {
+    const flow = c.get("flow");
+    const packageId = flow.id;
 
-      const body = await c.req.json();
-      const data = parseBody(updateSkillsSchema, body, "skillIds");
-      const { skillIds } = data;
+    const body = await c.req.json();
+    const data = parseBody(updateSkillsSchema, body, "skillIds");
+    const { skillIds } = data;
 
-      const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
-      if (invalidIds.length > 0) {
-        throw invalidRequest(
-          `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-          "skillIds",
-        );
-      }
+    const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
+    if (invalidIds.length > 0) {
+      throw invalidRequest(
+        `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+        "skillIds",
+      );
+    }
 
-      await updateManifestDeps(packageId, "skills", skillIds);
+    await updateManifestDeps(packageId, "skills", skillIds);
 
-      return c.json({ packageId, skillIds, message: "Skill references updated" });
-    },
-  );
+    return c.json({ packageId, skillIds, message: "Skill references updated" });
+  });
 
   // PUT /api/flows/:scope/:name/tools — set tool references for a flow
-  router.put(
-    "/:scope{@[^/]+}/:name/tools",
-    requireFlow(),
-    requireAdmin(),
-    requireMutableFlow(),
-    async (c) => {
-      const flow = c.get("flow");
-      const packageId = flow.id;
+  router.put("/:scope{@[^/]+}/:name/tools", requireFlow(), requireMutableFlow(), async (c) => {
+    const flow = c.get("flow");
+    const packageId = flow.id;
 
-      const body = await c.req.json();
-      const data = parseBody(updateToolsSchema, body, "toolIds");
-      const { toolIds } = data;
+    const body = await c.req.json();
+    const data = parseBody(updateToolsSchema, body, "toolIds");
+    const { toolIds } = data;
 
-      const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
-      if (invalidIds.length > 0) {
-        throw invalidRequest(
-          `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-          "toolIds",
-        );
-      }
+    const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
+    if (invalidIds.length > 0) {
+      throw invalidRequest(
+        `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+        "toolIds",
+      );
+    }
 
-      await updateManifestDeps(packageId, "tools", toolIds);
+    await updateManifestDeps(packageId, "tools", toolIds);
 
-      return c.json({ packageId, toolIds, message: "Tool references updated" });
-    },
-  );
+    return c.json({ packageId, toolIds, message: "Tool references updated" });
+  });
 
   return router;
 }

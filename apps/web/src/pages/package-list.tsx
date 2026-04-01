@@ -5,7 +5,6 @@ import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/shared-types";
 import { Button } from "@/components/ui/button";
 import { useFlows } from "../hooks/use-packages";
-import { useOrg } from "../hooks/use-org";
 import { useUnreadCountsByFlow } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
@@ -58,18 +57,11 @@ export function PackageTab({
   emptyExtraActions,
   headerContent,
 }: PackageTabProps) {
-  const { isOrgAdmin } = useOrg();
-
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
   const header = title ? (
-    <PageHeader
-      title={title}
-      emoji={emoji}
-      breadcrumbs={breadcrumbs}
-      actions={isOrgAdmin ? extraActions : undefined}
-    >
+    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>
       {headerContent}
     </PageHeader>
   ) : null;
@@ -81,7 +73,7 @@ export function PackageTab({
       <>
         {header}
         <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon}>
-          {isOrgAdmin && emptyActions}
+          {emptyActions}
         </EmptyState>
       </>
     );
@@ -102,7 +94,6 @@ export function PackageTab({
 export function PackageList() {
   const { t } = useTranslation(["flows", "common"]);
   const { data: flows, isLoading, error } = useFlows();
-  const { isOrgAdmin } = useOrg();
   const { data: unreadCounts } = useUnreadCountsByFlow();
   const [importOpen, setImportOpen] = useState(false);
 
@@ -134,16 +125,14 @@ export function PackageList() {
         emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
         emptyIcon={Layers}
         extraActions={
-          isOrgAdmin ? (
-            <>
-              <Button variant="outline" onClick={() => setImportOpen(true)}>
-                {t("nav.import", { ns: "common" })}
-              </Button>
-              <Link to="/flows/new">
-                <Button>{t("list.create")}</Button>
-              </Link>
-            </>
-          ) : undefined
+          <>
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              {t("nav.import", { ns: "common" })}
+            </Button>
+            <Link to="/flows/new">
+              <Button>{t("list.create")}</Button>
+            </Link>
+          </>
         }
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />

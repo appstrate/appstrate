@@ -1,13 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  createTestUser,
-  addOrgMember,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -48,26 +42,6 @@ describe("Proxies API", () => {
       expect(body.id).toBeTruthy();
     });
 
-    it("rejects non-admin", async () => {
-      // Create a member user and add to same org
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/proxies", {
-        method: "POST",
-        headers: {
-          Cookie: member.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          label: "Blocked",
-          url: "http://proxy.example.com:8080",
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("DELETE /api/proxies/:id", () => {

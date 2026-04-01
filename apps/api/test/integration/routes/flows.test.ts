@@ -4,8 +4,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -330,27 +328,6 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-    });
-
-    it("returns 403 for non-admin member", async () => {
-      await seedFlow({ id: "@myorg/orgp-forbid", orgId: ctx.orgId, createdBy: ctx.user.id });
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-      const memberCtx: TestContext = {
-        user: { id: member.id, email: member.email, name: member.name },
-        org: ctx.org,
-        cookie: member.cookie,
-        orgId: ctx.orgId,
-        defaultAppId: ctx.defaultAppId,
-      };
-
-      const res = await app.request("/api/flows/@myorg/orgp-forbid/org-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(memberCtx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: null }),
-      });
-
-      expect(res.status).toBe(403);
     });
 
     it("returns 400 with invalid orgProfileId", async () => {

@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
-import { AppWindow, Settings, ShieldAlert } from "lucide-react";
+import { AppWindow, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { setCurrentApplicationId } from "../hooks/use-current-application";
 import { PageHeader } from "../components/page-header";
@@ -14,7 +13,6 @@ import { ApplicationCreateModal } from "../components/application-create-modal";
 
 export function ApplicationsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isOrgAdmin } = useOrg();
   const { data: applications, isLoading, error } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
@@ -23,16 +21,6 @@ export function ApplicationsPage() {
     setCurrentApplicationId(appId);
     navigate("/app-settings");
   };
-
-  if (!isOrgAdmin) {
-    return (
-      <EmptyState message={t("applications.adminOnly")} icon={ShieldAlert}>
-        <Link to="/">
-          <Button variant="outline">{t("btn.back")}</Button>
-        </Link>
-      </EmptyState>
-    );
-  }
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;

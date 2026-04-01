@@ -47,7 +47,7 @@ import {
 } from "../services/package-versions.ts";
 import { flowDetailHandler } from "./flow-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireAdmin, requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "../lib/safe-json.ts";
@@ -926,52 +926,39 @@ export function createPackagesRouter() {
   // --- Package CRUD routes (skills, tools, flows) ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
     router.get(`/${path}`, makeListHandler(rcfg));
-    router.post(`/${path}`, requireAdmin(), makeCreateHandler(rcfg));
+    router.post(`/${path}`, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
     router.get(`/${path}/:scope{@[^/]+}/:name/versions`, makeListVersionsHandler(rcfg));
     // Version info + create version + restore — BEFORE :version param to avoid matching
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/info`, makeVersionInfoHandler(rcfg));
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions`,
-      requireAdmin(),
       requireOwnedPackage(),
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
-      requireAdmin(),
       requireOwnedPackage(),
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name/versions/:version`,
-      requireAdmin(),
       requireOwnedPackage(),
       makeDeleteVersionHandler(rcfg),
     );
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/:version`, makeVersionDetailHandler(rcfg));
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(
-      `/${path}/:scope{@[^/]+}/:name`,
-      requireAdmin(),
-      requireOwnedPackage(),
-      makeUpdateHandler(rcfg),
-    );
-    router.delete(
-      `/${path}/:scope{@[^/]+}/:name`,
-      requireAdmin(),
-      requireOwnedPackage(),
-      makeDeleteHandler(rcfg),
-    );
+    router.put(`/${path}/:scope{@[^/]+}/:name`, requireOwnedPackage(), makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:scope{@[^/]+}/:name`, requireOwnedPackage(), makeDeleteHandler(rcfg));
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireAdmin(), requireOwnedPackage(), makeDeleteHandler(rcfg));
+    router.put(`/${path}/:id`, requireOwnedPackage(), makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requireOwnedPackage(), makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---
-  router.post("/:scope{@[^/]+}/:name/fork", requireAdmin(), async (c) => {
+  router.post("/:scope{@[^/]+}/:name/fork", async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1200,7 +1187,7 @@ export function createPackagesRouter() {
   }
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requireAdmin(), async (c) => {
+  router.post("/import", rateLimit(10), async (c) => {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
@@ -1219,7 +1206,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), requireAdmin(), async (c) => {
+  router.post("/import-github", rateLimit(10), async (c) => {
     const body = await c.req.json();
     const data = parseBody(githubImportSchema, body, "url");
 

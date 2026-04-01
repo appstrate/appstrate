@@ -364,7 +364,7 @@ export const connectionProfilesPaths = {
       operationId: "createOrgConnectionProfile",
       tags: ["Connection Profiles"],
       summary: "Create an org connection profile",
-      description: "Create a new organization-level shared connection profile. Admin only.",
+      description: "Create a new organization-level shared connection profile.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -399,7 +399,7 @@ export const connectionProfilesPaths = {
       operationId: "renameOrgConnectionProfile",
       tags: ["Connection Profiles"],
       summary: "Rename an org connection profile",
-      description: "Update the name of an org-level connection profile. Admin only.",
+      description: "Update the name of an org-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
@@ -435,7 +435,7 @@ export const connectionProfilesPaths = {
       operationId: "deleteOrgConnectionProfile",
       tags: ["Connection Profiles"],
       summary: "Delete an org connection profile",
-      description: "Delete an org-level connection profile. Admin only.",
+      description: "Delete an org-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },

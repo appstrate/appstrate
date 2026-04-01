@@ -1,12 +1,10 @@
 /**
  * End-Users API — CRUD for end-users.
- * All routes require API key auth (admin).
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { requireAdmin } from "../middleware/guards.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import {
@@ -49,7 +47,7 @@ export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/end-users — create an end-user
-  router.post("/", rateLimit(60), idempotency(), requireAdmin(), async (c) => {
+  router.post("/", rateLimit(60), idempotency(), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(createEndUserSchema, body);
@@ -64,7 +62,7 @@ export function createEndUsersRouter() {
   });
 
   // GET /api/end-users — list end-users in the org (cursor-based pagination)
-  router.get("/", rateLimit(300), requireAdmin(), async (c) => {
+  router.get("/", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
@@ -90,7 +88,7 @@ export function createEndUsersRouter() {
   });
 
   // GET /api/end-users/:id — get a single end-user
-  router.get("/:id", rateLimit(300), requireAdmin(), async (c) => {
+  router.get("/:id", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     const result = await getEndUser(orgId, endUserId);
@@ -98,7 +96,7 @@ export function createEndUsersRouter() {
   });
 
   // PATCH /api/end-users/:id — update an end-user
-  router.patch("/:id", rateLimit(60), requireAdmin(), async (c) => {
+  router.patch("/:id", rateLimit(60), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     const body = await c.req.json();
@@ -109,7 +107,7 @@ export function createEndUsersRouter() {
   });
 
   // DELETE /api/end-users/:id — delete an end-user and all connections
-  router.delete("/:id", rateLimit(60), requireAdmin(), async (c) => {
+  router.delete("/:id", rateLimit(60), async (c) => {
     const orgId = c.get("orgId");
     const endUserId = c.req.param("id")!;
     await deleteEndUser(orgId, endUserId);

@@ -5,7 +5,7 @@ export const providerKeysPaths = {
       tags: ["Provider Keys"],
       summary: "List organization provider keys",
       description:
-        "Returns all provider keys for the current organization. API keys are never exposed. Admin only.",
+        "Returns all provider keys for the current organization. API keys are never exposed.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -37,7 +37,7 @@ export const providerKeysPaths = {
       tags: ["Provider Keys"],
       summary: "Create a provider key",
       description:
-        "Create a new provider key for the organization. The API key is encrypted at rest. Admin only.",
+        "Create a new provider key for the organization. The API key is encrypted at rest.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -93,7 +93,7 @@ export const providerKeysPaths = {
       tags: ["Provider Keys"],
       summary: "Test provider key configuration inline",
       description:
-        "Test a provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute. Admin only.",
+        "Test a provider key configuration without saving it first. If editing an existing key, pass existingKeyId to fall back to its stored API key when apiKey is omitted. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -147,7 +147,7 @@ export const providerKeysPaths = {
       operationId: "updateProviderKey",
       tags: ["Provider Keys"],
       summary: "Update a provider key",
-      description: "Update a provider key configuration. Admin only.",
+      description: "Update a provider key configuration.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -191,7 +191,7 @@ export const providerKeysPaths = {
       tags: ["Provider Keys"],
       summary: "Delete a provider key",
       description:
-        "Delete a provider key. Models using this key will have their providerKeyId set to null. Admin only.",
+        "Delete a provider key. Models using this key will have their providerKeyId set to null.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -214,7 +214,7 @@ export const providerKeysPaths = {
       tags: ["Provider Keys"],
       summary: "Test provider key connection",
       description:
-        "Test that the provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Admin only.",
+        "Test that the provider key's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

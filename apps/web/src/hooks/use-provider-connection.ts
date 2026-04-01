@@ -4,7 +4,6 @@ import {
   useConnectCredentials,
   useDisconnect,
 } from "./use-mutations";
-import { useOrg } from "./use-org";
 import {
   useConnectionProfiles,
   useProfileConnections,
@@ -32,8 +31,6 @@ export function useProviderConnection({
   readOnly: readOnlyParam,
   viewProfileId,
 }: UseProviderConnectionParams) {
-  const { isOrgAdmin } = useOrg();
-
   // User profiles
   const { data: userProfiles } = useConnectionProfiles();
   const defaultProfile = userProfiles?.find((p) => p.isDefault);
@@ -96,7 +93,6 @@ export function useProviderConnection({
   };
 
   return {
-    isOrgAdmin,
     userProfiles,
     hasMultipleProfiles,
     effectiveProfileId,

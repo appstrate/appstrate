@@ -5,7 +5,6 @@ import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders } from "../hooks/use-providers";
-import { useOrg } from "../hooks/use-org";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
@@ -22,7 +21,6 @@ export function ProvidersPage() {
   const [showAll, setShowAll] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();
-  const { isOrgAdmin } = useOrg();
 
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
@@ -38,9 +36,9 @@ export function ProvidersPage() {
 
         badges.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
-        const configButton = isOrgAdmin ? (
+        const configButton = (
           <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
-        ) : null;
+        );
 
         actions.set(
           p.id,
@@ -52,7 +50,7 @@ export function ProvidersPage() {
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providersData, isOrgAdmin]);
+  }, [providersData]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();
@@ -75,7 +73,7 @@ export function ProvidersPage() {
     </div>
   );
 
-  const configureButton = isOrgAdmin ? (
+  const configureButton = (
     <Button
       variant="outline"
       onClick={() => setConfigurePickerOpen(true)}
@@ -84,7 +82,7 @@ export function ProvidersPage() {
       <Settings size={14} />
       {t("providers.configureProvider")}
     </Button>
-  ) : null;
+  );
 
   return (
     <>

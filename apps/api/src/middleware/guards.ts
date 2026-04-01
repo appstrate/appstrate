@@ -5,22 +5,6 @@ import { getPackage } from "../services/flow-service.ts";
 import { getRunningExecutionsForPackage } from "../services/state/index.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 
-/** Check if a role grants admin/owner access. */
-export function isAdminRole(role: string): boolean {
-  return role === "admin" || role === "owner";
-}
-
-/** Middleware: reject with 403 if the current user is not org admin/owner. */
-export function requireAdmin() {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const orgRole = c.get("orgRole");
-    if (!isAdminRole(orgRole)) {
-      throw forbidden("Admin access required");
-    }
-    return next();
-  };
-}
-
 /** Middleware: reject with 403 if the current user is not org owner. */
 export function requireOwner() {
   return async (c: Context<AppEnv>, next: Next) => {

@@ -12,11 +12,10 @@ import { Trash2 } from "lucide-react";
 interface VersionHistoryProps {
   packageId: string;
   type: PackageType;
-  isAdmin: boolean;
   isOwned: boolean;
 }
 
-export function VersionHistory({ packageId, type, isAdmin, isOwned }: VersionHistoryProps) {
+export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps) {
   const { t } = useTranslation("flows");
   const { data: versions } = usePackageVersions(type, packageId);
   const restoreVersion = useRestoreVersion(type, packageId);
@@ -40,7 +39,7 @@ export function VersionHistory({ packageId, type, isAdmin, isOwned }: VersionHis
               {v.createdAt ? formatDateField(v.createdAt) : ""}
             </span>
             {v.yanked && <Badge variant="warning">{t("version.yanked")}</Badge>}
-            {isAdmin && isOwned && (
+            {isOwned && (
               <>
                 <Button
                   variant="ghost"

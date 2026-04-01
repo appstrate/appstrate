@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, addOrgMember, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedFlow, seedPackage } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
@@ -28,23 +28,6 @@ describe("User Flows API", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 403 for non-admin member", async () => {
-      await seedFlow({
-        id: "@myorg/admin-only",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-
-      const res = await app.request("/api/packages/flows/@myorg/admin-only", {
-        method: "DELETE",
-        headers: { Cookie: member.cookie, "X-Org-Id": ctx.orgId },
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("PUT /api/flows/:scope/:name/skills", () => {

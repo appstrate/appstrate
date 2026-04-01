@@ -36,7 +36,7 @@ export const providersPaths = {
       operationId: "createProvider",
       tags: ["Providers"],
       summary: "Create a custom provider",
-      description: "Create a new provider configuration. Admin only.",
+      description: "Create a new provider configuration.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -73,8 +73,7 @@ export const providersPaths = {
       operationId: "updateProvider",
       tags: ["Providers"],
       summary: "Update a provider",
-      description:
-        "Update a custom provider configuration. Admin only. Built-in providers cannot be modified.",
+      description: "Update a custom provider configuration. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -130,7 +129,7 @@ export const providersPaths = {
       operationId: "deleteProviderCredentials",
       tags: ["Providers"],
       summary: "Delete provider credentials",
-      description: "Remove admin credentials for a provider. Admin only.",
+      description: "Remove admin credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },
@@ -160,7 +159,7 @@ export const providersPaths = {
       operationId: "configureProviderCredentials",
       tags: ["Providers"],
       summary: "Configure provider credentials",
-      description: "Set OAuth client credentials for a provider. Admin only.",
+      description: "Set OAuth client credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "scope", in: "path", required: true, schema: { type: "string" } },

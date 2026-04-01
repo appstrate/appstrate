@@ -3,8 +3,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -134,27 +132,6 @@ describe("Providers API", () => {
       expect(body.id).toBe(`@${ctx.org.slug}/new-api-provider`);
     });
 
-    it("returns 403 for non-admin users", async () => {
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request("/api/providers", {
-        method: "POST",
-        headers: {
-          Cookie: memberUser.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: `@${ctx.org.slug}/blocked-provider`,
-          displayName: "Blocked Provider",
-          authMode: "api_key",
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
-
     it("returns 400 for invalid body (missing displayName)", async () => {
       const res = await app.request("/api/providers", {
         method: "POST",
@@ -246,29 +223,6 @@ describe("Providers API", () => {
       expect(res.status).toBe(204);
     });
 
-    it("returns 403 for non-admin users", async () => {
-      // Create provider as admin
-      await app.request("/api/providers", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          id: `@${ctx.org.slug}/admin-only-del`,
-          displayName: "Admin Only Delete",
-          authMode: "api_key",
-        }),
-      });
-
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request(`/api/providers/@${ctx.org.slug}/admin-only-del`, {
-        method: "DELETE",
-        headers: { Cookie: memberUser.cookie, "X-Org-Id": ctx.orgId },
-      });
-
-      expect(res.status).toBe(403);
-    });
-
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/providers/@provorg/any-provider", {
         method: "DELETE",
@@ -319,35 +273,5 @@ describe("Providers API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 403 for non-admin users", async () => {
-      // Create as admin
-      await app.request("/api/providers", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          id: `@${ctx.org.slug}/member-update`,
-          displayName: "Member Update",
-          authMode: "api_key",
-        }),
-      });
-
-      const memberUser = await createTestUser();
-      await addOrgMember(ctx.orgId, memberUser.id, "member");
-
-      const res = await app.request(`/api/providers/@${ctx.org.slug}/member-update`, {
-        method: "PUT",
-        headers: {
-          Cookie: memberUser.cookie,
-          "X-Org-Id": ctx.orgId,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          displayName: "Updated by member",
-          authMode: "api_key",
-        }),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 });

@@ -31,7 +31,7 @@ import {
   unbindOrgProfileProvider,
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
-import { requireAdmin } from "../middleware/guards.ts";
+
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections } from "@appstrate/connect";
 
@@ -94,7 +94,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org — create an org profile (admin only)
-  router.post("/org", rateLimit(10), requireAdmin(), async (c) => {
+  router.post("/org", rateLimit(10), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
@@ -103,7 +103,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // PUT /api/connection-profiles/org/:id — rename an org profile (admin only)
-  router.put("/org/:id", requireAdmin(), async (c) => {
+  router.put("/org/:id", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const body = await c.req.json();
@@ -119,7 +119,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // DELETE /api/connection-profiles/org/:id — delete an org profile (admin only)
-  router.delete("/org/:id", requireAdmin(), async (c) => {
+  router.delete("/org/:id", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     try {
@@ -160,7 +160,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
-  router.post("/org/:id/bind", rateLimit(10), requireAdmin(), async (c) => {
+  router.post("/org/:id/bind", rateLimit(10), async (c) => {
     const orgId = c.get("orgId");
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;
@@ -193,7 +193,7 @@ export function createConnectionProfilesRouter() {
   });
 
   // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
-  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", requireAdmin(), async (c) => {
+  router.delete("/org/:id/bind/:providerScope{@[^/]+}/:providerName", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;

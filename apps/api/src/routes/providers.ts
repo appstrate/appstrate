@@ -7,7 +7,7 @@ import type { AppEnv } from "../types/index.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
-import { requireAdmin, checkScopeMatch } from "../middleware/guards.ts";
+import { checkScopeMatch } from "../middleware/guards.ts";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -200,7 +200,7 @@ export function createProvidersRouter() {
   });
 
   // POST /api/providers — create a custom provider (admin only)
-  router.post("/", requireAdmin(), async (c) => {
+  router.post("/", async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
     const data = parseBody(createProviderSchema, body);
@@ -328,7 +328,7 @@ export function createProvidersRouter() {
   });
 
   // PUT /api/providers/:scope/:name — update a provider (admin only, custom only)
-  router.put("/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
@@ -408,7 +408,7 @@ export function createProvidersRouter() {
   });
 
   // PUT /api/providers/credentials/:scope/:name — configure credentials (admin only)
-  router.put("/credentials/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
+  router.put("/credentials/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const body = await c.req.json();
@@ -473,7 +473,7 @@ export function createProvidersRouter() {
   });
 
   // DELETE /api/providers/credentials/:scope/:name — delete credentials (admin only)
-  router.delete("/credentials/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
+  router.delete("/credentials/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 
@@ -488,7 +488,7 @@ export function createProvidersRouter() {
   });
 
   // DELETE /api/providers/:scope/:name — delete provider (admin only, custom only)
-  router.delete("/:scope{@[^/]+}/:name", requireAdmin(), async (c) => {
+  router.delete("/:scope{@[^/]+}/:name", async (c) => {
     const orgId = c.get("orgId");
     const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
 

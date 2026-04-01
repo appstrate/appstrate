@@ -4,7 +4,7 @@ export const apiKeysPaths = {
       operationId: "listApiKeys",
       tags: ["API Keys"],
       summary: "List API keys",
-      description: "List active (non-revoked) API keys for the organization. Admin only.",
+      description: "List active (non-revoked) API keys for the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -36,7 +36,7 @@ export const apiKeysPaths = {
       tags: ["API Keys"],
       summary: "Create an API key",
       description:
-        "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later. Admin only.",
+        "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -101,8 +101,7 @@ export const apiKeysPaths = {
       operationId: "revokeApiKey",
       tags: ["API Keys"],
       summary: "Revoke an API key",
-      description:
-        "Revoke (soft-delete) an API key. The key will immediately stop working. Admin only.",
+      description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

@@ -190,25 +190,6 @@ describe("Connection Profiles API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns 403 for non-admin member", async () => {
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-      const memberCtx: TestContext = {
-        user: { id: member.id, email: member.email, name: member.name },
-        org: ctx.org,
-        cookie: member.cookie,
-        orgId: ctx.orgId,
-        defaultAppId: ctx.defaultAppId,
-      };
-
-      const res = await app.request("/api/connection-profiles/org", {
-        method: "POST",
-        headers: { ...authHeaders(memberCtx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Should Fail" }),
-      });
-
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("PUT /api/connection-profiles/org/:id", () => {
