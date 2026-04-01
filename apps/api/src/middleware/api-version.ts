@@ -14,9 +14,7 @@ import {
 } from "../lib/api-versions.ts";
 import { ApiError } from "../lib/errors.ts";
 
-export function apiVersion(
-  getOrgApiVersion?: (orgId: string) => Promise<string | null>,
-) {
+export function apiVersion(getOrgApiVersion?: (orgId: string) => Promise<string | null>) {
   return async (c: Context<AppEnv>, next: Next) => {
     let version = c.req.header("Appstrate-Version");
 

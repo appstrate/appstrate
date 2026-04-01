@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
-import { ApiError, forbidden, internalError, parseBody } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
 import {
   listActorConnections,
   initiateConnection,
@@ -24,7 +24,15 @@ import { db } from "@appstrate/db/client";
 import type { Context } from "hono";
 
 async function resolveProfileId(c: Context<AppEnv>, actor: Actor): Promise<string> {
-  return c.req.query("profileId") ?? (await getDefaultProfileId(actor));
+  const profileId = c.req.query("profileId");
+  if (profileId) {
+    const parsed = z.uuid().safeParse(profileId);
+    if (!parsed.success) {
+      throw invalidRequest("Invalid profileId format", "profileId");
+    }
+    return parsed.data;
+  }
+  return getDefaultProfileId(actor);
 }
 
 const router = new Hono<AppEnv>();
@@ -238,6 +246,7 @@ router.delete("/:scope{@[^/]+}/:name", async (c) => {
     }
     return c.json({ success: true });
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     throw internalError();
   }
 });

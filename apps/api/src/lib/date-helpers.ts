@@ -6,8 +6,8 @@ export function toISO(date: Date | null | undefined): string | null {
 }
 
 /**
- * Convert a Date to ISO string, returning empty string if missing.
+ * Convert a Date to ISO string, falling back to current time if missing.
  */
 export function toISORequired(date: Date | null | undefined): string {
-  return date?.toISOString() ?? "";
+  return (date ?? new Date()).toISOString();
 }

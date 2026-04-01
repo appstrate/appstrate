@@ -17,11 +17,12 @@ import {
   setUserFlowProviderOverride,
   removeUserFlowProviderOverride,
   getUserFlowProviderOverrides,
+  getProfileForActor,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
-import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
@@ -103,6 +104,13 @@ export function createFlowsRouter() {
     const actor = getActor(c);
     const body = await c.req.json();
     const data = parseBody(z.object({ providerId: z.string().min(1), profileId: z.uuid() }), body);
+
+    // Validate ownership — user can only set overrides to their own profiles
+    const profile = await getProfileForActor(data.profileId, actor);
+    if (!profile) {
+      throw forbidden("Cannot use a profile you do not own");
+    }
+
     await setUserFlowProviderOverride(actor, flow.id, data.providerId, data.profileId);
     return c.json({ success: true });
   });

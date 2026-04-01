@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Building2, User, AlertTriangle, CheckCircle2, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "./spinner";
 import { Modal } from "./modal";
 import { ProviderIcon } from "./provider-icon";
 import { useProviders } from "../hooks/use-providers";
@@ -11,7 +12,7 @@ interface ConnectionSummaryModalProps {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  onConfigureConnections?: () => void;
+  onConfigureConnections: () => void;
   providers: ProviderStatus[];
   orgProfileName?: string | null;
   isPending?: boolean;
@@ -43,7 +44,7 @@ export function ConnectionSummaryModal({
           </Button>
           {allReady ? (
             <Button onClick={onConfirm} disabled={isPending}>
-              {isPending ? "..." : t("run.confirm")}
+              {isPending ? <Spinner /> : t("run.confirm")}
             </Button>
           ) : (
             <Button onClick={onConfigureConnections}>{t("run.configureConnections")}</Button>

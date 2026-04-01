@@ -113,11 +113,7 @@ router.post("/:token/accept", async (c) => {
       });
 
       // Add member to org
-      await addMember(
-        invitation.orgId,
-        newUserId,
-        invitation.role as "member" | "admin",
-      );
+      await addMember(invitation.orgId, newUserId, invitation.role as "member" | "admin");
 
       await markInvitationAccepted(invitation.id, newUserId);
 
@@ -149,11 +145,7 @@ router.post("/:token/accept", async (c) => {
     // --- EXISTING USER ---
     const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
 
-    await addMember(
-      invitation.orgId,
-      existingUser.id,
-      invitation.role as "member" | "admin",
-    );
+    await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
 
     await markInvitationAccepted(invitation.id, existingUser.id);
 
