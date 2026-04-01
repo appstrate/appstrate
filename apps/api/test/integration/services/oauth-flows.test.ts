@@ -14,11 +14,8 @@ import type { Actor } from "../../../src/lib/actor.ts";
 
 // ─── Mock OAuth Server ───────────────────────────────────────
 
-let mockServer: MockOAuthServer;
-
 // Start once for the entire test file — each test resets state via truncateAll + clearRequests
-const server = createMockOAuthServer();
-mockServer = server;
+const mockServer: MockOAuthServer = createMockOAuthServer();
 
 afterAll(() => {
   mockServer.stop();

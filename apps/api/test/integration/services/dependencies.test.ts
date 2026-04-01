@@ -21,7 +21,7 @@ describe("manifest-based dependency resolution", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { cookie, ...user } = await createTestUser();
+    const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
     const { org } = await createTestOrg(userId, { slug: "deporg" });
     orgId = org.id;

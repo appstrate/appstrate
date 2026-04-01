@@ -33,6 +33,31 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/core/src/**/*.ts", "packages/core/test/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@appstrate/db*",
+                "@appstrate/env*",
+                "@appstrate/connect*",
+                "@appstrate/shared-types*",
+                "@appstrate/emails*",
+                "@appstrate/api*",
+                "@appstrate/web*",
+              ],
+              message:
+                "core must remain independent — no imports from other workspace packages",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: globals.browser,

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Appstrate Tool Manifest",
+  "description": "Appstrate tool manifest — AFPS tool with no extensions.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
+    "version": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "const": "tool"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "license": {
+      "type": "string"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9]\\d*)$"
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tools": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": {}
+    },
+    "entrypoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["name", "description", "inputSchema"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["name", "version", "type", "entrypoint", "tool"],
+  "additionalProperties": {}
+}

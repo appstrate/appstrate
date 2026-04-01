@@ -17,9 +17,7 @@ import type { ExecutionMessage, PromptContext } from "../../src/services/adapter
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function createMockOrchestrator(
-  overrides?: Partial<ContainerOrchestrator>,
-): ContainerOrchestrator {
+function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
   return {
     initialize: mock(() => Promise.resolve()),
     shutdown: mock(() => Promise.resolve()),
@@ -31,7 +29,11 @@ function createMockOrchestrator(
     ),
     removeIsolationBoundary: mock(() => Promise.resolve()),
     createSidecar: mock(
-      (_executionId: string, _boundary: IsolationBoundary, _config: SidecarConfig): Promise<WorkloadHandle> =>
+      (
+        _executionId: string,
+        _boundary: IsolationBoundary,
+        _config: SidecarConfig,
+      ): Promise<WorkloadHandle> =>
         Promise.resolve({ id: "sidecar-001", executionId: _executionId, role: "sidecar" }),
     ),
     createWorkload: mock(
@@ -84,9 +86,7 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    const messages = await collectMessages(
-      adapter.execute("exec-001", basePromptContext(), 30),
-    );
+    const messages = await collectMessages(adapter.execute("exec-001", basePromptContext(), 30));
 
     // Phase 1: isolation boundary created
     expect(orchestrator.createIsolationBoundary).toHaveBeenCalledWith("exec-001");
@@ -116,11 +116,9 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    await collectMessages(
-      adapter.execute("exec-002", basePromptContext(), 30),
-    );
+    await collectMessages(adapter.execute("exec-002", basePromptContext(), 30));
 
-    const sidecarCall = (orchestrator.createSidecar as ReturnType<typeof mock>).mock.calls[0]!!;
+    const sidecarCall = (orchestrator.createSidecar as ReturnType<typeof mock>).mock.calls[0]!;
     const config = sidecarCall[2] as SidecarConfig;
     expect(config.llm).toBeDefined();
     expect(config.llm!.baseUrl).toBe("https://api.anthropic.com");
@@ -133,11 +131,9 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    await collectMessages(
-      adapter.execute("exec-003", basePromptContext(), 30),
-    );
+    await collectMessages(adapter.execute("exec-003", basePromptContext(), 30));
 
-    const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!!;
+    const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;
     const spec = workloadCall[0] as WorkloadSpec;
 
     // Agent uses sidecar for LLM, NOT real API
@@ -183,7 +179,13 @@ describe("PiAdapter.execute()", () => {
 
     const flowPackage = Buffer.from("fake-zip-content");
     const inputFiles = [
-      { fieldName: "doc", name: "report.pdf", type: "application/pdf", size: 1024, buffer: Buffer.from("pdf") },
+      {
+        fieldName: "doc",
+        name: "report.pdf",
+        type: "application/pdf",
+        size: 1024,
+        buffer: Buffer.from("pdf"),
+      },
     ];
 
     await collectMessages(
@@ -239,7 +241,8 @@ describe("PiAdapter.execute()", () => {
 
     await collectMessages(adapter.execute("exec-schema", ctx, 30));
 
-    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
+      .calls[0]![0] as WorkloadSpec;
     expect(spec.env.OUTPUT_SCHEMA).toBeDefined();
     const parsed = JSON.parse(spec.env.OUTPUT_SCHEMA!);
     expect(parsed.properties.total.type).toBe("number");
@@ -254,7 +257,8 @@ describe("PiAdapter.execute()", () => {
 
     await collectMessages(adapter.execute("exec-no-schema", ctx, 30));
 
-    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
+      .calls[0]![0] as WorkloadSpec;
     expect(spec.env.OUTPUT_SCHEMA).toBeUndefined();
   });
 
@@ -288,7 +292,8 @@ describe("PiAdapter.execute()", () => {
 
     await collectMessages(adapter.execute("exec-010", ctx, 30));
 
-    const config = (orchestrator.createSidecar as ReturnType<typeof mock>).mock.calls[0]![2] as SidecarConfig;
+    const config = (orchestrator.createSidecar as ReturnType<typeof mock>).mock
+      .calls[0]![2] as SidecarConfig;
     expect(config.proxyUrl).toBe("http://proxy.corp:8080");
   });
 
@@ -308,7 +313,8 @@ describe("PiAdapter.execute()", () => {
 
     await collectMessages(adapter.execute("exec-011", ctx, 30));
 
-    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
+      .calls[0]![0] as WorkloadSpec;
     const cost = JSON.parse(spec.env.MODEL_COST!);
     expect(cost.input).toBe(3);
     expect(cost.output).toBe(15);
@@ -333,7 +339,8 @@ describe("PiAdapter.execute()", () => {
 
     await collectMessages(adapter.execute("exec-012", ctx, 30));
 
-    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]![0] as WorkloadSpec;
+    const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
+      .calls[0]![0] as WorkloadSpec;
     expect(spec.env.MODEL_INPUT).toBe('["text","image"]');
     expect(spec.env.MODEL_CONTEXT_WINDOW).toBe("200000");
     expect(spec.env.MODEL_MAX_TOKENS).toBe("16384");

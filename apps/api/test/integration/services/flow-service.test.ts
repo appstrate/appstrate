@@ -11,7 +11,7 @@ describe("flow-service", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { cookie, ...user } = await createTestUser();
+    const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
     const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;

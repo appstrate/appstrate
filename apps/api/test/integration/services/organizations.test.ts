@@ -20,7 +20,7 @@ describe("organizations service", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { cookie, ...user } = await createTestUser();
+    const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
   });
 
@@ -202,9 +202,9 @@ describe("organizations service", () => {
     it("removeMember throws for a non-existent member", async () => {
       const org = await createOrganization("Rm2 Org", "rm2-org", userId);
 
-      await expect(
-        removeMember(org.id, "00000000-0000-0000-0000-000000000000"),
-      ).rejects.toThrow(/not found/i);
+      await expect(removeMember(org.id, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(
+        /not found/i,
+      );
     });
 
     it("updateMemberRole changes the role", async () => {

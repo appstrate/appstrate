@@ -87,6 +87,7 @@ appstrate/
 │   ├── registry.ts           # renderEmail + registerEmailOverrides (cloud override mechanism)
 │   └── templates/            # Layout + per-type templates (verification, invitation)
 │
+├── packages/core/            # @appstrate/core — shared validation, storage, utilities (published on npm)
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
@@ -100,7 +101,7 @@ appstrate/
 └── scripts/verify-openapi.ts # bun run verify:openapi
 ```
 
-**Workspace imports**: `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/emails`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`. **External npm dep**: `@appstrate/core` (validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages).
+**Workspace imports**: `@appstrate/core/*` (validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags), `@appstrate/db/schema`, `@appstrate/db/client`, `@appstrate/emails`, `@appstrate/env`, `@appstrate/connect`, `@appstrate/shared-types`.
 
 ## Architecture
 
@@ -234,6 +235,7 @@ bun test                          # All tests (1000+), all packages, single proc
 bun test apps/api/test/unit/      # API unit tests only
 bun test apps/api/test/           # API unit + integration
 bun test runtime-pi/              # Runtime Pi + sidecar tests
+bun test packages/core/           # Core library tests (367+ tests, no DB)
 bun test packages/connect/        # Connect package tests
 ```
 
@@ -267,6 +269,7 @@ apps/api/test/
 apps/web/src/**/test/      # Frontend unit tests (colocated with components)
 runtime-pi/test/           # Extension wrapper tests
 runtime-pi/sidecar/test/   # Sidecar proxy, helpers, forward proxy tests
+packages/core/test/        # Core library tests (367+ pure function tests, no DB/network)
 packages/connect/test/     # Provider doc heuristic tests
 ```
 

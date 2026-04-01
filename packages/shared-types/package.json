@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appstrate/core": "^2.9.8",
+    "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*"
   }
 }
