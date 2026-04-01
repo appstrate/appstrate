@@ -1,6 +1,7 @@
 {
   "dashboard.recentFlows": "Recently executed flows",
   "dashboard.recentExecutions": "Recent executions",
+  "dashboard.upcomingSchedules": "Upcoming schedules",
   "dashboard.seeAll": "See all",
   "dashboard.empty": "No recent activity",
   "dashboard.emptyHint": "Run a flow to see your activity here",
