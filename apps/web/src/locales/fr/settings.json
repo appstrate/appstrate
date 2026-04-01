@@ -251,6 +251,8 @@
   "providers.form.configure": "Configurer {{name}}",
   "providers.form.setupGuide": "Guide de configuration",
   "providers.form.callbackUrl": "URI de redirection",
+  "providers.form.activate": "Activer",
+  "providers.form.activated": "Activé",
   "providers.form.submit": "Ajouter le fournisseur",
   "providers.form.noCredsNeeded": "Aucun identifiant requis à cette étape. Après la création, allez sur la page Providers pour ajouter votre clé API.",
   "orgSettings.pendingInvitations": "Invitations en attente",
