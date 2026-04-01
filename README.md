@@ -2,6 +2,10 @@
 
 An open-source platform for executing one-shot AI flows in ephemeral Docker containers. Users sign up, connect OAuth/API key services (Gmail, ClickUp, etc.), click "Run", and the AI agent processes their data autonomously inside a temporary container.
 
+![Flows](.github/assets/screenshot-flows.png)
+
+![Execution Result](.github/assets/screenshot-execution.png)
+
 ## Features
 
 - **One-shot AI flows** — Each execution runs in an isolated Docker container with a Pi Coding Agent
