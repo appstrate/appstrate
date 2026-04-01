@@ -287,7 +287,7 @@ export function ExecutionDetailPage() {
           )}
 
           {(resultSubTab === "report" || !hasOutput) && finalReport && (
-            <div className="rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
+            <div className="overflow-x-auto rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
               <Markdown>{finalReport}</Markdown>
             </div>
           )}
