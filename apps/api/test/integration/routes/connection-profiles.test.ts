@@ -627,4 +627,84 @@ describe("Connection Profiles API", () => {
       expect(body.detail).toContain("profile you do not own");
     });
   });
+
+  describe("GET /api/connections (ownership)", () => {
+    it("rejects listing connections for another user's profile with 403", async () => {
+      const user1Profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "User1 Profile",
+      });
+
+      const user2 = await createTestUser();
+      await addOrgMember(ctx.orgId, user2.id, "member");
+      const user2Ctx: TestContext = {
+        user: { id: user2.id, email: user2.email, name: user2.name },
+        org: ctx.org,
+        cookie: user2.cookie,
+        orgId: ctx.orgId,
+        defaultAppId: ctx.defaultAppId,
+      };
+
+      const res = await app.request(`/api/connections?profileId=${user1Profile.id}`, {
+        headers: authHeaders(user2Ctx),
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("profile you do not own");
+    });
+
+    it("allows listing connections for own profile", async () => {
+      const ownProfile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "My Profile",
+      });
+
+      const res = await app.request(`/api/connections?profileId=${ownProfile.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe("GET /api/connections/integrations (ownership)", () => {
+    it("rejects listing integrations for another user's profile with 403", async () => {
+      const user1Profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "User1 Profile",
+      });
+
+      const user2 = await createTestUser();
+      await addOrgMember(ctx.orgId, user2.id, "member");
+      const user2Ctx: TestContext = {
+        user: { id: user2.id, email: user2.email, name: user2.name },
+        org: ctx.org,
+        cookie: user2.cookie,
+        orgId: ctx.orgId,
+        defaultAppId: ctx.defaultAppId,
+      };
+
+      const res = await app.request(`/api/connections/integrations?profileId=${user1Profile.id}`, {
+        headers: authHeaders(user2Ctx),
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("profile you do not own");
+    });
+
+    it("allows listing integrations for own profile", async () => {
+      const ownProfile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "My Profile",
+      });
+
+      const res = await app.request(`/api/connections/integrations?profileId=${ownProfile.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+    });
+  });
 });

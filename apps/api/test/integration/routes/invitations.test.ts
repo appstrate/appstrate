@@ -164,5 +164,57 @@ describe("Invitations API", () => {
       expect(body.email).toBe("known@test.com");
     });
 
+    it("returns 403 when authenticated user's email does not match invitation", async () => {
+      const wrongUser = await createTestUser({ email: "wrong@test.com" });
+      await createTestUser({ email: "target@test.com" });
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "target@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: wrongUser.cookie,
+        },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("email_mismatch");
+    });
+
+    it("accepts invitation when existing user re-accepts (idempotent addMember)", async () => {
+      const existingUser = await createTestUser({ email: "idempotent@test.com" });
+      const { addOrgMember } = await import("../../helpers/auth.ts");
+
+      // Pre-add the user as member (simulates double-click / race)
+      await addOrgMember(ctx.orgId, existingUser.id, "member");
+
+      const inv = await seedInvitation({
+        orgId: ctx.orgId,
+        email: "idempotent@test.com",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: existingUser.cookie,
+        },
+        body: JSON.stringify({}),
+      });
+
+      // Should succeed (idempotent), not 500
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.success).toBe(true);
+    });
+
   });
 });
