@@ -23,6 +23,9 @@ export const connectionProfiles = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",
     }),
+    orgId: uuid("org_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -37,9 +40,14 @@ export const connectionProfiles = pgTable(
       .where(sql`${table.isDefault} = true AND ${table.endUserId} IS NOT NULL`),
     index("idx_connection_profiles_user_id").on(table.userId),
     index("idx_connection_profiles_end_user_id").on(table.endUserId),
+    index("idx_connection_profiles_org_id").on(table.orgId),
     check(
-      "connection_profiles_exactly_one_actor",
-      sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
+      "connection_profiles_exactly_one_owner",
+      sql`(
+        (user_id IS NOT NULL AND end_user_id IS NULL AND org_id IS NULL) OR
+        (user_id IS NULL AND end_user_id IS NOT NULL AND org_id IS NULL) OR
+        (user_id IS NULL AND end_user_id IS NULL AND org_id IS NOT NULL)
+      )`,
     ),
   ],
 );
@@ -75,25 +83,27 @@ export const userPackageProfiles = pgTable(
   ],
 );
 
-export const flowProviderBindings = pgTable(
-  "flow_provider_bindings",
+// ─── Org profile provider bindings (delegation: org profile → user profile) ──
+export const orgProfileProviderBindings = pgTable(
+  "org_profile_provider_bindings",
   {
-    packageId: text("package_id")
+    orgProfileId: uuid("org_profile_id")
       .notNull()
-      .references(() => packages.id, { onDelete: "cascade" }),
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
-    orgId: uuid("org_id")
+    sourceProfileId: uuid("source_profile_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    profileId: uuid("profile_id").references(() => connectionProfiles.id, {
-      onDelete: "set null",
-    }),
-    connectedAt: timestamp("connected_at").defaultNow().notNull(),
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    boundByUserId: text("bound_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.packageId, table.providerId] }),
-    index("idx_flow_provider_bindings_package_id").on(table.packageId),
-    index("idx_flow_provider_bindings_org_id").on(table.orgId),
+    primaryKey({ columns: [table.orgProfileId, table.providerId] }),
+    index("idx_org_profile_bindings_source").on(table.sourceProfileId),
+    index("idx_org_profile_bindings_user").on(table.boundByUserId),
   ],
 );
 

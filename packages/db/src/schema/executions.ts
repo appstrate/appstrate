@@ -17,6 +17,7 @@ import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
 import { packages, packageVersions } from "./packages.ts";
+import { connectionProfiles } from "./connections.ts";
 
 export const executions = pgTable(
   "executions",
@@ -128,12 +129,9 @@ export const packageSchedules = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    userId: text("user_id").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    endUserId: text("end_user_id").references(() => endUsers.id, {
-      onDelete: "set null",
-    }),
+    connectionProfileId: uuid("connection_profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -149,12 +147,7 @@ export const packageSchedules = pgTable(
   },
   (table) => [
     index("idx_schedules_package_id").on(table.packageId),
-    index("idx_schedules_user_id").on(table.userId),
-    index("idx_schedules_end_user_id").on(table.endUserId),
+    index("idx_schedules_connection_profile_id").on(table.connectionProfileId),
     index("idx_package_schedules_org_id").on(table.orgId),
-    check(
-      "package_schedules_at_most_one_actor",
-      sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
-    ),
   ],
 );

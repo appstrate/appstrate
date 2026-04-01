@@ -7,7 +7,7 @@ import type {
   packageVersionDependencies,
 } from "./packages.ts";
 import type { executions, executionLogs, packageSchedules } from "./executions.ts";
-import type { connectionProfiles } from "./connections.ts";
+import type { connectionProfiles, orgProfileProviderBindings } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 
 export type Profile = InferSelectModel<typeof profiles>;
@@ -27,6 +27,8 @@ export type Execution = InferSelectModel<typeof executions>;
 export type ExecutionLog = InferSelectModel<typeof executionLogs>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
+
+export type OrgProfileProviderBinding = InferSelectModel<typeof orgProfileProviderBindings>;
 
 export type Application = InferSelectModel<typeof applications>;
 

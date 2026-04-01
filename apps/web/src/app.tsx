@@ -25,6 +25,11 @@ import { AppSettingsPage } from "./pages/app-settings-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
+import { OrgProfilesPage } from "./pages/org-profiles-page";
+import { OrgProfileDetailPage } from "./pages/org-profile-detail";
+import { ScheduleDetailPage } from "./pages/schedule-detail";
+import { ScheduleCreatePage } from "./pages/schedule-create";
+import { ScheduleEditPage } from "./pages/schedule-edit";
 import { PreferencesPage } from "./pages/preferences";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -223,9 +228,14 @@ export function App() {
             />
             <Route path="/executions" element={<ExecutionsPage />} />
             <Route path="/schedules" element={<SchedulesListPage />} />
+            <Route path="/schedules/new" element={<ScheduleCreatePage />} />
+            <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
+            <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/org-profiles" element={<OrgProfilesPage />} />
+            <Route path="/org-profiles/:id" element={<OrgProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
             <Route

@@ -33,9 +33,11 @@ export function WebhooksPage() {
   if (scopeTab !== "all") filters.scope = scopeTab;
   if (scopeTab === "application" && appFilter !== "all") filters.applicationId = appFilter;
 
-  const { data: webhooks, isLoading, error } = useWebhooks(
-    Object.keys(filters).length > 0 ? filters : undefined,
-  );
+  const {
+    data: webhooks,
+    isLoading,
+    error,
+  } = useWebhooks(Object.keys(filters).length > 0 ? filters : undefined);
 
   if (!isOrgAdmin) {
     return (
@@ -59,9 +61,7 @@ export function WebhooksPage() {
         emoji="🪝"
         breadcrumbs={[{ label: t("settings:webhooks.pageTitle") }]}
         actions={
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("settings:webhooks.createTitle")}
-          </Button>
+          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
         }
       >
         <Tabs
@@ -77,9 +77,7 @@ export function WebhooksPage() {
             <TabsTrigger value="organization">
               {t("settings:webhooks.scopeOrganization")}
             </TabsTrigger>
-            <TabsTrigger value="application">
-              {t("settings:webhooks.scopeApplication")}
-            </TabsTrigger>
+            <TabsTrigger value="application">{t("settings:webhooks.scopeApplication")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </PageHeader>
@@ -105,9 +103,7 @@ export function WebhooksPage() {
 
       {!webhooks || webhooks.length === 0 ? (
         <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("settings:webhooks.createTitle")}
-          </Button>
+          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
         </EmptyState>
       ) : (
         <div className="space-y-2">
@@ -122,9 +118,7 @@ export function WebhooksPage() {
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-mono text-sm truncate">{wh.url}</span>
                     <Badge variant={wh.active ? "success" : "secondary"}>
-                      {wh.active
-                        ? t("settings:webhooks.active")
-                        : t("settings:webhooks.inactive")}
+                      {wh.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
                     </Badge>
                     <Badge variant="outline">
                       {wh.scope === "organization"
@@ -134,9 +128,7 @@ export function WebhooksPage() {
                           : t("settings:webhooks.scopeBadgeApp")}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground font-mono">
-                    {wh.events.join(", ")}
-                  </p>
+                  <p className="text-xs text-muted-foreground font-mono">{wh.events.join(", ")}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {wh.packageId || t("settings:webhooks.allFlows")}
                     {" · "}

@@ -55,15 +55,6 @@ export async function validateFlowDependencies(
   for (const provider of providers) {
     const connectionProfileId = providerProfiles[provider.id];
     if (!connectionProfileId) {
-      const mode = provider.connectionMode ?? "user";
-      if (mode === "admin") {
-        throw new ApiError({
-          status: 400,
-          code: "dependency_not_satisfied",
-          title: "Dependency Not Satisfied",
-          detail: `Provider '${provider.id}' is not bound by an administrator`,
-        });
-      }
       throw new ApiError({
         status: 400,
         code: "dependency_not_satisfied",

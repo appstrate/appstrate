@@ -7,10 +7,10 @@ import { executions } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/execution-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { getRecentExecutions, getFlowProviderBindings } from "../services/state/index.ts";
+import { getRecentExecutions } from "../services/state/index.ts";
 import { getPackage } from "../services/flow-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
-import { getEffectiveProfileId } from "../services/connection-profiles.ts";
+import { resolveProviderProfiles } from "../services/connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -114,9 +114,11 @@ export function createInternalRouter() {
     const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
 
     try {
-      const actor: Actor = execution.endUserId
+      const actor: Actor | null = execution.endUserId
         ? { type: "end_user", id: execution.endUserId }
-        : { type: "member", id: execution.userId! };
+        : execution.userId
+          ? { type: "member", id: execution.userId }
+          : null;
       const recentExecutions = await getRecentExecutions(
         execution.packageId,
         actor,
@@ -162,27 +164,24 @@ export function createInternalRouter() {
     }
 
     try {
-      // Resolve profile for this provider
-      const connectionMode = provider.connectionMode ?? "user";
-      let profileId: string;
+      // Resolve the credential-holding profile for this provider via resolveProviderProfiles
+      const actor: Actor | null = execution.endUserId
+        ? { type: "end_user", id: execution.endUserId }
+        : execution.userId
+          ? { type: "member", id: execution.userId }
+          : null;
 
-      if (connectionMode === "admin") {
-        const bindings = await getFlowProviderBindings(execution.orgId, execution.packageId);
-        const adminProfileId = bindings[providerId];
-        if (!adminProfileId) {
-          throw notFound(`No admin binding for provider '${providerId}'`);
-        }
-        profileId = adminProfileId;
-      } else {
-        // Use the connection profile snapshot from the execution, or fall back to current
-        if (execution.connectionProfileId) {
-          profileId = execution.connectionProfileId;
-        } else {
-          const executionActor: Actor = execution.endUserId
-            ? { type: "end_user", id: execution.endUserId }
-            : { type: "member", id: execution.userId! };
-          profileId = await getEffectiveProfileId(executionActor, execution.packageId);
-        }
+      const profileMap = await resolveProviderProfiles(
+        [provider],
+        actor,
+        execution.packageId,
+        execution.orgId,
+        execution.connectionProfileId ?? undefined,
+      );
+
+      const profileId = profileMap[providerId];
+      if (!profileId) {
+        throw notFound(`No binding for provider '${providerId}'`);
       }
 
       // Unified credential resolution
@@ -196,7 +195,6 @@ export function createInternalRouter() {
         executionId,
         providerId,
         packageId: execution.packageId,
-        connectionMode,
         profileId,
       });
 

@@ -25,7 +25,7 @@ const ALL_TABLES = [
   "package_dist_tags",
   "package_configs",
   "user_package_profiles",
-  "flow_provider_bindings",
+  "org_profile_provider_bindings",
   "user_provider_connections",
   "oauth_states",
   "provider_credentials",

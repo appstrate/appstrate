@@ -46,11 +46,7 @@ export function ApplicationsPage() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("applications.pageTitle") },
         ]}
-        actions={
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("applications.create")}
-          </Button>
-        }
+        actions={<Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>}
       />
 
       {!applications || applications.length === 0 ? (
@@ -59,9 +55,7 @@ export function ApplicationsPage() {
           hint={t("applications.emptyHint")}
           icon={AppWindow}
         >
-          <Button onClick={() => setCreateOpen(true)}>
-            {t("applications.create")}
-          </Button>
+          <Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">

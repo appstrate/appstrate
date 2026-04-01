@@ -51,17 +51,16 @@ function buildScopeInfo(
 
 /**
  * Resolve provider statuses for a flow's required providers.
- * Uses connectionProfileId for both user and admin connections (via flow provider bindings map).
+ * providerProfiles maps each providerId to the profile holding its credentials
+ * (already resolved via org profile bindings or user profile direct).
  */
 export async function resolveProviderStatuses(
   providers: FlowProviderRequirement[],
-  bindings: Record<string, string>,
+  providerProfiles: Record<string, string>,
   orgId: string,
-  userProfileId?: string,
 ): Promise<ProviderStatus[]> {
   return Promise.all(
     providers.map(async (svc) => {
-      const mode = svc.connectionMode ?? "user";
       const base = {
         id: svc.id,
         provider: svc.id,
@@ -71,39 +70,23 @@ export async function resolveProviderStatuses(
       const authMode = await getProviderAuthMode(svc.id, orgId);
       const label = authModeLabel(authMode);
       const scopesRequired = svc.scopes?.length ? svc.scopes : undefined;
+      const profileId = providerProfiles[svc.id];
 
-      if (mode === "admin") {
-        const adminProfileId = bindings[svc.id];
-        if (adminProfileId) {
-          const conn = await getConnectionStatus(svc.id, adminProfileId, orgId);
-          return {
-            ...base,
-            status: conn.status,
-            authMode: label,
-            connectionMode: "admin" as const,
-            adminProvided: true,
-            ...buildScopeInfo(conn.scopesGranted, scopesRequired, conn.status === "connected"),
-          };
-        }
+      if (!profileId) {
         return {
           ...base,
           status: "not_connected" as const,
           authMode: label,
-          connectionMode: "admin" as const,
-          adminProvided: false,
           ...(scopesRequired ? { scopesRequired } : {}),
         };
       }
 
-      const conn = userProfileId
-        ? await getConnectionStatus(svc.id, userProfileId, orgId)
-        : { status: "not_connected" as const };
+      const conn = await getConnectionStatus(svc.id, profileId, orgId);
       const connScopesGranted = "scopesGranted" in conn ? conn.scopesGranted : undefined;
       return {
         ...base,
         status: conn.status,
         authMode: label,
-        connectionMode: "user" as const,
         ...buildScopeInfo(connScopesGranted, scopesRequired, conn.status === "connected"),
       };
     }),

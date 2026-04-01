@@ -30,8 +30,6 @@ const expectedEndpoints = [
   // Flows (runtime — flows.ts + user-flows.ts junction endpoints)
   "GET /api/flows",
   "PUT /api/flows/{scope}/{name}/config",
-  "POST /api/flows/{scope}/{name}/providers/{providerScope}/{providerName}/bind",
-  "DELETE /api/flows/{scope}/{name}/providers/{providerScope}/{providerName}/bind",
   "GET /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories",
   "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
@@ -55,6 +53,8 @@ const expectedEndpoints = [
 
   // Schedules
   "GET /api/schedules",
+  "GET /api/schedules/{id}",
+  "GET /api/schedules/{id}/executions",
   "GET /api/flows/{scope}/{name}/schedules",
   "POST /api/flows/{scope}/{name}/schedules",
   "PUT /api/schedules/{id}",
@@ -84,6 +84,14 @@ const expectedEndpoints = [
   "POST /api/connection-profiles",
   "GET /api/connection-profiles/connections",
   "DELETE /api/connection-profiles/connections",
+  "GET /api/connection-profiles/my-org-bindings",
+  "GET /api/connection-profiles/org",
+  "POST /api/connection-profiles/org",
+  "PUT /api/connection-profiles/org/{id}",
+  "DELETE /api/connection-profiles/org/{id}",
+  "GET /api/connection-profiles/org/{id}/bindings",
+  "POST /api/connection-profiles/org/{id}/bind",
+  "DELETE /api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}",
   "PUT /api/connection-profiles/{id}",
   "DELETE /api/connection-profiles/{id}",
   "GET /api/connection-profiles/{id}/connections",

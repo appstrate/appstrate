@@ -5,19 +5,15 @@ import {
   getPackageConfigFull,
   setFlowOverride,
   getRunningExecutionsCounts,
-  bindFlowProvider,
-  unbindFlowProvider,
   getPackageMemories,
   deletePackageMemory,
   deleteAllPackageMemories,
 } from "../services/state/index.ts";
-import { getConnectionStatus } from "../services/connection-manager/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/flow-service.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { getActor } from "../lib/actor.ts";
 import {
-  getEffectiveProfileId,
   setPackageProfileOverride,
   removePackageProfileOverride,
 } from "../services/connection-profiles.ts";
@@ -89,66 +85,6 @@ export function createFlowsRouter() {
       validation: { valid: true },
     });
   });
-
-  // POST /api/flows/:scope/:name/providers/:providerScope/:providerName/bind — bind a profile's connection to a provider
-  router.post(
-    "/:scope{@[^/]+}/:name/providers/:providerScope{@[^/]+}/:providerName/bind",
-    requireFlow(),
-    requireAdmin(),
-    async (c) => {
-      const flow = c.get("flow");
-      const actor = getActor(c);
-      const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-
-      // Verify the provider exists and is in admin mode
-      const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
-      if (!provider) {
-        throw notFound(`Provider '${providerId}' not found`);
-      }
-      if ((provider.connectionMode ?? "user") !== "admin") {
-        throw invalidRequest(`Provider '${providerId}' is not in admin mode`);
-      }
-
-      // Get profile from body or default
-      let profileId: string | undefined;
-      try {
-        const body = await c.req.json<{ profileId?: string }>();
-        profileId = body.profileId;
-      } catch {
-        // No body — use default profile
-      }
-      const effectiveProfileId = profileId ?? (await getEffectiveProfileId(actor));
-
-      // Verify the profile has a connection for this provider
-      const orgId = c.get("orgId");
-      const conn = await getConnectionStatus(provider.id, effectiveProfileId, orgId);
-      if (conn.status !== "connected") {
-        throw invalidRequest(`No active connection for '${provider.id}'`);
-      }
-
-      await bindFlowProvider(orgId, flow.id, providerId, effectiveProfileId);
-      return c.json({ bound: true });
-    },
-  );
-
-  // DELETE /api/flows/:scope/:name/providers/:providerScope/:providerName/bind — unbind admin's connection from a provider
-  router.delete(
-    "/:scope{@[^/]+}/:name/providers/:providerScope{@[^/]+}/:providerName/bind",
-    requireFlow(),
-    requireAdmin(),
-    async (c) => {
-      const flow = c.get("flow");
-      const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-
-      const provider = resolveManifestProviders(flow.manifest).find((s) => s.id === providerId);
-      if (!provider) {
-        throw notFound(`Provider '${providerId}' not found`);
-      }
-
-      await unbindFlowProvider(c.get("orgId"), flow.id, providerId);
-      return c.json({ unbound: true });
-    },
-  );
 
   // PUT /api/flows/:scope/:name/profile — set flow profile override
   router.put("/:scope{@[^/]+}/:name/profile", requireFlow(), async (c) => {

@@ -13,17 +13,18 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireFlow } from "../middleware/guards.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
-import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const createScheduleSchema = z.object({
   name: z.string().optional(),
+  connectionProfileId: z.uuid(),
   cronExpression: z.string().min(1, "cronExpression is required"),
   timezone: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
 });
 
 const updateScheduleSchema = z.object({
+  connectionProfileId: z.uuid().optional(),
   name: z.string().optional(),
   cronExpression: z.string().optional(),
   timezone: z.string().optional(),
@@ -76,9 +77,19 @@ export function createSchedulesRouter() {
       }
     }
 
-    const actor = getActor(c);
-    const schedule = await createSchedule(flow.id, actor, c.get("orgId"), data);
+    const schedule = await createSchedule(flow.id, data.connectionProfileId, c.get("orgId"), data);
     return c.json(schedule, 201);
+  });
+
+  // GET /api/schedules/:id — get a single schedule
+  router.get("/schedules/:id", async (c) => {
+    const id = c.req.param("id");
+    const orgId = c.get("orgId");
+    const schedule = await getSchedule(id);
+    if (!schedule || schedule.orgId !== orgId) {
+      throw notFound(`Schedule '${id}' not found`);
+    }
+    return c.json(schedule);
   });
 
   // PUT /api/schedules/:id — update a schedule

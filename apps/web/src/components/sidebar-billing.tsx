@@ -42,9 +42,11 @@ export function SidebarBilling() {
         <SidebarMenuItem className="relative">
           <SidebarMenuButton
             asChild
-            tooltip={{
-              children: tooltipContent,
-            } as React.ComponentProps<typeof TooltipContent>}
+            tooltip={
+              {
+                children: tooltipContent,
+              } as React.ComponentProps<typeof TooltipContent>
+            }
           >
             <Link to="/org-settings#billing">
               <Coins size={16} />

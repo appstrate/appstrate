@@ -1,15 +1,38 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { Schedule } from "@appstrate/shared-types";
+import { onMutationError } from "./use-mutations";
+import type { Schedule, EnrichedSchedule, Execution } from "@appstrate/shared-types";
+
+export function useScheduleExecutions(scheduleId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["schedule-executions", orgId, scheduleId],
+    queryFn: async () => {
+      return api<Execution[]>(`/schedules/${scheduleId}/executions`);
+    },
+    enabled: !!scheduleId,
+  });
+}
 
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["schedules", orgId],
     queryFn: async () => {
-      return api<Schedule[]>("/schedules");
+      return api<EnrichedSchedule[]>("/schedules");
     },
+  });
+}
+
+export function useScheduleById(id: string | undefined) {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["schedule", orgId, id],
+    queryFn: async () => {
+      return api<EnrichedSchedule>(`/schedules/${id}`);
+    },
+    enabled: !!id,
   });
 }
 
@@ -18,7 +41,7 @@ export function useSchedules(packageId: string | undefined) {
   return useQuery({
     queryKey: ["schedules", orgId, packageId],
     queryFn: async () => {
-      return api<Schedule[]>(`/flows/${packageId}/schedules`);
+      return api<EnrichedSchedule[]>(`/flows/${packageId}/schedules`);
     },
     enabled: !!packageId,
   });
@@ -26,12 +49,14 @@ export function useSchedules(packageId: string | undefined) {
 
 function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["schedules"] });
+  qc.invalidateQueries({ queryKey: ["schedule"] });
 }
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
+      connectionProfileId: string;
       name?: string;
       cronExpression: string;
       timezone?: string;
@@ -43,6 +68,7 @@ export function useCreateSchedule(packageId: string) {
       });
     },
     onSuccess: () => invalidateSchedules(qc),
+    onError: onMutationError,
   });
 }
 
@@ -54,6 +80,7 @@ export function useUpdateSchedule() {
       ...data
     }: {
       id: string;
+      connectionProfileId?: string;
       name?: string;
       cronExpression?: string;
       timezone?: string;
@@ -66,6 +93,7 @@ export function useUpdateSchedule() {
       });
     },
     onSuccess: () => invalidateSchedules(qc),
+    onError: onMutationError,
   });
 }
 
@@ -76,5 +104,6 @@ export function useDeleteSchedule() {
       return api(`/schedules/${id}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateSchedules(qc),
+    onError: onMutationError,
   });
 }
