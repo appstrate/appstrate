@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useFlows } from "../hooks/use-packages";
 import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { useProfiles } from "../hooks/use-profiles";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
@@ -17,13 +18,19 @@ export function DashboardPage() {
   const { data: unreadCounts } = useUnreadCountsByFlow();
   const { data: schedules } = useAllSchedules();
 
+  const executions = execData?.executions ?? [];
+  const profileMap = useProfiles(
+    executions
+      .slice(0, 15)
+      .map((e) => e.userId)
+      .filter((id): id is string => !!id),
+  );
+
   const isLoading = execLoading || flowsLoading;
   const error = execError || flowsError;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
-
-  const executions = execData?.executions ?? [];
 
   // Build flow lookup map
   const flowMap = new Map<
@@ -138,6 +145,7 @@ export function DashboardPage() {
               key={exec.id}
               execution={exec}
               flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
+              userName={exec.userId ? profileMap.get(exec.userId) : undefined}
               scheduleName={
                 exec.scheduleId
                   ? (schedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
