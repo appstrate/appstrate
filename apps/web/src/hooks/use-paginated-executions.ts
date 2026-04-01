@@ -11,6 +11,7 @@ interface PaginatedResult {
 interface UsePaginatedExecutionsOptions {
   packageId?: string;
   scheduleId?: string;
+  user?: "me";
   limit: number;
   offset: number;
 }
@@ -18,6 +19,7 @@ interface UsePaginatedExecutionsOptions {
 export function usePaginatedExecutions({
   packageId,
   scheduleId,
+  user,
   limit,
   offset,
 }: UsePaginatedExecutionsOptions) {
@@ -29,10 +31,15 @@ export function usePaginatedExecutions({
       ? `/flows/${packageId}/executions`
       : `/executions`;
 
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  if (user) params.set("user", user);
+
   return useQuery({
-    queryKey: ["paginated-executions", orgId, endpoint, limit, offset],
+    queryKey: ["paginated-executions", orgId, endpoint, user, limit, offset],
     queryFn: async () => {
-      return api<PaginatedResult>(`${endpoint}?limit=${limit}&offset=${offset}`);
+      return api<PaginatedResult>(`${endpoint}?${params.toString()}`);
     },
     placeholderData: (prev) => prev,
     enabled: scheduleId ? !!scheduleId : packageId ? !!packageId : true,

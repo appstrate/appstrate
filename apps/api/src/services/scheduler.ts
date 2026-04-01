@@ -210,10 +210,7 @@ async function triggerScheduledExecution(
   input: Record<string, unknown> | undefined,
 ) {
   /** Create a failed execution record + dispatch webhook so the user is notified. */
-  async function failSchedule(
-    error: string,
-    actor: Actor | null = null,
-  ): Promise<void> {
+  async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const executionId = `exec_${crypto.randomUUID()}`;
     try {
       await createFailedExecution(

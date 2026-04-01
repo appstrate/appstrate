@@ -3,6 +3,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedFlow, seedExecution } from "../../helpers/seed.ts";
+import { addOrgMember, createTestUser } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -253,9 +254,9 @@ describe("Notifications API", () => {
     });
   });
 
-  // ─── GET /api/executions (user executions across flows) ────
+  // ─── GET /api/executions (org executions, ?user=me filter) ──
 
-  describe("GET /api/executions (user executions list)", () => {
+  describe("GET /api/executions", () => {
     it("returns empty list when no executions exist", async () => {
       const res = await app.request("/api/executions", {
         headers: authHeaders(ctx),
@@ -302,6 +303,77 @@ describe("Notifications API", () => {
       expect(body.executions).toBeArray();
       expect(body.executions).toHaveLength(2);
       expect(body.total).toBe(2);
+    });
+
+    it("returns all org executions including other members by default", async () => {
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+
+      await seedFlow({
+        id: "@notiforg/shared-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await seedExecution({
+        packageId: "@notiforg/shared-flow",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedExecution({
+        packageId: "@notiforg/shared-flow",
+        orgId: ctx.orgId,
+        userId: otherUser.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/executions", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        executions: unknown[];
+        total: number;
+      };
+      expect(body.executions).toHaveLength(2);
+      expect(body.total).toBe(2);
+    });
+
+    it("filters to current user only with ?user=me", async () => {
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+
+      await seedFlow({
+        id: "@notiforg/filter-flow",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await seedExecution({
+        packageId: "@notiforg/filter-flow",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedExecution({
+        packageId: "@notiforg/filter-flow",
+        orgId: ctx.orgId,
+        userId: otherUser.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/executions?user=me", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        executions: { userId: string }[];
+        total: number;
+      };
+      expect(body.executions).toHaveLength(1);
+      expect(body.total).toBe(1);
+      expect(body.executions[0]!.userId).toBe(ctx.user.id);
     });
 
     it("respects limit parameter", async () => {

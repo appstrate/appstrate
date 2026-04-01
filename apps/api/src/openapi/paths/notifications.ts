@@ -132,13 +132,20 @@ export const notificationsPaths = {
   },
   "/api/executions": {
     get: {
-      operationId: "listUserExecutions",
+      operationId: "listExecutions",
       tags: ["Notifications"],
-      summary: "List all user executions",
+      summary: "List executions",
       description:
-        "Lists all executions for the current user across all flows, ordered by most recent.",
+        "Lists all executions for the organization across all flows, ordered by most recent. Use `?user=me` to filter to the current user's executions only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        {
+          name: "user",
+          in: "query",
+          schema: { type: "string", enum: ["me"] },
+          description:
+            "Filter executions by user. `me` returns only the current user's executions. Omit for all org executions.",
+        },
         {
           name: "limit",
           in: "query",

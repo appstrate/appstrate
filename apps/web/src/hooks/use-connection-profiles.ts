@@ -20,9 +20,9 @@ export function useProfileConnections(profileId: string | null | undefined) {
   return useQuery({
     queryKey: ["profile-connections", orgId, profileId],
     queryFn: () =>
-      api<{ connections: ConnectionInfo[] }>(
-        `/connection-profiles/${profileId}/connections`,
-      ).then((r) => r.connections),
+      api<{ connections: ConnectionInfo[] }>(`/connection-profiles/${profileId}/connections`).then(
+        (r) => r.connections,
+      ),
     enabled: !!profileId,
     staleTime: 30_000,
   });
