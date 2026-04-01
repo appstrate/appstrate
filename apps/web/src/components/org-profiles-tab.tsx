@@ -4,15 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Plus, FolderOpen, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { useOrg } from "../hooks/use-org";
+import { EmptyState } from "./page-states";
+import { Spinner } from "./spinner";
 import { useOrgProfiles, useCreateOrgProfile } from "../hooks/use-connection-profiles";
 
-export function OrgProfilesPage() {
+export function OrgProfilesTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isOrgAdmin } = useOrg();
-  const { data: orgProfiles, isLoading, error } = useOrgProfiles();
+  const { data: orgProfiles, isLoading } = useOrgProfiles();
 
   const [newName, setNewName] = useState("");
   const createMutation = useCreateOrgProfile();
@@ -25,42 +23,34 @@ export function OrgProfilesPage() {
     });
   };
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (isLoading) return <Spinner className="mx-auto mt-8" />;
 
   return (
     <>
-      <PageHeader
-        title={t("common:nav.orgProfiles")}
-        emoji="🏢"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("common:nav.orgProfiles") },
-        ]}
-        actions={
-          isOrgAdmin ? (
-            <div className="flex gap-2">
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder={t("orgProfiles.namePlaceholder")}
-                aria-label={t("orgProfiles.namePlaceholder")}
-                className="h-9 w-48"
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              />
-              <Button onClick={handleCreate} disabled={!newName.trim() || createMutation.isPending}>
-                <Plus className="size-4 mr-1" />
-                {t("orgProfiles.create")}
-              </Button>
-            </div>
-          ) : undefined
-        }
-      />
+      {/* Create form */}
+      <div className="flex gap-2 mb-4">
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder={t("orgProfiles.namePlaceholder")}
+          aria-label={t("orgProfiles.namePlaceholder")}
+          className="h-9 w-64"
+          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+        />
+        <Button
+          size="sm"
+          onClick={handleCreate}
+          disabled={!newName.trim() || createMutation.isPending}
+        >
+          <Plus className="size-4 mr-1" />
+          {t("orgProfiles.create")}
+        </Button>
+      </div>
 
       {orgProfiles && orgProfiles.length === 0 ? (
         <EmptyState
           message={t("orgProfiles.empty")}
-          hint={isOrgAdmin ? t("orgProfiles.emptyHint") : undefined}
+          hint={t("orgProfiles.emptyHint")}
           icon={FolderOpen}
         />
       ) : (

@@ -1,16 +1,8 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
-import {
-  BrainCircuit,
-  Building,
-  CreditCard,
-  Globe,
-  KeyRound,
-  ShieldAlert,
-  Users,
-} from "lucide-react";
+import { BrainCircuit, Building, CreditCard, Globe, KeyRound, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -63,6 +55,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
 import { PlanGrid } from "../components/plan-card";
+import { OrgProfilesTab } from "../components/org-profiles-tab";
 import { toast } from "sonner";
 import type {
   OrganizationMember,
@@ -77,7 +70,7 @@ import type {
 export function OrgSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
-  const { currentOrg, isOrgAdmin, isOrgOwner } = useOrg();
+  const { currentOrg, isOrgOwner } = useOrg();
   const queryClient = useQueryClient();
 
   const { features } = useAppConfig();
@@ -85,11 +78,12 @@ export function OrgSettingsPage() {
   const validTabs = [
     "general",
     "members",
+    "profiles",
     ...(features.models ? ["models" as const] : []),
     "proxies",
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
-  type Tab = "general" | "members" | "models" | "proxies" | "billing";
+  type Tab = "general" | "members" | "profiles" | "models" | "proxies" | "billing";
   const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -270,16 +264,6 @@ export function OrgSettingsPage() {
     return <EmptyState message={t("orgSettings.noOrg")} icon={Building} />;
   }
 
-  if (!isOrgAdmin) {
-    return (
-      <EmptyState message={t("orgSettings.adminOnly")} icon={ShieldAlert}>
-        <Link to="/">
-          <Button variant="outline">{t("btn.back")}</Button>
-        </Link>
-      </EmptyState>
-    );
-  }
-
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
@@ -329,6 +313,7 @@ export function OrgSettingsPage() {
             <TabsTrigger value="members">
               {t("orgSettings.tabMembers", { count: members.length })}
             </TabsTrigger>
+            <TabsTrigger value="profiles">{t("orgSettings.tabProfiles")}</TabsTrigger>
             {features.models && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
             <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>
             {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
@@ -471,7 +456,7 @@ export function OrgSettingsPage() {
                       {roleLabel[member.role]}
                     </Badge>
                   </div>
-                  {isOrgAdmin && !isOwner && (
+                  {!isOwner && (
                     <div className="mt-3 pt-3 border-t border-border flex gap-2">
                       {isOrgOwner && (
                         <Select
@@ -573,6 +558,8 @@ export function OrgSettingsPage() {
           )}
         </>
       )}
+
+      {tab === "profiles" && <OrgProfilesTab />}
 
       {tab === "models" && features.models && (
         <>
