@@ -342,6 +342,69 @@ describe("Schedules API", () => {
     });
   });
 
+  describe("Org profile support", () => {
+    it("creates a schedule with an org profile", async () => {
+      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
+      const fid = flowId("org-sched");
+      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionProfileId: orgProfile.id,
+          cronExpression: "0 9 * * 1-5",
+          name: "Org Schedule",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.connectionProfileId).toBe(orgProfile.id);
+    });
+
+    it("updates a schedule to use an org profile", async () => {
+      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
+      const fid = flowId("org-upd");
+      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const schedule = await seedSchedule({
+        packageId: flow.id,
+        orgId: ctx.orgId,
+        connectionProfileId: profileId,
+        cronExpression: "0 * * * *",
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionProfileId: orgProfile.id }),
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("rejects a profile from another org", async () => {
+      const otherCtx = await createTestContext();
+      const otherOrgProfile = await seedConnectionProfile({
+        orgId: otherCtx.orgId,
+        name: "Other Org Profile",
+      });
+      const fid = flowId("foreign-org");
+      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const res = await app.request(`/api/flows/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionProfileId: otherOrgProfile.id,
+          cronExpression: "0 9 * * 1-5",
+        }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+  });
+
   describe("Authentication", () => {
     it("returns 401 without auth", async () => {
       const res = await app.request("/api/schedules");

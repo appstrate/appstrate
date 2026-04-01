@@ -249,6 +249,18 @@ describe("Flows API", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("accepts an org profile for provider override", async () => {
+      await seedFlow({ id: "@myorg/pp-put-org", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
+
+      const res = await app.request("/api/flows/@myorg/pp-put-org/provider-profiles", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: "@system/gmail", profileId: orgProfile.id }),
+      });
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("DELETE /api/flows/:scope/:name/provider-profiles", () => {

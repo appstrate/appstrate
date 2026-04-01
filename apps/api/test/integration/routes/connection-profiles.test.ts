@@ -538,6 +538,25 @@ describe("Connection Profiles API", () => {
       expect(body.detail).toContain("profile you do not own");
     });
 
+    it("accepts connecting on an org profile", async () => {
+      const providerId = "@testorg/test-provider-org";
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+
+      const orgProfile = await seedConnectionProfile({
+        orgId: ctx.orgId,
+        name: "Org Profile",
+      });
+
+      const res = await app.request(`/api/connections/connect/${providerId}`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: orgProfile.id }),
+      });
+
+      // Should not get 403 — ownership check passes for org profiles
+      expect(res.status).not.toBe(403);
+    });
+
     it("does not return 403 when connecting on own profile", async () => {
       const providerId = "@testorg/test-provider-own";
       await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
@@ -591,6 +610,24 @@ describe("Connection Profiles API", () => {
       const body = (await res.json()) as any;
       expect(body.detail).toContain("profile you do not own");
     });
+
+    it("accepts saving an API key on an org profile", async () => {
+      const providerId = "@testorg/apikey-provider-org";
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+
+      const orgProfile = await seedConnectionProfile({
+        orgId: ctx.orgId,
+        name: "Org Profile",
+      });
+
+      const res = await app.request(`/api/connections/connect/${providerId}/api-key`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-key-123", profileId: orgProfile.id }),
+      });
+
+      expect(res.status).not.toBe(403);
+    });
   });
 
   describe("POST /api/connections/connect/:provider/credentials (ownership)", () => {
@@ -625,6 +662,27 @@ describe("Connection Profiles API", () => {
       expect(res.status).toBe(403);
       const body = (await res.json()) as any;
       expect(body.detail).toContain("profile you do not own");
+    });
+
+    it("accepts saving credentials on an org profile", async () => {
+      const providerId = "@testorg/creds-provider-org";
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+
+      const orgProfile = await seedConnectionProfile({
+        orgId: ctx.orgId,
+        name: "Org Profile",
+      });
+
+      const res = await app.request(`/api/connections/connect/${providerId}/credentials`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credentials: { username: "user", password: "pass" },
+          profileId: orgProfile.id,
+        }),
+      });
+
+      expect(res.status).not.toBe(403);
     });
   });
 
@@ -666,6 +724,19 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(200);
     });
+
+    it("allows listing connections for an org profile", async () => {
+      const orgProfile = await seedConnectionProfile({
+        orgId: ctx.orgId,
+        name: "Org Profile",
+      });
+
+      const res = await app.request(`/api/connections?profileId=${orgProfile.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("GET /api/connections/integrations (ownership)", () => {
@@ -701,6 +772,19 @@ describe("Connection Profiles API", () => {
       });
 
       const res = await app.request(`/api/connections/integrations?profileId=${ownProfile.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("allows listing integrations for an org profile", async () => {
+      const orgProfile = await seedConnectionProfile({
+        orgId: ctx.orgId,
+        name: "Org Profile",
+      });
+
+      const res = await app.request(`/api/connections/integrations?profileId=${orgProfile.id}`, {
         headers: authHeaders(ctx),
       });
 

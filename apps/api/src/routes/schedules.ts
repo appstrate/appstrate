@@ -14,7 +14,7 @@ import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireAdmin, requireFlow } from "../middleware/guards.ts";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { getProfileForActor } from "../services/connection-profiles.ts";
+import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
@@ -67,7 +67,7 @@ export function createSchedulesRouter() {
       const data = parseBody(createScheduleSchema, body);
 
       // Validate ownership — user can only schedule with their own profiles
-      const profile = await getProfileForActor(data.connectionProfileId, actor);
+      const profile = await getAccessibleProfile(data.connectionProfileId, actor, c.get("orgId"));
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -128,7 +128,7 @@ export function createSchedulesRouter() {
     // Validate ownership — user can only update schedule to use their own profiles
     if (data.connectionProfileId) {
       const actor = getActor(c);
-      const profile = await getProfileForActor(data.connectionProfileId, actor);
+      const profile = await getAccessibleProfile(data.connectionProfileId, actor, orgId);
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }

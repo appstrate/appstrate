@@ -104,6 +104,18 @@ export async function getProfileForActor(
 }
 
 /**
+ * Check if an actor can use a profile: either their own (user/end-user)
+ * or an org profile belonging to the actor's current org.
+ */
+export async function getAccessibleProfile(
+  profileId: string,
+  actor: Actor,
+  orgId: string,
+): Promise<ConnectionProfile | null> {
+  return (await getProfileForActor(profileId, actor)) ?? (await getOrgProfile(profileId, orgId));
+}
+
+/**
  * Get a user profile whose owner is a member of the given org.
  * Used for read-only access (e.g. viewing schedule provider status).
  */
