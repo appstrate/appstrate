@@ -94,7 +94,7 @@ export function useConnect() {
 
       const session = await apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
         method: "POST",
-        ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
+        body: JSON.stringify(body),
       });
       const popup = window.open(session.authUrl, "oauth", "width=600,height=700");
       if (!popup) {
