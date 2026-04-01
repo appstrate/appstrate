@@ -8,7 +8,10 @@ export function useExecutions(packageId: string | undefined) {
   return useQuery({
     queryKey: ["executions", orgId, packageId],
     queryFn: async () => {
-      return api<Execution[]>(`/flows/${packageId}/executions`);
+      const result = await api<{ executions: Execution[]; total: number }>(
+        `/flows/${packageId}/executions`,
+      );
+      return result.executions;
     },
     enabled: !!packageId,
   });

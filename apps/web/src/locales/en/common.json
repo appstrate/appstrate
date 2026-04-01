@@ -80,5 +80,8 @@
   "unsaved.title": "Unsaved changes",
   "unsaved.message": "You have unsaved changes. What would you like to do?",
   "unsaved.saveDraft": "Save draft",
-  "unsaved.discard": "Leave without saving"
+  "unsaved.discard": "Leave without saving",
+  "pagination.previous": "Previous",
+  "pagination.next": "Next",
+  "pagination.pageOf": "Page {{page}} of {{total}}"
 }

@@ -577,13 +577,19 @@ export function createExecutionsRouter() {
       .max(100)
       .catch(50)
       .parse(c.req.query("limit") ?? 50);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
     const endUser = c.get("endUser");
-    const rows = await listPackageExecutions(flow.id, orgId, limit);
-    // End-user scoping: end-users can only see their own executions
-    const filtered = endUser
-      ? rows.filter((r: Record<string, unknown>) => r.endUserId === endUser.id)
-      : rows;
-    return c.json(filtered);
+    const result = await listPackageExecutions(flow.id, orgId, {
+      limit,
+      offset,
+      endUserId: endUser?.id,
+    });
+    return c.json(result);
   });
 
   // GET /api/schedules/:id/executions — list executions for a schedule
@@ -597,8 +603,14 @@ export function createExecutionsRouter() {
       .max(100)
       .catch(20)
       .parse(c.req.query("limit") ?? 20);
-    const rows = await listScheduleExecutions(scheduleId, orgId, limit);
-    return c.json(rows);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
+    const result = await listScheduleExecutions(scheduleId, orgId, { limit, offset });
+    return c.json(result);
   });
 
   // GET /api/executions/:id — get a single execution

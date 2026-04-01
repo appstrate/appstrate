@@ -14,14 +14,14 @@ import {
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
-import { ExecutionRow } from "../components/execution-row";
+import { ExecutionList } from "../components/execution-list";
+import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
 import { OrgProfileProvidersBlock } from "../components/org-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   useScheduleById,
-  useScheduleExecutions,
   useUpdateSchedule,
   useDeleteSchedule,
 } from "../hooks/use-schedules";
@@ -40,7 +40,6 @@ import {
   Calendar,
   Clock,
 } from "lucide-react";
-import type { Execution } from "@appstrate/shared-types";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["flows", "common"]);
@@ -312,17 +311,23 @@ function ScheduleHistory({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["flows"]);
-  const { data: executions, isLoading } = useScheduleExecutions(schedule.id);
   const { data: flows } = useFlows();
   const flowName =
     flows?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
 
   const isActive = schedule.enabled && schedule.readiness.status === "ready";
 
+  // Use the same hook as ExecutionList so React Query deduplicates the fetch.
+  // We only need the first execution for the "next run" preview row.
+  const { data } = usePaginatedExecutions({
+    scheduleId: schedule.id,
+    limit: 20,
+    offset: 0,
+  });
+  const firstExec = data?.executions?.[0];
+
   // Show the fake "next execution" row only if the last execution started > 30s ago.
-  // This synchronizes with a time-based external system (wall clock), which legitimately
-  // requires setState in an effect to react to data changes + schedule a delayed reveal.
-  const lastStartedAt = executions?.[0]?.startedAt;
+  const lastStartedAt = firstExec?.startedAt;
   const [showNext, setShowNext] = useState(true);
 
   /* eslint-disable react-hooks/set-state-in-effect -- syncing with wall clock timer */
@@ -342,53 +347,46 @@ function ScheduleHistory({
   }, [lastStartedAt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  if (isLoading) return <LoadingState />;
+  const previewRow =
+    isActive && showNext && schedule.nextRunAt ? (
+      <div className="flex items-center gap-2 px-3 py-2 text-sm opacity-50">
+        <div className="flex flex-1 items-center gap-2 min-w-0">
+          <span className="text-muted-foreground font-mono text-xs">
+            #{(firstExec?.executionNumber ?? 0) + 1}
+          </span>
+          {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
+          <UIBadge variant="secondary" className="gap-1">
+            <Clock className="size-3" />
+            {t("schedule.scheduled")}
+          </UIBadge>
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+            <Calendar className="size-3" />
+            {schedule.name || schedule.id}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">
+              {formatDateField(schedule.nextRunAt)}
+            </span>
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   return (
-    <div className="rounded-md border border-border">
-      {/* Next execution preview — same layout as ExecutionRow */}
-      {isActive &&
-        showNext &&
-        schedule.nextRunAt &&
-        (() => {
-          const lastNumber = executions?.[0]?.executionNumber ?? 0;
-          return (
-            <div className="flex items-center gap-2 px-3 py-2 text-sm opacity-50">
-              <div className="flex flex-1 items-center gap-2 min-w-0">
-                <span className="text-muted-foreground font-mono text-xs">#{lastNumber + 1}</span>
-                {flowName && <span className="font-medium truncate max-w-[150px]">{flowName}</span>}
-                <UIBadge variant="secondary" className="gap-1">
-                  <Clock className="size-3" />
-                  {t("schedule.scheduled")}
-                </UIBadge>
-                <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
-                  <Calendar className="size-3" />
-                  {schedule.name || schedule.id}
-                </span>
-                <div className="ml-auto flex items-center gap-2">
-                  <span className="text-muted-foreground text-xs">
-                    {formatDateField(schedule.nextRunAt)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-      {!executions || executions.length === 0 ? (
-        <div className="p-6">
-          <EmptyState message={t("schedule.noExecutions")} icon={Clock} compact />
+    <ExecutionList
+      scheduleId={schedule.id}
+      pageSize={12}
+      fixedFlowName={flowName}
+      fixedScheduleName={schedule.name}
+      firstPageBanner={previewRow}
+      emptyState={
+        <div className="rounded-md border border-border">
+          {previewRow}
+          <div className="p-6">
+            <EmptyState message={t("schedule.noExecutions")} icon={Clock} compact />
+          </div>
         </div>
-      ) : (
-        executions.map((exec: Execution) => (
-          <ExecutionRow
-            key={exec.id}
-            execution={exec}
-            flowName={flowName}
-            scheduleName={schedule.name}
-          />
-        ))
-      )}
-    </div>
+      }
+    />
   );
 }

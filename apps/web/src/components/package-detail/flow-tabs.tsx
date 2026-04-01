@@ -3,17 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useExecutions } from "../../hooks/use-executions";
 import { useFlowMemories } from "../../hooks/use-memories";
-import { useSchedules, useAllSchedules } from "../../hooks/use-schedules";
+import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
 import { useDeleteMemory } from "../../hooks/use-mutations";
-import { useProfiles } from "../../hooks/use-profiles";
 import { useFlowReadiness } from "../../hooks/use-flow-readiness";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { FlowProvidersSection } from "./flow-providers-section";
-import { ExecutionRow } from "../execution-row";
+import { ExecutionList } from "../execution-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunFlowButton } from "../run-flow-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
@@ -32,23 +30,19 @@ export function FlowExecutionsTab({
 }) {
   const { t } = useTranslation(["flows", "common"]);
   const { data: detail } = usePackageDetail("flow", packageId);
-  const { data: executions } = useExecutions(packageId);
-  const profileMap = useProfiles(
-    (executions ?? []).map((e) => e.userId).filter((id): id is string => !!id),
-  );
-  const { data: allSchedules } = useAllSchedules();
   const readiness = useFlowReadiness(detail, undefined, undefined, configSchemaOverride);
 
   if (!detail) return null;
 
   const { hasRequiredConfig, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
-  // Provider connection checks are handled by the ConnectionSummaryModal,
-  // so only non-connection readiness gates disable the button.
   const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig;
 
   return (
-    <>
-      {!executions || executions.length === 0 ? (
+    <ExecutionList
+      packageId={packageId}
+      pageSize={12}
+      hideFlowName
+      emptyState={
         <EmptyState message={t("detail.emptyExec")} icon={Play} compact>
           <RunFlowButton
             packageId={packageId}
@@ -58,23 +52,8 @@ export function FlowExecutionsTab({
             showLabel
           />
         </EmptyState>
-      ) : (
-        <div className="rounded-md border border-border">
-          {executions.map((exec) => (
-            <ExecutionRow
-              key={exec.id}
-              execution={exec}
-              userName={exec.userId ? profileMap.get(exec.userId) : undefined}
-              scheduleName={
-                exec.scheduleId
-                  ? (allSchedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
-                  : null
-              }
-            />
-          ))}
-        </div>
-      )}
-    </>
+      }
+    />
   );
 }
 

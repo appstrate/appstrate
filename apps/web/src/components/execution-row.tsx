@@ -28,7 +28,7 @@ export function ExecutionRow({
     const start = new Date(execution.startedAt).getTime();
     const tick = () => setElapsed(Date.now() - start);
     tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(tick, 100);
     return () => clearInterval(id);
   }, [isRunning, execution.startedAt]);
 

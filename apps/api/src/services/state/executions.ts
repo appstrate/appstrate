@@ -287,7 +287,16 @@ export async function deletePackageExecutions(packageId: string, orgId: string):
   return deleted.length;
 }
 
-async function listExecutionsWithFilter(filter: SQL, limit: number) {
+async function listExecutionsWithFilter(
+  filter: SQL,
+  limit: number,
+  offset = 0,
+): Promise<{ executions: Record<string, unknown>[]; total: number }> {
+  const [countRow] = await db
+    .select({ count: count() })
+    .from(executions)
+    .where(filter);
+
   const rows = await db
     .select({
       execution: executions,
@@ -297,27 +306,41 @@ async function listExecutionsWithFilter(filter: SQL, limit: number) {
     .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
     .where(filter)
     .orderBy(desc(executions.startedAt))
-    .limit(limit);
-  return rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion }));
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    executions: rows.map((r) => ({ ...r.execution, packageVersion: r.packageVersion })) as unknown as Record<string, unknown>[],
+    total: countRow?.count ?? 0,
+  };
 }
 
 export async function listPackageExecutions(
   packageId: string,
   orgId: string,
-  limit = 50,
-  applicationId?: string | null,
+  options: { limit?: number; offset?: number; applicationId?: string | null; endUserId?: string | null } = {},
 ) {
+  const { limit = 50, offset = 0, applicationId, endUserId } = options;
   const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];
   if (applicationId) {
     conditions.push(eq(executions.applicationId, applicationId));
   }
-  return listExecutionsWithFilter(and(...conditions)!, limit);
+  if (endUserId) {
+    conditions.push(eq(executions.endUserId, endUserId));
+  }
+  return listExecutionsWithFilter(and(...conditions)!, limit, offset);
 }
 
-export async function listScheduleExecutions(scheduleId: string, orgId: string, limit = 20) {
+export async function listScheduleExecutions(
+  scheduleId: string,
+  orgId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  const { limit = 20, offset = 0 } = options;
   return listExecutionsWithFilter(
     and(eq(executions.scheduleId, scheduleId), eq(executions.orgId, orgId))!,
     limit,
+    offset,
   );
 }
 

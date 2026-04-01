@@ -2,35 +2,34 @@ import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useFlows } from "../hooks/use-packages";
-import { useAllExecutions, useUnreadCountsByFlow } from "../hooks/use-notifications";
-import { useProfiles } from "../hooks/use-profiles";
-import { useAllSchedules } from "../hooks/use-schedules";
+import { useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
-import { ExecutionRow } from "../components/execution-row";
-import type { Execution } from "@appstrate/shared-types";
+import { ExecutionList } from "../components/execution-list";
 
 export function DashboardPage() {
   const { t } = useTranslation(["flows", "common"]);
   const { profile, user } = useAuth();
-  const { data: execData, isLoading: execLoading, error: execError } = useAllExecutions(0, 20);
+  const { data: execData, isLoading: execLoading, error: execError } = usePaginatedExecutions({
+    limit: 15,
+    offset: 0,
+  });
   const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
   const { data: unreadCounts } = useUnreadCountsByFlow();
-  const { data: schedules } = useAllSchedules();
-
-  const executions = execData?.executions ?? [];
-  const profileMap = useProfiles(
-    executions
-      .slice(0, 15)
-      .map((e) => e.userId)
-      .filter((id): id is string => !!id),
-  );
 
   const isLoading = execLoading || flowsLoading;
   const error = execError || flowsError;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
+
+  const executions = execData?.executions ?? [];
+
+  // No executions → redirect to flows page
+  if (executions.length === 0) {
+    return <Navigate to="/flows" replace />;
+  }
 
   // Build flow lookup map
   const flowMap = new Map<
@@ -65,21 +64,6 @@ export function DashboardPage() {
     seen.add(exec.packageId);
     recentFlowIds.push(exec.packageId);
     if (recentFlowIds.length >= 8) break;
-  }
-
-  // Flow name map for execution rows
-  const flowNameMap = new Map<string, string>();
-  if (flows) {
-    for (const f of flows) {
-      flowNameMap.set(f.id, f.displayName);
-    }
-  }
-
-  const recentExecutions = executions.slice(0, 15);
-
-  // No executions → redirect to flows page
-  if (executions.length === 0) {
-    return <Navigate to="/flows" replace />;
   }
 
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
@@ -126,7 +110,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Recent executions */}
+      {/* Recent executions — same query key as usePaginatedExecutions above, no double fetch */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-medium text-muted-foreground">
@@ -139,21 +123,7 @@ export function DashboardPage() {
             {t("dashboard.seeAll")}
           </Link>
         </div>
-        <div className="rounded-md border border-border">
-          {recentExecutions.map((exec: Execution) => (
-            <ExecutionRow
-              key={exec.id}
-              execution={exec}
-              flowName={flowNameMap.get(exec.packageId ?? "") ?? exec.packageId ?? "\u2014"}
-              userName={exec.userId ? profileMap.get(exec.userId) : undefined}
-              scheduleName={
-                exec.scheduleId
-                  ? (schedules?.find((s) => s.id === exec.scheduleId)?.name ?? null)
-                  : null
-              }
-            />
-          ))}
-        </div>
+        <ExecutionList pageSize={7} paginated={false} />
       </section>
     </div>
   );
