@@ -4,6 +4,7 @@ import { useForm, Controller } from "react-hook-form";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -14,7 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "./spinner";
-import { useCreateApiKey } from "../hooks/use-api-keys";
+import { ScopeMultiSelect } from "./scope-multi-select";
+import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 
 interface Props {
   open: boolean;
@@ -29,11 +31,44 @@ function computeExpiresAt(expiresIn: string): string | null {
   return new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
 }
 
+/** Build compact resource summary from scopes (e.g. ["flows", "executions (2/3)"]). */
+function buildResourceSummary(
+  scopes: string[],
+  allScopes: string[],
+): Array<{ resource: string; full: boolean; count: number; total: number }> {
+  const byResource = new Map<string, { count: number; total: number }>();
+  const allSet = new Set(allScopes);
+  for (const s of allScopes) {
+    const r = s.split(":")[0]!;
+    const entry = byResource.get(r) ?? { count: 0, total: 0 };
+    entry.total++;
+    byResource.set(r, entry);
+  }
+  const selectedSet = new Set(scopes);
+  for (const s of allSet) {
+    if (selectedSet.has(s)) {
+      const r = s.split(":")[0]!;
+      byResource.get(r)!.count++;
+    }
+  }
+  return [...byResource.entries()]
+    .filter(([, v]) => v.count > 0)
+    .map(([resource, { count, total }]) => ({
+      resource,
+      full: count === total,
+      count,
+      total,
+    }));
+}
+
 export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateApiKey();
+  const { data: availableScopes } = useAvailableScopes();
 
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [createdScopes, setCreatedScopes] = useState<string[]>([]);
+  const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
   const { copied, copy } = useCopyToClipboard();
 
   const {
@@ -50,18 +85,28 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   const handleClose = () => {
     reset({ name: "", expiresIn: "90" });
     setCreatedKey(null);
+    setCreatedScopes([]);
+    setSelectedScopes(null);
     createMutation.reset();
     onClose();
   };
+
+  const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
+  const allSelected = availableScopes ? effectiveScopes.length === availableScopes.length : true;
 
   function onFormSubmit(data: FormData) {
     const expiresAt = computeExpiresAt(data.expiresIn);
 
     createMutation.mutate(
-      { name: data.name.trim(), expiresAt },
+      {
+        name: data.name.trim(),
+        expiresAt,
+        scopes: allSelected ? undefined : effectiveScopes,
+      },
       {
         onSuccess: (result) => {
           setCreatedKey(result.key);
+          setCreatedScopes(result.scopes);
           onKeyCreated?.(result.key);
         },
         onError: (err) => {
@@ -77,10 +122,16 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
     if (createdKey) copy(createdKey);
   };
 
-  // After creation: show the key
+  // ── Success state ──
   if (createdKey) {
+    const summary =
+      availableScopes && createdScopes.length > 0
+        ? buildResourceSummary(createdScopes, availableScopes)
+        : [];
+    const isFullAccess = availableScopes ? createdScopes.length === availableScopes.length : true;
+
     return (
-      <Modal open={open} onClose={handleClose} title={t("apiKeys.created")}>
+      <Modal open={open} onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
         <p className="text-sm text-warning bg-warning/10 rounded-md px-3 py-2">
           {t("apiKeys.createdWarning")}
         </p>
@@ -95,6 +146,30 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             {copied ? t("btn.copied") : t("btn.copy")}
           </Button>
         </div>
+
+        {/* Scopes granted */}
+        <div className="mt-4 pt-3 border-t border-border">
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            {t("apiKeys.scopesGranted")}
+          </p>
+          {isFullAccess ? (
+            <Badge variant="success">{t("apiKeys.fullAccess")}</Badge>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {summary.map((g) => (
+                <Badge key={g.resource} variant="secondary" className="text-[0.65rem] px-1.5 py-0">
+                  {g.resource}
+                  {!g.full && (
+                    <span className="ml-0.5 opacity-60">
+                      {g.count}/{g.total}
+                    </span>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
           <Button onClick={handleClose}>{t("btn.done")}</Button>
         </div>
@@ -102,24 +177,30 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
     );
   }
 
-  // Creation form
+  // ── Creation form ──
   return (
     <Modal
       open={open}
       onClose={handleClose}
       title={t("apiKeys.createTitle")}
+      className="sm:max-w-lg"
       actions={
         <>
           <Button variant="outline" type="button" onClick={handleClose}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="create-api-key-form" disabled={createMutation.isPending}>
+          <Button
+            type="submit"
+            form="create-api-key-form"
+            disabled={createMutation.isPending || effectiveScopes.length === 0}
+          >
             {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
           </Button>
         </>
       }
     >
-      <form id="create-api-key-form" onSubmit={onSubmit}>
+      <form id="create-api-key-form" onSubmit={onSubmit} className="space-y-4">
+        {/* Name */}
         <div className="space-y-2">
           <Label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</Label>
           <Input
@@ -132,6 +213,8 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             autoFocus
           />
         </div>
+
+        {/* Expiration */}
         <div className="space-y-2">
           <Label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</Label>
           <Controller
@@ -153,6 +236,19 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             )}
           />
         </div>
+
+        {/* Permissions */}
+        {availableScopes && (
+          <div className="space-y-2">
+            <Label>{t("apiKeys.permissionSummary")}</Label>
+            <ScopeMultiSelect
+              available={availableScopes}
+              selected={effectiveScopes}
+              onChange={setSelectedScopes}
+            />
+          </div>
+        )}
+
         {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
       </form>
     </Modal>
