@@ -8,6 +8,7 @@ import { InputModal } from "./input-modal";
 import { ConnectionSummaryModal } from "./connection-summary-modal";
 import { useRunFlow } from "../hooks/use-mutations";
 import { api } from "../api";
+import { hasDisconnectedProviders } from "../lib/provider-status";
 import type { FlowDetail } from "@appstrate/shared-types";
 
 interface RunFlowButtonProps {
@@ -49,7 +50,7 @@ export function RunFlowButton({
 
   const providers = detail?.dependencies?.providers ?? [];
   const hasProviders = providers.length > 0;
-  const hasDisconnected = providers.some((p) => p.status !== "connected");
+  const hasDisconnected = hasDisconnectedProviders(providers);
   const hasInputSchema = !!(
     detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0
   );

@@ -17,13 +17,16 @@ import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./flow-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
-import { getProfileByIdUnsafe, resolveProviderProfiles } from "./connection-profiles.ts";
+import {
+  getProfileByIdUnsafe,
+  resolveProviderProfiles,
+  getFlowOrgProfile,
+} from "./connection-profiles.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { getConnection } from "@appstrate/connect";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
-import { getPackageConfig } from "./state/package-config.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
@@ -222,8 +225,9 @@ async function triggerScheduledExecution(
 
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Load the flow's admin-configured org profile from package_configs
-    const { orgProfileId: flowOrgProfileId } = await getPackageConfig(orgId, packageId);
+    // Load the flow's admin-configured org profile (validates it still exists)
+    const flowOrgProfile = await getFlowOrgProfile(orgId, packageId);
+    const flowOrgProfileId = flowOrgProfile?.id ?? null;
 
     // Resolve provider profiles, config, and validate readiness.
     // Schedules don't support per-provider overrides — the schedule's connectionProfileId

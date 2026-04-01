@@ -12,23 +12,8 @@ import {
 import { ProviderIcon } from "./provider-icon";
 import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
-import {
-  useConnect,
-  useConnectApiKey,
-  useConnectCredentials,
-  useDisconnect,
-} from "../hooks/use-mutations";
 import { useProviders } from "../hooks/use-providers";
-import { useOrg } from "../hooks/use-org";
-import {
-  useConnectionProfiles,
-  useProfileConnections,
-  useOrgProfileBindings,
-  useBindOrgProvider,
-  useUnbindOrgProvider,
-  useFlowProviderProfiles,
-  useSetFlowProviderProfile,
-} from "../hooks/use-connection-profiles";
+import { useProviderConnection } from "../hooks/use-provider-connection";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
@@ -48,75 +33,39 @@ export function ProviderConnectionCard({
   orgProfileName,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "flows"]);
-  const { isOrgAdmin } = useOrg();
 
-  // User profiles
-  const { data: userProfiles } = useConnectionProfiles();
-  const defaultProfile = userProfiles?.find((p) => p.isDefault);
-  const hasMultipleProfiles = (userProfiles?.length ?? 0) > 1;
-
-  // Per-provider profile override (persisted via API when packageId is provided)
-  const { data: providerOverrides } = useFlowProviderProfiles(packageId);
-  const setProviderProfile = useSetFlowProviderProfile(packageId ?? "");
-  const overrideProfileId = providerOverrides?.[providerId];
-  const effectiveProfileId = overrideProfileId ?? defaultProfile?.id ?? null;
-
-  const handleProfileChange = (profileId: string) => {
-    if (packageId) {
-      setProviderProfile.mutate({ providerId, profileId });
-    }
-  };
+  const {
+    isOrgAdmin,
+    userProfiles,
+    hasMultipleProfiles,
+    effectiveProfileId,
+    isConnected,
+    binding,
+    isBoundButDisconnected,
+    isEffectivelyBound,
+    connectMutation,
+    connectApiKeyMutation,
+    connectCredentialsMutation,
+    disconnectMutation,
+    isPending,
+    profileParam,
+    handleProfileChange,
+    doBind,
+    handleUnbind,
+  } = useProviderConnection({ providerId, packageId, orgProfileId });
 
   // Provider metadata
   const { data: providersData } = useProviders();
   const provider = providersData?.providers?.find((p) => p.id === providerId);
 
-  // Connection status — scoped to the user's profile
-  const { data: profileConnections } = useProfileConnections(effectiveProfileId);
-  const isConnected = profileConnections?.some((c) => c.providerId === providerId) ?? false;
-
-  // Binding status (only when orgProfileId is provided)
-  const { data: bindings } = useOrgProfileBindings(orgProfileId);
-  const binding = bindings?.find((b) => b.providerId === providerId);
-  const isBound = !!binding;
-  const isBoundButDisconnected = isBound && binding?.connected === false;
-  const isEffectivelyBound = isBound && !isBoundButDisconnected;
-
-  // Mutations
-  const connectMutation = useConnect();
-  const connectApiKeyMutation = useConnectApiKey();
-  const connectCredentialsMutation = useConnectCredentials();
-  const disconnectMutation = useDisconnect();
-  const bindMutation = useBindOrgProvider();
-  const unbindMutation = useUnbindOrgProvider();
-
   // Modal state
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [customCredOpen, setCustomCredOpen] = useState(false);
-
-  const isPending =
-    connectMutation.isPending ||
-    connectApiKeyMutation.isPending ||
-    connectCredentialsMutation.isPending ||
-    disconnectMutation.isPending ||
-    bindMutation.isPending ||
-    unbindMutation.isPending;
 
   const displayName = provider?.displayName ?? providerId;
   const iconUrl = provider?.iconUrl;
   const authMode = provider?.authMode;
   const credentialSchema = provider?.credentialSchema as JSONSchemaObject | undefined;
-
-  const profileParam = effectiveProfileId ? { profileId: effectiveProfileId } : {};
-
-  const doBind = () => {
-    if (!orgProfileId || !effectiveProfileId) return;
-    bindMutation.mutate({
-      profileId: orgProfileId,
-      providerId,
-      sourceProfileId: effectiveProfileId,
-    });
-  };
 
   const handleConnect = () => {
     if (authMode === "api_key") {
@@ -130,11 +79,6 @@ export function ProviderConnectionCard({
 
   const handleDisconnect = () => {
     disconnectMutation.mutate({ provider: providerId, ...profileParam });
-  };
-
-  const handleUnbind = () => {
-    if (!orgProfileId) return;
-    unbindMutation.mutate({ profileId: orgProfileId, providerId });
   };
 
   // ─── Determine active mode: org-bound or user-managed ────

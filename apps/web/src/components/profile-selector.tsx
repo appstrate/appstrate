@@ -9,8 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const ALL_VALUE = "__all__";
+import { PROFILE_ALL_VALUE, decodeProfileValue } from "@/lib/profile-selection";
 
 interface ProfileSelectorProps {
   /** Show "All" as first option */
@@ -33,11 +32,11 @@ export function ProfileSelector({ showAllOption, value, onChange, label }: Profi
 
   const currentValue = isControlled
     ? value === null && showAllOption
-      ? ALL_VALUE
+      ? PROFILE_ALL_VALUE
       : (value ?? "")
     : (globalProfileId ?? "");
   const handleChange = (val: string) => {
-    const resolved = val === ALL_VALUE ? null : val;
+    const resolved = decodeProfileValue(val);
     if (isControlled) onChange(resolved);
     else setCurrentProfileId(resolved);
   };
@@ -52,7 +51,7 @@ export function ProfileSelector({ showAllOption, value, onChange, label }: Profi
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {showAllOption && <SelectItem value={ALL_VALUE}>{t("profiles.all")}</SelectItem>}
+          {showAllOption && <SelectItem value={PROFILE_ALL_VALUE}>{t("profiles.all")}</SelectItem>}
           {profiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
