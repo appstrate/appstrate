@@ -291,7 +291,7 @@
   "editor.errorContent": "Le contenu est requis.",
   "editor.breadcrumbNewSkill": "Nouveau skill",
   "editor.breadcrumbNewTool": "Nouveau tool",
-  "editor.breadcrumbNewProvider": "Nouveau fournisseur",
+  "editor.breadcrumbNewProvider": "Nouveau provider",
   "fork.button": "Dupliquer",
   "fork.title": "Dupliquer le package",
   "fork.nameLabel": "Nom du package",
