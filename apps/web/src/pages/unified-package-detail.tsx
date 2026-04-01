@@ -10,12 +10,8 @@ import {
   usePackageDownload,
   useDeletePackage,
 } from "../hooks/use-packages";
-import type {
-  FlowDetail,
-  JSONSchemaObject,
-  OrgPackageItemDetail,
-  PackageType,
-} from "@appstrate/shared-types";
+import type { FlowDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageOwnership } from "../hooks/use-org";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";

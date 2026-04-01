@@ -5,6 +5,7 @@ import { onMutationError } from "./use-mutations";
 import { invalidateConnectionRelated } from "./invalidation";
 import type {
   ConnectionProfile,
+  ConnectionInfo,
   UserConnectionProviderGroup,
   EnrichedBinding,
 } from "@appstrate/shared-types";
@@ -13,23 +14,13 @@ interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;
 }
 
-interface ConnectionRecord {
-  id: string;
-  profileId: string;
-  providerId: string;
-  orgId: string;
-  scopesGranted?: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 /** List connections for a specific profile (user or org). */
 export function useProfileConnections(profileId: string | null | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["profile-connections", orgId, profileId],
     queryFn: () =>
-      api<{ connections: ConnectionRecord[] }>(
+      api<{ connections: ConnectionInfo[] }>(
         `/connection-profiles/${profileId}/connections`,
       ).then((r) => r.connections),
     enabled: !!profileId,

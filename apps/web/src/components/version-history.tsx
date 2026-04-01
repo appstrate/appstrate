@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/markdown";
 import { Spinner } from "./spinner";

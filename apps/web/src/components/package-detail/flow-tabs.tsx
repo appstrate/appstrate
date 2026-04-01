@@ -284,7 +284,7 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
 
       {/* API Key section */}
       {keysLoading ? (
-        <div className="text-sm text-muted-foreground">{t("btn.loading", { ns: "common" })}</div>
+        <div className="text-sm text-muted-foreground">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
         <div className="rounded-md border border-warning/30 bg-warning/5 px-4 py-3">
           <p className="text-sm text-warning">{t("api.noKey")}</p>

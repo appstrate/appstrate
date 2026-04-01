@@ -72,7 +72,7 @@ export async function uploadPackageZip(
   }
 }
 
-export interface FlowPackageResult {
+interface FlowPackageResult {
   zip: Buffer;
   toolDocs: Array<{ id: string; content: string }>;
 }

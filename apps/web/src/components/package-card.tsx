@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
 import { RunFlowButton } from "./run-flow-button";

@@ -204,16 +204,19 @@ export function schemaToFields(
   return keys.map((key) => {
     const prop = schema.properties[key];
     const fileField = isFileField(prop);
+    const isInputFile = mode === "input" && fileField;
     const constraints = wrapper?.fileConstraints?.[key];
     const hint = wrapper?.uiHints?.[key];
+    const type = isInputFile ? "string" : (typeof prop.type === "string" ? prop.type : "string");
     return {
       _id: crypto.randomUUID(),
       key,
-      type: fileField ? "file" : typeof prop.type === "string" ? prop.type : "string",
+      type,
       description: prop.description || "",
       required: requiredSet.has(key),
-      ...(mode === "input" && fileField
+      ...(isInputFile
         ? {
+            isFile: true,
             accept: constraints?.accept || "",
             maxSize: constraints?.maxSize != null ? String(constraints.maxSize) : "",
             multiple: isMultipleFileField(prop),
@@ -248,7 +251,7 @@ export function fieldsToSchema(
   const uiHints: Record<string, UIHint> = {};
   for (const f of filtered) {
     const key = f.key.trim();
-    if (mode === "input" && f.type === "file") {
+    if (mode === "input" && f.isFile) {
       // Generate standard JSON Schema for file fields
       const fileItemProp: JSONSchema7 = {
         type: "string",

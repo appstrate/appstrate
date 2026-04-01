@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 const emojiMap: Record<PackageType, string> = {

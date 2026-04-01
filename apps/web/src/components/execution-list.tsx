@@ -73,7 +73,7 @@ export function ExecutionList({
   if (isLoading && page === 0) {
     return (
       <div className="rounded-md border border-border p-8 text-center text-sm text-muted-foreground">
-        {t("btn.loading", { ns: "common" })}
+        {t("loading", { ns: "common" })}
       </div>
     );
   }

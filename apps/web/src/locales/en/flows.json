@@ -202,6 +202,7 @@
   "editor.fieldPlaceholder": "placeholder",
   "editor.fieldEnum": "enum (comma)",
   "editor.fieldReq": "req",
+  "editor.fieldIsFile": "file",
   "editor.fieldAccept": "extensions (.pdf, .csv...)",
   "editor.fieldMaxSize": "max size (bytes)",
   "editor.fieldMultiple": "multi",

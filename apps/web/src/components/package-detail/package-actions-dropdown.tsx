@@ -19,7 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "../modal";
 import { JsonView } from "../json-view";
 import { packageEditPath } from "../../lib/package-paths";

@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
-import type { PackageType } from "@appstrate/shared-types";
+import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";

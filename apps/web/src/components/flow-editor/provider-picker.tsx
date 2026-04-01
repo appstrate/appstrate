@@ -13,7 +13,8 @@ import { ProviderCredentialsModal } from "../provider-credentials-modal";
 import { Modal } from "../modal";
 import { useProviders } from "../../hooks/use-providers";
 import type { ProviderEntry } from "./types";
-import type { AvailableScope, ProviderConfig } from "@appstrate/shared-types";
+import type { ProviderConfig } from "@appstrate/shared-types";
+import type { AvailableScope } from "@appstrate/core/validation";
 import { VersionSelect } from "./resource-section";
 
 interface ProviderPickerProps {
